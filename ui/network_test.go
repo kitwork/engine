@@ -14,17 +14,17 @@ const networkNotice = `<card show="open" flex="row" gap="3" padding="3">` +
 	`<text weight="bold">{{ connected ? 'Back online' : 'You are offline' }}</text>` +
 	`<button click="close()"><icon value="x" alt="Dismiss" /></button></card>`
 
-// networkWithNotice is a network host with that notice; words are written on the host, after component=.
+// networkWithNotice is a <network> with that notice; words are written on the tag, after its name.
 func networkWithNotice(words string) string {
-	return `<box component="network"` + words + `>` + networkNotice + `</box>`
+	return `<network` + words + `>` + networkNotice + `</network>`
 }
 
 // networkToast is a toast whose notice changes with its tone, so a page that says a warning through it
 // is told nothing (TestToastCallsAreRead).
-const networkToast = `<box component="toast" as="$toast"><card for="notice of notices; key: notice.id">` +
+const networkToast = `<toast as="$toast"><card for="notice of notices; key: notice.id">` +
 	`<icon show="notice.tone == 'warning'" value="alert-triangle" color="warning+5" alt="Warning" />` +
 	`<text>{{ notice.message }}</text>` +
-	`<button click="dismiss(notice.id)"><icon value="x" alt="Dismiss" /></button></card></box>`
+	`<button click="dismiss(notice.id)"><icon value="x" alt="Dismiss" /></button></card></toast>`
 
 // The network the author draws (17/10/2026): placed, the host floats at its edge (classes network and
 // network-<place>, reboot.css) and is a status region, since what shows in it and what it changes to is
@@ -35,10 +35,10 @@ const networkToast = `<box component="toast" as="$toast"><card for="notice of no
 // toast beside it in the overlay and the network are no parents a child is placed against: the overlay
 // has no place-anchor. CONTROL: a box placed below its parent makes one.
 func TestNetworkHostWithItsNotice(t *testing.T) {
-	overlay := networkToast + networkWithNotice(` as="$network" place="bottom-start"`)
+	overlay := networkToast + networkWithNotice(` as="$network" place="bottom-left"`)
 	html := compileQuiet(t, toastSite(overlay, `<content><text show="!$network.connected">Offline</text><text>{{ $network.open }}</text></content>`))
 	mustContain(t, html,
-		`<div class="flex-column network network-bottom-start" data-kitwork-component="network: $network" role="status">`,
+		`<div class="flex-column network network-bottom-left" data-kitwork-component="network: $network" role="status">`,
 		`<div class="card flex-row gap-3 padding-3" data-kitwork-bind="show: open" hidden>`,
 		`<i class="color-warning+5 icon-wifi-off" role="img" aria-label="Offline" data-kitwork-bind="show: !connected" hidden></i>`,
 		`<i class="color-success icon-wifi" role="img" aria-label="Online" data-kitwork-bind="show: connected"></i>`,
@@ -46,7 +46,7 @@ func TestNetworkHostWithItsNotice(t *testing.T) {
 		`data-kitwork-event="click: close()"><i class="icon-x" role="img" aria-label="Dismiss"></i></button></div></div>`,
 		`<p data-kitwork-bind="show: !$network.connected" hidden>Offline</p>`,
 		`<p data-kitwork-bind="text: $network.open">false</p>`,
-		`</main><div class="flex-column"><div class="flex-column toast toast-bottom-end"`,
+		`</main><div class="flex-column"><div class="flex-column toast toast-bottom-right"`,
 	)
 	// one status region the engine writes on the host, beside the toast's own (a reader span)
 	if n := strings.Count(html, `data-kitwork-component="network: $network" role="status"`); n != 1 {
@@ -54,16 +54,16 @@ func TestNetworkHostWithItsNotice(t *testing.T) {
 	}
 	mustNotContain(t, html, `aria-live`, `place-anchor`)
 	// CONTROL: a box placed below its parent in the same overlay makes its parent an anchor
-	html = compileQuiet(t, toastSite(`<box><box place="below-start"><text>hint</text></box></box>`+overlay, `<content><text>x</text></content>`))
-	mustContain(t, html, `<div class="flex-column place-anchor"><div class="flex-column place-below-start`)
-	mustContain(t, html, `</div><div class="flex-column network network-bottom-start" data-kitwork-component="network: $network" role="status">`)
+	html = compileQuiet(t, toastSite(`<box><box place="below-left"><text>hint</text></box></box>`+overlay, `<content><text>x</text></content>`))
+	mustContain(t, html, `<div class="flex-column place-anchor"><div class="flex-column place-below-left`)
+	mustContain(t, html, `</div><div class="flex-column network network-bottom-left" data-kitwork-component="network: $network" role="status">`)
 }
 
 // Without place the host stays where it is written, a line of the form it is in: no class of where it
 // floats, and still a status region, since it has something inside. Each of the six places is a class
 // of its own.
 func TestNetworkWithoutPlaceStaysInTheFlow(t *testing.T) {
-	html := compileQuiet(t, content(`<content><box gap="2"><box component="network" as="$network"><text show="!connected">Changes wait for the connection.</text></box><text>Form</text></box></content>`))
+	html := compileQuiet(t, content(`<content><box gap="2"><network as="$network"><text show="!connected">Changes wait for the connection.</text></network><text>Form</text></box></content>`))
 	mustContain(t, html, `<div class="flex-column gap-2"><div class="flex-column" data-kitwork-component="network: $network" role="status"><p data-kitwork-bind="show: !connected" hidden>Changes wait for the connection.</p></div>`)
 	mustNotContain(t, html, `network-`, `class="flex-column network`)
 	for _, place := range toastPlaces {
@@ -77,7 +77,7 @@ func TestNetworkWithoutPlaceStaysInTheFlow(t *testing.T) {
 // status region, since nothing in it would be said. A show the author writes is theirs: the engine adds
 // none. Its alias still reads the instance.
 func TestNetworkEmptyHostIsHeardNotSeen(t *testing.T) {
-	empty := `<box component="network" as="$network" offline="$toast.warning('You are offline.')" online="$toast.info('Back online.')" />`
+	empty := `<network as="$network" offline="$toast.warning('You are offline.')" online="$toast.info('Back online.')" />`
 	html := compileQuiet(t, toastSite(networkToast+empty, `<content><text>{{ $network.connected ? 'Online' : 'Offline' }}</text></content>`))
 	mustContain(t, html,
 		`<div class="flex-column show-false" data-kitwork-component="network: $network" data-kitwork-event="offline: $toast.warning(&#39;You are offline.&#39;); online: $toast.info(&#39;Back online.&#39;)"></div>`,
@@ -92,25 +92,27 @@ func TestNetworkEmptyHostIsHeardNotSeen(t *testing.T) {
 	// the show the author writes stays the only one, with a width too (shown from medium, never hidden
 	// below it by the engine)
 	for _, c := range []struct{ show, class string }{{` show="true"`, `flex-column`}, {` medium:show="true"`, `flex-column medium:show-true`}} {
-		shown := `<box component="network" as="$network"` + c.show + ` offline="$toast.warning('You are offline.')" />`
+		shown := `<network as="$network"` + c.show + ` offline="$toast.warning('You are offline.')" />`
 		html = compileQuiet(t, toastSite(networkToast+shown, `<content><text>x</text></content>`))
 		mustContain(t, html, `<div class="`+c.class+`" data-kitwork-component="network: $network" data-kitwork-event="offline: $toast.warning(&#39;You are offline.&#39;)"></div>`)
 		mustNotContain(t, html, `show-false`)
 	}
 
 	// once is a modifier of any event: said once, then no more
-	once := `<box component="network" offline:once="$toast.warning('You are offline.')" />`
+	once := `<network offline:once="$toast.warning('You are offline.')" />`
 	html = compileQuiet(t, toastSite(networkToast+once, `<content><text>x</text></content>`))
 	mustContain(t, html, `<div class="flex-column show-false" data-kitwork-component="network" data-kitwork-event="offline.once: $toast.warning(&#39;You are offline.&#39;)"></div>`)
 }
 
-// What the network does not take is told where it is written: its place by width, from data, empty or
-// not an edge of the screen; a role it writes itself; online and offline anywhere but on the host of
-// Kitwork's network (they would wait for an event nothing sends there): a box, a button, a text, a
-// child of the network's host, the host of another of Kitwork's components, a site's own component
-// that is named network, an event listed with click; a key filter on an event that is no key; the
-// web's on-names; a host it does not take; the tag form. And the empty host stays the network's own:
-// dropdown, a component without a UI too, is nothing written empty.
+// What the network does not take is told where it is written: its place by width, from data, empty,
+// not an edge of the screen, or one of before 19/10/2026 (bottom-start: told its left or right word,
+// bottom-left); a role it writes itself; online and offline anywhere but on Kitwork's
+// <network> (they would wait for an event nothing sends there): a box, a button, a text, a child of
+// the network, another of Kitwork's components (<dropdown>), an event listed with click; a key filter
+// on an event that is no key; the web's on-names; the attribute form component="network" (since
+// 18/10/2026 a component is its tag), on a box or on a button, told the tag to write. A site's own
+// logic named network is an error at its file (the name is Kitwork's). And the empty tag stays the
+// network's own: <dropdown />, a component without a UI too, is nothing written empty.
 // CONTROL: each written right compiles (the tests above).
 func TestNetworkWrittenWrongIsAnError(t *testing.T) {
 	warn := `$toast.warning('x')`
@@ -118,45 +120,51 @@ func TestNetworkWrittenWrongIsAnError(t *testing.T) {
 		{"a place by width", networkWithNotice(` medium:place="top"`), `medium:place=`, "place của network không nhận tiền tố"},
 		{"a place from data", networkWithNotice(` place="{{ where }}"`), `place=`, "place của network là chữ cố định, không có {{ }}"},
 		{"an empty place", networkWithNotice(` place=""`), `place=`,
-			"place của network cần một giá trị: bottom-end, bottom, bottom-start, top-end, top, top-start"},
+			"place của network cần một giá trị: bottom-right, bottom, bottom-left, top-right, top, top-left"},
 		{"a bare place", networkWithNotice(` place`), `place>`,
-			"place của network cần một giá trị: bottom-end, bottom, bottom-start, top-end, top, top-start"},
-		{"a place of a parent", networkWithNotice(` place="below-end"`), `place=`,
-			`place của network là một mép hay góc màn hình: bottom-end, bottom, bottom-start, top-end, top, top-start; không phải "below-end"`},
+			"place của network cần một giá trị: bottom-right, bottom, bottom-left, top-right, top, top-left"},
+		{"a place of a parent", networkWithNotice(` place="below-right"`), `place=`,
+			`place của network là một mép hay góc màn hình: bottom-right, bottom, bottom-left, top-right, top, top-left; không phải "below-right"`},
+		// the places of before 19/10/2026: start and end are now left and right (they mirror on a page
+		// written right to left); the toast's test holds the other two
+		{"a place of before: bottom-start", networkWithNotice(` place="bottom-start"`), `place=`,
+			`place="bottom-start": start và end nay là left và right, viết place="bottom-left" (tự lật khi trang viết từ phải sang trái)`},
+		{"a place of before: top-end", networkWithNotice(` place="top-end"`), `place=`,
+			`place="top-end": start và end nay là left và right, viết place="top-right" (tự lật khi trang viết từ phải sang trái)`},
 		{"a role", networkWithNotice(` role="alert"`), `role=`, `vai trò của network là việc của engine (role="status" khi bên trong có thông báo): bỏ role`},
 		{"aria-live", networkWithNotice(` aria-live="assertive"`), `aria-live=`, "vai trò của network là việc của engine (role=\"status\" khi bên trong có thông báo): bỏ aria-live"},
 		{"aria-atomic", networkWithNotice(` aria-atomic="true"`), `aria-atomic=`, "bỏ aria-atomic"},
 
 		{"offline on a box", `<box offline="` + warn + `"><text>a</text></box>`, `offline=`,
-			`offline là sự kiện của component network, chỉ thẻ chủ của nó nghe được: <box component="network" offline="…" />`},
+			`offline là sự kiện của component network, chỉ thẻ của nó nghe được: <network offline="…" />`},
 		{"online on a button", `<button online="` + warn + `">a</button>`, `online=`,
-			`online là sự kiện của component network, chỉ thẻ chủ của nó nghe được: <box component="network" online="…" />`},
+			`online là sự kiện của component network, chỉ thẻ của nó nghe được: <network online="…" />`},
 		{"offline on a text", `<text offline="` + warn + `">a</text>`, `offline=`,
-			`offline là sự kiện của component network, chỉ thẻ chủ của nó nghe được`},
+			`offline là sự kiện của component network, chỉ thẻ của nó nghe được`},
 		{"offline on a link", `<link value="/a" offline="` + warn + `">a</link>`, `offline=`,
-			`offline là sự kiện của component network, chỉ thẻ chủ của nó nghe được`},
-		{"offline on a child of the host", `<box component="network"><box offline="` + warn + `"><text>a</text></box></box>`, `offline=`,
-			`offline là sự kiện của component network, chỉ thẻ chủ của nó nghe được`},
-		{"offline on a text in the host", `<box component="network"><text offline="` + warn + `">a</text></box>`, `offline=`,
-			`offline là sự kiện của component network, chỉ thẻ chủ của nó nghe được`},
-		{"offline on the host of dropdown", `<box component="dropdown" offline="close()"><button click="toggle()">a</button></box>`, `offline=`,
-			`offline là sự kiện của component network, chỉ thẻ chủ của nó nghe được`},
+			`offline là sự kiện của component network, chỉ thẻ của nó nghe được`},
+		{"offline on a child of the network", `<network><box offline="` + warn + `"><text>a</text></box></network>`, `offline=`,
+			`offline là sự kiện của component network, chỉ thẻ của nó nghe được`},
+		{"offline on a text in the network", `<network><text offline="` + warn + `">a</text></network>`, `offline=`,
+			`offline là sự kiện của component network, chỉ thẻ của nó nghe được`},
+		{"offline on a dropdown", `<dropdown offline="close()"><button click="toggle()">a</button></dropdown>`, `offline=`,
+			`offline là sự kiện của component network, chỉ thẻ của nó nghe được`},
 		{"offline listed with click", `<button click,offline="` + warn + `">a</button>`, `click,offline=`,
-			`offline là sự kiện của component network, chỉ thẻ chủ của nó nghe được: <box component="network" offline="…" />`},
+			`offline là sự kiện của component network, chỉ thẻ của nó nghe được: <network offline="…" />`},
 		{"online with its modifier", `<box online:once="` + warn + `"><text>a</text></box>`, `online:once=`,
-			`<box component="network" online:once="…" />`},
-		{"a key filter on offline", `<box component="network" offline:escape="` + warn + `" />`, `offline:escape=`,
+			`<network online:once="…" />`},
+		{"a key filter on offline", `<network offline:escape="` + warn + `" />`, `offline:escape=`,
 			"offline:escape: escape và enter lọc một phím, đặt trên keydown hoặc keyup"},
 		{"the web's ononline", `<box ononline="` + warn + `"><text>a</text></box>`, `ononline=`,
 			`ononline là chữ của web; sự kiện viết bằng tên của nó, không có on: online="` + warn + `"`},
-		{"the web's onoffline on the host", `<box component="network" onoffline="` + warn + `" />`, `onoffline=`,
+		{"the web's onoffline on the network", `<network onoffline="` + warn + `" />`, `onoffline=`,
 			`onoffline là chữ của web; sự kiện viết bằng tên của nó, không có on: offline="` + warn + `"`},
-		{"a host it does not take", `<button component="network">a</button>`, `component=`,
-			"network đặt trên <box>, <card>, <item>, <section>, không trên <button>"},
-		{"the tag form", `<network offline="` + warn + `" />`, `<network`,
-			`network có logic (component của Kitwork): viết <box component="network" …>…</box>`},
-		{"dropdown written empty", `<box component="dropdown" />`, `<box`,
-			`dropdown không có giao diện: nội dung bên trong thẻ là giao diện của nó (<box component="dropdown">…</box>)`},
+		{"the attribute form", `<box component="network" offline="` + warn + `" />`, `component=`,
+			`component= đã bỏ: component là một thẻ, viết <network />`},
+		{"the attribute form on a button", `<button component="network">a</button>`, `component=`,
+			`component= đã bỏ: component là một thẻ, viết <network>…</network> (<network> dựng một <box>; cần <button> thì đặt nó bên trong)`},
+		{"dropdown written empty", `<dropdown />`, `<dropdown`,
+			`<dropdown> không có giao diện: nội dung bên trong thẻ là giao diện của nó (<dropdown>…</dropdown>)`},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			source := `<content>` + c.content + `</content>`
@@ -165,28 +173,17 @@ func TestNetworkWrittenWrongIsAnError(t *testing.T) {
 	}
 
 	// written in a site of their own: the toast's host, the page's one toast (its overlay holds none
-	// here); a layout called by its tag, which takes no event (its own words, before the network's); a
-	// component of the site named network, the site's and not Kitwork's (it sends neither event); and a
-	// key filter on an event that is no key, told the same way on any event (click: the CONTROL)
-	mine := `import { component } from "kitwork";
-
-component.define("network", () => {
-  var connected = true;
-  const close = () => {};
-});
-`
+	// here); a layout called by its tag, which takes no event (its own words, before the network's); and
+	// a key filter on an event that is no key, told the same way on any event (click: the CONTROL)
 	for _, c := range []struct {
 		name, content, needle, says string
 		files                       map[string]string // added to the content alone
 	}{
-		{"offline on the host of the toast", strings.Replace(networkToast, `as="$toast"`, `as="$toast" offline="clear()"`, 1), `offline=`,
-			`offline là sự kiện của component network, chỉ thẻ chủ của nó nghe được: <box component="network" offline="…" />`, nil},
+		{"offline on the toast", strings.Replace(networkToast, `as="$toast"`, `as="$toast" offline="clear()"`, 1), `offline=`,
+			`offline là sự kiện của component network, chỉ thẻ của nó nghe được: <network offline="…" />`, nil},
 		{"offline on a layout called by its tag", `<offline-line offline="close()" />`, `offline=`,
 			"sự kiện offline đặt trong offline-line.ui: offline-line là layout",
 			map[string]string{"/site/offline-line.ui": `<box><text>Offline</text></box>`}},
-		{"offline on the site's own network", `<box component="network" offline="close()"><text>{{ connected }}</text></box>`, `offline=`,
-			"offline là sự kiện của network của Kitwork; network ở đây là component của site (network.work), không gửi sự kiện đó: đặt tên khác cho component này",
-			map[string]string{"/site/network.work": mine}},
 		{"a key filter on click", `<button click:escape="clear()">a</button>`, `click:escape=`,
 			"click:escape: escape và enter lọc một phím, đặt trên keydown hoặc keyup", nil},
 	} {
@@ -199,25 +196,41 @@ component.define("network", () => {
 			mustFail(t, files, where("content.ui", source, c.needle), c.says)
 		})
 	}
+
+	// a component of the site named network: until 18/10/2026 it was the site's and its tag took no
+	// offline (it sends neither event); since every component is a tag, a name without a dash is
+	// Kitwork's, so the site's logic under it is an error at its file, before any event is read
+	t.Run("the site's own network", func(t *testing.T) {
+		files := content(`<content><network offline="close()"><text>{{ connected }}</text></network></content>`)
+		files["/site/network.work"] = `import { component } from "kitwork";
+
+component.define("network", () => {
+  var connected = true;
+  const close = () => {};
+});
+`
+		mustFailExactly(t, files, `network.work:1:1: component.define("network", …) đặt tên trùng thẻ <network> của Kitwork: <network> luôn là component của Kitwork nên logic này không bao giờ được đọc; tên component của site có gạch ngang (shop-network)`)
+	})
 }
 
-// What works and is probably not meant is a warning, and the page renders: a place on an empty host
-// (it is never seen, so the place places nothing), a placed network inside a glass frame or a lazy one
-// (each holds what is fixed inside it by itself, not by the screen, as for the toast). CONTROL: the
-// network without place in either frame, and in a frame of material none, warns of nothing.
+// What works and is probably not meant is a warning, and the page renders: a place on an empty
+// <network /> (it is never seen, so the place places nothing), a placed network inside a glass frame
+// (told at its tag) or a lazy one (each holds what is fixed inside it by itself, not by the screen, as
+// for the toast). CONTROL: the network without place in either frame, and in a frame of material none,
+// warns of nothing.
 func TestNetworkWarnings(t *testing.T) {
-	empty := `<box component="network" place="bottom-start" offline="$toast.warning('You are offline.')" />`
+	empty := `<network place="bottom-left" offline="$toast.warning('You are offline.')" />`
 	html := compileWarns(t, toastSite(networkToast+empty, `<content><text>x</text></content>`),
 		where("overlay.ui", `<overlay>`+networkToast+empty+`</overlay>`, `place=`),
-		`place="bottom-start" trên network rỗng: thẻ chủ rỗng chỉ nghe sự kiện và không hiện, place không đặt gì`)
+		`place="bottom-left" trên <network /> rỗng: nó chỉ nghe sự kiện và không hiện, place không đặt gì`)
 	mustContain(t, html, `<div class="flex-column show-false" data-kitwork-component="network" data-kitwork-event="offline: $toast.warning(&#39;You are offline.&#39;)"></div>`)
 
 	glass := `<content><section material="glass">` + networkWithNotice(` place="top"`) + `</section></content>`
-	compileWarns(t, content(glass), where("content.ui", glass, `component=`),
+	compileWarns(t, content(glass), where("content.ui", glass, `<network`),
 		"network có place trong khung kính (material ở content.ui:1:19) bám theo khung đó, không theo màn hình")
 	lazy := `<content><section lazy="600px">` + networkWithNotice(` place="top"`) + `</section></content>`
 	compileWarns(t, content(lazy), strings.TrimSuffix(where("content.ui", lazy, `lazy=`), " "),
-		`lazy="600px": khung này giữ <box component="network" place="top"> ở content.ui:1:`)
+		`lazy="600px": khung này giữ <network place="top"> ở content.ui:1:`)
 
 	// CONTROL: in the page's flow a frame places it where it is written, as it places anything
 	compileQuiet(t, content(`<content><section material="glass">`+networkWithNotice(``)+`</section></content>`))
@@ -225,26 +238,26 @@ func TestNetworkWarnings(t *testing.T) {
 	compileQuiet(t, content(`<content><section material="none">`+networkWithNotice(` place="top"`)+`</section></content>`))
 }
 
-// offline and online are refused off the network's host also on the tags that compile their own
-// attributes, each naming the network and the host to write (componentEventsHere runs in each): a
+// offline and online are refused off the <network> tag also on the tags that compile their own
+// attributes, each naming the network and the tag to write (componentEventsHere runs in each): a
 // quote, an accordion, its header (the first child, compiled into <summary>), a breadcrumb, a code, and
-// a code inside a terminal (a command). Until 17/10/2026 these six compiled without a word and dropped
+// a code inside a <terminal> (a command). Until 17/10/2026 these six compiled without a word and dropped
 // the handler. CONTROL: each written without the event compiles quietly.
 func TestNetworkEventsOnTagsOfTheirOwn(t *testing.T) {
 	warn := `$toast.warning('x')`
 	for _, c := range []struct{ name, markup, event, needle, says string }{
 		{"a quote", `<quote EVENT><text>a</text></quote>`, ` offline="` + warn + `"`, `offline=`,
-			`offline là sự kiện của component network, chỉ thẻ chủ của nó nghe được: <box component="network" offline="…" />`},
+			`offline là sự kiện của component network, chỉ thẻ của nó nghe được: <network offline="…" />`},
 		{"an accordion", `<accordion EVENT><text click="toggle()">Q</text><text>A</text></accordion>`, ` online="` + warn + `"`, `online=`,
-			`online là sự kiện của component network, chỉ thẻ chủ của nó nghe được: <box component="network" online="…" />`},
+			`online là sự kiện của component network, chỉ thẻ của nó nghe được: <network online="…" />`},
 		{"the header of an accordion", `<accordion><text click="toggle()" EVENT>Q</text><text>A</text></accordion>`, ` offline="` + warn + `"`, `offline=`,
-			`offline là sự kiện của component network, chỉ thẻ chủ của nó nghe được: <box component="network" offline="…" />`},
+			`offline là sự kiện của component network, chỉ thẻ của nó nghe được: <network offline="…" />`},
 		{"a breadcrumb", `<breadcrumb EVENT><item><link value="/">Home</link></item></breadcrumb>`, ` online="` + warn + `"`, `online=`,
-			`online là sự kiện của component network, chỉ thẻ chủ của nó nghe được: <box component="network" online="…" />`},
+			`online là sự kiện của component network, chỉ thẻ của nó nghe được: <network online="…" />`},
 		{"a code", `<code EVENT>ls</code>`, ` offline="` + warn + `"`, `offline=`,
-			`offline là sự kiện của component network, chỉ thẻ chủ của nó nghe được: <box component="network" offline="…" />`},
-		{"a command of a terminal", `<box component="terminal"><code EVENT>ls</code></box>`, ` online:once="` + warn + `"`, `online:once=`,
-			`online là sự kiện của component network, chỉ thẻ chủ của nó nghe được: <box component="network" online:once="…" />`},
+			`offline là sự kiện của component network, chỉ thẻ của nó nghe được: <network offline="…" />`},
+		{"a command of a terminal", `<terminal><code EVENT>ls</code></terminal>`, ` online:once="` + warn + `"`, `online:once=`,
+			`online là sự kiện của component network, chỉ thẻ của nó nghe được: <network online:once="…" />`},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			source := `<content>` + strings.Replace(c.markup, " EVENT", c.event, 1) + `</content>`
@@ -255,66 +268,71 @@ func TestNetworkEventsOnTagsOfTheirOwn(t *testing.T) {
 	}
 }
 
-// On an <item> the host keeps its role in its list: a live region by the two words role="status" means
-// (aria-live="polite" aria-atomic="true"), never role="status", which would take the item out of the
-// list; the list stays a list. Written empty it is no live region at all (nothing in it is said).
-// CONTROL: the same host on a box is a status region.
-func TestNetworkOnAnItemKeepsItsRole(t *testing.T) {
-	html := compileQuiet(t, content(`<content><list><item component="network" as="$network"><text show="!connected">Offline</text></item><item><text>Form</text></item></list></content>`))
-	mustContain(t, html, `<ul class="flex-column" role="list"><li class="flex-column" data-kitwork-component="network: $network" aria-live="polite" aria-atomic="true"><p data-kitwork-bind="show: !connected" hidden>Offline</p></li><li class="flex-column"><p>Form</p></li></ul>`)
-	mustNotContain(t, html, `role="status"`, `role="listitem"`)
+// A network inside an <item> leaves the item its role in its list: the <li> carries nothing of the
+// network (no role, no live region) and the list stays a list, while the network, a box of its own, is
+// the status region. Written empty it is no live region at all (nothing in it is said). Until
+// 18/10/2026 the network could be written on the item itself (<item component="network">), a live
+// region by the two words role="status" means; since a component is its tag, it is built on a box,
+// always. CONTROL: the old form on the item is the error of component=, told to put <network> inside.
+func TestNetworkInAnItemLeavesTheItemItsRole(t *testing.T) {
+	html := compileQuiet(t, content(`<content><list><item><network as="$network"><text show="!connected">Offline</text></network></item><item><text>Form</text></item></list></content>`))
+	mustContain(t, html, `<ul class="flex-column" role="list"><li class="flex-column"><div class="flex-column" data-kitwork-component="network: $network" role="status"><p data-kitwork-bind="show: !connected" hidden>Offline</p></div></li><li class="flex-column"><p>Form</p></li></ul>`)
+	mustNotContain(t, html, `aria-live`, `role="listitem"`)
 
-	html = compileQuiet(t, content(`<content><list><item component="network" as="$network" /><item><text>{{ $network.connected }}</text></item></list></content>`))
-	mustContain(t, html, `<ul class="flex-column" role="list"><li class="flex-column show-false" data-kitwork-component="network: $network"></li>`)
+	html = compileQuiet(t, content(`<content><list><item><network as="$network" /></item><item><text>{{ $network.connected }}</text></item></list></content>`))
+	mustContain(t, html, `<ul class="flex-column" role="list"><li class="flex-column"><div class="flex-column show-false" data-kitwork-component="network: $network"></div></li>`)
 	mustNotContain(t, html, `aria-live`, `role="status"`)
 
-	// CONTROL: on a box
-	html = compileQuiet(t, content(`<content><box component="network" as="$network"><text show="!connected">Offline</text></box></content>`))
-	mustContain(t, html, `<div class="flex-column" data-kitwork-component="network: $network" role="status">`)
-	mustNotContain(t, html, `aria-live`)
+	// CONTROL: the network written on the item itself
+	source := `<content><list><item component="network" as="$network"><text show="!connected">Offline</text></item></list></content>`
+	mustFailExactly(t, content(source), where("content.ui", source, `component=`)+
+		`component= đã bỏ: component là một thẻ, viết <network as="$network">…</network> (<network> dựng một <box>; cần <item> thì đặt nó bên trong)`)
 }
 
-// A region is no host of the network: it keeps its own role (a landmark a screen reader lists), and a
-// placed one would pin the region itself to the screen. Told where component= is written, with the
-// tags it is written on instead: the root of sidebar.ui, a footer written in page.ui with place, and
-// every other region in a file of its own. CONTROL: the same network on a box inside the region
-// compiles, a status region inside the landmark.
-func TestNetworkIsNoRegion(t *testing.T) {
+// A region holds a network and is never one: it keeps its own role (a landmark a screen reader lists),
+// and a placed network floats, never the region it is in. Until 18/10/2026 a region refused
+// component="network" with its own error; since a component is its tag, component= on a region is the
+// error of component=, told to write <network> inside it: the root of sidebar.ui, a footer written in
+// page.ui with place, and every other region in a file of its own. CONTROL: <network> inside the
+// region compiles, a status region inside the landmark (placed, it is the one that floats).
+func TestNetworkInsideARegion(t *testing.T) {
 	const notice = `<text show="!connected">Offline</text>`
-	const says = "đặt nó trên một thẻ bên trong (<box>, <card>, <item>, <section>)"
+	says := func(region string) string {
+		return "component= đã bỏ: component là một thẻ, viết <network>…</network> bên trong <" + region + ">"
+	}
 	sidebar := `<sidebar component="network">` + notice + `</sidebar>`
-	mustFail(t, map[string]string{
+	mustFailExactly(t, map[string]string{
 		"/site/page.ui":    `<page><sidebar /><content /></page>`,
 		"/site/sidebar.ui": sidebar,
 		"/site/content.ui": `<content><text>x</text></content>`,
-	}, where("sidebar.ui", sidebar, `component=`), "network không đặt trên vùng <sidebar>: "+says)
+	}, where("sidebar.ui", sidebar, `component=`)+says("sidebar"))
 
 	page := `<page><content /><footer component="network" place="bottom">` + notice + `</footer></page>`
-	mustFail(t, map[string]string{
+	mustFailExactly(t, map[string]string{
 		"/site/page.ui":    page,
 		"/site/content.ui": `<content><text>x</text></content>`,
-	}, where("page.ui", page, `component=`), "network không đặt trên vùng <footer>: "+says)
+	}, where("page.ui", page, `component=`)+says("footer"))
 
 	for _, region := range []string{"header", "navbar", "tabbar", "overlay"} {
 		t.Run(region, func(t *testing.T) {
 			source := `<` + region + ` component="network">` + notice + `</` + region + `>`
-			mustFail(t, map[string]string{
+			mustFailExactly(t, map[string]string{
 				"/site/page.ui":           `<page><` + region + ` /><content /></page>`,
 				"/site/" + region + ".ui": source,
 				"/site/content.ui":        `<content><text>x</text></content>`,
-			}, where(region+".ui", source, `component=`), "network không đặt trên vùng <"+region+">: "+says)
+			}, where(region+".ui", source, `component=`)+says(region))
 		})
 	}
 
-	// CONTROL: inside the region, on a box
+	// CONTROL: inside the region, its tag
 	html := compileQuiet(t, map[string]string{
 		"/site/page.ui":    `<page><sidebar /><content /></page>`,
-		"/site/sidebar.ui": `<sidebar><box component="network">` + notice + `</box></sidebar>`,
+		"/site/sidebar.ui": `<sidebar><network>` + notice + `</network></sidebar>`,
 		"/site/content.ui": `<content><text>x</text></content>`,
 	})
 	mustContain(t, html, `<aside class="flex-column"><div class="flex-column" data-kitwork-component="network" role="status">`)
 	html = compileQuiet(t, map[string]string{
-		"/site/page.ui":    `<page><content /><footer><box component="network" place="bottom">` + notice + `</box></footer></page>`,
+		"/site/page.ui":    `<page><content /><footer><network place="bottom">` + notice + `</network></footer></page>`,
 		"/site/content.ui": `<content><text>x</text></content>`,
 	})
 	mustContain(t, html, `<footer class="flex-column"><div class="flex-column network network-bottom" data-kitwork-component="network" role="status">`)
@@ -326,27 +344,39 @@ func TestNetworkIsNoRegion(t *testing.T) {
 // same notice in the page's flow stands on the canvas and passes.
 func TestNetworkPlacedNoticeFloatsOverThePage(t *testing.T) {
 	notice := `<card background="ink/10"><text>You are offline</text></card>`
-	contrastFails(t, nil, content(`<content><box component="network" place="bottom-start">`+notice+`</box></content>`), `background=`,
+	contrastFails(t, nil, content(`<content><network place="bottom-left">`+notice+`</network></content>`), `background=`,
 		"chữ ink mặc định của trang trên nền ink/10 phủ trên nội dung bên dưới (xét cả nền trắng và nền đen) chỉ 1.32:1 ở chế độ sáng; chữ thường cần 4.5:1 (chữ lớn 3:1). "+
 			"Không màu chữ nào, kể cả trắng hay đen, đọc được trên nền này: đổi nền ink (background, material) hay khai lại ink trong router.colors.")
 	// CONTROL: unplaced, the notice is a line of the page, on the canvas
-	contrastPasses(t, nil, content(`<content><box component="network">`+notice+`</box></content>`))
+	contrastPasses(t, nil, content(`<content><network>`+notice+`</network></content>`))
 }
 
-// The place of Kitwork's network (and toast) is an edge of the screen, not a place against the parent,
-// so the box around it is no place-anchor. A site's own component named network or toast is the site's:
-// its place="below-start" places it against its parent like any other, and the parent is an anchor.
+// The place of Kitwork's <network> (and <toast>) is an edge of the screen, not a place against the
+// parent, so the box around it is no place-anchor. A site's own component is the site's, a name with a
+// dash (site-network, site-toast): its place="below-left" places it against its parent like any other,
+// and the parent is an anchor. Until 18/10/2026 the site could name its component network or toast;
+// since a name without a dash is Kitwork's tag, the site's logic under it is an error at its file.
 func TestNetworkPlaceAnchorIsForPlacesAgainstTheParent(t *testing.T) {
-	html := compileQuiet(t, content(`<content><box><box component="network" place="bottom-start"><text>{{ connected }}</text></box></box></content>`))
-	mustContain(t, html, `<main class="flex-column"><div class="flex-column"><div class="flex-column network network-bottom-start" data-kitwork-component="network" role="status">`)
+	html := compileQuiet(t, content(`<content><box><network place="bottom-left"><text>{{ connected }}</text></network></box></content>`))
+	mustContain(t, html, `<main class="flex-column"><div class="flex-column"><div class="flex-column network network-bottom-left" data-kitwork-component="network" role="status">`)
 	mustNotContain(t, html, `place-anchor`)
 
+	define := func(name string) string {
+		return "import { component } from \"kitwork\";\n\ncomponent.define(\"" + name + "\", () => {\n  var count = 1;\n});\n"
+	}
 	for _, name := range []string{"network", "toast"} {
 		t.Run("the site's "+name, func(t *testing.T) {
-			files := content(`<content><box><box component="` + name + `" place="below-start"><text>{{ count }}</text></box></box></content>`)
-			files["/site/"+name+".work"] = "import { component } from \"kitwork\";\n\ncomponent.define(\"" + name + "\", () => {\n  var count = 1;\n});\n"
+			mine := "site-" + name
+			files := content(`<content><box><` + mine + ` place="below-left"><text>{{ count }}</text></` + mine + `></box></content>`)
+			files["/site/"+mine+".work"] = define(mine)
 			html := compileQuiet(t, files)
-			mustContain(t, html, `<main class="flex-column"><div class="flex-column place-anchor"><div class="flex-column place-below-start"><p>1</p></div></div></main>`)
+			mustContain(t, html, `<main class="flex-column"><div class="flex-column place-anchor"><div class="flex-column place-below-left"><p>1</p></div></div></main>`)
+
+			// the site's logic named like Kitwork's tag
+			files = content(`<content><box><` + name + ` place="below-left"><text>{{ count }}</text></` + name + `></box></content>`)
+			files["/site/"+name+".work"] = define(name)
+			mustFailExactly(t, files, name+`.work:1:1: component.define("`+name+`", …) đặt tên trùng thẻ <`+name+`> của Kitwork: <`+name+
+				`> luôn là component của Kitwork nên logic này không bao giờ được đọc; tên component của site có gạch ngang (shop-`+name+`)`)
 		})
 	}
 }
@@ -410,8 +440,8 @@ func TestNetworkTimesReachTheInstance(t *testing.T) {
 
 	// placed, the words go with the place's classes; not written, no scope either
 	for words, want := range map[string]string{
-		` place="bottom-start" delay="3s"`: `<div class="flex-column network network-bottom-start" data-kitwork-component="network" role="status" data-kitwork-scope="delay: 3000">`,
-		` place="bottom-start"`:            `<div class="flex-column network network-bottom-start" data-kitwork-component="network" role="status">`,
+		` place="bottom-left" delay="3s"`: `<div class="flex-column network network-bottom-left" data-kitwork-component="network" role="status" data-kitwork-scope="delay: 3000">`,
+		` place="bottom-left"`:            `<div class="flex-column network network-bottom-left" data-kitwork-component="network" role="status">`,
 	} {
 		host, html, warned := networkCompile(t, `<content>`+networkWithNotice(words)+`</content>`)
 		if host != want || warned != "" {
@@ -428,7 +458,7 @@ func TestNetworkTimesReachTheInstance(t *testing.T) {
 		` delay="0"`:  `<div class="flex-column show-false" data-kitwork-component="network" data-kitwork-event="offline: close()" data-kitwork-scope="delay: 0">`,
 		``:            `<div class="flex-column show-false" data-kitwork-component="network" data-kitwork-event="offline: close()">`,
 	} {
-		host, html, warned := networkCompile(t, `<content><box component="network"`+words+` offline="close()" /></content>`)
+		host, html, warned := networkCompile(t, `<content><network`+words+` offline="close()" /></content>`)
 		if host != want || warned != "" {
 			t.Errorf("empty%q:\n got  %s (warnings %q)\n want %s", words, host, warned, want)
 		}
@@ -507,9 +537,9 @@ func TestNetworkTimesWrittenWrongAreErrors(t *testing.T) {
 
 		{` delay="soon"`, `delay=`, `delay="soon" không phải một thời lượng: viết delay="1s" hay delay="800ms" (0 là báo ngay)`},
 		{` delay="-fast"`, `delay=`, `delay="-fast" không phải một thời lượng: viết delay="1s" hay delay="800ms" (0 là báo ngay)`},
-		{` delay="1m"`, `delay=`, `delay="1m" không phải một thời lượng: viết delay="1s" hay delay="800ms" (0 là báo ngay)`},
-		{` duration="4 s"`, `duration=`, `duration="4 s" không phải một thời lượng: viết duration="4s" hay duration="800ms" (0 là ở lại tới khi đóng)`},
-		{` duration="4S"`, `duration=`, `duration="4S" không phải một thời lượng: viết duration="4s" hay duration="800ms" (0 là ở lại tới khi đóng)`},
+		{` delay="1m"`, `delay=`, `delay="1m"` + delayLong},
+		{` duration="4 s"`, `duration=`, `duration="4 s" có khoảng trắng trước đơn vị, .ui viết số liền đơn vị: viết duration="4s"`},
+		{` duration="4S"`, `duration=`, `duration="4S" có đơn vị S, .ui viết là s: viết duration="4s"`},
 		{` duration=".5s"`, `duration=`, `duration=".5s" không phải một thời lượng: viết duration="4s" hay duration="800ms" (0 là ở lại tới khi đóng)`},
 
 		{` delay="10.5s"`, `delay=`, `delay="10.5s"` + delayLong},
@@ -542,7 +572,7 @@ func TestNetworkTimesWrittenWrongAreErrors(t *testing.T) {
 		{` timeout="3s"`, `timeout=`, `network không có timeout: ` + toDuration},
 		{` grace="2s"`, `grace=`, `network không có grace: ` + toDelay},
 	} {
-		source := `<content><box component="network"` + c.words + ` offline="close()" /></content>`
+		source := `<content><network` + c.words + ` offline="close()" /></content>`
 		if got, want := compileError(t, content(source)), where("content.ui", source, c.needle)+c.says; got != want {
 			t.Errorf("empty%q:\n got  %s\n want %s", c.words, got, want)
 		}
@@ -558,7 +588,7 @@ func TestNetworkTimesWrittenWrongAreErrors(t *testing.T) {
 // limit and the empty-host check were each disabled by hand and their rows went red.
 func TestNetworkTimesWarnings(t *testing.T) {
 	const fast = `dưới 2 giây: người xem đọc không kịp; viết duration từ "2s", hay bỏ duration (4 giây)`
-	const empty = `trên network rỗng: thẻ chủ rỗng không hiện gì, duration không đóng gì; vẽ thông báo bên trong (<card show="open">…</card>) hay bỏ duration`
+	const empty = `trên <network /> rỗng: nó không hiện gì, duration không đóng gì; vẽ thông báo bên trong (<card show="open">…</card>) hay bỏ duration`
 	emptyHost := `<div class="flex-column show-false" data-kitwork-component="network" data-kitwork-event="offline: close()">`
 	for _, c := range []struct {
 		name, host string
@@ -571,13 +601,13 @@ func TestNetworkTimesWarnings(t *testing.T) {
 			`<div class="flex-column" data-kitwork-component="network" role="status" data-kitwork-scope="delay: 0; duration: 1999">`},
 		{"half a second", networkWithNotice(` duration="0.5s"`), []string{`duration=`, `duration="0.5s" ` + fast},
 			`<div class="flex-column" data-kitwork-component="network" role="status" data-kitwork-scope="duration: 500">`},
-		{"a duration on an empty host", `<box component="network" duration="6s" offline="close()" />`, []string{`duration=`, `duration="6s" ` + empty}, emptyHost},
-		{"a fast duration on an empty host is told once", `<box component="network" duration="1s" offline="close()" />`, []string{`duration=`, `duration="1s" ` + empty}, emptyHost},
-		{"a zero duration on an empty host", `<box component="network" duration="0" offline="close()" />`, []string{`duration=`, `duration="0" ` + empty}, emptyHost},
-		{"an empty host keeps its delay", `<box component="network" delay="2s" duration=" 6s " offline="close()" />`, []string{`duration=`, `duration="6s" ` + empty},
+		{"a duration on an empty host", `<network duration="6s" offline="close()" />`, []string{`duration=`, `duration="6s" ` + empty}, emptyHost},
+		{"a fast duration on an empty host is told once", `<network duration="1s" offline="close()" />`, []string{`duration=`, `duration="1s" ` + empty}, emptyHost},
+		{"a zero duration on an empty host", `<network duration="0" offline="close()" />`, []string{`duration=`, `duration="0" ` + empty}, emptyHost},
+		{"an empty host keeps its delay", `<network delay="2s" duration=" 6s " offline="close()" />`, []string{`duration=`, `duration="6s" ` + empty},
 			`<div class="flex-column show-false" data-kitwork-component="network" data-kitwork-event="offline: close()" data-kitwork-scope="delay: 2000">`},
-		{"a place and a duration on an empty host", `<box component="network" place="top" duration="6s" offline="close()" />`, []string{
-			`place=`, `place="top" trên network rỗng: thẻ chủ rỗng chỉ nghe sự kiện và không hiện, place không đặt gì; vẽ thông báo bên trong (<card show="open">…</card>) hay bỏ place`,
+		{"a place and a duration on an empty host", `<network place="top" duration="6s" offline="close()" />`, []string{
+			`place=`, `place="top" trên <network /> rỗng: nó chỉ nghe sự kiện và không hiện, place không đặt gì; vẽ thông báo bên trong (<card show="open">…</card>) hay bỏ place`,
 			`duration=`, `duration="6s" ` + empty}, emptyHost},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -602,15 +632,15 @@ func TestNetworkTimesWarnings(t *testing.T) {
 // CONTROL: the same empty host without an alias is told its duration closes nothing, and drops it.
 func TestNetworkEmptyHostWithAnAliasKeepsItsDuration(t *testing.T) {
 	content := `<content><card show="$network.open"><text>{{ $network.connected ? 'Back online' : 'Offline' }}</text></card></content>`
-	html := compileQuiet(t, toastSite(networkToast+`<box component="network" as="$network" duration="6s" />`, content))
+	html := compileQuiet(t, toastSite(networkToast+`<network as="$network" duration="6s" />`, content))
 	mustContain(t, html, `data-kitwork-component="network: $network" data-kitwork-scope="duration: 6000"`)
 
-	s := memorySite("", toastSite(networkToast+`<box component="network" duration="6s" />`, `<content><text>x</text></content>`))
+	s := memorySite("", toastSite(networkToast+`<network duration="6s" />`, `<content><text>x</text></content>`))
 	page, err := s.Compile("/site")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if warned := terminalWarnings(page); !strings.Contains(warned, `duration="6s" trên network rỗng`) {
+	if warned := terminalWarnings(page); !strings.Contains(warned, `duration="6s" trên <network /> rỗng`) {
 		t.Errorf("an empty host without an alias is not told its duration closes nothing:\n%s", warned)
 	}
 	if strings.Contains(page.Render(Request{Path: "/"}), "duration: 6000") {

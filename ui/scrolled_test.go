@@ -112,7 +112,7 @@ func TestScrolledErrors(t *testing.T) {
 	// control: the scroll event with its own words, and the scroll area, still compile
 	for _, content := range []string{
 		`<content><box scroll="y"><text>a</text></box></content>`,
-		`<content><box component="dropdown" scroll="close()"><text>a</text></box></content>`,
+		`<content><dropdown scroll="close()"><text>a</text></dropdown></content>`,
 	} {
 		if _, err := memorySite("", map[string]string{"/site/content.ui": content}).Compile("/site"); err != nil {
 			t.Errorf("control %s: %v", content, err)

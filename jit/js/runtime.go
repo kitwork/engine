@@ -27,7 +27,7 @@ import (
 	"github.com/kitwork/engine/jit/internal/htmlattr"
 )
 
-//go:embed components services directives
+//go:embed components services directives parts
 var jsFS embed.FS
 
 // moduleCache memoizes parsed module files (and misses, stored as "") so each is read at most once.
@@ -63,6 +63,14 @@ var (
 	// "name@version" (with or without its "v") from a template page that writes one.
 	groupedComponentAttrRe = regexp.MustCompile(`data-kitwork-component="([^"]*)"`)
 )
+
+// templateVersions are the catalogue components whose newest version speaks another grammar than the
+// one template pages were written in, each with the version a template page's host (data-kit-component,
+// no version written) still gets. The editor of .ui (v2.0.0, 20/10/2026: toggle('bold'), link(), its
+// parts found by the engine) took the place of the template editor's run('bold'), beginLink() and
+// data-kit-element="area"; a .kitwork.html page that writes data-kit-component="editor" keeps v1.0.0.
+// The engine's own host, data-kitwork-component, always gets the newest.
+var templateVersions = map[string]string{"editor": "v1.0.0"}
 
 // parseVersion converts a string like "v1.2.3.js" or "v1.2.3" into major, minor, patch ints.
 func parseVersion(s string) (major, minor, patch int) {
@@ -183,6 +191,8 @@ func scanComponents(html string, site Site) []string {
 		// grouped form may: both mean the catalogue's v2.0.0.
 		if m[2] != "" {
 			m[2] = "v" + strings.TrimPrefix(m[2], "v")
+		} else if pinned := templateVersions[m[1]]; pinned != "" {
+			m[2] = pinned // a template page's component that kept its grammar when .ui's changed it
 		}
 	}
 	var grouped [][]string

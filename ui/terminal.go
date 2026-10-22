@@ -3,7 +3,6 @@ package ui
 import (
 	"html"
 	"math"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -11,10 +10,10 @@ import (
 	"github.com/kitwork/engine/ui/stylesheet"
 )
 
-// The terminal (decisions of 12/10/2026) is one of Kitwork's components, written on a container the
-// author chooses. The author writes the whole look in markup; the component gives behaviour:
+// The terminal (decisions of 12/10/2026) is one of Kitwork's components, written as its tag,
+// <terminal>. The author writes the whole look in markup; the component gives behaviour:
 //
-//	<box component="terminal" typing="3s" background="ink-10" radius="medium">
+//	<terminal typing="3s" background="ink-10" radius="medium">
 //	  <box flex="row" align="center" gap="3" padding-x="4" padding-y="2" background="ink-20">
 //	    <text size="small" font="code">bash</text>
 //	    <button click="copy()">{{ copied ? 'Copied' : 'Copy' }}</button>
@@ -24,7 +23,7 @@ import (
 //	    <text color="ink-30">Cloning into 'engine'...</text>
 //	    <code language="bash">cd engine</code>
 //	  </box>
-//	</box>
+//	</terminal>
 //
 // What is inside the host is markup of the page, compiled as anywhere else, with one rule: every
 // <code> inside a terminal is a command, wherever it sits in the host — in a bar the author draws too —
@@ -99,7 +98,7 @@ type terminalScope struct {
 // and returns the host without them, to go on as the host of a component without a UI.
 func (c *compiler) terminalHost(n *Node) (*Node, *terminalSpec, error) {
 	if len(n.SignificantChildren()) == 0 {
-		return nil, nil, errAt(n, "terminal cần ít nhất một lệnh bên trong: <%s component=\"terminal\"><code>lệnh</code></%s> (mỗi <code> bên trong là một lệnh)", n.Tag, n.Tag)
+		return nil, nil, errAt(n, "terminal cần ít nhất một lệnh bên trong: <terminal><code>lệnh</code></terminal> (mỗi <code> bên trong là một lệnh)")
 	}
 	spec := &terminalSpec{}
 	host := *n
@@ -140,16 +139,9 @@ func shellRemoved(a *Attr) string {
 		`"PS> " cho powershell, ">>> " cho python, "sql> " cho sql); bỏ shell và viết <code language="` + language + `">…</code>`
 }
 
-var (
-	// durationRe is a duration typing takes: a number of seconds or milliseconds, written with its unit
-	durationRe = regexp.MustCompile(`^([0-9]+(?:\.[0-9]+)?)(ms|s)$`)
-	// unitlessRe is a number written without a unit
-	unitlessRe = regexp.MustCompile(`^[0-9]+(?:\.[0-9]+)?$`)
-)
-
-// terminalTyping reads typing=: the total time typing every command takes, "3s" or "800ms", in
-// milliseconds. Anything else is an error that says what to write (typing="3s"); longer than five
-// seconds is told while developing and renders as written.
+// terminalTyping reads typing=: the total time typing every command takes, a duration (duration.go:
+// "3s", "800ms", "0.05m"), in milliseconds. Anything else is an error that says what to write
+// (typing="3s"); longer than five seconds is told while developing and renders as written.
 func (c *compiler) terminalTyping(n *Node, a *Attr) (float64, error) {
 	value := strings.TrimSpace(a.Value)
 	switch {
@@ -159,46 +151,25 @@ func (c *compiler) terminalTyping(n *Node, a *Attr) (float64, error) {
 		return 0, errAttr(n, a, `typing của terminal là một thời lượng cố định (typing="3s"), không có {{ }}: nó được quyết một lần khi trang dựng`)
 	case value == "true" || value == "false":
 		return 0, errAttr(n, a, `typing nay là tổng thời gian gõ mọi lệnh, không phải %s: viết typing="3s" hoặc typing="800ms"; không gõ thì bỏ typing`, value)
-	case strings.HasPrefix(value, "-") && (durationRe.MatchString(value[1:]) || unitlessRe.MatchString(value[1:])):
-		return 0, errAttr(n, a, `typing không nhận thời lượng âm (%s): viết một thời lượng như typing="%s"`, value, durationSuggestion(value[1:]))
-	case unitlessRe.MatchString(value):
-		if number, _ := strconv.ParseFloat(value, 64); number == 0 {
-			return 0, errAttr(n, a, `typing="%s" là không giây: không gõ thì bỏ typing; gõ thì viết một thời lượng như typing="3s"`, a.Value)
-		}
-		return 0, errAttr(n, a, `typing="%s" thiếu đơn vị: viết typing="%s"`, a.Value, durationSuggestion(value))
 	}
-	m := durationRe.FindStringSubmatch(value)
-	if m == nil {
-		return 0, errAttr(n, a, `typing="%s" không phải một thời lượng: viết typing="3s" hoặc typing="800ms" (tổng thời gian gõ mọi lệnh)`, a.Value)
-	}
-	// seconds are read as the digits times 10³ in one rounding (4.03s is 4030, not 4030.0000000000005)
-	digits := m[1]
-	if m[2] == "s" {
-		digits += "e3"
-	}
-	ms, err := strconv.ParseFloat(digits, 64)
-	if err != nil || math.IsInf(ms, 0) {
-		return 0, errAttr(n, a, `typing="%s" không phải một thời lượng: viết typing="3s" hoặc typing="800ms" (tổng thời gian gõ mọi lệnh)`, a.Value)
-	}
-	if ms == 0 {
+	d := readDuration(value)
+	switch d.problem {
+	case durationNegative:
+		return 0, errAttr(n, a, `typing không nhận thời lượng âm (%s): viết một thời lượng như typing="%s"`, value, d.suggestion(durationMilliseconds))
+	case durationZero:
 		return 0, errAttr(n, a, `typing="%s" là không giây: không gõ thì bỏ typing; gõ thì viết một thời lượng như typing="3s"`, a.Value)
+	case durationNoUnit:
+		return 0, errAttr(n, a, `typing="%s" thiếu đơn vị: viết typing="%s"`, a.Value, d.suggestion(durationMilliseconds))
+	case durationTwoUnits, durationForeign:
+		return 0, errAttr(n, a, `typing="%s" %s: viết typing="%s"`, a.Value, d.reason(), d.suggestion(durationMilliseconds))
 	}
-	if ms > typingLongest {
+	if d.problem == durationNotOne || math.IsInf(d.ms, 0) {
+		return 0, errAttr(n, a, `typing="%s" không phải một thời lượng: viết typing="3s" hoặc typing="800ms" (tổng thời gian gõ mọi lệnh)`, a.Value)
+	}
+	if d.ms > typingLongest {
 		c.warn(n.File, a.Line, a.Column, `typing="`+a.Value+`" gõ lâu hơn 5 giây: chuyển động tự chạy quá 5 giây cần một cách để dừng (WCAG 2.2.2 Pause, Stop, Hide); viết typing="5s" hoặc ngắn hơn`)
 	}
-	return ms, nil
-}
-
-// durationSuggestion is the duration to write for a value written without its unit, or with one after
-// a minus: 3 → 3s, 800 → 800ms (a number that large is milliseconds), -3s → 3s.
-func durationSuggestion(value string) string {
-	if durationRe.MatchString(value) {
-		return value
-	}
-	if number, err := strconv.ParseFloat(value, 64); err == nil && number >= 100 {
-		return value + "ms"
-	}
-	return value + "s"
+	return d.ms, nil
 }
 
 // terminalChildren compiles what is inside a terminal's host: the author's markup, each <code> a

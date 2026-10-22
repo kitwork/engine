@@ -6,14 +6,14 @@ import (
 )
 
 // Engine colours (decision of 13/10/2026, "+N riêng cho từng chế độ"): a colour the engine chooses,
-// never the author — the text of a <badge>, the colours of a code block, the words of <error>, the
-// brand end of the standard headline and inverse gradients — is its token made stronger by the
-// smallest multiple of 5 that reads 4.5:1 on its grounds in THAT mode. It starts from the role's step
-// when the mode's canvas is lighter than the token (stronger darkens it: the step the engine wrote for
-// both modes before, so a light look is byte for byte what it was), and from 0 when the canvas is
-// darker (stronger lightens it, toward white: the accent itself reads, and keeps its hue, as the old
-// .deep did in dark). When no step up to +100 reads, the role's step stays and the contrast check
-// tells it. An X+N the author writes is one number for both modes still (operators.go).
+// never the author — the text of a <badge>, the colours of a code block, the words of <error>, a link
+// inside a <richtext>, the brand end of the standard headline and inverse gradients — is its token made
+// stronger by the smallest multiple of 5 that reads 4.5:1 on its grounds in THAT mode. It starts from
+// the role's step when the mode's canvas is lighter than the token (stronger darkens it: the step the
+// engine wrote for both modes before, so a light look is byte for byte what it was), and from 0 when
+// the canvas is darker (stronger lightens it, toward white: the accent itself reads, and keeps its hue,
+// as the old .deep did in dark). When no step up to +100 reads, the role's step stays and the contrast
+// check tells it. An X+N the author writes is one number for both modes still (operators.go).
 //
 // Each engine colour is a name, the custom property it is written in without its --: the tables (looks,
 // codeLooks, the standard gradients, BadgeTint) hold the name, Paint paints it as its value in the mode
@@ -28,6 +28,7 @@ const (
 	ErrorColour    = "kitwork-error"    // the words of <error> (reboot.css :where(.error))
 	HeadlineColour = "kitwork-headline" // the brand end of the standard headline gradient
 	InverseColour  = "kitwork-inverse"  // the brand start of the standard inverse gradient
+	LinkColour     = "kitwork-link"     // the words of a link inside a <richtext> (richtext.go)
 )
 
 // CodeColour is the engine colour of a code role: kitwork-code-brand, kitwork-code-inserted.
@@ -58,6 +59,9 @@ var engineRoles = map[string]engineRole{
 	CodeColour("inserted"): {"success", []string{"success-" + strconv.Itoa(TintStep)}, 45},
 	CodeColour("deleted"):  {"danger", []string{"danger-" + strconv.Itoa(TintStep)}, 40},
 	ErrorColour:            {"danger", pageGrounds, ErrorStep},
+	// a link of a richtext reads on the page's grounds as running text does: the brand made stronger as
+	// far as a code keyword's is, from the same step (the least that reads on every palette measured)
+	LinkColour: {"brand", pageGrounds, 35},
 	// as text over the page's grounds and the glow behind a hero; inverse under paper, canvas and
 	// brand-95 text, on the band itself
 	HeadlineColour: {"brand", []string{"canvas", "paper", "panel", "brand-" + strconv.Itoa(TintStep)}, 40},

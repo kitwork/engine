@@ -1,11 +1,11 @@
 /* dropdown component — something that opens and closes (KITWORK_UI §7, docs/components/
  * dropdown.md). It has no look of its own: what is written inside it is its interface, and the
- * behaviour is written in the markup, on the dropdown's host itself:
+ * behaviour is written in the markup, on the dropdown's tag itself:
  *
- *   <box component="dropdown" as="$account" click-outside="close()" keydown:escape="close()">
+ *   <dropdown as="$account" click-outside="close()" keydown:escape="close()">
  *     <button click="toggle()" expanded="{{ open }}">Quốc</button>
- *     <popover place="below-end">…</popover>
- *   </box>
+ *     <popover place="below-right">…</popover>
+ *   </dropdown>
  *
  * The engine writes data-kitwork-component="dropdown: $account", the events in data-kitwork-event,
  * aria-expanded in data-kitwork-bind, and the popover with data-kitwork-bind="show: open", so the

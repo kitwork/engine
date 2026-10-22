@@ -56,7 +56,7 @@ var groupedEventTypes = map[string]string{
 // ComponentEvents are the events Kitwork's own components send (context.emit), each with its component:
 // the kernel listens for them as for any custom event, and only the host of that component hears them
 // (ui refuses them anywhere else). Known here, they are no note on every page that writes them.
-var ComponentEvents = map[string]string{"online": "network", "offline": "network"}
+var ComponentEvents = map[string]string{"online": "network", "offline": "network", "finish": "countdown"}
 
 const groupedEventVocabulary = "click, double-click, context-menu, click-outside, keydown, keyup, input, change, submit, " +
 	"focus-in, focus-out, pointer-down, pointer-up, pointer-enter, pointer-leave, scroll, load, error, toggle, " +

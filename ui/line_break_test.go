@@ -14,7 +14,7 @@ import (
 //   - the page from CRLF, and from CR alone, is that page byte for byte.
 func TestLineBreaksOfEveryKindReadAlike(t *testing.T) {
 	source := `<content gap="4">
-  <box component="terminal">
+  <terminal>
     <code language="powershell">
       Get-ChildItem
     </code>
@@ -22,7 +22,7 @@ func TestLineBreaksOfEveryKindReadAlike(t *testing.T) {
       content.ui
     </text>
     <code language="powershell">kitwork dev</code>
-  </box>
+  </terminal>
   <code language="go">
     // a comment
     x := 1

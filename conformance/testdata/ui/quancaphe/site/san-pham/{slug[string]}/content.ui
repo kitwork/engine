@@ -27,7 +27,7 @@
           </select>
         </field>
 
-        <box if="!product.soldOut" flex="row" align="start" gap="3">
+        <box if="!product.soldOut" flex="row" align="left" gap="3">
           <button click="quantity > 1 && quantity--" radius="full" padding="2"><icon value="minus" alt="Giảm"></icon></button>
           <text weight="bold" font="code">{{ quantity }}</text>
           <button click="quantity++" radius="full" padding="2"><icon value="plus" alt="Tăng"></icon></button>

@@ -101,7 +101,7 @@ func TestStylesheetWordsThatDoNothingHere(t *testing.T) {
 			Intent{Tag: "text", Name: "wrap", Value: "balance"}},
 		{Intent{Tag: "box", Width: "medium", Name: "wrap", Value: "pretty"}, []string{`wrap="pretty" chỉ có nghĩa trên chữ`},
 			Intent{Tag: "text", Width: "medium", Name: "wrap", Value: "pretty"}},
-		{Intent{Tag: "text", Name: "align", Value: "top"}, []string{`align="top" là vị trí các con của một khung, trên chữ không có tác dụng`, "start, center hoặc end"},
+		{Intent{Tag: "text", Name: "align", Value: "top"}, []string{`align="top" là vị trí các con của một khung, trên chữ không có tác dụng: align của text nhận left, center hoặc right`},
 			Intent{Tag: "box", Name: "align", Value: "top"}},
 		{Intent{Tag: "box", Name: "fit", Value: "cover"}, []string{"fit chỉ đặt trên image", "không đặt trên box"},
 			Intent{Tag: "image", Name: "fit", Value: "cover"}},
@@ -142,8 +142,9 @@ func TestStylesheetWordsThatDoNothingHere(t *testing.T) {
 // A word the table does not understand stays an error, never a warning: the value is read before the
 // place is judged (fit="cove" on a box is a typo, not a misplaced fit), a number the engine cannot draw
 // is refused (columns="0", opacity above 100), and the web and Tailwind words keep their error with the
-// .ui word to write (decision D, question 2). An auto written under a prefix would undo a size, which
-// drawing it as not written would not: it stays refused.
+// .ui word to write (decision D, question 2), as do start and end, the words left and right replaced
+// (19/10/2026). An auto written under a prefix would undo a size, which drawing it as not written would
+// not: it stays refused.
 func TestStylesheetTyposAndWebWordsStayErrors(t *testing.T) {
 	table := NewTable(examplePalette(t))
 	cases := []struct {
@@ -151,7 +152,13 @@ func TestStylesheetTyposAndWebWordsStayErrors(t *testing.T) {
 		says string
 	}{
 		{Intent{Tag: "box", Name: "fit", Value: "cove"}, `fit nhận cover`},
-		{Intent{Tag: "text", Name: "align", Value: "middle"}, `align của text nhận start, center hoặc end, không có "middle"`},
+		{Intent{Tag: "text", Name: "align", Value: "middle"}, `align của text nhận left, center hoặc right, không có "middle"`},
+		// start and end were replaced by left and right (19/10/2026): the old word is an error, not a
+		// warning, on a text as on a box, even where its new word would only be warned of (on a text
+		// top-left warns, as top does)
+		{Intent{Tag: "text", Name: "align", Value: "start"}, `align="start": start và end nay là left và right, viết align="left" (tự lật khi trang viết từ phải sang trái)`},
+		{Intent{Tag: "text", Name: "align", Value: "top-start"}, `align="top-start": start và end nay là left và right, viết align="top-left" (tự lật khi trang viết từ phải sang trái)`},
+		{Intent{Tag: "box", Name: "place", Value: "end"}, `place="end": start và end nay là left và right, viết place="right" (tự lật khi trang viết từ phải sang trái)`},
 		{Intent{Tag: "box", Name: "wrap", Value: "nowrap"}, `wrap nhận true hoặc false, không có "nowrap"`},
 		{Intent{Name: "gap", Value: "big"}, `gap theo thang khoảng cách, không có "big"`},
 		{Intent{Name: "padding", Value: "-4"}, `không có "-4"`},

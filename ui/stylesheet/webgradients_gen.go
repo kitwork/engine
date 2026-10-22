@@ -23,11 +23,12 @@
 //     name the collection gives them is a known word the page is told to replace;
 //   - each is the top layer the stylesheet writes (the first, painted over the rest): for 169 of the
 //     collection the whole gradient, linear;
-//   - a linear one keeps its direction: to right is to-end, to left to-start, to top and to bottom
+//   - a linear one keeps its direction: to right is to-right, to left to-left, to top and to bottom
 //     themselves; an angle becomes the nearest of the eight direction words (0deg is to-top, 90deg
-//     to-end, 180deg to-bottom; a negative angle is the same turn less 360deg; an angle halfway between
-//     two words takes the diagonal one): at most 22.5deg away, 20deg in this collection (the -20deg ones,
-//     to-top);
+//     to-right, 180deg to-bottom; a negative angle is the same turn less 360deg; an angle halfway
+//     between two words takes the diagonal one): at most 22.5deg away, 20deg in this collection (the
+//     -20deg ones, to-top); left and right are the design's and mirror on a right-to-left page, as every
+//     left and right of .ui does (decision of 19/10/2026);
 //   - a radial one is centred where the stylesheet centres it and reaches the box's farthest corner, the
 //     one size a gradient of Kitwork has;
 //   - its stops are the stylesheet's colours at its places, as written (Warm Flame's 99 and 100, Cold
@@ -95,11 +96,11 @@ var leftOut = map[string]bool{"Coup de Grace": true, "Loon Crest": true, "Sharp 
 var repeats = map[string]string{"Cochiti Lake": "Clean Mirror", "River City": "Party Bliss", "Royal Garden": "Colorful Peach"}
 
 // keywordDirections are the directions the stylesheet writes in words, as direction words: to right is
-// to-end, which flips for right-to-left as every start and end does.
+// to-right, which mirrors on a right-to-left page as every left and right of .ui does.
 var keywordDirections = map[string]string{
-	"to top": "to-top", "to right": "to-end", "to bottom": "to-bottom", "to left": "to-start",
-	"to top right": "to-top-end", "to right top": "to-top-end", "to bottom right": "to-bottom-end", "to right bottom": "to-bottom-end",
-	"to bottom left": "to-bottom-start", "to left bottom": "to-bottom-start", "to top left": "to-top-start", "to left top": "to-top-start",
+	"to top": "to-top", "to right": "to-right", "to bottom": "to-bottom", "to left": "to-left",
+	"to top right": "to-top-right", "to right top": "to-top-right", "to bottom right": "to-bottom-right", "to right bottom": "to-bottom-right",
+	"to bottom left": "to-bottom-left", "to left bottom": "to-bottom-left", "to top left": "to-top-left", "to left top": "to-top-left",
 }
 
 // namedHex are the colours the stylesheet writes by name, as their hex.
@@ -128,7 +129,7 @@ func mechanical(name string) string {
 }
 
 // directionWords are the eight directions of a linear gradient, clockwise from to-top, 45deg apart.
-var directionWords = [8]string{"to-top", "to-top-end", "to-end", "to-bottom-end", "to-bottom", "to-bottom-start", "to-start", "to-top-start"}
+var directionWords = [8]string{"to-top", "to-top-right", "to-right", "to-bottom-right", "to-bottom", "to-bottom-left", "to-left", "to-top-left"}
 
 // direction is the direction word nearest a CSS angle: the angle taken round to 0–360deg, then the word
 // of the nearest multiple of 45deg; halfway between two, the diagonal (the odd step).

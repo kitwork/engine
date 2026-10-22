@@ -74,7 +74,7 @@ type uiCase struct {
 	Scope     map[string]any    `json:"scope"`
 	Functions map[string]string `json:"functions"`
 	Expect    string            `json:"expect"`
-	// Files are the case's own sources, by path from the site root ("../.components/cart.work" for the
+	// Files are the case's own sources, by path from the site root ("../.components/shop-cart.work" for the
 	// identity's): the case compiles them instead of the fixture's site.
 	Files map[string]string `json:"files"`
 	// Error is the compile error the case must give instead of a page.

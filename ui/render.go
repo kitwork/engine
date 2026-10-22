@@ -9,6 +9,7 @@ import (
 
 	"github.com/kitwork/engine/jit/highlight"
 	"github.com/kitwork/engine/jit/hydrate"
+	"github.com/kitwork/engine/utilities/richtext"
 )
 
 // A compiled page is a tree of ops. Everything that does not depend on data is joined into static
@@ -184,6 +185,8 @@ type elemOp struct {
 
 	// textarea: value is the content
 	content *interpolation
+	// richtext: its value, cleaned for the page's origin and written as its content (richtext.go)
+	richtext *expr
 
 	// fragment: no element of its own
 	fragment bool
@@ -625,7 +628,10 @@ func linkCurrent(path, href string, exact bool) string {
 }
 
 // internalLink reports whether href is a path on this site ("/menu"), the only links a page can be.
+// href is read the way a browser reads it (richtext.NormalizeAddress): "/\evil.example" and
+// "/<TAB>/evil.example" are "//evil.example", another host.
 func internalLink(href string) bool {
+	href = richtext.NormalizeAddress(href)
 	return strings.HasPrefix(href, "/") && !strings.HasPrefix(href, "//")
 }
 
@@ -663,7 +669,7 @@ func linkScheme(value string) string {
 // safeLink: a link goes to a page in the site, a web page, an e-mail or a phone number (KITWORK_UI §7,
 // "Link ra ngoài"). Anything else (javascript:, data:, vbscript:…) is not a place to go.
 func safeLink(href string) bool {
-	switch linkScheme(href) {
+	switch linkScheme(richtext.NormalizeAddress(href)) {
 	case "", "http", "https", "mailto", "tel":
 		return true
 	}
@@ -682,28 +688,13 @@ func safeImage(src string) bool {
 }
 
 // externalLink: a web address on another host than the page's own (origin), or any web address when
-// the origin is not known. Such a link leaves the site: rel="external noopener".
+// the origin is not known. Such a link leaves the site: rel="external noopener". It is the rule of a
+// richtext's links (richtext.External): the host a browser reads, after the scheme and its slashes,
+// the address normalized first, so a backslash or a tab cannot hide the host ("\\evil.example" is
+// "//evil.example", "https://evil.example\@kitwork.io" goes to evil.example), and a "//" in the path
+// does not name one ("http:evil.example/x//kitwork.io" goes to evil.example).
 func externalLink(href, origin string) bool {
-	scheme := linkScheme(href)
-	if scheme != "http" && scheme != "https" && !strings.HasPrefix(href, "//") {
-		return false
-	}
-	host := hostOf(href)
-	return host == "" || origin == "" || !strings.EqualFold(host, hostOf(origin))
-}
-
-func hostOf(u string) string {
-	rest := u
-	if i := strings.Index(rest, "//"); i >= 0 {
-		rest = rest[i+2:]
-	}
-	if i := strings.IndexAny(rest, "/?#"); i >= 0 {
-		rest = rest[:i]
-	}
-	if i := strings.LastIndex(rest, "@"); i >= 0 {
-		rest = rest[i+1:]
-	}
-	return rest
+	return richtext.External(href, origin)
 }
 
 // newTabNote tells a screen reader the link opens a new tab; it is not seen.

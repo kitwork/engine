@@ -243,7 +243,7 @@ router.bundle({ javascript: "inline" });
 	"localhost/content.ui": `<content><text id="title">Một</text><link id="next" value="/hai">Hai</link></content>`,
 	"localhost/hai/content.ui": `<content>
   <text id="title">Hai</text>
-  <box component="dropdown"><button id="open" click="toggle()" expanded="{{ open }}">Mở</button></box>
+  <dropdown><button id="open" click="toggle()" expanded="{{ open }}">Mở</button></dropdown>
   <link id="next" value="/ba">Ba</link>
 </content>`,
 	"localhost/ba/router.work": `import { router } from "kitwork";
@@ -252,8 +252,8 @@ router.bundle({ javascript: "split" });
 `,
 	"localhost/ba/content.ui": `<content>
   <text id="title">Ba</text>
-  <box component="dropdown"><button id="open" click="toggle()" expanded="{{ open }}">Mở</button></box>
-  <box id="mode"><button component="appearance" click="toggle()">Đổi</button></box>
+  <dropdown><button id="open" click="toggle()" expanded="{{ open }}">Mở</button></dropdown>
+  <box id="mode"><appearance click="toggle()">Đổi</appearance></box>
 </content>`,
 }
 

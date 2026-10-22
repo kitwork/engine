@@ -55,6 +55,16 @@ func ComponentNames(site Site) hydrate.ComponentNames {
 		if source == "" {
 			return nil, false
 		}
+		if pinned := templateVersions[name]; pinned != "" && version == "" {
+			// a template page's host gets the pinned version, the engine's the newest, and the name alone
+			// does not say which host asked: both versions' names, the direction that never invents a report
+			names, ok := declaredNamesOf(source)
+			older, known := declaredNamesOf(componentSource(name+"@"+pinned, site))
+			if !ok || !known {
+				return nil, false
+			}
+			return unionNames(names, older), true
+		}
 		return declaredNamesOf(source)
 	}
 }
@@ -65,6 +75,22 @@ type namesResult struct {
 }
 
 var namesCache sync.Map // sha256 of a source → namesResult
+
+// unionNames are the names of two lists, each once, sorted.
+func unionNames(a, b []string) []string {
+	seen := make(map[string]bool, len(a)+len(b))
+	out := make([]string, 0, len(a)+len(b))
+	for _, list := range [][]string{a, b} {
+		for _, name := range list {
+			if !seen[name] {
+				seen[name] = true
+				out = append(out, name)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
 
 func declaredNamesOf(source string) ([]string, bool) {
 	sum := sha256.Sum256([]byte(source))

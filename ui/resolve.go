@@ -31,8 +31,8 @@ type Site struct {
 	// rendering as written; "strict" makes it a compile error. Any other word is an error.
 	Contrast string
 	// Language is router.language of the route (the nearest folder that says one), "" when none does.
-	// A language written right to left (ar, he, fa, ur, and their regional forms) makes a physical left
-	// or right attribute a warning: left and right never flip (classes.go, checkSides).
+	// A language written right to left (ar, he, fa, ur, and their regional forms) gives the page
+	// dir="rtl", so left and right mirror: the stylesheet writes them as logical CSS (page.go).
 	Language string
 }
 

@@ -124,7 +124,7 @@ func TestStandardGradientsReadAsDesigned(t *testing.T) {
 		{"inverse", "canvas", pages, 4.5, false},
 		{"inverse", "brand-95", pages, 4.5, false},
 	}
-	for _, g := range []string{"fade-top", "fade-bottom", "fade-start", "fade-end"} {
+	for _, g := range []string{"fade-top", "fade-bottom", "fade-left", "fade-right"} {
 		pairs = append(pairs, pair{g, "ink", []string{"canvas", "paper", "panel"}, 4.5, false}, pair{g, "ink-30", pages, 4.5, false})
 	}
 	for _, g := range []string{"glow", "tint"} {
@@ -172,7 +172,7 @@ func TestStandardGradientsReadAsDesigned(t *testing.T) {
 	}
 	// the steps are the least that read: headline ending in brand+15, and a glow of brand-83, fall short
 	weaker, err := palettes["quancaphe"].WithGradients(map[string]Gradient{
-		"headline15": {Type: "linear", Direction: "to-end", Stops: []Stop{{Color: "ink", At: 0}, {Color: "brand+15", At: 100}}},
+		"headline15": {Type: "linear", Direction: "to-right", Stops: []Stop{{Color: "ink", At: 0}, {Color: "brand+15", At: 100}}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -191,11 +191,13 @@ func TestStandardGradientsReadAsDesigned(t *testing.T) {
 	}
 }
 
-// The standard set is the designed one: eighteen names in their order, none a named colour, a fixed
-// colour or a token of the default palette, every stop a colour the default palette names or one of the
-// engine's own (the brand end of headline and inverse, engine_colour.go), which no author may write.
+// The standard set is the designed one: eighteen names in their order (fade-left and fade-right, named
+// fade-start and fade-end until left and right took the place of start and end on 19/10/2026), none a
+// named colour, a fixed colour or a token of the default palette, every stop a colour the default
+// palette names or one of the engine's own (the brand end of headline and inverse, engine_colour.go),
+// which no author may write.
 func TestStandardGradientsAreTheDesignedSet(t *testing.T) {
-	want := "fade-top fade-bottom fade-start fade-end skeleton hairline glow tint headline inverse " +
+	want := "fade-top fade-bottom fade-left fade-right skeleton hairline glow tint headline inverse " +
 		"scrim-top scrim-bottom night gilded ocean nebula magma prism"
 	if got := strings.Join(StandardGradients(), " "); got != want {
 		t.Fatalf("the standard set\n got %s\nwant %s", got, want)
@@ -301,47 +303,49 @@ func TestEveryStandardGradientCompilesToCSS(t *testing.T) {
 	}
 }
 
-// start and end flip for right-to-left: a gradient whose direction or position names one is written
-// again for :dir(rtl), inside :where() so the rule weighs one class like every page rule, right after
-// the class's own; one that names neither (to-bottom, top, center) has no such rule.
-func TestGradientFlipsForRightToLeft(t *testing.T) {
+// left and right are the design's left and right, and mirror on a page written from right to left
+// (decision of 19/10/2026: start and end are gone from .ui): CSS has no logical word for a gradient's
+// direction or centre, so a gradient whose direction or position names left or right is written again
+// for :dir(rtl), mirrored, inside :where() so the rule weighs one class like every page rule, right after
+// the class's own. CONTROL: one that names neither (to-top, top, center) has no such rule.
+func TestGradientMirrorsOnRightToLeft(t *testing.T) {
 	p, _ := NewPalette(false)
 	table := NewTable(p)
-	css := pageCSS(t, table, Intent{Name: "background", Value: "fade-end"}, Intent{Name: "background", Value: "night"},
+	css := pageCSS(t, table, Intent{Name: "background", Value: "fade-right"}, Intent{Name: "background", Value: "night"},
 		Intent{Name: "background", Value: "fade-top"}, Intent{Name: "background", Value: "glow"})
-	fadeEnd := `.background-fade-end{background-image:linear-gradient(to right,color-mix(in srgb,var(--canvas) 0%,transparent) 0%,var(--canvas) 100%);` +
+	fadeRight := `.background-fade-right{background-image:linear-gradient(to right,color-mix(in srgb,var(--canvas) 0%,transparent) 0%,var(--canvas) 100%);` +
 		`background-image:linear-gradient(to right in srgb,color-mix(in srgb,var(--canvas) 0%,transparent) 0%,var(--canvas) 100%)}` + "\n" +
-		`.background-fade-end:where(:dir(rtl)){background-image:linear-gradient(to left,color-mix(in srgb,var(--canvas) 0%,transparent) 0%,var(--canvas) 100%);` +
+		`.background-fade-right:where(:dir(rtl)){background-image:linear-gradient(to left,color-mix(in srgb,var(--canvas) 0%,transparent) 0%,var(--canvas) 100%);` +
 		`background-image:linear-gradient(to left in srgb,color-mix(in srgb,var(--canvas) 0%,transparent) 0%,var(--canvas) 100%)}` + "\n"
-	if !strings.Contains(css, fadeEnd) {
-		t.Errorf("fade-end and its right-to-left rule, one after the other:\n%s", css)
+	if !strings.Contains(css, fadeRight) {
+		t.Errorf("fade-right and its right-to-left rule, one after the other:\n%s", css)
 	}
 	if !strings.Contains(css, `.background-night:where(:dir(rtl)){background-image:linear-gradient(to bottom left,#191970 0%,#000 100%)}`) {
-		t.Errorf("to-bottom-end is to bottom left from right to left:\n%s", css)
+		t.Errorf("to-bottom-right is to bottom left on a right-to-left page:\n%s", css)
 	}
 	for _, still := range []string{"fade-top", "glow"} {
 		if strings.Contains(css, ".background-"+still+":where(:dir(rtl))") {
-			t.Errorf("%s names no start or end: no right-to-left rule:\n%s", still, css)
+			t.Errorf("control: %s names no left or right: no right-to-left rule:\n%s", still, css)
 		}
 	}
-	// a position with start or end: a site's radial gradient at the top start
-	q, err := p.WithGradients(map[string]Gradient{"corner": {Type: "radial", Position: "top-start", Stops: []Stop{{Color: "brand", At: 0}, {Color: "brand/0", At: 60}}}})
+	// a position with left or right: a site's radial gradient at the top left
+	q, err := p.WithGradients(map[string]Gradient{"corner": {Type: "radial", Position: "top-left", Stops: []Stop{{Color: "brand", At: 0}, {Color: "brand/0", At: 60}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	css = pageCSS(t, NewTable(q), Intent{Name: "background", Value: "corner"})
 	if !strings.Contains(css, ".background-corner{background-image:radial-gradient(at top left,") ||
 		!strings.Contains(css, ".background-corner:where(:dir(rtl)){background-image:radial-gradient(at top right,") {
-		t.Errorf("top-start is top left, and top right from right to left:\n%s", css)
+		t.Errorf("top-left is top left, and top right on a right-to-left page:\n%s", css)
 	}
 }
 
 // color="headline" is gradient text: the first stop as a solid colour where the browser cannot clip to
 // the text; where it can (either spelling), the gradient behind the letters, clipped to them with the
-// -webkit- form first, and the fill transparent; flipped for right-to-left inside the same @supports;
-// and in forced colours the system's text colour again, so the text never disappears. A first stop
-// with an alpha falls back to its colour solid (line/0 is line). Prefixed, the rules hold under the
-// prefix's condition.
+// -webkit- form first, and the fill transparent; mirrored on a right-to-left page inside the same
+// @supports; and in forced colours the system's text colour again, so the text never disappears. A
+// first stop with an alpha falls back to its colour solid (line/0 is line). Prefixed, the rules hold
+// under the prefix's condition.
 func TestGradientTextCSS(t *testing.T) {
 	p, _ := NewPalette(false)
 	table := NewTable(p)
@@ -461,7 +465,7 @@ func TestGradientMisusedIsAnError(t *testing.T) {
 		{Name: "background", Value: "scrimtop"}:  {`scrimtop không phải tên gradient: tên là scrim-top`, "scrim-top"},
 		{Name: "background", Value: "glwo"}:      {`background="glwo": "glwo" không có trong bảng màu của trang; gần nhất: glow.`, ""},
 		{Name: "color", Value: "headlin"}:        {`; gần nhất: headline.`, ""},
-		{Name: "background", Value: "zzzz-none"}: {`; gradient: cirrus, dune, dusk, evensong, fade-bottom, fade-end, fade-start, fade-top, gilded, glow, golden-hour, hairline, harbor, headline, inverse, magma, nebula, night, ocean, prism, rain-garden, rose-haze, scrim-bottom, scrim-top, sea-mist, skeleton, spring-rain, still-water, tint, twilight;`, ""},
+		{Name: "background", Value: "zzzz-none"}: {`; gradient: cirrus, dune, dusk, evensong, fade-bottom, fade-left, fade-right, fade-top, gilded, glow, golden-hour, hairline, harbor, headline, inverse, magma, nebula, night, ocean, prism, rain-garden, rose-haze, scrim-bottom, scrim-top, sea-mist, skeleton, spring-rain, still-water, tint, twilight;`, ""},
 	} {
 		_, err := table.Class(nil, in)
 		var problem *Problem
@@ -489,13 +493,60 @@ func suggestionOf(p *Problem) string {
 	return p.Suggestion
 }
 
+// fade-start and fade-end were renamed fade-left and fade-right when left and right took the place of
+// start and end (decision of 19/10/2026): the old name is an error in background and color, the whole
+// message exactly, suggesting the new one with its step kept (fade-start-40 is fade-left-40, the .N of
+// before its -N), however its letters are written; router.gradients cannot take it as a name of its own
+// (router.colors as a token's: TestPaletteWithGradients). CONTROL: the new names compile, and
+// phoenix-start, of the WebGradients collection, keeps its name (start is a word of its proper name
+// there, not a side).
+func TestRetiredStandardGradientNamesAreErrors(t *testing.T) {
+	p, _ := NewPalette(false)
+	table := NewTable(p)
+	const why = ": start và end nay là left và right (tự lật khi trang viết từ phải sang trái)"
+	for in, want := range map[Intent][2]string{
+		{Name: "background", Value: "fade-start"}:    {"fade-start nay là fade-left" + why, "fade-left"},
+		{Name: "background", Value: "fade-end"}:      {"fade-end nay là fade-right" + why, "fade-right"},
+		{Name: "color", Value: "fade-end"}:           {"fade-end nay là fade-right" + why, "fade-right"},
+		{Name: "background", Value: "fade-start-40"}: {"fade-start-40 nay là fade-left-40" + why, "fade-left-40"},
+		{Name: "color", Value: "fade-end+20"}:        {"fade-end+20 nay là fade-right+20" + why, "fade-right+20"},
+		{Name: "background", Value: "fade-start.40"}: {"fade-start.40 nay là fade-left-60" + why, "fade-left-60"},
+		{Name: "background", Value: "fadestart"}:     {"fadestart nay là fade-left" + why, "fade-left"},
+	} {
+		_, err := table.Class(nil, in)
+		var problem *Problem
+		if err == nil || !errors.As(err, &problem) || problem.Message != want[0] || problem.Suggestion != want[1] {
+			t.Errorf("%+v:\n got %v (suggestion %q)\nwant %q (suggestion %q)", in, err, suggestionOf(problem), want[0], want[1])
+		}
+	}
+	hero := Gradient{Type: "linear", Direction: "to-right", Stops: []Stop{{Color: "ink", At: 0}, {Color: "brand", At: 100}}}
+	for name, want := range map[string]string{
+		"fade-start": "router.gradients: fade-start nay là fade-left" + why,
+		"fade-end":   "router.gradients: fade-end nay là fade-right" + why,
+		"fadeend":    "router.gradients: fadeend nay là fade-right" + why,
+	} {
+		if err := CheckGradient(name, hero); err == nil || err.Error() != want {
+			t.Errorf("router.gradients({ %q: … }):\n got %v\nwant %s", name, err, want)
+		}
+	}
+	for _, in := range []Intent{{Name: "background", Value: "fade-left"}, {Name: "color", Value: "fade-right"},
+		{Name: "background", Value: "fade-left-40"}, {Name: "background", Value: "phoenix-start"}} {
+		if _, err := table.Class(nil, in); err != nil {
+			t.Errorf("control: %+v: %v", in, err)
+		}
+	}
+}
+
 // router.gradients is checked as far as it can be read without the palette (CheckGradient), each problem
 // in the author's language with what to write: a missing or unknown type, a linear one without its
-// direction (left and right are start and end), a direction on a radial one, a position on a linear
-// one, fewer than two stops, a stop without a colour, at outside 0 to 100 or going back, a name that is
-// not one or is already a colour's or a standard gradient's. CONTROL: the owner's two examples read.
+// direction, a direction or a position written with start or end (the words of before 19/10/2026, left
+// and right now: told the word of today, which mirrors on a right-to-left page as start and end did), a
+// direction on a radial one, a position on a linear one, fewer than two stops, a stop without a colour,
+// at outside 0 to 100 or going back, a name that is not one or is already a colour's or a standard
+// gradient's. A word with start or end that is still no word once they are replaced (to-start-top) has
+// the plain message. CONTROL: the owner's two examples read, and so do left and right themselves.
 func TestCheckGradientRefuses(t *testing.T) {
-	ok := Gradient{Type: "linear", Direction: "to-bottom-end", Stops: []Stop{{Color: "brand", At: 0}, {Color: "violet", At: 100}}}
+	ok := Gradient{Type: "linear", Direction: "to-bottom-right", Stops: []Stop{{Color: "brand", At: 0}, {Color: "violet", At: 100}}}
 	if err := CheckGradient("hero", ok); err != nil {
 		t.Fatalf("control: the owner's hero reads: %v", err)
 	}
@@ -514,12 +565,17 @@ func TestCheckGradientRefuses(t *testing.T) {
 	}{
 		{"hero", with(func(g *Gradient) { g.Type = "" }), `router.gradients: "hero" thiếu type: linear, radial hoặc conic`},
 		{"hero", with(func(g *Gradient) { g.Type = "lineal" }), `router.gradients: "hero" có type "lineal": type là linear, radial hoặc conic`},
-		{"hero", with(func(g *Gradient) { g.Direction = "" }), `router.gradients: "hero" là linear nên cần direction: to-top, to-bottom, to-start, to-end, to-top-start, to-top-end, to-bottom-start, to-bottom-end`},
-		{"hero", with(func(g *Gradient) { g.Direction = "to-bottom-right" }), `có direction "to-bottom-right": direction là to-top, to-bottom, to-start, to-end, to-top-start, to-top-end, to-bottom-start, to-bottom-end; trái phải viết start và end, tự lật khi viết từ phải sang trái: to-bottom-end`},
+		{"hero", with(func(g *Gradient) { g.Direction = "" }), `router.gradients: "hero" là linear nên cần direction: to-top, to-bottom, to-left, to-right, to-top-left, to-top-right, to-bottom-left, to-bottom-right`},
+		{"hero", with(func(g *Gradient) { g.Direction = "to-bottom-end" }), `router.gradients: "hero", direction="to-bottom-end": start và end nay là left và right, viết direction="to-bottom-right" (tự lật khi trang viết từ phải sang trái)`},
+		{"hero", with(func(g *Gradient) { g.Direction = "to-end" }), `router.gradients: "hero", direction="to-end": start và end nay là left và right, viết direction="to-right" (tự lật khi trang viết từ phải sang trái)`},
+		{"hero", with(func(g *Gradient) { g.Direction = "to-top-start" }), `router.gradients: "hero", direction="to-top-start": start và end nay là left và right, viết direction="to-top-left" (tự lật khi trang viết từ phải sang trái)`},
+		{"hero", with(func(g *Gradient) { g.Direction = "to-start-top" }), `router.gradients: "hero" có direction "to-start-top": direction là to-top, to-bottom, to-left, to-right, to-top-left, to-top-right, to-bottom-left, to-bottom-right`},
 		{"hero", with(func(g *Gradient) { g.Direction = "45deg" }), `có direction "45deg": direction là to-top`},
 		{"hero", with(func(g *Gradient) { g.Position = "top" }), `"hero" là linear: không có position, hướng của nó là direction`},
-		{"hero", with(func(g *Gradient) { g.Type, g.Direction, g.Position = "radial", "to-top", "" }), `"hero" là radial: không có direction, tâm của nó là position (center, top, bottom, start, end, top-start, top-end, bottom-start, bottom-end)`},
-		{"hero", with(func(g *Gradient) { g.Type, g.Direction, g.Position = "conic", "", "left" }), `có position "left": position là center, top, bottom, start, end, top-start, top-end, bottom-start, bottom-end; trái phải viết start và end, tự lật khi viết từ phải sang trái: start`},
+		{"hero", with(func(g *Gradient) { g.Type, g.Direction, g.Position = "radial", "to-top", "" }), `"hero" là radial: không có direction, tâm của nó là position (center, top, bottom, left, right, top-left, top-right, bottom-left, bottom-right)`},
+		{"hero", with(func(g *Gradient) { g.Type, g.Direction, g.Position = "conic", "", "start" }), `router.gradients: "hero", position="start": start và end nay là left và right, viết position="left" (tự lật khi trang viết từ phải sang trái)`},
+		{"hero", with(func(g *Gradient) { g.Type, g.Direction, g.Position = "radial", "", "bottom-end" }), `router.gradients: "hero", position="bottom-end": start và end nay là left và right, viết position="bottom-right" (tự lật khi trang viết từ phải sang trái)`},
+		{"hero", with(func(g *Gradient) { g.Type, g.Direction, g.Position = "radial", "", "middle" }), `router.gradients: "hero" có position "middle": position là center, top, bottom, left, right, top-left, top-right, bottom-left, bottom-right`},
 		{"hero", with(func(g *Gradient) { g.Stops = g.Stops[:1] }), `"hero" cần ít nhất hai điểm dừng`},
 		{"hero", with(func(g *Gradient) { g.Stops[1].Color = " " }), `"hero" điểm dừng 2 thiếu color: mỗi điểm dừng là { color, at }`},
 		{"hero", with(func(g *Gradient) { g.Stops[1].At = 120 }), `"hero" điểm dừng 2 có at 120: at là vị trí trên gradient, từ 0 đến 100`},
@@ -540,27 +596,40 @@ func TestCheckGradientRefuses(t *testing.T) {
 			t.Errorf("%s %+v:\n got %v\nwant %q", c.name, c.g, err, c.want)
 		}
 	}
+	// control: every direction and every position of today reads, left and right among them
+	for _, direction := range []string{"to-top", "to-bottom", "to-left", "to-right", "to-top-left", "to-top-right", "to-bottom-left", "to-bottom-right"} {
+		if err := CheckGradient("hero", with(func(g *Gradient) { g.Direction = direction })); err != nil {
+			t.Errorf("control: direction %q reads: %v", direction, err)
+		}
+	}
+	for _, position := range []string{"", "center", "top", "bottom", "left", "right", "top-left", "top-right", "bottom-left", "bottom-right"} {
+		if err := CheckGradient("hero", with(func(g *Gradient) { g.Type, g.Direction, g.Position = "radial", "", position })); err != nil {
+			t.Errorf("control: position %q reads: %v", position, err)
+		}
+	}
 	// two stops at one place are a hard edge, not going back
-	if err := CheckGradient("stripe", Gradient{Type: "linear", Direction: "to-end", Stops: []Stop{{Color: "brand", At: 0}, {Color: "brand", At: 50}, {Color: "ink", At: 50}, {Color: "ink", At: 100}}}); err != nil {
+	if err := CheckGradient("stripe", Gradient{Type: "linear", Direction: "to-right", Stops: []Stop{{Color: "brand", At: 0}, {Color: "brand", At: 50}, {Color: "ink", At: 50}, {Color: "ink", At: 100}}}); err != nil {
 		t.Errorf("two stops at one place are a hard edge: %v", err)
 	}
 }
 
 // The palette checks a site's gradients against itself (WithGradients): every stop's colour one it
 // names, never a gradient; the name never one of its tokens. The nearest folder wins per name, and the
-// standard set is every palette's. A token named like a standard gradient is refused by router.colors.
+// standard set is every palette's. A token named like a standard gradient is refused by router.colors,
+// and so is one named like a standard gradient's name of before 19/10/2026 (fade-start, fade-end), told
+// the name of today. CONTROL: glow-soft, which only holds a standard name among others, is a token.
 func TestPaletteWithGradients(t *testing.T) {
 	p := examplePalette(t, map[string]Color{"chart": {Light: "#6b5d52"}})
-	hero := Gradient{Type: "linear", Direction: "to-end", Stops: []Stop{{Color: "brand", At: 0}, {Color: "tomato/50", At: 100}}}
+	hero := Gradient{Type: "linear", Direction: "to-right", Stops: []Stop{{Color: "brand", At: 0}, {Color: "tomato/50", At: 100}}}
 	for _, c := range []struct {
 		chain map[string]Gradient
 		want  string
 	}{
-		{map[string]Gradient{"hero": {Type: "linear", Direction: "to-end", Stops: []Stop{{Color: "brand", At: 0}, {Color: "brnad", At: 100}}}},
+		{map[string]Gradient{"hero": {Type: "linear", Direction: "to-right", Stops: []Stop{{Color: "brand", At: 0}, {Color: "brnad", At: 100}}}},
 			`router.gradients: "hero", điểm dừng 2: color="brnad": "brnad" không có trong bảng màu của trang; gần nhất: brand.`},
-		{map[string]Gradient{"hero": {Type: "linear", Direction: "to-end", Stops: []Stop{{Color: "glow", At: 0}, {Color: "brand", At: 100}}}},
+		{map[string]Gradient{"hero": {Type: "linear", Direction: "to-right", Stops: []Stop{{Color: "glow", At: 0}, {Color: "brand", At: 100}}}},
 			`router.gradients: "hero", điểm dừng 1: "glow" là một gradient; điểm dừng là một màu`},
-		{map[string]Gradient{"hero": {Type: "linear", Direction: "to-end", Stops: []Stop{{Color: "brand", At: 0}, {Color: "navy-blue/40", At: 100}}}},
+		{map[string]Gradient{"hero": {Type: "linear", Direction: "to-right", Stops: []Stop{{Color: "brand", At: 0}, {Color: "navy-blue/40", At: 100}}}},
 			`router.gradients: "hero", điểm dừng 2: color="navy-blue/40": navy-blue không phải tên màu: đó là tên Figma đặt cho navy`},
 		{map[string]Gradient{"chart": hero}, `router.gradients: "chart" đã là token màu của bảng màu: tên gradient và tên màu chung một chỗ`},
 		{map[string]Gradient{"canvas": hero}, `router.gradients: "canvas" đã là token màu của bảng màu`},
@@ -570,7 +639,7 @@ func TestPaletteWithGradients(t *testing.T) {
 			t.Errorf("%+v:\n got %v\nwant %q", c.chain, err, c.want)
 		}
 	}
-	_, err := p.WithGradients(map[string]Gradient{"hero": {Type: "linear", Direction: "to-end", Stops: []Stop{{Color: "brand", At: 0}, {Color: "glwo", At: 100}}}})
+	_, err := p.WithGradients(map[string]Gradient{"hero": {Type: "linear", Direction: "to-right", Stops: []Stop{{Color: "brand", At: 0}, {Color: "glwo", At: 100}}}})
 	if err == nil || strings.Contains(err.Error(), "gradient:") || strings.Contains(err.Error(), "gần nhất: glow") {
 		t.Errorf("a stop's message names no gradient, a stop is a colour: %v", err)
 	}
@@ -596,6 +665,15 @@ func TestPaletteWithGradients(t *testing.T) {
 	_, err = NewPalette(false, map[string]Color{"glow": {Light: "#ffffff"}})
 	if err == nil || err.Error() != `router.colors: "glow" đã là tên một gradient chuẩn (background="glow"): tên màu và tên gradient chung một chỗ, đặt tên token theo vai trò khác` {
 		t.Errorf("a token named like a standard gradient: %v", err)
+	}
+	// fade-start and fade-end, the standard gradients' names until 19/10/2026, are told the name of today
+	for name, want := range map[string]string{
+		"fade-start": "router.colors: fade-start nay là fade-left: start và end nay là left và right (tự lật khi trang viết từ phải sang trái)",
+		"fade-end":   "router.colors: fade-end nay là fade-right: start và end nay là left và right (tự lật khi trang viết từ phải sang trái)",
+	} {
+		if _, err := NewPalette(false, map[string]Color{name: {Light: "#ffffff"}}); err == nil || err.Error() != want {
+			t.Errorf("a token named like a standard gradient's old name, %s:\n got %v\nwant %s", name, err, want)
+		}
 	}
 	if _, err := NewPalette(false, map[string]Color{"glow-soft": {Light: "#ffffff"}}); err != nil {
 		t.Errorf("control: glow-soft is no gradient's name: %v", err)
@@ -632,8 +710,8 @@ func TestGradientSamples(t *testing.T) {
 		t.Errorf("glow: opaque at 0%%, %.3f at 30%%, transparent from 70%%: %+v", glow[3].A, glow)
 	}
 	q, _ := p.WithGradients(map[string]Gradient{
-		"stripe": {Type: "linear", Direction: "to-end", Stops: []Stop{{Color: "white", At: 0}, {Color: "white", At: 55}, {Color: "black", At: 55}, {Color: "black", At: 100}}},
-		"smoke":  {Type: "linear", Direction: "to-end", Stops: []Stop{{Color: "white/0", At: 0}, {Color: "black", At: 100}}},
+		"stripe": {Type: "linear", Direction: "to-right", Stops: []Stop{{Color: "white", At: 0}, {Color: "white", At: 55}, {Color: "black", At: 55}, {Color: "black", At: 100}}},
+		"smoke":  {Type: "linear", Direction: "to-right", Stops: []Stop{{Color: "white/0", At: 0}, {Color: "black", At: 100}}},
 	})
 	stripe, _ := q.GradientSamples("stripe", LightMode)
 	if stripe[5].R != 1 || stripe[6].R != 0 {

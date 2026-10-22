@@ -11,13 +11,13 @@ import (
 )
 
 // The tabs (decisions of 16/10/2026, docs/components/tabs.md) are one of Kitwork's components, written
-// on a container the author chooses. The author writes the tabs and the panels in markup, the way they
+// as their tag, <tabs>. The author writes the tabs and the panels in markup, the way they
 // would anyway; the engine recognises them and writes the accessibility wiring itself:
 //
-//	<box component="tabs" as="$shell" persist="true" alt="Shell">
+//	<tabs as="$shell" persist="true" alt="Shell">
 //	  <button click="select('bash')">bash</button>
 //	  <button click="select('powershell')">PowerShell</button>
-//	</box>
+//	</tabs>
 //	<box show="$shell.selected == 'bash'">…</box>
 //	<box show="$shell.selected == 'powershell'">…</box>
 //
@@ -121,7 +121,7 @@ func (c *compiler) tabsHost(n *Node, site *callSite, inside ctx, persist string)
 	var scan func(nodes []*Node) error
 	scan = func(nodes []*Node) error {
 		for _, ch := range nodes {
-			if ch.IsText() || attrNamed(ch, "component").Name == "component" {
+			if ch.IsText() || c.callsComponent(ch) {
 				continue // a nested component's buttons are its own
 			}
 			tab := false
@@ -140,7 +140,7 @@ func (c *compiler) tabsHost(n *Node, site *callSite, inside ctx, persist string)
 			if !tab && pressable(ch) {
 				// role="tablist" holds tabs only (ARIA): the arrows skip anything else, and a screen reader
 				// reads it as part of the tab list
-				c.warn(ch.File, ch.Line, ch.Column, fmt.Sprintf(`<%s> trong thẻ chủ của tabs không phải tab: dải tab chỉ chứa tab (role="tablist"), phím mũi tên bỏ qua nó mà trình đọc màn hình đọc nó như một phần của dải; đặt nó ra ngoài thẻ chủ, bên cạnh dải tab`, ch.Tag))
+				c.warn(ch.File, ch.Line, ch.Column, fmt.Sprintf(`<%s> trong <tabs> không phải tab: dải tab chỉ chứa tab (role="tablist"), phím mũi tên bỏ qua nó mà trình đọc màn hình đọc nó như một phần của dải; đặt nó ra ngoài <tabs>, bên cạnh dải tab`, ch.Tag))
 			}
 			if err := scan(ch.Children); err != nil {
 				return err
@@ -152,7 +152,7 @@ func (c *compiler) tabsHost(n *Node, site *callSite, inside ctx, persist string)
 		return nil, err
 	}
 	if len(scope.names) == 0 {
-		return nil, errAt(n, `tabs cần ít nhất một tab bên trong thẻ chủ: <button click="select('tên')">…</button> (mỗi nút gọi select với một tên viết sẵn là một tab)`)
+		return nil, errAt(n, `tabs cần ít nhất một tab bên trong <tabs>: <button click="select('tên')">…</button> (mỗi nút gọi select với một tên viết sẵn là một tab)`)
 	}
 	c.tabHosts = append(c.tabHosts, scope)
 	if persist != "" {
@@ -507,7 +507,7 @@ func (c *compiler) wireTabs() error {
 		}
 		if h.alias == "" {
 			at := attrNamed(h.node, "component")
-			c.warn(h.node.File, at.Line, at.Column, `tabs không có as: ngoài thẻ chủ không gì đọc được tab đang chọn; đặt as="$tên" trên thẻ chủ rồi viết show="$tên.selected == 'tên tab'" trên panel của mỗi tab`)
+			c.warn(h.node.File, at.Line, at.Column, `tabs không có as: ngoài <tabs> không gì đọc được tab đang chọn; viết <tabs as="$tên"> rồi viết show="$tên.selected == 'tên tab'" trên panel của mỗi tab`)
 		}
 	}
 	c.tabsPrepaints()

@@ -20,13 +20,13 @@ import (
 //
 // A layout piece is found from the folder of the file that writes the call: that folder, its parents
 // up to the site root, then .components/ of the identity. (Regions are layouts too, found from the
-// route's folder: compile.go.) A name with logic is a component, written component="name" on a tag;
-// writing it as a tag is an error that says how to write it, so a layout that gains a .work reports
-// every call of it. A name that is a core tag, a region or a Kitwork element is always that tag, so a
-// .ui file named like one is an error.
+// route's folder: compile.go.) A name with logic is a component, called by its tag the same way
+// (host.go), so a layout that gains a .work keeps its calls. A piece of the site has a dash in its
+// name (product-card), and a name without one is Kitwork's: a core tag, a region, a Kitwork element
+// or component is always that tag, so a .ui file named like one is an error.
 
-// layoutCall compiles an element whose tag is outside the vocabulary: a call of a layout piece. A tag
-// that names a component, or nothing at all, is an error.
+// layoutCall compiles an element whose tag is outside the vocabulary: a piece of the site, a layout or
+// a component. A tag that names nothing is an error.
 func (c *compiler) layoutCall(n *Node, cx ctx) (op, error) {
 	name := n.Tag
 	if plannedElements[name] {
@@ -35,11 +35,21 @@ func (c *compiler) layoutCall(n *Node, cx ctx) (op, error) {
 		}
 		return nil, errAt(n, "<%s> là phần tử của Kitwork mà engine chưa dựng được", name)
 	}
+	if n.written != "" && !siteName(name) {
+		return nil, c.unknownWritten(n)
+	}
+	if strings.Contains(name, "-") && !componentName(name) {
+		return nil, c.dashesWrong(n)
+	}
+	if !siteName(name) {
+		return nil, c.withoutADash(n)
+	}
 	var def *componentDef
 	var err error
-	if a := attrNamed(n, "source"); a.Name == "source" {
-		def, err = c.layoutSource(n, a)
-	} else if componentName(name) {
+	source := attrNamed(n, "source")
+	if source.Name == "source" {
+		def, err = c.layoutSource(n, source)
+	} else {
 		def, err = c.layoutNamed(n, name)
 	}
 	if err != nil {
@@ -49,11 +59,13 @@ func (c *compiler) layoutCall(n *Node, cx ctx) (op, error) {
 		if n.written != "" {
 			return nil, c.unknownWritten(n)
 		}
-		return nil, errAt(n, "không biết thẻ <%s>: không có trong từ vựng của Kitwork, không có layout %s.ui (từ thư mục của %s lên gốc site, rồi .components/), và không có component tên này",
+		return nil, errAt(n, "không biết thẻ <%s>: không có layout %s.ui (từ thư mục của %s lên gốc site, rồi .components/), và không có component tên này",
 			name, name, filepath.Base(n.File))
 	}
 	if def.instance() {
-		return nil, c.componentAsATag(n, def)
+		// a component of the site: its host goes on as a call of it (host.go), found by the source when
+		// one is written
+		return c.componentCall(asHost(n, def.hostTag(), name), cx)
 	}
 	if err := c.checkLayoutRoot(n, def, cx.pageChild); err != nil {
 		return nil, err
@@ -78,7 +90,7 @@ func (c *compiler) layoutCall(n *Node, cx ctx) (op, error) {
 		if a.Bare { // an input without a value: a layout has no true-or-false word of its own at the call
 			return nil, errAttr(n, a, "%s cần một giá trị", a.Name)
 		}
-		if chain != "" && (base == "as" || base == "for" || base == "if" || base == "source" || base == "component") {
+		if chain != "" && (base == "as" || base == "for" || base == "if" || base == "source") {
 			return nil, errAttr(n, a, "%s không nhận tiền tố", base)
 		}
 		switch {
@@ -90,9 +102,6 @@ func (c *compiler) layoutCall(n *Node, cx ctx) (op, error) {
 				return nil, err
 			}
 			c.warn(n.File, a.Line, a.Column, fmt.Sprintf("as đặt tên cho một instance; %s là layout (chỉ có giao diện, không có logic) nên không có instance để gọi: bỏ as", name))
-		case base == "component":
-			return nil, errAttr(n, a, "<%s> là layout, không là thẻ chủ của component: component=\"%s\" đặt trên một thẻ của Kitwork (trong %s, hoặc ở chỗ gọi: <box component=\"%s\" …>)",
-				name, strings.TrimSpace(a.Value), rel(c.site, def.ui), strings.TrimSpace(a.Value))
 		case base == "for":
 			each, err := parseFor(a.Value, n, a)
 			if err != nil {
@@ -141,6 +150,8 @@ func (c *compiler) layoutCall(n *Node, cx ctx) (op, error) {
 			}
 			inputs = append(inputs, a)
 			outside = append(outside, inputExprs(a, in)...)
+		case c.renamedSide(n, a, chain, base) != "":
+			return nil, errAttr(n, a, "%s", c.renamedSide(n, a, chain, base))
 		case chain != "" || presentation(base, rootTag) || tagWord(rootTag, base) || base == "align":
 			// a typo in the value is that error first (question 1): background="papr" is told of its colour
 			if presentation(base, rootTag) || tagWord(rootTag, base) || base == "align" {
@@ -213,15 +224,14 @@ func (c *compiler) layoutCall(n *Node, cx ctx) (op, error) {
 // (<ProductCard> is productcard): it names the tag as written, and when the capitals stand for dashes
 // (product-card) and a layout or a component has that name, how to call it.
 func (c *compiler) unknownWritten(n *Node) error {
-	if dashed := dashedTag(n.written); dashed != n.Tag && componentName(dashed) {
+	if dashed := dashedTag(n.written); dashed != n.Tag && siteName(dashed) {
 		if def, err := c.layoutNamed(n, dashed); err == nil && def != nil {
+			what := "layout " + rel(c.site, def.ui)
 			if def.instance() {
-				if e, ok := c.componentAsATag(n, def).(*Error); ok {
-					return errAt(n, "không biết thẻ <%s>: tên viết thường, các chữ nối bằng gạch ngang; %s", n.written, e.Message)
-				}
+				what = "component " + dashed + " (" + def.logicPlace(c.site) + ")"
 			}
-			return errAt(n, "không biết thẻ <%s>: tên viết thường, các chữ nối bằng gạch ngang; layout %s gọi bằng <%s />",
-				n.written, rel(c.site, def.ui), dashed)
+			return errAt(n, "không biết thẻ <%s>: tên viết thường, các chữ nối bằng gạch ngang; %s gọi bằng <%s>",
+				n.written, what, dashed)
 		}
 	}
 	return errAt(n, "không biết thẻ <%s> (đọc là <%s>): không có trong từ vựng của Kitwork, không có layout %s.ui (từ thư mục của %s lên gốc site, rồi .components/), và không có component tên này",
@@ -245,15 +255,61 @@ func dashedTag(written string) string {
 	return b.String()
 }
 
+// withoutADash is the error of a tag outside the vocabulary whose name has no dash: such a name is
+// Kitwork's, and Kitwork has no tag of it. A piece of the site in reach under that name is told to
+// take a dash; with none, the tag names nothing.
+func (c *compiler) withoutADash(n *Node) error {
+	name := n.Tag
+	file := ""
+	if componentName(name) {
+		file = c.nearestUI(c.writingDir(n), name)
+		if file == "" {
+			root := filepath.Clean(c.site.Root)
+			if logic, _, err := c.site.componentLogic(name, filepath.Join(root, "components.work"), filepath.Join(root, name+".work"),
+				filepath.Join(c.site.identityDir(), name+".work")); err == nil {
+				file = logic
+			}
+		}
+	}
+	if file != "" && filepath.Base(file) == "components.work" {
+		// a file of several components: the define is renamed, not the file
+		return errAt(n, "<%s> không có gạch ngang nên là thẻ của Kitwork, mà Kitwork không có thẻ này: tên layout và component của site có gạch ngang; trong %s đổi component.define(\"%s\", …) thành component.define(\"shop-%s\", …) rồi gọi <shop-%s>",
+			name, rel(c.site, file), name, name, name)
+	}
+	if file != "" {
+		return errAt(n, "<%s> không có gạch ngang nên là thẻ của Kitwork, mà Kitwork không có thẻ này: tên layout và component của site có gạch ngang; đổi tên %s (vd. shop-%s) rồi gọi <shop-%s>",
+			name, rel(c.site, file), name, name)
+	}
+	return errAt(n, "không biết thẻ <%s>: Kitwork không có thẻ này, và tên layout hay component của site có gạch ngang (<product-card>, <shop-cart>)", name)
+}
+
+// dashesWrong is the error of a tag of the site whose dashes are misplaced (shop--cart, shop-cart-, a
+// digit after a dash is fine): a site's name is lowercase words joined by single dashes. It writes the
+// name the dashes meant, and names a file in reach under the name as written.
+func (c *compiler) dashesWrong(n *Node) error {
+	words := []string{}
+	for _, word := range strings.Split(n.Tag, "-") {
+		if word != "" {
+			words = append(words, word)
+		}
+	}
+	meant := strings.Join(words, "-")
+	if file := c.nearestUI(c.writingDir(n), n.Tag); file != "" {
+		return errAt(n, "tên layout và component của site viết thường, các từ nối bằng một gạch ngang: đổi tên %s thành %s.ui rồi gọi <%s>", rel(c.site, file), meant, meant)
+	}
+	return errAt(n, "không biết thẻ <%s>: tên layout và component của site viết thường, các từ nối bằng một gạch ngang (<%s>)", n.Tag, meant)
+}
+
 // layoutWords are the words a layout call takes, for a message.
 const layoutWords = "if, show, for, span, place, source và dữ liệu file đọc"
 
-// layoutNamed finds what a tag outside the vocabulary names from the folder of the file that writes it.
-// A name the site or the identity defines logic for is that component. Otherwise the nearest <name>.ui
-// is a layout piece, even when Kitwork has a component of that name: the site's file keeps its meaning,
-// and Kitwork's component is reached by its path, component="kitwork/components/<name>". With neither,
-// Kitwork's component, or nil.
+// layoutNamed finds what a name of the site (with a dash) names from the folder of the file that
+// writes it. A name the site or the identity defines logic for is that component. Otherwise the
+// nearest <name>.ui is a layout piece; with neither, nil.
 func (c *compiler) layoutNamed(n *Node, name string) (*componentDef, error) {
+	if !siteName(name) {
+		return nil, nil
+	}
 	s := c.site
 	root := filepath.Clean(s.Root)
 	probe := &Attr{Name: "component", Value: name, Line: n.Line, Column: n.Column}
@@ -263,14 +319,11 @@ func (c *compiler) layoutNamed(n *Node, name string) (*componentDef, error) {
 		return nil, err
 	}
 	if logic != "" {
-		return c.resolve(n, probe, name) // the component, for the message that says how to write it
+		return c.resolve(n, probe, name) // the component, with its .ui if it has one
 	}
 	dir := c.writingDir(n)
 	file := c.nearestUI(dir, name)
 	if file == "" {
-		if kitworkComponents[name] != nil {
-			return c.resolve(n, probe, name)
-		}
 		return nil, nil
 	}
 	if err := strayLogic(s, file, name); err != nil {
@@ -279,8 +332,8 @@ func (c *compiler) layoutNamed(n *Node, name string) (*componentDef, error) {
 	return c.layoutFile(name, file)
 }
 
-// layoutSource finds the file a layout call's source names: a name looked up like the tag's own, or a
-// path (./x, ../x from the writing file, .components/x for the identity). It must be a layout piece.
+// layoutSource finds the file a call's source names: a name looked up like the tag's own, or a path
+// (./x, ../x from the writing file, .components/x for the identity). A layout or a component.
 func (c *compiler) layoutSource(n *Node, a *Attr) (*componentDef, error) {
 	value, err := pieceValue(n, a, "source")
 	if err != nil {
@@ -289,20 +342,16 @@ func (c *compiler) layoutSource(n *Node, a *Attr) (*componentDef, error) {
 	var def *componentDef
 	if strings.Contains(value, "/") {
 		def, err = c.resolve(n, a, value)
-	} else if componentName(value) {
+	} else if siteName(value) {
 		def, err = c.layoutNamed(n, value)
 	} else {
-		return nil, errAttr(n, a, "source là tên của một layout (viết thường, nối bằng gạch ngang) hoặc đường dẫn tới nó, không phải %q", value)
+		return nil, errAttr(n, a, "source là tên của một layout hay component của site (viết thường, nối bằng gạch ngang) hoặc đường dẫn tới nó, không phải %q", value)
 	}
 	if err != nil {
 		return nil, err
 	}
-	switch {
-	case def == nil:
-		return nil, errAttr(n, a, "không tìm thấy layout %s (source=\"%s\")", filepath.Base(value), value)
-	case def.instance():
-		return nil, errAttr(n, a, "source lấy một layout (chỉ có giao diện); %s có logic (%s) nên là component: viết component=\"%s\" trên một thẻ",
-			def.name, def.logicPlace(c.site), value)
+	if def == nil {
+		return nil, errAttr(n, a, "không tìm thấy %s (source=\"%s\")", filepath.Base(value), value)
 	}
 	return def, nil
 }
@@ -369,38 +418,6 @@ func strayLogic(s *Site, file, name string) error {
 		name, name, name, rel(s, file))}
 }
 
-// componentAsATag is the error of a name with logic written as a tag: it is a component, written
-// component="name" on a tag — its .ui's root tag, empty, or the author's tag around its content.
-func (c *compiler) componentAsATag(n *Node, def *componentDef) error {
-	host := def.rootTag()
-	if host == "" {
-		host = "box"
-	}
-	return errAt(n, "%s có logic (%s): viết %s", def.name, def.logicPlace(c.site), suggestion(host, def, n))
-}
-
-// layoutAsAComponent is the error of a layout piece written component="name": it has no logic, so it
-// is called by its tag.
-func (c *compiler) layoutAsAComponent(n *Node, a *Attr, def *componentDef) error {
-	value := strings.TrimSpace(a.Value)
-	call := "<" + def.name
-	if strings.Contains(value, "/") {
-		call += ` source="` + value + `"`
-	}
-	for _, other := range n.Attrs {
-		if other.Name != "component" {
-			call += " …"
-			break
-		}
-	}
-	message := fmt.Sprintf("%s là layout (chỉ có giao diện, không có logic): viết %s />", def.name, call)
-	if kit := kitworkComponents[def.name]; kit != nil && !kit.planned && !strings.Contains(value, "/") {
-		message += fmt.Sprintf("; %s ở đây là file của site, còn component %s của Kitwork viết component=\"kitwork/components/%s\"",
-			rel(c.site, def.ui), def.name, def.name)
-	}
-	return errAttr(n, a, "%s", message)
-}
-
 // checkLayoutRoot checks the root of a layout piece: the call puts its for, if, show, span and place
 // on it, so it is an element that takes them, and it does not repeat itself. A reader as the root is a
 // warning, not an error: it renders, but called twice it is two readers, and inside the content Drive
@@ -417,12 +434,14 @@ func (c *compiler) checkLayoutRoot(call *Node, def *componentDef, pageChild bool
 		case "for":
 			return errAttr(root, a, "gốc của %s không mang for: lặp mấy lần là việc của chỗ gọi (<%s for=\"…\" />)", file, def.name)
 		case "component":
-			return errAttr(root, a, "gốc của %s mang component=\"%s\": chỗ gọi <%s /> đặt for, if, show, span, place lên chính gốc này, nên gốc không là thẻ chủ của component; đặt component trên một thẻ bên trong",
-				file, strings.TrimSpace(a.Value), def.name)
+			return componentWritten(root, a)
 		}
 	}
 	info, known := catalog[root.Tag]
 	switch {
+	case kitworkComponents[root.Tag] != nil || c.callsComponent(root):
+		return errAt(root, "gốc của %s là <%s>, một component: chỗ gọi <%s /> đặt for, if, show, span, place lên chính gốc này, nên gốc không là một component; bọc <%s> trong một <box>",
+			file, root.Tag, def.name, root.Tag)
 	case !known:
 		return errAt(root, "gốc của %s là <%s>, không phải thẻ của Kitwork: chỗ gọi <%s /> đặt for, if, show, span, place lên gốc, nên gốc là một thẻ như box, card, list; bọc <%s /> trong thẻ đó",
 			file, root.Tag, def.name, root.Tag)
@@ -458,15 +477,49 @@ func (c *compiler) namedLikeATag(n *Node) error {
 	}
 	file := c.nearestUI(c.writingDir(n), n.Tag)
 	if file == "" {
+		if kitworkComponents[n.Tag] != nil {
+			return nil // logic under a Kitwork component's name is told where the component is found
+		}
+		return c.logicNamedLikeATag(n, known)
+	}
+	what := "thẻ lõi"
+	switch {
+	case kitworkComponents[n.Tag] != nil:
+		what = "component"
+	case !known || isKitworkElement(n.Tag):
+		what = "phần tử"
+	}
+	return &Error{File: rel(c.site, file), Line: 1, Column: 1, Message: fmt.Sprintf(
+		"%s đặt tên trùng %s <%s> của Kitwork: <%s> luôn là %s của Kitwork nên file này không bao giờ được gọi; đặt cho layout tên khác (viết thường, nối bằng gạch ngang) rồi gọi bằng tên đó",
+		filepath.Base(file), what, n.Tag, n.Tag, what)}
+}
+
+// logicNamedLikeATag refuses a component.define of the site named like a core tag or a Kitwork element
+// (card, reader): that tag always means Kitwork's, so the logic would never be read. Every element of a
+// tag asks, so the answer is kept by name for the page.
+func (c *compiler) logicNamedLikeATag(n *Node, known bool) error {
+	logic, asked := c.logicNamed[n.Tag]
+	if !asked {
+		s := c.site
+		root := filepath.Clean(s.Root)
+		var err error
+		logic, _, err = s.componentLogic(n.Tag, filepath.Join(root, "components.work"), filepath.Join(root, n.Tag+".work"),
+			filepath.Join(s.identityDir(), n.Tag+".work"))
+		if err != nil {
+			return err
+		}
+		c.logicNamed[n.Tag] = logic
+	}
+	if logic == "" {
 		return nil
 	}
 	what := "thẻ lõi"
 	if !known || isKitworkElement(n.Tag) {
 		what = "phần tử"
 	}
-	return &Error{File: rel(c.site, file), Line: 1, Column: 1, Message: fmt.Sprintf(
-		"%s đặt tên trùng %s <%s> của Kitwork: <%s> luôn là %s của Kitwork nên file này không bao giờ được gọi; đặt cho layout tên khác (viết thường, nối bằng gạch ngang) rồi gọi bằng tên đó",
-		filepath.Base(file), what, n.Tag, n.Tag, what)}
+	return &Error{File: rel(c.site, logic), Line: 1, Column: 1, Message: fmt.Sprintf(
+		"component.define(\"%s\", …) đặt tên trùng %s <%s> của Kitwork: <%s> luôn là %s của Kitwork nên logic này không bao giờ được đọc; tên component của site có gạch ngang (shop-%s)",
+		n.Tag, what, n.Tag, n.Tag, what, n.Tag)}
 }
 
 // isKitworkElement reports whether a tag is one of Kitwork's own elements rather than the core

@@ -234,112 +234,17 @@ func (c *compiler) engineStateClass(state, name, value string) string {
 	return class
 }
 
-// sideWritten is a presentation attribute of one element as written, for what its left, right, start
-// and end attributes say together (checkSides): the attribute, its name without the prefix, and the
-// condition it holds under, the narrowest width (widths are min-width) and the states.
-type sideWritten struct {
-	attr   *Attr
-	name   string
-	width  int
-	states []string
-}
-
-// sameCondition reports whether two attributes of one element hold under one condition: the same
-// width, and no state on either or a state they share (hover,focus: and hover: both hold while
-// hovered). A wider width is another condition: medium:padding-start over padding-left is the page
-// growing, not two words for one side.
-func sameCondition(a, b sideWritten) bool {
-	if a.width != b.width || (len(a.states) == 0) != (len(b.states) == 0) {
-		return false
-	}
-	if len(a.states) == 0 {
-		return true
-	}
-	for _, s := range a.states {
-		for _, t := range b.states {
-			if s == t {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // rightToLeftLanguages are the languages written right to left that router.language names, by their
 // primary subtag: ar-EG, he-IL, fa-IR and ur-PK are theirs.
 var rightToLeftLanguages = map[string]bool{"ar": true, "he": true, "fa": true, "ur": true}
 
 // rightToLeft reports whether a language (router.language: "ar", "ar-EG", "he_IL") is written right to
-// left; "" and every other language are left to right.
+// left, so its page carries dir="rtl" and left and right mirror (page.go); "" and every other language
+// are left to right.
 func rightToLeft(language string) bool {
 	primary := strings.ToLower(strings.TrimSpace(language))
 	if i := strings.IndexAny(primary, "-_"); i >= 0 {
 		primary = primary[:i]
 	}
 	return rightToLeftLanguages[primary]
-}
-
-// sidePlace names in words the side or corners a physical left or right attribute sets.
-func sidePlace(name string) string {
-	side := "trái"
-	if strings.HasSuffix(name, "-right") {
-		side = "phải"
-	}
-	switch {
-	case strings.HasPrefix(name, "padding-"):
-		return "cạnh " + side
-	case strings.HasPrefix(name, "radius-top-"):
-		return "góc trên bên " + side
-	case strings.HasPrefix(name, "radius-bottom-"):
-		return "góc dưới bên " + side
-	}
-	return "hai góc bên " + side
-}
-
-// checkSides tells the author, while developing, what an element's left and right attributes say
-// (decision 13/10/2026). left and right are the screen's and never flip; start and end are the line's
-// and flip right to left. The page renders as written in both cases:
-//   - a physical attribute and its logical twin under one condition (padding-left with padding-start,
-//     radius-top-left with radius-top-start, or with -end on a site written right to left) set the same
-//     side: the one later in the fixed order wins, whatever order they are written in, so the other
-//     does nothing there. Keep one;
-//   - on a site whose router.language is written right to left (ar, he, fa, ur), left is the end of the
-//     line and right its start: a physical attribute is told the twin that keeps its place and flips.
-//
-// A site written left to right hears only of the twins.
-func (c *compiler) checkSides(n *Node, written []sideWritten) {
-	language := c.site.Language
-	rtl := rightToLeft(language)
-	direction := "từ trái sang phải"
-	if rtl {
-		direction = fmt.Sprintf("từ phải sang trái (router.language %q)", language)
-	}
-	for _, physical := range written {
-		twin := stylesheet.Logical(physical.name, rtl)
-		if twin == "" {
-			continue // not a physical left or right
-		}
-		a := physical.attr
-		if rtl {
-			at, other, otherAt := "cuối", stylesheet.Logical(physical.name, false), "đầu"
-			if strings.HasSuffix(physical.name, "-right") {
-				at, otherAt = "đầu", "cuối"
-			}
-			c.warn(n.File, a.Line, a.Column, fmt.Sprintf("%s=%q: trang viết %s mà left và right không lật theo hướng viết, nên %s ở đây là phía %s dòng. Viết %s để giữ đúng chỗ này mà vẫn lật theo hướng viết (%s nếu ý là phía %s dòng)",
-				a.Name, a.Value, direction, sidePlace(physical.name), at, twin, other, otherAt))
-		}
-		for _, logical := range written {
-			if logical.name != twin || !sameCondition(physical, logical) {
-				continue
-			}
-			winner, loser := twin, physical.name
-			if stylesheet.Rank(physical.name) > stylesheet.Rank(twin) {
-				winner, loser = physical.name, twin
-			}
-			c.warn(n.File, a.Line, a.Column, fmt.Sprintf("%s=%q và %s=%q (%s:%d:%d) cùng là %s khi dòng viết %s: %s thắng vì đứng sau %s trong thứ tự cố định, viết trước hay sau cũng vậy. Giữ một: %s lật theo hướng viết, %s thì không",
-				a.Name, a.Value, logical.attr.Name, logical.attr.Value, n.File, logical.attr.Line, logical.attr.Column,
-				sidePlace(physical.name), direction, winner, loser, twin, physical.name))
-			break
-		}
-	}
 }

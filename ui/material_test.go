@@ -23,7 +23,7 @@ func TestMaterialOnFrames(t *testing.T) {
 		"/site/content.ui": `<content><box background="brand-85" material="glass"><text>a</text></box>` +
 			`<card medium:material="glass/60" large:material="none"><text>b</text></card>` +
 			`<section material="glass/88" hover:background="paper"><text>c</text></section>` +
-			`<box component="dropdown"><button click="toggle()">Mở</button><popover material="glass"><text>d</text></popover></box></content>`,
+			`<dropdown><button click="toggle()">Mở</button><popover material="glass"><text>d</text></popover></dropdown></content>`,
 	}
 	s := memorySite("", files)
 	s.Reload = true

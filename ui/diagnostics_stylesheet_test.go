@@ -107,7 +107,7 @@ func TestStylesheetDiagnosticsWordsThatDoNothingHere(t *testing.T) {
 	stylesheetSameLines(t, "one warning per word, at its attribute", warned, []string{
 		`content.ui:2:8: wrap="balance" chỉ có nghĩa trên chữ (<text>); trên khung, wrap nhận true hoặc false`,
 		`content.ui:2:23: fit chỉ đặt trên image (ảnh lấp khung thế nào), không đặt trên box`,
-		`content.ui:2:41: align="top" là vị trí các con của một khung, trên chữ không có tác dụng: align của text nhận start, center hoặc end`,
+		`content.ui:2:41: align="top" là vị trí các con của một khung, trên chữ không có tác dụng: align của text nhận left, center hoặc right`,
 		`content.ui:2:53: width="auto" là mặc định: không viết width là theo nội dung. width nhận fit (ôm nội dung) hoặc full (hết bề ngang của khung cha); hoặc một chữ của thang độ rộng (small (640px), medium (768px), large (1024px), wide (1280px) hoặc huge (1536px)), nhận một số của thang (` + spacingScaleForTest + `) hoặc một số có đơn vị px, rem, em, %, ch, vw, vh, dvh (640px, 50%, 68ch)`,
 	})
 	// CONTROL: where each word acts

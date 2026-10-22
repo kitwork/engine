@@ -11,7 +11,7 @@
   </box>
 
   <box flex="row" align="center" space="between" gap="2">
-    <box flex="row" align="start" gap="2">
+    <box flex="row" align="left" gap="2">
       <text weight="bold" font="code" color="{{ product.oldPrice ? 'danger+15' : 'ink' }}">{{ money(product.price) }}</text>
       <text if="product.oldPrice" strikethrough="true" size="small" font="code" color="ink-30"
             alt="Giá cũ {{ money(product.oldPrice) }}">{{ money(product.oldPrice) }}</text>

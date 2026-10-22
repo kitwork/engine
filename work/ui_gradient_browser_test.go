@@ -19,7 +19,7 @@ import (
 )
 
 // gradientBrowserFiles is a site with the standard set's gradients written as a page would: a glow
-// behind a hero, a fade at the end of a scroller (and the same inside a frame the probe turns
+// behind a hero, a fade at the right of a scroller (and the same inside a frame the probe turns
 // right-to-left), a glow that a colour replaces from medium, a gradient headline, gradient text whose
 // stops are color-mix(), an icon painted with a gradient (its background), and a switch written with the
 // glow box's medium colour. A solid paper box gives the probe the paper's colour.
@@ -27,13 +27,13 @@ var gradientBrowserFiles = map[string]string{
 	"localhost/router.work": `import { router } from "kitwork";
 
 router.colors({ brand: "#c8742c" });
-router.gradients({ ember: { type: "linear", direction: "to-end", stops: [ { color: "ink-10", at: 0 }, { color: "brand+15", at: 100 } ] } });
+router.gradients({ ember: { type: "linear", direction: "to-right", stops: [ { color: "ink-10", at: 0 }, { color: "brand+15", at: 100 } ] } });
 `,
 	"localhost/page.ui": `<page><content /></page>`,
 	"localhost/content.ui": `<content>
   <box id="glow" background="glow" padding="4"><text>Quán</text></box>
-  <box id="end" background="fade-end" padding="4"><text>Cuộn tiếp</text></box>
-  <box id="holder"><box id="end-rtl" background="fade-end" padding="4"><text>Cuộn tiếp</text></box></box>
+  <box id="right" background="fade-right" padding="4"><text>Cuộn tiếp</text></box>
+  <box id="holder"><box id="right-rtl" background="fade-right" padding="4"><text>Cuộn tiếp</text></box></box>
   <box id="wide" background="glow" medium:background="paper" padding="4"><text>Rộng</text></box>
   <box id="paper" background="paper" padding="4"><text>paper</text></box>
   <text id="headline" heading="1" color="headline">Kitwork</text>
@@ -72,8 +72,8 @@ const gradientProbe = `<script>
         var report = {}, headline = getComputedStyle(byId("headline"));
         report.forced = String(matchMedia("(forced-colors: active)").matches);
         report.glow = image(byId("glow"));
-        report.end = image(byId("end"));
-        report["end rtl"] = image(byId("end-rtl"));
+        report.right = image(byId("right"));
+        report["right rtl"] = image(byId("right-rtl"));
         report.wide = image(byId("wide")) + " paper=" + (getComputedStyle(byId("wide")).backgroundColor === getComputedStyle(byId("paper")).backgroundColor);
         report.headline = image(byId("headline")) + " clip=" + (headline.webkitBackgroundClip || headline.backgroundClip) +
           " fill=" + (headline.webkitTextFillColor === "rgba(0, 0, 0, 0)" ? "transparent" : "painted");
@@ -92,8 +92,9 @@ const gradientProbe = `<script>
 
 // TestBrowserGradients proves gradients (decision of 12/10/2026) in a real browser on a page the engine
 // serves, in light and in forced colours (Windows contrast themes; blink's inForcedColors):
-//   - background="glow" is a radial gradient at the top; background="fade-end" a linear one to the
-//     right, and to the left inside a frame turned right-to-left (the :dir(rtl) rule);
+//   - background="glow" is a radial gradient at the top; background="fade-right" a linear one to the
+//     right, and mirrored, to the left, inside a frame turned right-to-left (the :dir(rtl) rule: left
+//     and right mirror on a right-to-left page, decision of 19/10/2026);
 //   - background="glow" medium:background="paper", in a window wider than medium, has no image and the
 //     paper's colour: the colour written for medium takes the gradient away; a switch written with the
 //     same medium:background="paper" keeps its thumb (reboot.css's radial image): the colour takes back
@@ -169,8 +170,8 @@ func TestBrowserGradients(t *testing.T) {
 		{"light", "", map[string]string{
 			"forced":          "false",
 			"glow":            "radial at-top",
-			"end":             "linear to-right",
-			"end rtl":         "linear to-left",
+			"right":           "linear to-right",
+			"right rtl":       "linear to-left",
 			"wide":            "none paper=true",
 			"headline":        "linear to-right clip=text fill=transparent",
 			"headline colour": "rgb(10, 37, 64)", // ink, the first stop
@@ -179,14 +180,14 @@ func TestBrowserGradients(t *testing.T) {
 			"switch":          "radial", // its thumb, reboot.css's image, beside the wide box's taken-back glow
 		}},
 		{"forced colors", "inForcedColors=true", map[string]string{
-			"forced":   "true",
-			"glow":     "none",
-			"end":      "none",
-			"end rtl":  "none",
-			"wide":     "none paper=true",
-			"headline": "none clip=text fill=painted",
-			"tinted":   "none clip=text fill=painted",
-			"icon":     "none",
+			"forced":    "true",
+			"glow":      "none",
+			"right":     "none",
+			"right rtl": "none",
+			"wide":      "none paper=true",
+			"headline":  "none clip=text fill=painted",
+			"tinted":    "none clip=text fill=painted",
+			"icon":      "none",
 		}},
 	}
 	for _, profile := range profiles {

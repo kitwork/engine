@@ -85,6 +85,10 @@ var elementLooks = []elementLook{
 	// a typing terminal (ui/terminal.go; the author draws the rest)
 	{selector: "::highlight(kitwork-terminal-untyped)", unread: "what a terminal has not typed yet: transparent, not shown"},
 	{selector: "::highlight(kitwork-terminal-caret)", unread: "the typing caret, a block over a character not typed yet: no text shown"},
+	// the countdown's time bar (ui/countdown.go): the fields inside a <time> drawn as one input
+	{selector: ":where(.countdown-time[role=\"group\"])", unread: "the countdown's bar: its fields are read with a field's fill, which is the bar's"},
+	{selector: ":where(.countdown-time[role=\"group\"]:focus-within)", unread: "the countdown's bar with the focus in it: its fields are read with a focused field's fill"},
+	{selector: ":where(.countdown-time[role=\"group\"] input)", unread: "a field of the countdown's bar paints nothing: the bar's fill shows through it"},
 }
 
 // Look is how an element looks before the author writes anything, at one width, as far as contrast

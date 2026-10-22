@@ -84,15 +84,15 @@ func TestHeaderExample(t *testing.T) {
 }
 
 // specAttributes are the presentation attributes of KITWORK_UI §7 and §8, with K's additions: the
-// padding axes and sides, raw sizes, aspect-ratio and fit; M's material; and lazy (15/10/2026).
+// padding axes and sides, raw sizes, aspect-ratio and fit; M's material; and lazy (15/10/2026). The
+// sides and corners are left and right only: start and end were replaced by them (19/10/2026).
 var specAttributes = []string{
 	"flex", "wrap", "align", "space", "gap", "columns", "span", "place", "pin", "lazy", "container",
 	"width", "min-width", "max-width", "height", "min-height", "max-height", "aspect-ratio", "fit",
 	"padding", "padding-x", "padding-y", "padding-top", "padding-bottom", "padding-left", "padding-right",
-	"padding-start", "padding-end", "scroll", "lines", "background", "material", "border", "radius",
-	"radius-top", "radius-bottom", "radius-left", "radius-right", "radius-start", "radius-end",
+	"scroll", "lines", "background", "material", "border", "radius",
+	"radius-top", "radius-bottom", "radius-left", "radius-right",
 	"radius-top-left", "radius-top-right", "radius-bottom-left", "radius-bottom-right",
-	"radius-top-start", "radius-top-end", "radius-bottom-start", "radius-bottom-end",
 	"shadow", "opacity", "scale", "rotate",
 	"font", "size", "weight", "italic", "case", "underline", "strikethrough", "color", "thickness", "show",
 }
@@ -306,12 +306,13 @@ func TestRulesKeepTheFixedOrder(t *testing.T) {
 }
 
 // hover holds only where a pointer hovers; open follows the nearest element that opens; active is
-// aria-current; disabled covers aria-disabled. A width and a state together are one block.
+// aria-current, and aria-pressed="true" (a button that is on: an editor's format, 20/10/2026);
+// disabled covers aria-disabled. A width and a state together are one block.
 func TestStateSelectors(t *testing.T) {
 	table := NewTable(nil)
 	want := map[string]string{
 		"open":     `.open\:color-ink:where(:is(details[open],[aria-expanded=true]) *):not(:where(details:not([open]),[aria-expanded=false]) *){color:var(--ink)}`,
-		"active":   `.active\:color-ink:where([aria-current]:not([aria-current=false])){color:var(--ink)}`,
+		"active":   `.active\:color-ink:where([aria-current]:not([aria-current=false]),[aria-pressed=true]){color:var(--ink)}`,
 		"scrolled": `.scrolled\:color-ink:where(:root[data-kitwork-scrolled] *){color:var(--ink)}`,
 		"hover":    "@media (hover:hover){\n" + `.hover\:color-ink:where(:hover){color:var(--ink)}`,
 		"focus":    `.focus\:color-ink:where(:focus-visible){color:var(--ink)}`,
@@ -456,11 +457,14 @@ func TestValidationNamesTheWordAndTheValidOnes(t *testing.T) {
 		{Intent{Name: "font", Value: "mono"}, []string{"mono", "code"}, "code"},
 		{Intent{Name: "space", Value: "4"}, []string{"between", `gap="4"`}, `gap="4"`},
 		{Intent{Name: "align", Value: "between"}, []string{"between", `space="between"`}, `space="between"`},
-		{Intent{Name: "align", Value: "left"}, []string{`"left"`, "top-start", "bottom-end"}, ""},
-		{Intent{Tag: "text", Name: "align", Value: "top"}, []string{`"top"`, "start, center hoặc end"}, ""},
+		{Intent{Name: "align", Value: "middle"}, []string{`"middle"`, "top-left", "bottom-right"}, ""},
+		{Intent{Tag: "text", Name: "align", Value: "top"}, []string{`"top"`, "left, center hoặc right"}, ""},
+		// start and end were replaced by left and right (19/10/2026): the old word is told its new one
+		{Intent{Name: "align", Value: "top-end"}, []string{`align="top-end": start và end nay là left và right, viết align="top-right"`}, "top-right"},
+		{Intent{Name: "place", Value: "below-start"}, []string{`place="below-start": start và end nay là left và right, viết place="below-left"`}, "below-left"},
 		{Intent{Name: "flex", Value: "grid"}, []string{`"grid"`, "row", "column"}, ""},
 		{Intent{Name: "place", Value: "before"}, []string{"before", "chưa được hỗ trợ"}, ""},
-		{Intent{Name: "place", Value: "middle"}, []string{`"middle"`, "below-end", "fill"}, ""},
+		{Intent{Name: "place", Value: "middle"}, []string{`"middle"`, "below-right", "fill"}, ""},
 		{Intent{Name: "opacity", Value: "150"}, []string{`"150"`, "0 đến 100"}, ""},
 		{Intent{Name: "scale", Value: "0.95"}, []string{`"0.95"`, "95"}, ""},
 		{Intent{Name: "rotate", Value: "-90"}, []string{`"-90"`, "0 đến 360"}, ""},
@@ -486,7 +490,7 @@ func TestValidationNamesTheWordAndTheValidOnes(t *testing.T) {
 		{Intent{Name: "justify", Value: "between"}, []string{"align", "space"}, ""},
 		{Intent{Name: "font-size", Value: "14px"}, []string{`font-size="14px"`, "size", "mini, small"}, "size"},
 		{Intent{Name: "border-radius", Value: "8px"}, []string{"radius", "none, small"}, "radius"},
-		{Intent{Name: "text-align", Value: "center"}, []string{"align", "start, center, end"}, "align"},
+		{Intent{Name: "text-align", Value: "center"}, []string{"align", "left, center, right"}, "align"},
 		{Intent{Name: "overflow", Value: "auto"}, []string{"scroll", "x, y"}, "scroll"},
 	}
 	for _, c := range cases {
@@ -636,22 +640,48 @@ func TestBadgeColour(t *testing.T) {
 }
 
 // align on text aligns its lines, on any element that is not a container; the class's own rule is the
-// same on every tag, so one class serves a box and a text.
+// same on every tag, so one class serves a box and a text. left and right are the design's and write
+// logical CSS, so they mirror on a page written right to left: align="right" is text-align:end,
+// align="left" text-align:start. align="end", the old word (start and end were replaced by left and
+// right, 19/10/2026), is an error on a box and on a text alike, naming align="right". CONTROL: center
+// is center either way.
 func TestAlignOnText(t *testing.T) {
 	table := NewTable(nil)
-	var boxRules, textRules Rules
-	box, _ := table.Class(&boxRules, Intent{Tag: "box", Name: "align", Value: "end"})
-	text, _ := table.Class(&textRules, Intent{Tag: "text", Name: "align", Value: "end"})
-	if box != text || box != "align-end" {
-		t.Fatalf("%q %q", box, text)
+	for _, c := range []struct{ value, horizontal, textAlign string }{
+		{"right", "flex-end", "end"},
+		{"left", "flex-start", "start"},
+		{"center", "center", "center"}, // CONTROL
+	} {
+		var boxRules, textRules Rules
+		box, err := table.Class(&boxRules, Intent{Tag: "box", Name: "align", Value: c.value})
+		if err != nil {
+			t.Fatalf("box align=%q: %v", c.value, err)
+		}
+		text, err := table.Class(&textRules, Intent{Tag: "text", Name: "align", Value: c.value})
+		if err != nil {
+			t.Fatalf("text align=%q: %v", c.value, err)
+		}
+		if box != text || box != "align-"+c.value {
+			t.Fatalf("%q %q", box, text)
+		}
+		own := ".align-" + c.value + "{--kitwork-vertical:center;--kitwork-horizontal:" + c.horizontal + "}"
+		if !strings.Contains(string(boxRules.CSS()), own) || !strings.Contains(string(textRules.CSS()), own) {
+			t.Fatalf("the own rule differs:\n%s\n%s", boxRules.CSS(), textRules.CSS())
+		}
+		if !strings.Contains(string(textRules.CSS()), `.align-`+c.value+`:where(:not(.flex-row,.flex-column,.grid)){text-align:`+c.textAlign+`}`) ||
+			strings.Contains(string(boxRules.CSS()), "text-align") {
+			t.Fatalf("text-align:\n%s\n%s", boxRules.CSS(), textRules.CSS())
+		}
 	}
-	own := ".align-end{--kitwork-vertical:center;--kitwork-horizontal:flex-end}"
-	if !strings.Contains(string(boxRules.CSS()), own) || !strings.Contains(string(textRules.CSS()), own) {
-		t.Fatalf("the own rule differs:\n%s\n%s", boxRules.CSS(), textRules.CSS())
-	}
-	if !strings.Contains(string(textRules.CSS()), `.align-end:where(:not(.flex-row,.flex-column,.grid)){text-align:end}`) ||
-		strings.Contains(string(boxRules.CSS()), "text-align") {
-		t.Fatalf("text-align:\n%s\n%s", boxRules.CSS(), textRules.CSS())
+	for _, tag := range []string{"box", "text"} {
+		var r Rules
+		class, err := table.Class(&r, Intent{Tag: tag, Name: "align", Value: "end"})
+		var p *Problem
+		if !errors.As(err, &p) || p.Warning || p.Suggestion != "right" ||
+			p.Message != `align="end": start và end nay là left và right, viết align="right" (tự lật khi trang viết từ phải sang trái)` ||
+			class != "" || len(r.Classes()) != 0 {
+			t.Errorf("%s align=\"end\": class %q, recorded %v, %#v", tag, class, r.Classes(), p)
+		}
 	}
 }
 
@@ -700,7 +730,7 @@ func TestDomain(t *testing.T) {
 		t.Errorf("from data the element cannot become <s>: it needs the class (%v)", strike)
 	}
 	text, _ := table.Domain(&r, Intent{Tag: "text", Name: "align"})
-	if len(text) != 3 {
+	if len(text) != 3 || text["left"] != "align-left" || text["center"] != "align-center" || text["right"] != "align-right" {
 		t.Errorf("align of text from data: %v", text)
 	}
 	// A tag that takes no value of the attribute is refused as a written value is, not given an empty
@@ -774,7 +804,7 @@ func TestCSSDoesNotDependOnRecordingOrder(t *testing.T) {
 		{Name: "gap", Value: "10"}, {Name: "gap", Value: "2"}, {Name: "gap", Value: "0.5"},
 		{Tag: "badge", Name: "color", Value: "success"}, {Name: "color", Value: "success"},
 		{Width: "large", Name: "columns", Value: "2"}, {Width: "small", Name: "columns", Value: "2"},
-		{State: "hover,focus", Name: "color", Value: "ink"}, {Name: "place", Value: "below-end"},
+		{State: "hover,focus", Name: "color", Value: "ink"}, {Name: "place", Value: "below-right"},
 	}
 	var forward, backward Rules
 	for i := range intents {

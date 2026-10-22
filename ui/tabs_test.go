@@ -12,18 +12,18 @@ import (
 // them, a panel of code for each tab, the second panel written BEFORE the bar so a panel is wired
 // wherever it stands.
 const tabsWindow = `<content>
-<box component="terminal" as="$code" typing="800ms" background="panel">
+<terminal as="$code" typing="800ms" background="panel">
   <box show="$files.selected == 'page'"><code language="ui">page</code></box>
   <box flex="row" gap="2">
-    <box component="tabs" as="$files" persist="true" alt="Files" flex="row" gap="1"TABS_INPUT>
+    <tabs as="$files" persist="true" alt="Files" flex="row" gap="1"TABS_INPUT>
       <button click="select('router')">router.work</button>
       <button click="select('page')">page.ui</button>
-    </box>
+    </tabs>
     <button click="copy()">Copy</button>
   </box>
   <box show="$files.selected == 'router'"><code language="work">router.get()</code></box>
   <text>{{ $files.selected }}</text>
-</box>
+</terminal>
 </content>`
 
 func tabsCompile(t *testing.T, source string) *Page {
@@ -112,10 +112,10 @@ func TestTabsPrepaintFollowsTheGroupsLastPanel(t *testing.T) {
 // CONTROL: the same colour without the prefix is not under aria-selected.
 func TestSelectedStateFollowsTheChosenTab(t *testing.T) {
 	source := `<content>
-<box component="tabs" as="$files" alt="Files" flex="row">
+<tabs as="$files" alt="Files" flex="row">
   <button click="select('a')" color="ink-30" selected:color="ink" selected:underline="true">a</button>
   <button click="select('b')" color="ink-30" selected:color="SELECTED">b</button>
-</box>
+</tabs>
 <box show="$files.selected == 'a'"><text>a</text></box>
 <box show="$files.selected == 'b'"><text>b</text></box>
 </content>`
@@ -139,22 +139,22 @@ func TestSelectedStateFollowsTheChosenTab(t *testing.T) {
 // the instance, the instance as it starts, so the first tab's panel is shown and the other hidden.
 // CONTROLS: the same window in content.ui, and in a layout called by its tag.
 func TestTabsInAComponentsOwnUIPaintTheFirstTab(t *testing.T) {
-	window := `<box component="terminal" typing="2s">
+	window := `<terminal typing="2s">
   <box flex="row">
-    <box component="tabs" as="$files" alt="Files" flex="row">
+    <tabs as="$files" alt="Files" flex="row">
       <button click="select('router')">router.work</button>
       <button click="select('page')">page.ui</button>
-    </box>
+    </tabs>
     <button click="copy()">Copy</button>
   </box>
   <box show="$files.selected == 'router'"><code language="work">router</code></box>
   <box show="$files.selected == 'page'"><code language="ui">page</code></box>
-</box>`
+</terminal>`
 	panels := regexp.MustCompile(`<div[^>]*role="tabpanel"[^>]*>`)
 	for name, files := range map[string]map[string]string{
 		"content.ui": {"/site/content.ui": `<content>` + window + `</content>`},
 		"layout":     {"/site/content.ui": `<content><files-window /></content>`, "/.components/files-window.ui": "<box>" + window + "</box>"},
-		"component": {"/site/content.ui": `<content><box component="code-window" /></content>`, "/.components/code-window.ui": "<box>" + window + "</box>",
+		"component": {"/site/content.ui": `<content><code-window /></content>`, "/.components/code-window.ui": "<box>" + window + "</box>",
 			"/.components/code-window.work": `import { component } from "kitwork"; component.define("code-window", () => { var note = 1; });`},
 	} {
 		s := memorySite("", files)
@@ -179,14 +179,14 @@ func TestTabsInAComponentsOwnUIPaintTheFirstTab(t *testing.T) {
 func TestAliasReadsTheInstanceAsItStarts(t *testing.T) {
 	source := `<content>
 <text>{{ $install.copied }} {{ $menu.open }}</text>
-<box component="terminal" as="$install"><code>ls</code></box>
-<box component="dropdown" as="$menu"><button click="toggle()">Mở</button></box>
+<terminal as="$install"><code>ls</code></terminal>
+<dropdown as="$menu"><button click="toggle()">Mở</button></dropdown>
 <text>{{ $install.typing }}</text>
 </content>`
 	html := tabsCompile(t, source).Render(Request{Path: "/"})
 	mustContain(t, html, `data-kitwork-bind="text: [($install.copied), &#39; &#39;, ($menu.open)].join(&#39;&#39;)">false false</p>`, `>0</p>`)
 	// CONTROL: a $-name the page declares itself is the page's
-	page := tabsCompile(t, `<content><text>{{ $install.copied }}</text><box component="terminal" as="$install"><code>ls</code></box></content>`).
+	page := tabsCompile(t, `<content><text>{{ $install.copied }}</text><terminal as="$install"><code>ls</code></terminal></content>`).
 		Render(Request{Path: "/", Scope: map[string]any{"$install": map[string]any{"copied": "của trang"}}})
 	mustContain(t, page, ">của trang</p>")
 }
@@ -196,37 +196,37 @@ func TestAliasReadsTheInstanceAsItStarts(t *testing.T) {
 func TestTabsSayWhatDoesNotFit(t *testing.T) {
 	panels := `<box show="$files.selected == 'a'"><text>a</text></box><box show="$files.selected == 'b'"><text>b</text></box>`
 	for _, c := range []struct{ source, needle, says string }{
-		{`<content><box component="tabs" as="$files"><button click="toggle()">a</button></box></content>`, `<box`,
-			`tabs cần ít nhất một tab bên trong thẻ chủ: <button click="select('tên')">…</button>`},
-		{`<content><box component="tabs" as="$files"><button click="select('a')">a</button><button click="select('a')">b</button></box>` + panels + `</content>`, `click="select('a')">b`,
+		{`<content><tabs as="$files"><button click="toggle()">a</button></tabs></content>`, `<tabs`,
+			`tabs cần ít nhất một tab bên trong <tabs>: <button click="select('tên')">…</button>`},
+		{`<content><tabs as="$files"><button click="select('a')">a</button><button click="select('a')">b</button></tabs>` + panels + `</content>`, `click="select('a')">b`,
 			`tab a đã có ở dòng 1: mỗi tab một tên`},
-		{`<content><box component="tabs" as="$files"><box for="name of names"><button click="select('a')">a</button></box></box>` + panels + `</content>`, `click="select('a')"`,
+		{`<content><tabs as="$files"><box for="name of names"><button click="select('a')">a</button></box></tabs>` + panels + `</content>`, `click="select('a')"`,
 			`tab a nằm trong for`},
-		{`<content><box component="tabs" as="$files"><button click="select('a')" value="x">a</button></box>` + panels + `</content>`, `value="x"`,
+		{`<content><tabs as="$files"><button click="select('a')" value="x">a</button></tabs>` + panels + `</content>`, `value="x"`,
 			`value của một tab là tên của nó, engine viết từ select('a'): bỏ value`},
-		{`<content><box component="tabs" as="$files" selected="c"><button click="select('a')">a</button><button click="select('b')">b</button></box>` + panels + `</content>`, `selected="c"`,
+		{`<content><tabs as="$files" selected="c"><button click="select('a')">a</button><button click="select('b')">b</button></tabs>` + panels + `</content>`, `selected="c"`,
 			`selected="c" không phải tên của tab nào (a, b)`},
-		{`<content><box component="tabs" as="$files"><button click="select('a')">a</button></box><code show="$files.selected == 'a'">a</code></content>`, `show=`,
+		{`<content><tabs as="$files"><button click="select('a')">a</button></tabs><code show="$files.selected == 'a'">a</code></content>`, `show=`,
 			`<code> không làm panel của tab a được`},
-		{`<content><box component="tabs" as="$files"><button click="select('a')">a</button></box><box for="x of xs" show="$files.selected == 'a'"><text>a</text></box></content>`, `show=`,
+		{`<content><tabs as="$files"><button click="select('a')">a</button></tabs><box for="x of xs" show="$files.selected == 'a'"><text>a</text></box></content>`, `show=`,
 			`panel của tab a nằm trong for`},
 	} {
 		mustFail(t, map[string]string{"/site/content.ui": c.source}, where("content.ui", c.source, c.needle), c.says)
 	}
 	for _, c := range []struct{ source, needle, says string }{
-		{`<content><box component="tabs" as="$files"><button click="select('a')">a</button><button click="select('b')">b</button></box><box show="$files.selected == 'a'"><text>a</text></box></content>`,
+		{`<content><tabs as="$files"><button click="select('a')">a</button><button click="select('b')">b</button></tabs><box show="$files.selected == 'a'"><text>a</text></box></content>`,
 			`click="select('b')"`, `tab b của $files không có panel: viết show="$files.selected == 'b'" trên phần tử nó cho hiện`},
-		{`<content><box component="tabs" as="$files"><button click="select('a')">a</button></box><box show="$files.selected == 'a'"><text>a</text></box><box show="'c' === $files.selected"><text>c</text></box></content>`,
+		{`<content><tabs as="$files"><button click="select('a')">a</button></tabs><box show="$files.selected == 'a'"><text>a</text></box><box show="'c' === $files.selected"><text>c</text></box></content>`,
 			`show="'c'`, `show so $files.selected với 'c', mà $files không có tab c (a): phần tử này không bao giờ hiện`},
-		{`<content><box component="tabs"><button click="select('a')">a</button></box></content>`,
-			`component="tabs"`, `tabs không có as: ngoài thẻ chủ không gì đọc được tab đang chọn`},
-		{`<content><box component="tabs" as="$files" selected="a"><button click="select('a')">a</button><button click="select(selected == 'a' ? 'b' : 'a')">b</button></box><box show="$files.selected == 'a'"><text>a</text></box></content>`,
+		{`<content><tabs><button click="select('a')">a</button></tabs></content>`,
+			`<tabs`, `tabs không có as: ngoài <tabs> không gì đọc được tab đang chọn; viết <tabs as="$tên">`},
+		{`<content><tabs as="$files" selected="a"><button click="select('a')">a</button><button click="select(selected == 'a' ? 'b' : 'a')">b</button></tabs><box show="$files.selected == 'a'"><text>a</text></box></content>`,
 			`click="select(selected`, `engine nhận một nút là tab khi click là select('tên') với tên viết sẵn`},
 		// a tablist holds tabs only: what a person can press inside it that is no tab is told where it is
-		{`<content><box component="terminal"><box component="tabs" as="$files"><button click="select('a')">a</button><button click="copy()">Copy</button></box><box show="$files.selected == 'a'"><code language="work">a</code></box></box></content>`,
-			`<button click="copy()"`, `<button> trong thẻ chủ của tabs không phải tab: dải tab chỉ chứa tab (role="tablist")`},
-		{`<content><box component="tabs" as="$files"><button click="select('a')">a</button><box><link value="/x">x</link></box></box><box show="$files.selected == 'a'"><text>a</text></box></content>`,
-			`<link`, `<link> trong thẻ chủ của tabs không phải tab: dải tab chỉ chứa tab (role="tablist")`},
+		{`<content><terminal><tabs as="$files"><button click="select('a')">a</button><button click="copy()">Copy</button></tabs><box show="$files.selected == 'a'"><code language="work">a</code></box></terminal></content>`,
+			`<button click="copy()"`, `<button> trong <tabs> không phải tab: dải tab chỉ chứa tab (role="tablist")`},
+		{`<content><tabs as="$files"><button click="select('a')">a</button><box><link value="/x">x</link></box></tabs><box show="$files.selected == 'a'"><text>a</text></box></content>`,
+			`<link`, `<link> trong <tabs> không phải tab: dải tab chỉ chứa tab (role="tablist")`},
 	} {
 		page := tabsCompile(t, c.source)
 		at := where("content.ui", c.source, c.needle)
@@ -247,11 +247,11 @@ func TestTabsSayWhatDoesNotFit(t *testing.T) {
 // is the same as not writing it: the same HTML to the byte, nothing kept.
 func TestTabsPersistUnderTheSetOfTheirNames(t *testing.T) {
 	tabs := func(alias, persist string, names ...string) string {
-		s := `<box component="tabs" as="` + alias + `"` + persist + ` alt="Shell" flex="row">`
+		s := `<tabs as="` + alias + `"` + persist + ` alt="Shell" flex="row">`
 		for _, name := range names {
 			s += `<button click="select('` + name + `')">` + name + `</button>`
 		}
-		s += `</box>`
+		s += `</tabs>`
 		for _, name := range names {
 			s += `<box show="` + alias + `.selected == '` + name + `'"><text>` + name + `</text></box>`
 		}
@@ -296,7 +296,7 @@ func TestTabsPersistUnderTheSetOfTheirNames(t *testing.T) {
 // letters that carry marks (lựa chọn, über, Đường) is suggested without them, not cut where they stood.
 func TestTabsPersistSaysWhatToWrite(t *testing.T) {
 	host := func(attr string) string {
-		return `<content><box component="tabs" as="$files"` + attr + `><button click="select('a')">a</button></box><box show="$files.selected == 'a'"><text>a</text></box></content>`
+		return `<content><tabs as="$files"` + attr + `><button click="select('a')">a</button></tabs><box show="$files.selected == 'a'"><text>a</text></box></content>`
 	}
 	for _, c := range []struct{ attr, needle, says string }{
 		{` remember="files"`, `remember=`, `remember đã đổi thành persist (16/10/2026): viết persist="true" để mọi tabs có cùng các tab trên site đi theo một lựa chọn, hay persist="files" để giữ lựa chọn dưới tên này`},
@@ -330,17 +330,17 @@ func TestTabsPersistSaysWhatToWrite(t *testing.T) {
 // paints both before the kernel runs. CONTROL: the page's own $files, the same alias as the instances',
 // is the page's: its panels are wired to the page's tabs.
 func TestTabsInAComponentUsedTwiceWireEachInstance(t *testing.T) {
-	window := `<box component="tabs" as="$files"PERSIST alt="Files" flex="row">
+	window := `<tabs as="$files"PERSIST alt="Files" flex="row">
   <button click="select('router')">router.work</button>
   <button click="select('page')">page.ui</button>
-</box>
+</tabs>
 <box show="$files.selected == 'router'"><text>router</text></box>
 <box show="$files.selected == 'page'"><text>page</text></box>`
 	page := `<content>
-<box component="tabs" as="$files" alt="Page" flex="row"><button click="select('a')">a</button><button click="select('b')">b</button></box>
+<tabs as="$files" alt="Page" flex="row"><button click="select('a')">a</button><button click="select('b')">b</button></tabs>
 <box show="$files.selected == 'b'"><text>b</text></box>
-<box component="code-window" />
-<box component="code-window" />
+<code-window />
+<code-window />
 <box show="$files.selected == 'a'"><text>a</text></box>
 </content>`
 	tab := regexp.MustCompile(`id="(kitwork-tab-[0-9-]+)" type="button" role="tab" aria-controls="([^"]*)" value="([a-z]+)"`)
@@ -399,11 +399,11 @@ func TestTabsInAComponentUsedTwiceWireEachInstance(t *testing.T) {
 // starts on starts on its own first.
 func TestTabsThatShareANameStartTogether(t *testing.T) {
 	tabs := func(alias, words string, names ...string) string {
-		s := `<box component="tabs" as="` + alias + `"` + words + ` alt="Shell" flex="row">`
+		s := `<tabs as="` + alias + `"` + words + ` alt="Shell" flex="row">`
 		for _, name := range names {
 			s += `<button click="select('` + name + `')">` + name + `</button>`
 		}
-		s += `</box>`
+		s += `</tabs>`
 		for _, name := range names {
 			s += `<box show="` + alias + `.selected == '` + name + `'"><text>` + alias + " " + name + `</text></box>`
 		}

@@ -4,23 +4,28 @@ import (
 	"fmt"
 	"path"
 	"strings"
+
+	"github.com/kitwork/engine/ui/stylesheet"
 )
 
-// A component — a name with logic — is written component="name" on a tag (KITWORK_UI §13). A piece
-// with only a .ui is a layout, called by its tag (layout.go); written component= it is an error that
-// says so. Two shapes:
+// A component — a name with logic — is written as its tag (KITWORK_UI §13, 18/10/2026): one of
+// Kitwork's by a name without a dash (<tabs>, <carousel>), one of the site's by a name with one
+// (<shop-cart>, a layout's form). The tag builds one element, the host: the compiler gives it the
+// host's tag of .ui (componentDef.hostTag) and a component attribute naming what it calls (asHost),
+// and componentCall goes on from there; component= written by the author is an error that says which
+// tag to write (componentWritten). Two shapes:
 //
-//   - With a UI (cart.ui with its cart.work, Kitwork's toast): the file's one root is the host, and the
-//     call writes that same tag, empty — <box component="cart" as="$cart" />. The two are one element:
-//     the file owns the look and the behaviour; the call adds only its own words (component, as, if,
-//     show, for with its key, span and place, with width prefixes) and inputs, which are every other
-//     attribute and must be names the component declares or its .ui reads.
-//   - Without a UI (dropdown, appearance, a site component that has only a .work): the host is the
-//     author's tag and its attributes stay the tag's; what is written inside is the component's UI.
-//     An attribute that is none of the tag's own is an input; one the tag and the component both
-//     claim is an error. The terminal is one of these with a rule of its own: its own word (typing)
-//     leaves the host first, and each <code> inside is a command with a prompt before it
-//     (terminal.go). A component's inside is never a terminal's: its code is its own.
+//   - With a UI (shop-cart.ui with its shop-cart.work, Kitwork's progressbar): the file's one root is
+//     the host, and the call is empty — <shop-cart as="$cart" />. The two are one element: the file
+//     owns the look and the behaviour; the call adds only its own words (as, if, show, for with its
+//     key, span and place, with width prefixes) and inputs, which are every other attribute and must
+//     be names the component declares or its .ui reads.
+//   - Without a UI (dropdown, appearance, a site component that has only a .work): the host is a box
+//     (a button for appearance) and the attributes written on the tag are the box's; what is written
+//     inside is the component's UI. An attribute that is none of the box's own is an input; one the
+//     box and the component both claim is an error. The terminal is one of these with a rule of its
+//     own: its own word (typing) leaves the host first, and each <code> inside is a command with a
+//     prompt before it (terminal.go). A component's inside is never a terminal's: its code is its own.
 //
 // Which side reads a name: if, show, for (and its key), as and the values of inputs are read where
 // the call stands, and may not read the component's own names. Everything else written on a host
@@ -28,40 +33,112 @@ import (
 // and an outer level (a component around it, a row, the route's view) both declare is a warning
 // there: the nearest wins. Inside a component's own .ui its names win without question.
 
-// componentCall compiles an element that carries component=.
-func (c *compiler) componentCall(n *Node, cx ctx, outer *callSite) (op, error) {
+// kitworkCall compiles one of Kitwork's components written as its tag: <tabs as="$files">…</tabs>.
+func (c *compiler) kitworkCall(n *Node, kit *kitworkComponent, cx ctx) (op, error) {
+	if kit.planned {
+		return nil, errAt(n, "<%s> là component của Kitwork mà engine chưa dựng được", n.Tag)
+	}
+	if err := c.namedLikeATag(n); err != nil {
+		return nil, err
+	}
+	if a := attrNamed(n, "source"); a.Name == "source" {
+		return nil, errAttr(n, a, "source lấy một file của site; <%s> là của Kitwork, không có source", n.Tag)
+	}
+	return c.componentCall(asHost(n, kit.hostTag(), n.Tag), cx)
+}
+
+// asHost is the host a component's tag builds on: the same element under the host's tag of .ui, with
+// the tag the author wrote as a component attribute first, where the tag stands. componentCall finds
+// the component by it, or by the source written beside it, and the page carries the component's name
+// as data-kitwork-component. The node as written is left as it is.
+func asHost(n *Node, tag, component string) *Node {
+	host := *n
+	host.Tag = tag
+	host.Attrs = append([]Attr{{Name: "component", Value: component, Line: n.Line, Column: n.Column}}, n.Attrs...)
+	return &host
+}
+
+// called is a component's call as the author wrote it, for a message: its tag (<tabs>, <shop-cart>,
+// <my-row> with a source). n is the host it builds on (asHost).
+func called(n *Node) string {
+	return "<" + attrNamed(n, "component").Value + ">"
+}
+
+// tagOf is an element's tag as the author wrote it, for a message: a component's tag (<dropdown>) for
+// the host it built (a box, a button), the element's own tag otherwise.
+func (c *compiler) tagOf(n *Node) string {
+	if tag, ok := c.hostTags[n]; ok {
+		return tag
+	}
+	return n.Tag
+}
+
+// componentWritten is the error of component= written by the author: since 18/10/2026 a component is
+// written as its tag (KITWORK_UI §13), and the message writes the tag. A name without a dash that
+// Kitwork has (a component, an element, a core tag) is that tag; a site's name takes a dash, so one
+// without is told to take one.
+func componentWritten(n *Node, a *Attr) error {
+	value := strings.TrimSpace(a.Value)
+	name := path.Base(value)
+	if !componentName(name) || strings.Contains(value, "{{") {
+		// no name a tag could take: {{ }}, two names, capitals, nothing
+		return errAttr(n, a, "component= đã bỏ: component là một thẻ, tên của nó là tên thẻ, viết thường, cố định (<tabs>, <shop-cart>)")
+	}
+	tag := name
+	kit := kitworkComponents[name]
+	if _, kitworkTag := catalog[name]; kit == nil && !kitworkTag && !plannedElements[name] && !siteName(name) {
+		tag = "shop-" + name
+	}
+	call := "<" + tag
+	if strings.Contains(value, "/") && !strings.HasPrefix(value, "kitwork/") {
+		call += ` source="` + strings.TrimSuffix(value, name) + tag + `"` // the file renamed with the name
+	}
+	if alias, ok := n.Attr("as"); ok {
+		call += ` as="` + alias + `"`
+	}
+	inside := len(n.SignificantChildren()) > 0
+	if !inside {
+		call += " />"
+	} else {
+		call += ">…</" + tag + ">"
+	}
+	message := fmt.Sprintf("component= đã bỏ: component là một thẻ, viết %s", call)
+	if info, ok := catalog[n.Tag]; ok && (info.region || n.Tag == "page") {
+		message += fmt.Sprintf(" bên trong <%s>", n.Tag) // a region is no component's host: it holds one
+	} else if _, chosen := catalog[n.Tag]; chosen && kit != nil && kit.root == "" && n.Tag != kit.hostTag() {
+		message += fmt.Sprintf(" (<%s> dựng một <%s>; cần <%s> thì đặt nó bên trong)", name, kit.hostTag(), n.Tag)
+	}
+	if tag != name {
+		message += fmt.Sprintf("; tên component của site có gạch ngang, tên không gạch ngang là của Kitwork: đổi tên %s thành %s", name, tag)
+	}
+	return errAttr(n, a, "%s", message)
+}
+
+// componentCall compiles the host of a component (asHost): an element whose component attribute is
+// the tag the author wrote, and names what it calls unless a source does.
+func (c *compiler) componentCall(n *Node, cx ctx) (op, error) {
 	attr := attrNamed(n, "component")
-	info := catalog[n.Tag] // element() sends a tag outside the vocabulary to layoutCall
-	if info.region && len(n.SignificantChildren()) == 0 {
-		return c.region(n, cx) // refuses the attribute: an empty region call takes source, if and show
+	info := catalog[n.Tag] // a host's tag: box, button, the root of the component's UI
+	written := attr.Value
+	c.hostTags[n] = written
+	find := attr
+	if source := attrNamed(n, "source"); source.Name == "source" {
+		find = source // a component of the site the call names by its file (layoutCall checked it)
 	}
-	if reason := forbiddenHost(n.Tag); reason != "" {
-		return nil, errAttr(n, attr, "component không đặt trên <%s>: %s", n.Tag, reason)
-	}
-	def, err := c.resolveComponent(n, attr)
+	def, err := c.resolveComponent(n, find)
 	if err != nil {
 		return nil, err
 	}
-	if def.layout() {
-		return nil, c.layoutAsAComponent(n, attr, def)
-	}
 	c.called[def.name] = def // its names, read outside its host, are told (strayNames)
 	if def.root != nil {
-		if err := checkComponentRoot(def); err != nil {
+		if err := c.checkComponentRoot(def); err != nil {
 			return nil, err
 		}
-	}
-	if info.region && def.hasUI() {
-		return nil, errAttr(n, attr, "%s có giao diện (%s) nên không đặt trên vùng <%s>: giao diện của vùng là file của vùng; đặt %s trên một thẻ bên trong",
-			def.name, def.what(c.site), n.Tag, def.name)
 	}
 	// a component with a rule for what is inside it (the terminal): its own words are read here and
 	// leave the host, which then goes on as the host of a component without a UI
 	var term *terminalSpec
 	if def.kitwork != nil && def.kitwork.around {
-		if info.region {
-			return nil, errAttr(n, attr, "%s không đặt trên vùng <%s>: đặt nó trên một thẻ bên trong (%s)", def.name, n.Tag, hostList(def.kitwork.hosts))
-		}
 		var err error
 		if n, term, err = c.terminalHost(n); err != nil {
 			return nil, err
@@ -86,7 +163,7 @@ func (c *compiler) componentCall(n *Node, cx ctx, outer *callSite) (op, error) {
 		}
 		// a lazy frame around places the stack, fixed, by itself and not by the screen (15/10/2026); a
 		// glass frame does too (its backdrop-filter)
-		c.tellLazyAround(cx, "<"+n.Tag+" component=\"toast\">", n, "một khung lazy giữ phần cố định (position:fixed) bên trong theo chính nó, không theo màn hình, nên ngăn thông báo nằm ngoài màn hình")
+		c.tellLazyAround(cx, "<toast>", n, "một khung lazy giữ phần cố định (position:fixed) bên trong theo chính nó, không theo màn hình, nên ngăn thông báo nằm ngoài màn hình")
 		if glass := glassAround(cx.paint); glass != nil {
 			c.warn(n.File, attr.Line, attr.Column, fmt.Sprintf("toast trong khung kính (material ở %s:%d:%d) bám theo khung đó, không theo màn hình: kính giữ phần cố định bên trong theo chính nó; đặt toast ngoài khung kính, như trong overlay.ui",
 				glass.node.File, glass.attr.Line, glass.attr.Column))
@@ -97,42 +174,84 @@ func (c *compiler) componentCall(n *Node, cx ctx, outer *callSite) (op, error) {
 	// same way
 	var network *networkSpec
 	if def.kitwork != nil && def.name == "network" {
-		if info.region {
-			// a region keeps its own role (a landmark), and a placed one would pin the region itself
-			return nil, errAttr(n, attr, "%s không đặt trên vùng <%s>: đặt nó trên một thẻ bên trong (%s)", def.name, n.Tag, hostList(def.kitwork.hosts))
-		}
 		var err error
 		if n, network, err = c.networkHost(n); err != nil {
 			return nil, err
 		}
 		if network.place != "" {
-			c.tellLazyAround(cx, "<"+n.Tag+" component=\"network\" place=\""+network.place+"\">", n, "một khung lazy giữ phần cố định (position:fixed) bên trong theo chính nó, không theo màn hình, nên ngăn thông báo nằm ngoài màn hình")
+			c.tellLazyAround(cx, "<network place=\""+network.place+"\">", n, "một khung lazy giữ phần cố định (position:fixed) bên trong theo chính nó, không theo màn hình, nên ngăn thông báo nằm ngoài màn hình")
 			if glass := glassAround(cx.paint); glass != nil {
 				c.warn(n.File, attr.Line, attr.Column, fmt.Sprintf("network có place trong khung kính (material ở %s:%d:%d) bám theo khung đó, không theo màn hình: kính giữ phần cố định bên trong theo chính nó; đặt network ngoài khung kính, như trong overlay.ui",
 					glass.node.File, glass.attr.Line, glass.attr.Column))
 			}
 		}
 	}
-	if def.hasUI() {
-		if root := def.rootTag(); n.Tag != root {
-			return nil, errAttr(n, attr, "%s dựng một <%s>: viết %s", def.what(c.site), root, suggestion(root, def, n))
+	// the carousel's own words (alt, transition, duration) leave the host the same way, and its track
+	// is found before anything compiles (carousel.go)
+	var carousel *carouselScope
+	if def.kitwork != nil && def.name == "carousel" {
+		var err error
+		if n, carousel, err = c.carouselHost(n, attr); err != nil {
+			return nil, err
 		}
+	}
+	// the countdown's own word (duration) leaves the host the same way, and the <time> that holds the time
+	// left is found before anything compiles (countdown.go)
+	var countdown *countdownScope
+	if def.kitwork != nil && def.name == "countdown" {
+		var err error
+		if n, countdown, err = c.countdownHost(n, attr); err != nil {
+			return nil, err
+		}
+	}
+	// the editor's parts (its writing area, toolbars, the link's popover) are found before anything
+	// compiles, and the words it refuses told; its own word (format) leaves the host (editor.go)
+	var editor *editorScope
+	if def.kitwork != nil && def.name == "editor" {
+		var err error
+		if n, editor, err = c.editorHost(n, attr, cx); err != nil {
+			return nil, err
+		}
+	}
+	if def.hasUI() {
 		if def.kitwork != nil {
 			return c.kitworkUI(n, cx, def)
 		}
 		if len(n.SignificantChildren()) > 0 {
 			return nil, errAt(n, "%s có giao diện (%s) nên thẻ gọi để rỗng: nội dung con không phải slot; đổi giao diện thì sửa %s",
-				def.name, def.what(c.site), path.Base(def.what(c.site)))
+				called(n), def.what(c.site), path.Base(def.what(c.site)))
 		}
-	} else {
-		if len(n.SignificantChildren()) == 0 && (def.kitwork == nil || !def.kitwork.empty) {
-			return nil, errAt(n, "%s không có giao diện: nội dung bên trong thẻ là giao diện của nó (<%s component=\"%s\">…</%s>)", def.name, n.Tag, def.name, n.Tag)
-		}
-		if def.kitwork != nil && !def.kitwork.hosts[n.Tag] && !info.region {
-			return nil, errAttr(n, attr, "%s đặt trên %s, không trên <%s>", def.name, hostList(def.kitwork.hosts), n.Tag)
-		}
+	} else if len(n.SignificantChildren()) == 0 && (def.kitwork == nil || !def.kitwork.empty) {
+		return nil, errAt(n, "%s không có giao diện: nội dung bên trong thẻ là giao diện của nó (%s…</%s>)", called(n), called(n), written)
 	}
 	site := &callSite{def: def, state: def.state}
+	if carousel != nil {
+		site.carousel = carousel
+		site.classes = append(site.classes, carousel.classes()...)
+		site.inputs = append(site.inputs, carousel.inputs()...)
+		site.state = carousel.startState(site.state)
+		c.carousels = append(c.carousels, carousel)
+		if carousel.countFrom != "" {
+			// slides a for repeats: how many is the page's data, read where the call stands, as an input
+			// the author could have written (count="{{ 2 + (mons).length }}")
+			in, err := parseInterpolation("{{ "+carousel.countFrom+" }}", n, attr)
+			if err != nil {
+				return nil, err
+			}
+			site.bindings = append(site.bindings, binding{name: "count", in: in})
+		}
+	}
+	if countdown != nil {
+		site.inputs = append(site.inputs, countdown.inputs()...) // the duration, in milliseconds
+		site.state = countdown.startState(site.state)            // all of it left, not playing
+		c.countdowns = append(c.countdowns, countdown)
+	}
+	if editor != nil {
+		// the box its hidden field is placed against, and its first state, read where the call stands
+		// for each request: the counts of its value cleaned, unsaved, open, address (editor.go)
+		site.classes = append(site.classes, stylesheet.EditorClass)
+		site.bindings = append(site.bindings, editor.bindings()...)
+	}
 	if network != nil {
 		site.network = network
 		site.classes = append(site.classes, network.classes()...)
@@ -141,8 +260,10 @@ func (c *compiler) componentCall(n *Node, cx ctx, outer *callSite) (op, error) {
 			site.places = append(site.places, 0) // fixed over whatever the page holds there, at every width (contrast.go)
 		}
 	}
-	host := *n // the host as the author wrote it, without the call's words (a component without a UI)
+	c.hostTags[n] = written // the component's own words may have left the host (terminal, tabs, toast…)
+	host := *n              // the host as the author wrote it, without the call's words (a component without a UI)
 	host.Attrs = nil
+	c.hostTags[&host] = written
 	if def.kitwork != nil && def.kitwork.empty && len(n.SignificantChildren()) == 0 && !writesAttribute(n, "show") {
 		// written empty, it is heard and never seen: it takes no room in the page's flow (a gap of a
 		// row around it, a line of a list), and the kernel still starts it
@@ -162,11 +283,19 @@ func (c *compiler) componentCall(n *Node, cx ctx, outer *callSite) (op, error) {
 		if a.Bare && !(booleanAttributes[base] && !def.hasUI() && (presentation(base, n.Tag) || tagWord(n.Tag, base))) {
 			return nil, errAttr(n, a, "%s cần một giá trị", a.Name)
 		}
-		if chain != "" && (base == "component" || base == "as" || base == "for" || base == "if") {
+		if a.Bare && a.Value == "" {
+			// a word of the box a site component builds: lint did not know the tag (it does one of Kitwork's)
+			a.Value = "true"
+			c.warn(n.File, a.Line, a.Column, fmt.Sprintf("thuộc tính đúng/sai luôn có giá trị: viết %s=\"true\" (viết trơn đọc là true)", a.Name))
+		}
+		if chain != "" && (base == "as" || base == "for" || base == "if" || base == "source") {
 			return nil, errAttr(n, a, "%s không nhận tiền tố", base)
 		}
 		switch {
+		case base == "component" && i > 0:
+			return nil, componentWritten(n, a) // the author's own, beside the tag
 		case base == "component":
+		case base == "source" && def.kitwork == nil:
 		case base == "as":
 			asAttr = a
 		case base == "for":
@@ -228,21 +357,18 @@ func (c *compiler) componentCall(n *Node, cx ctx, outer *callSite) (op, error) {
 			name := camel(a.Name)
 			if chain != "" || isEvent(a.Name) || presentation(base, n.Tag) || tagWord(n.Tag, a.Name) || a.Name == "align" {
 				if _, declared := def.state[name]; declared && chain == "" {
-					return nil, errAttr(n, a, "%s là thuộc tính của <%s> và cũng là tên %s khai: một chữ một nghĩa trên một thẻ; đổi tên trong %s",
-						a.Name, n.Tag, def.name, logicFileName(c, def))
+					return nil, errAttr(n, a, "%s là thuộc tính của <%s> (%s dựng một <%s>) và cũng là tên %s khai: một chữ một nghĩa trên một thẻ; đổi tên trong %s",
+						a.Name, n.Tag, called(n), n.Tag, def.name, logicFileName(c, def))
 				}
 				host.Attrs = append(host.Attrs, *a)
 				continue
-			}
-			if a.Name == "source" {
-				return nil, errAttr(n, a, "source chỉ dành cho vùng; chỉ rõ nguồn của component bằng đường dẫn: component=\".components/%s\"", def.name)
 			}
 			if _, declared := def.state[name]; !declared {
 				if message := c.webWord(n, a); message != "" {
 					// a word of the web (onoffline, href, class) is told the .ui word, as on any tag (compile.go)
 					return nil, errAttr(n, a, "%s", message)
 				}
-				return nil, errAttr(n, a, "%s không phải thuộc tính của <%s>, và %s không khai %s", a.Name, n.Tag, def.name, name)
+				return nil, errAttr(n, a, "%s không phải thuộc tính của <%s> (%s dựng một <%s>), và %s không khai %s", a.Name, n.Tag, called(n), n.Tag, def.name, name)
 			}
 			in, err := c.inputValue(n, a, site)
 			if err != nil {
@@ -251,15 +377,6 @@ func (c *compiler) componentCall(n *Node, cx ctx, outer *callSite) (op, error) {
 			outside = append(outside, inputExprs(a, in)...)
 		}
 	}
-	if outer != nil && outer.ifExpr != nil {
-		// a region root that is a host: the region's own if comes first
-		if site.ifExpr != nil {
-			site.ifExpr = &expr{source: "(" + outer.ifExpr.source + ") && (" + site.ifExpr.source + ")", ir: []any{"&&", outer.ifExpr.ir, site.ifExpr.ir}}
-		} else {
-			site.ifExpr = outer.ifExpr
-		}
-	}
-
 	// what the call reads is read where it stands, never the component's own names
 	for _, o := range outside {
 		if err := c.checkNames(n, o.attr, o.e, cx.scope, cx.aliases); err != nil {
@@ -317,13 +434,28 @@ func (c *compiler) componentCall(n *Node, cx ctx, outer *callSite) (op, error) {
 		inner = rowFrame(site.forEach, inner)
 	}
 	inner = componentFrame(def, inner)
+	inner.countdown = countdown // nil for any other component (countdown.go)
 	inside := cx
 	inside.scope = inner
 	inside.terminal = nil // a component's code is its own, never a command of a terminal around it
 	inside.tabs = nil     // nor is its button a tab of a tabs around it
 
-	// nor is it a notice of a toast around it
+	// nor is it a notice of a toast around it, nor a part of a carousel around it
 	inside.toast, inside.toastRow = nil, false
+	inside.carousel = nil
+	if carousel != nil {
+		carousel.alias, inside.carousel = site.alias, carousel
+	}
+	// nor is its <time> the time left of a countdown around it
+	inside.countdown = nil
+	if countdown != nil {
+		countdown.alias, countdown.aliases, inside.countdown = site.alias, cx.aliases, countdown
+	}
+	// nor is its <content> the writing area of an editor around it, nor its button one of its commands
+	inner.editor, inside.editor = editor, editor // nil for any other component (editor.go)
+	if editor != nil {
+		editor.alias, editor.aliases = site.alias, cx.aliases
+	}
 	if toast != nil {
 		// the stack: its blueprint of a notice is one of the children, its place and limit go in (toast.go)
 		toast.alias, toast.aliases = site.alias, inside.aliases
@@ -331,7 +463,7 @@ func (c *compiler) componentCall(n *Node, cx ctx, outer *callSite) (op, error) {
 		site.classes = append(site.classes, toast.classes()...)
 		site.inputs = append(site.inputs, toast.inputs()...)
 		if site.alias == "" {
-			c.warn(n.File, attr.Line, attr.Column, `toast không có as: trang không gọi được show; viết as="$toast" trên thẻ chủ rồi gọi $toast.success('Đã lưu.') ở bất cứ đâu`)
+			c.warn(n.File, attr.Line, attr.Column, `toast không có as: trang không gọi được show; viết <toast as="$toast"> rồi gọi $toast.success('Đã lưu.') ở bất cứ đâu`)
 		}
 	}
 	if forAttr != nil {
@@ -408,11 +540,11 @@ func outsideError(c *compiler, n *Node, o outsideExpr, def *componentDef, name s
 	}
 	switch o.word {
 	case "if", "for", "key":
-		return errAttr(n, o.attr, "%s đọc bên ngoài thẻ chủ: có thẻ chủ hay không, lặp mấy lần quyết trước khi %s có; %s là của %s", o.word, def.name, name, def.name)
+		return errAttr(n, o.attr, "%s đọc ở chỗ gọi, bên ngoài %s: có %s hay không, lặp mấy lần quyết trước khi nó có; %s là của %s", o.word, called(n), called(n), name, def.name)
 	case "show":
-		return errAttr(n, o.attr, "show đọc bên ngoài thẻ chủ; %s là của %s: %s", name, def.name, where)
+		return errAttr(n, o.attr, "show đọc ở chỗ gọi, bên ngoài %s; %s là của %s: %s", called(n), name, def.name, where)
 	}
-	return errAttr(n, o.attr, "giá trị của %s đọc bên ngoài thẻ chủ; %s là của %s, không phải của chỗ gọi", o.word, name, def.name)
+	return errAttr(n, o.attr, "giá trị của %s đọc ở chỗ gọi, bên ngoài %s; %s là của %s, không phải của chỗ gọi", o.word, called(n), name, def.name)
 }
 
 // liveCall refuses a for or an if on a host that reads a component the browser runs: the kernel
@@ -428,8 +560,8 @@ func (c *compiler) liveCall(n *Node, cx ctx, site *callSite, def *componentDef, 
 			return err
 		}
 		if def.instance() {
-			return errAttr(n, a, "%s trên thẻ chủ của %s đọc trạng thái sống (%s): kernel chưa tách được hàng của for khỏi instance của component, nên chưa lặp hay bỏ một thẻ chủ theo trạng thái sống; dùng show trên phần con, hoặc đặt %s trên một thẻ bọc không phải thẻ chủ",
-				word, def.name, e.source, word)
+			return errAttr(n, a, "%s trên %s đọc trạng thái sống (%s): kernel chưa tách được hàng của for khỏi instance của component, nên chưa lặp hay bỏ một component theo trạng thái sống; dùng show trên phần con, hoặc đặt %s trên một <box> bọc ngoài",
+				word, called(n), e.source, word)
 		}
 		if word == "if" {
 			return errAttr(n, a, "bên trong %s if theo trạng thái của component chưa chạy ở trình duyệt; dùng show", cx.scope.live().label())
@@ -458,8 +590,12 @@ func (c *compiler) takesInput(def *componentDef, name string) bool {
 // words and no input.
 func (c *compiler) notAnInput(n *Node, a *Attr, def *componentDef) error {
 	file := path.Base(def.what(c.site))
-	words := "component, as, if, show, for, span, place và dữ liệu nó đọc"
+	words := "as, if, show, for, span, place và dữ liệu nó đọc"
 	base := a.Name[strings.LastIndex(a.Name, ":")+1:]
+	// a side or a corner named with start or end is told its name of today, as on any element
+	if message := c.renamedSide(n, a, strings.TrimSuffix(strings.TrimSuffix(a.Name, base), ":"), base); message != "" {
+		return errAttr(n, a, "%s", message)
+	}
 	known := isEvent(a.Name) || presentation(base, def.rootTag()) || tagWord(def.rootTag(), base) || base == "align"
 	if known {
 		// a typo in the value is that error first (question 1): background="papr" is told of its colour
@@ -557,60 +693,25 @@ func (c *compiler) kitworkUI(n *Node, cx ctx, def *componentDef) (op, error) {
 	return nil, errAt(n, "%s là component của Kitwork mà engine chưa dựng được", def.name)
 }
 
-// forbiddenHost is why a tag cannot carry component=, "" when it can.
+// forbiddenHost is why a tag cannot be the root of a component's .ui (the host), "" when it can.
 func forbiddenHost(tag string) string {
 	switch tag {
 	case "page":
-		return "page là khung của trang; component đặt trên một thẻ bên trong"
+		return "page là khung của trang"
 	case "content":
-		return "content là nội dung của route; component đặt trên một thẻ bên trong"
+		return "content là nội dung của route"
 	case "popover", "option", "empty":
 		return tag + " là một phần của thẻ chứa nó, không đứng riêng"
 	case "fragment":
 		return "fragment không dựng phần tử nào"
-	case "input", "image", "icon", "select", "textarea":
+	case "input", "image", "icon", "select", "textarea", "richtext":
 		return tag + " không có nội dung con, và phần tử của nó do Kitwork quyết"
 	case "code", "quote":
 		return tag + " chỉ chứa chữ"
 	case "accordion", "accordions", "breadcrumb", "reader":
-		return tag + " là phần tử của Kitwork, tự là instance; component= trên nó chỉ dành cho component mở rộng nó (" + tag + ".define), mà engine chưa đọc"
+		return tag + " là phần tử của Kitwork, tự là instance"
 	}
 	return ""
-}
-
-func hostList(hosts map[string]bool) string {
-	names := sortedNames(hosts)
-	quoted := make([]string, len(names))
-	for i, name := range names {
-		quoted[i] = "<" + name + ">"
-	}
-	return strings.Join(quoted, ", ")
-}
-
-// suggestion writes the call of a component the way it is written: its host tag, component=, the
-// alias the author wrote, then the rest.
-func suggestion(tag string, def *componentDef, n *Node) string {
-	var b strings.Builder
-	b.WriteString("<" + tag + " component=\"" + def.name + "\"")
-	rest := false
-	for _, a := range n.Attrs {
-		switch a.Name {
-		case "as":
-			b.WriteString(" as=\"" + a.Value + "\"")
-		case "component":
-		default:
-			rest = true
-		}
-	}
-	if rest {
-		b.WriteString(" …")
-	}
-	if def.hasUI() {
-		b.WriteString(" />")
-	} else {
-		b.WriteString(">…</" + tag + ">")
-	}
-	return b.String()
 }
 
 // registerAlias records an as where it is written: page-wide in page.ui, a region file or the content,
@@ -739,6 +840,9 @@ func (c *compiler) checkNames(n *Node, a *Attr, e *expr, scope *frame, aliases *
 			line, column = a.Line, a.Column
 		}
 		if outer := owner.parent.declaring(name); outer != nil {
+			if c.editorMenuOwn(n, name) {
+				continue // the toggle() that opens a dropdown of an editor's toolbar, the engine's reading (editor.go)
+			}
 			c.warn(n.File, line, column, fmt.Sprintf("%s ở đây là của %s, mà %s bao ngoài cũng khai %s: một tên một nghĩa — gọi qua alias ($tên.%s) hoặc đổi tên",
 				name, owner.label(), outer.label(), name, name))
 			continue
@@ -773,7 +877,9 @@ func (c *compiler) errUse(use aliasUse) error {
 // componentEventsHere refuses an event only a Kitwork component sends (componentEvents) on any tag
 // but that component's host: <box offline="…"> would wait for an event nothing ever sends there. A
 // component of the site with that component's name is the site's, and sends none of them either. The
-// host it says to write carries the event alone, with its modifiers (click,offline:once → offline:once).
+// host it says to write carries the event alone, with its modifiers (click,offline:once → offline:once),
+// written empty for a component that may be (<network offline="…" />), open for one that holds what
+// the author draws (<countdown finish="…">).
 func (c *compiler) componentEventsHere(n *Node, events []Attr, site *callSite) error {
 	for i := range events {
 		a := &events[i]
@@ -784,19 +890,19 @@ func (c *compiler) componentEventsHere(n *Node, events []Attr, site *callSite) e
 			if owner == "" {
 				continue
 			}
-			if site != nil && site.def != nil && site.def.name == owner {
-				if site.def.kitwork != nil {
-					continue
-				}
-				return errAttr(n, a, "%s là sự kiện của %s của Kitwork; %s ở đây là component của site (%s), không gửi sự kiện đó: đặt tên khác cho component này",
-					event, owner, owner, site.def.logicPlace(c.site))
+			if site != nil && site.def != nil && site.def.kitwork != nil && site.def.name == owner {
+				continue // a site's logic under Kitwork's name is refused at its file (component.go)
 			}
 			written := event
 			if modifiers != "" {
 				written += ":" + modifiers
 			}
-			return errAttr(n, a, "%s là sự kiện của component %s, chỉ thẻ chủ của nó nghe được: <box component=\"%s\" %s=\"…\" />",
-				event, owner, owner, written)
+			end := " />"
+			if k := kitworkComponents[owner]; k != nil && !k.empty {
+				end = ">"
+			}
+			return errAttr(n, a, "%s là sự kiện của component %s, chỉ thẻ của nó nghe được: <%s %s=\"…\"%s",
+				event, owner, owner, written, end)
 		}
 	}
 	return nil

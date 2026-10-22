@@ -26,14 +26,14 @@ router.colors({ brand: "#c8742c" });
   <text id="state">{{ $pick.copied ? 'yes' : 'no' }}</text>
   <box flex="row" gap="2"><button id="on">Bật</button><button id="off" disabled="true">Tắt</button></box>
   <box id="pick">
-    <box component="terminal" as="$pick" typing="2s" background="panel">
+    <terminal as="$pick" typing="2s" background="panel">
       <box padding="4">
         <code language="powershell" show="false" medium:show="true">Get-ChildItem -Recurse -Force -ErrorAction SilentlyContinue</code>
         <code language="bash" medium:show="false">ls -la --color=never --group-directories-first</code>
         <code language="bash">echo done</code>
         <button id="copy-pick" click="copy()">{{ copied ? 'Đã chép' : 'Chép' }}</button>
       </box>
-    </box>
+    </terminal>
   </box>
 </content>`,
 }
@@ -100,8 +100,8 @@ router.language("` + language + `");
 `,
 		"localhost/page.ui": `<page><content /></page>`,
 		"localhost/content.ui": `<content padding="4" gap="4">
-  <box id="ok"><box component="terminal"><code>echo ok</code><button id="copy-ok" click="copy()">Copy</button></box></box>
-  <box id="no"><box component="terminal"><code>refuse me</code><button id="copy-no" click="copy()">Copy</button></box></box>
+  <box id="ok"><terminal><code>echo ok</code><button id="copy-ok" click="copy()">Copy</button></terminal></box>
+  <box id="no"><terminal><code>refuse me</code><button id="copy-no" click="copy()">Copy</button></terminal></box>
 </content>`,
 	}
 }

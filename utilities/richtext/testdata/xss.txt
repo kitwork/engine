@@ -1,0 +1,763 @@
+# XSS corpus for Clean: filter-evasion payloads in the style of the OWASP cheat sheet, mutation XSS
+# known from DOMPurify and PortSwigger research, character references without ";", control
+# characters inside addresses, and hosts hidden behind backslashes; and, for the grammar of 20/10/2026,
+# alignment classes injected or spelt with references, text-align with expression() and url(), markup
+# and end tags breaking out of a pre, code inside a and a inside code, rules with attributes: nothing
+# of a class, a style or an align attribute reaches the output, the writer spells one of two classes.
+#
+# A case is "== name", the source lines, then "-- want" and the HTML Clean must give ("" when the
+# want is empty). Characters a text file cannot hold plainly are written {NUL} {SOH} {TAB} {LF} {CR}
+# {FF} {VT} {ESC} {DEL} {NBSP} {ZWSP} {BOM} or {U+XXXX}, and a byte that is not UTF-8 {BYTE:XX}.
+
+== script tag with a source
+<SCRIPT SRC=http://xss.rocks/xss.js></SCRIPT>after
+-- want
+<p>after</p>
+
+== polyglot
+javascript:/*--></title></style></textarea></script></xmp><svg/onload='+/"/+/onmouseover=1/+/[*/[]/+alert(1)//'>
+-- want
+<p>javascript:/*--&gt;</p>
+
+== image with a script source
+<IMG SRC="javascript:alert('XSS');">
+-- want
+
+== image without quotes
+<IMG SRC=javascript:alert('XSS')>image
+-- want
+<p>image</p>
+
+== image with mixed case
+<IMG SRC=JaVaScRiPt:alert('XSS')>
+-- want
+
+== grave accents
+<IMG SRC=`javascript:alert("RSnake says, 'XSS'")`>
+-- want
+
+== malformed a with an event
+<a onmouseover="alert(document.cookie)">xxs link</a>
+-- want
+<p>xxs link</p>
+
+== malformed img
+<IMG """><SCRIPT>alert("XSS")</SCRIPT>"\>
+-- want
+<p>"\&gt;</p>
+
+== fromCharCode
+<IMG SRC=javascript:alert(String.fromCharCode(88,83,83))>
+-- want
+
+== onerror with references without semicolons
+<img src=x onerror="&#0000106&#0000097&#0000118&#0000097&#0000115&#0000099&#0000114&#0000105&#0000112&#0000116&#0000058&#0000097&#0000108&#0000101&#0000114&#0000116&#0000040&#0000039&#0000088&#0000083&#0000083&#0000039&#0000041">
+-- want
+
+== decimal references in href
+<a href="&#106;&#97;&#118;&#97;&#115;&#99;&#114;&#105;&#112;&#116;&#58;&#97;&#108;&#101;&#114;&#116;&#40;&#39;&#88;&#83;&#83;&#39;&#41;">x</a>
+-- want
+<p>x</p>
+
+== long decimal references without semicolons
+<a href="&#0000106&#0000097&#0000118&#0000097&#0000115&#0000099&#0000114&#0000105&#0000112&#0000116&#0000058alert(1)">x</a>
+-- want
+<p>x</p>
+
+== hex references without semicolons
+<a href="&#x6A&#x61&#x76&#x61&#x73&#x63&#x72&#x69&#x70&#x74&#x3A&#x61&#x6C&#x65&#x72&#x74&#x28&#x27&#x58&#x53&#x53&#x27&#x29">x</a>
+-- want
+<p>x</p>
+
+== embedded tab
+<a href="jav{TAB}ascript:alert('XSS');">x</a>
+-- want
+<p>x</p>
+
+== encoded tab
+<a href="jav&#x09;ascript:alert('XSS');">x</a>
+-- want
+<p>x</p>
+
+== encoded newline
+<a href="jav&#x0A;ascript:alert('XSS');">x</a>
+-- want
+<p>x</p>
+
+== encoded carriage return
+<a href="jav&#x0D;ascript:alert('XSS');">x</a>
+-- want
+<p>x</p>
+
+== null inside the scheme
+<a href="java{NUL}script:alert('XSS');">x</a>
+-- want
+<p>x</p>
+
+== spaces and a control character in front
+<a href=" &#14;  javascript:alert('XSS');">x</a>
+-- want
+<p>x</p>
+
+== named references without semicolons
+<a href="javascript&colon;alert(1)">a</a><a href="java&Tab;script:alert(1)">b</a><a href="java&NewLine;script:alert(1)">c</a>
+-- want
+<p>abc</p>
+
+== colon reference with a semicolon
+<a href="JaVaScRiPt&colon;alert(1)">x</a>
+-- want
+<p>x</p>
+
+== decimal colon without a semicolon
+<a href="javascript&#58alert(1)">x</a>
+-- want
+<p>x</p>
+
+== encoded space and control in front
+<a href="&#x20;javascript:alert(1)">a</a><a href="&#x01;javascript:alert(1)">b</a>
+-- want
+<p>ab</p>
+
+== leading zeros in a hex reference
+<a href="ja&#x0000A;vascript:alert(1)">x</a>
+-- want
+<p>x</p>
+
+== a single digit reference Go leaves alone
+<a href="/a&#9x">x</a>
+-- want
+<p><a href="/a&amp;#9x">x</a></p>
+
+== data and vbscript
+<a href="data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==">a</a> <a href="vbscript:msgbox(1)">b</a> <a href="DATA:text/html,x">c</a>
+-- want
+<p>a b c</p>
+
+== a script address behind U+2028
+<a href="java{U+2028}script:alert(1)">x</a>
+-- want
+<p>x</p>
+
+== fullwidth letters
+<a href="{U+FF4A}{U+FF41}{U+FF56}{U+FF41}script:alert(1)">x</a>
+-- want
+<p>x</p>
+
+== backslash in front of a host
+<a href="/\evil.example">x</a>
+-- want
+<p>x</p>
+
+== two backslashes
+<a href="\\evil.example">x</a>
+-- want
+<p>x</p>
+
+== backslash then slash
+<a href="\/evil.example">x</a>
+-- want
+<p>x</p>
+
+== tab between the slashes
+<a href="/{TAB}/evil.example">x</a>
+-- want
+<p>x</p>
+
+== carriage return between the slashes
+<a href="/{CR}/evil.example">x</a>
+-- want
+<p>x</p>
+
+== line feed between the slashes
+<a href="/{LF}/evil.example">x</a>
+-- want
+<p>x</p>
+
+== encoded tab between the slashes
+<a href="/&#9;/evil.example">x</a>
+-- want
+<p>x</p>
+
+== encoded backslashes
+<a href="&#92;&#92;evil.example">a</a><a href="/&bsol;evil.example">b</a>
+-- want
+<p>ab</p>
+
+== null between the slashes
+<a href="/{NUL}/evil.example">x</a>
+-- want
+<p>x</p>
+
+== protocol relative
+<A HREF="//www.google.com/">XSS</A>
+-- want
+<p>XSS</p>
+
+== a web address written with backslashes
+<a href="https:\\evil.example\path">x</a>
+-- want
+<p><a href="https://evil.example/path">x</a></p>
+
+== a user name hiding the host
+<a href="https://evil.example\@kitwork.io/">a</a> <a href="https://kitwork.io\@evil.example/">b</a>
+-- want
+<p><a href="https://evil.example/@kitwork.io/">a</a> <a href="https://kitwork.io/@evil.example/">b</a></p>
+
+== addresses a link may not hold
+<a href="#top">a</a> <a href="?q=1">b</a> <a href="page.html">c</a> <a href="evil.example">d</a> <a href="../up">e</a> <a href="">f</a> <a href>g</a>
+-- want
+<p>a b c d e f g</p>
+
+== addresses a link may hold
+<a href="mailto:hi@kitwork.io">a</a> <a href="tel:+84901234567">b</a> <a href="HTTPS://Kitwork.io">c</a> <a href="/">d</a> <a href="http://66.102.7.147/">e</a> <a href="http://%77%77%77%2E%67%6F%6F%67%6C%65%2E%63%6F%6D">f</a>
+-- want
+<p><a href="mailto:hi@kitwork.io">a</a> <a href="tel:+84901234567">b</a> <a href="HTTPS://Kitwork.io">c</a> <a href="/">d</a> <a href="http://66.102.7.147/">e</a> <a href="http://%77%77%77%2E%67%6F%6F%67%6C%65%2E%63%6F%6D">f</a></p>
+
+== a dotted host written with tabs and newlines
+<A HREF="h{LF}tt{TAB}p://6{TAB}6.000146.0x7.147/">XSS</A>
+-- want
+<p><a href="http://66.000146.0x7.147/">XSS</a></p>
+
+== an address with markup inside
+<a href="https://a.example/?q=<script>&quot;x&quot;">x</a>
+-- want
+<p><a href="https://a.example/?q=&lt;script&gt;&quot;x&quot;">x</a></p>
+
+== an address breaking out of its quotes
+<a href="https://a.example/&quot; onmouseover=&quot;alert(1)">x</a>
+-- want
+<p><a href="https://a.example/&quot; onmouseover=&quot;alert(1)">x</a></p>
+
+== references in a path
+<a href="/a&amp;b&lt;c&gt;d&nbsp;e">x</a>
+-- want
+<p><a href="/a&amp;b&lt;c&gt;d&nbsp;e">x</a></p>
+
+== legacy references without a semicolon, the way a browser reads them in an attribute
+<a href="/search?x=1&copy=2">a</a> <a href="/search?lang=vi&region=vn">b</a> <a href="/a&amp=1&notit;&copy 2&lt">c</a>
+-- want
+<p><a href="/search?x=1&amp;copy=2">a</a> <a href="/search?lang=vi&amp;region=vn">b</a> <a href="/a&amp;amp=1&amp;notit;© 2&lt;">c</a></p>
+
+== the first href wins
+<a href="javascript:alert(1)" href="/ok">a</a> <a href="/ok" href="javascript:alert(1)">b</a>
+-- want
+<p>a <a href="/ok">b</a></p>
+
+== events and styles
+<a href=/ok onclick=alert(1) style="color:red" target=_blank rel=opener>x</a><p id=x class=y style="background:url(javascript:alert(1))" onclick=alert(1) title=t>p</p>
+-- want
+<p><a href="/ok">x</a></p>
+<p>p</p>
+
+== slash before the attribute
+<a/href="javascript:alert(1)">a</a> <a/href="/ok">b</a>
+-- want
+<p>a <a href="/ok">b</a></p>
+
+== spaces around the equals sign
+<a href = "javascript:alert(1)">a</a> <a href = "/ok">b</a>
+-- want
+<p>a <a href="/ok">b</a></p>
+
+== unquoted script address
+<a href=javascript:alert(1)>x</a>
+-- want
+<p>x</p>
+
+== self-closing a
+<a href="javascript:alert(1)"/>x
+-- want
+<p>x</p>
+
+== an attribute named with quotes
+<a """ href="/ok">x</a>
+-- want
+<p><a href="/ok">x</a></p>
+
+== a less-than sign in an attribute name
+<a href="/x"<b>y</b></a>
+-- want
+<p><a href="/x">y</a></p>
+
+== a title holding markup
+<a href="/x" title="</a><img src=x onerror=alert(1)>">y</a>
+-- want
+<p><a href="/x">y</a></p>
+
+== a tag split across a script
+<scr<script>ipt>alert(1)</scr</script>ipt>
+-- want
+<p>ipt&gt;alert(1)ipt&gt;</p>
+
+== nested less-than signs
+<<SCRIPT>alert("XSS");//\<</SCRIPT>
+-- want
+<p>&lt;</p>
+
+== an unclosed script tag
+<SCRIPT SRC=http://xss.rocks/xss.js?< B >
+-- want
+
+== an iframe without its end
+<iframe src=http://xss.rocks/scriptlet.html <
+-- want
+
+== a quote breaking out of a script string
+\";alert('XSS');//
+-- want
+<p>\";alert('XSS');//</p>
+
+== a title end then a script
+</TITLE><SCRIPT>alert("XSS");</SCRIPT>after
+-- want
+<p>after</p>
+
+== an image input
+<INPUT TYPE="IMAGE" SRC="javascript:alert('XSS');">x
+-- want
+<p>x</p>
+
+== body background and onload
+<BODY BACKGROUND="javascript:alert('XSS')" ONLOAD=alert('XSS')>body
+-- want
+<p>body</p>
+
+== odd characters in an attribute name
+<BODY onload!#$%&()*~+-_.,:;?@[/|\]^`=alert("XSS")>x
+-- want
+<p>x</p>
+
+== style with a list image
+<STYLE>li {list-style-image: url("javascript:alert('XSS')");}</STYLE><UL><LI>XSS</br>
+-- want
+<ul>
+<li>XSS</li>
+</ul>
+
+== svg onload
+<svg/onload=alert('XSS')>after
+-- want
+
+== bgsound, link, meta
+<BGSOUND SRC="javascript:alert('XSS');"><LINK REL="stylesheet" HREF="javascript:alert('XSS');"><META HTTP-EQUIV="refresh" CONTENT="0;url=javascript:alert('XSS');">text
+-- want
+<p>text</p>
+
+== style import
+<STYLE>@import'http://xss.rocks/xss.css';</STYLE>text
+-- want
+<p>text</p>
+
+== iframe and frameset
+<IFRAME SRC="javascript:alert('XSS');"></IFRAME><FRAMESET><FRAME SRC="javascript:alert('XSS');"></FRAMESET>text
+-- want
+<p>text</p>
+
+== table backgrounds
+<TABLE BACKGROUND="javascript:alert('XSS')"><TD BACKGROUND="javascript:alert('XSS')">cell
+-- want
+<p>cell</p>
+
+== div styles
+<DIV STYLE="background-image: url(javascript:alert('XSS'))">a</DIV><DIV STYLE="width: expression(alert('XSS'));">b</DIV>
+-- want
+<p>a</p>
+<p>b</p>
+
+== conditional comment
+<!--[if gte IE 4]><SCRIPT>alert('XSS');</SCRIPT><![endif]-->text
+-- want
+<p>text</p>
+
+== base href
+<BASE HREF="javascript:alert('XSS');//"><a href=../lol/safari.html>test</a>
+-- want
+<p>test</p>
+
+== object and embed
+<OBJECT TYPE="text/x-scriptlet" DATA="http://xss.rocks/scriptlet.html">fallback</OBJECT><EMBED SRC="data:image/svg+xml;base64,PHN2Zz4=" type="image/svg+xml" AllowScriptAccess="always"></EMBED>text
+-- want
+<p>text</p>
+
+== a greater-than sign in a quoted attribute of script
+<SCRIPT a=">" SRC="httx://xss.rocks/xss.js"></SCRIPT>after
+-- want
+<p>after</p>
+
+== an attribute named equals
+<SCRIPT ="blah" SRC="httx://xss.rocks/xss.js"></SCRIPT>after
+-- want
+<p>after</p>
+
+== a grave accent value
+<SCRIPT a=`>` SRC="httx://xss.rocks/xss.js"></SCRIPT>after
+-- want
+<p>after</p>
+
+== form, button, input, select
+<form action="javascript:alert(1)"><input type=submit value=go><button formaction="javascript:alert(1)">click</button></form><select><option>a</option></select><button>b</button>after
+-- want
+<p>after</p>
+
+== img with srcset and onerror
+<img src=x:alert(alt) onerror=eval(src) alt=0>text
+-- want
+<p>text</p>
+
+== details ontoggle
+<details open ontoggle=alert(1)><summary>s</summary>x</details>
+-- want
+<p>s</p>
+<p>x</p>
+
+== marquee and custom elements
+<marquee onstart=alert(1)>m</marquee> <x onclick=alert(1)>x</x> <custom-element onclick=alert(1)>c</custom-element>
+-- want
+<p>m x c</p>
+
+== video fallback
+<video><source onerror=alert(1)>fallback</video>
+-- want
+<p>fallback</p>
+
+== a quote and a greater-than sign in text
+"><script>alert(1)</script>
+-- want
+<p>"&gt;</p>
+
+== references in plain text stay as written
+&lt;script&gt;alert(1)&lt;/script&gt; &ltb&gt &amp;amp;
+-- want
+<p>&amp;lt;script&amp;gt;alert(1)&amp;lt;/script&amp;gt; &amp;ltb&amp;gt &amp;amp;amp;</p>
+
+== references in HTML text
+<p>&lt;script&gt;alert(1)&lt;/script&gt; &ltb&gt &amp;amp; &copy2026 &notit; &#x3C;i&#62;</p>
+-- want
+<p>&lt;script&gt;alert(1)&lt;/script&gt; &lt;b&gt; &amp;amp; ©2026 ¬it; &lt;i&gt;</p>
+
+== mutation XSS: svg, p end tag, style
+<svg></p><style><a id="</style><img src=1 onerror=alert(1)>">
+-- want
+<p>"&gt;</p>
+
+== mutation XSS: math, mtext, table, mglyph, style
+<math><mtext><table><mglyph><style><!--</style><img title="--&gt;&lt;/mglyph&gt;&lt;img&Tab;src=1&Tab;onerror=alert(1)&gt;">
+-- want
+
+== mutation XSS: nested forms in math
+<form><math><mtext></form><form><mglyph><style></math><img src onerror=alert(1)>
+-- want
+
+== mutation XSS: noscript with a title
+<noscript><p title="</noscript><img src=x onerror=alert(1)>">
+-- want
+<p>"&gt;</p>
+
+== mutation XSS: style inside svg
+<svg><style><img src=x onerror=alert(1)></style></svg>after
+-- want
+<p>after</p>
+
+== mutation XSS: style inside math
+<math><style><img src=x onerror=alert(1)></style></math>after
+-- want
+<p>after</p>
+
+== mutation XSS: CDATA inside svg
+<svg><![CDATA[><img src=x onerror=alert(1)>]]></svg>after
+-- want
+<p>after</p>
+
+== CDATA in HTML is a bogus comment
+<![CDATA[><img src=x onerror=alert(1)>]]>
+-- want
+<p>]]&gt;</p>
+
+== mutation XSS: svg title and a breakout
+<svg><title><p>hidden</p></title></svg><svg><desc><img src=x onerror=alert(1)></desc></svg>after
+-- want
+<p>after</p>
+
+== mutation XSS: foreignObject
+<svg><foreignObject><p>inside</p><iframe srcdoc="<script>alert(1)</script>"></iframe></foreignObject></svg>after
+-- want
+<p>after</p>
+
+== mutation XSS: a breakout tag
+<svg><p>visible</p></svg>
+-- want
+<p>visible</p>
+
+== mutation XSS: font with an attribute breaks out
+<svg><font color=red>out</font></svg>
+-- want
+<p>out</p>
+
+== mutation XSS: xlink href
+<svg><a xlink:href="javascript:alert(1)"><text x="20" y="20">XSS</text></a></svg>after
+-- want
+<p>after</p>
+
+== mutation XSS: math with an href
+<math href="javascript:alert(1)">CLICK</math>after
+-- want
+<p>after</p>
+
+== mutation XSS: an end tag of the element around svg
+<p>a<svg><g></p>b
+-- want
+<p>a</p>
+<p>b</p>
+
+== mutation XSS: textarea and title
+<textarea><img src=x onerror=alert(1)></textarea><title><img src=x onerror=alert(1)></title>after
+-- want
+<p>after</p>
+
+== raw text elements
+<xmp><img src=x onerror=alert(1)></xmp><iframe><img src=x></iframe><noembed><img src=x></noembed><noframes><img src=x></noframes><template><img src=x></template>after
+-- want
+<p>after</p>
+
+== plaintext runs to the end
+before<plaintext><img src=x onerror=alert(1)></plaintext>after
+-- want
+<p>before</p>
+
+== script with an escaped part
+<script><!--<script></script>hidden</script>shown
+-- want
+<p>shown</p>
+
+== script end tags that are not
+<script>a</scriptx>b</script >c<style>d</style/>e
+-- want
+<p>ce</p>
+
+== comments that end as they begin
+<!--><img src=x onerror=alert(1)>--><!---><img src=x onerror=alert(1)>-->
+-- want
+<p>--&gt;--&gt;</p>
+
+== a comment ended by a bang
+<!-- a --!><b>bold</b>
+-- want
+<p><strong>bold</strong></p>
+
+== processing instruction and a bogus end tag
+<?xml version="1.0"?><img src=x onerror=alert(1)></1><img src=x onerror=alert(1)>text
+-- want
+<p>text</p>
+
+== an end tag with nothing in it
+a</>b
+-- want
+<p>ab</p>
+
+== a comment without its end
+text<!-- <script>alert(1)</script>
+-- want
+<p>text</p>
+
+== a tag without its end
+text<a href="/x
+-- want
+<p>text</p>
+
+== doctype
+<!DOCTYPE html><p>x</p>
+-- want
+<p>x</p>
+
+== a link inside a link
+<a href="/one">a<a href="/two">b</a>c</a>
+-- want
+<p><a href="/one">a</a><a href="/two">b</a>c</p>
+
+== a refused link inside a kept one
+<a href="/one">a<a href="javascript:x">b</a>c</a>
+-- want
+<p><a href="/one">a</a>bc</p>
+
+== many attributes and duplicates on a kept link
+<a href="https://kitwork.io/" HREF="javascript:alert(1)" Href="/x" srcdoc="<script>" formaction="javascript:x" xlink:href="javascript:x">x</a>
+-- want
+<p><a href="https://kitwork.io/">x</a></p>
+
+== the meta charset trick
+<meta charset="x-imap4-modified-utf7">&ADz&AGn&AG0&AEf&ACA&AHM&AHI&AGO&AD0&AGn&ACA&AG8Abg&AGUAcgByAG8AcgA9AGEAbABlAHIAdAAoADEAKQ&ACAAPABi
+-- want
+<p>&amp;ADz&amp;AGn&amp;AG0&amp;AEf&amp;ACA&amp;AHM&amp;AHI&amp;AGO&amp;AD0&amp;AGn&amp;ACA&amp;AG8Abg&amp;AGUAcgByAG8AcgA9AGEAbABlAHIAdAAoADEAKQ&amp;ACAAPABi</p>
+
+== a null byte in text and in a tag name
+a{NUL}b<b{NUL}>c</b{NUL}>
+-- want
+<p>abc</p>
+
+== invalid UTF-8
+a{BYTE:FF}b{BYTE:C3}<p>ok{BYTE:E2}{BYTE:82}</p>
+-- want
+<p>a�b�</p>
+<p>ok�</p>
+
+== a class beside the alignment
+<p class="align-center x">a</p><p class="x align-right y">b</p><h3 class="lead align-center">c</h3>
+-- want
+<p class="align-center">a</p>
+<p class="align-right">b</p>
+<h3 class="align-center">c</h3>
+
+== a class breaking out of its quotes
+<p class="align-center&quot; onmouseover=&quot;alert(1)">a</p><p class='align-center" onclick="alert(1)'>b</p><p class="align-center"onclick="alert(1)">c</p>
+-- want
+<p>a</p>
+<p>b</p>
+<p class="align-center">c</p>
+
+== a class written with references
+<p class="align&#45;center">a</p><p class="align&#x2D;right&#32;x">b</p><p class="align&hyphen;center">c</p><p class="align&minus;right">d</p>
+-- want
+<p class="align-center">a</p>
+<p class="align-right">b</p>
+<p>c</p>
+<p>d</p>
+
+== classes not of the grammar, in another case, on an element that takes none
+<p class="ALIGN-CENTER">a</p><p class="align-left">b</p><p class="align-justify">c</p><span class="align-center">d</span> <a href="/x" class="align-right">e</a><ul><li class="align-center">f</li></ul>
+-- want
+<p>a</p>
+<p>b</p>
+<p>c</p>
+<p>d <a href="/x">e</a></p>
+<ul>
+<li>f</li>
+</ul>
+
+== the first class attribute wins
+<p class="x" class="align-center">a</p><p class="align-right" class="align-center">b</p>
+-- want
+<p>a</p>
+<p class="align-right">b</p>
+
+== an alignment beside events
+<p class=align-center onmouseover=alert(1) style="color:red">a</p><div align=right onclick="alert(1)">b</div>
+-- want
+<p class="align-center">a</p>
+<p class="align-right">b</p>
+
+== text-align with expression and url
+<p style="text-align:expression(alert(1))">a</p><p style="text-align:url(javascript:alert(1))">b</p><p style="text-align:center;behavior:url(x.htc)">c</p><p style="background:url(javascript:alert(1));text-align:right">d</p><p style="width:expression(alert(1));text-align:center !important">e</p>
+-- want
+<p>a</p>
+<p>b</p>
+<p class="align-center">c</p>
+<p class="align-right">d</p>
+<p class="align-center">e</p>
+
+== text-align written with references, markup, a comment or an escape
+<p style="text-align:&#99;enter">a</p><p style="text-align:center</p><script>alert(1)</script>">b</p><p style="text-align:/**/center">c</p><p style="text-align:cent\er">d</p>
+-- want
+<p class="align-center">a</p>
+<p>b</p>
+<p>c</p>
+<p>d</p>
+
+== the align attribute with other values
+<p align="javascript:alert(1)">a</p><p align=CENTER>b</p><h2 align=middle>c</h2><p align=" right">d</p><div align=center><p align=left>e</p><p>f</p></div>
+-- want
+<p>a</p>
+<p class="align-center">b</p>
+<h2 class="align-center">c</h2>
+<p>d</p>
+<p>e</p>
+<p class="align-center">f</p>
+
+== a heading and a quote paragraph aligned, a list item not
+<h4 class="align-right" id="x" onclick="alert(1)">a</h4><h1 align=center>b</h1><blockquote class="align-center"><p>c</p><p class="align-right">d</p></blockquote><ul style="text-align:center"><li>e</li></ul>
+-- want
+<h4 class="align-right">a</h4>
+<h2 class="align-center">b</h2>
+<blockquote>
+<p class="align-center">c</p>
+<p class="align-right">d</p>
+</blockquote>
+<ul>
+<li>e</li>
+</ul>
+
+== a pre holding escaped markup
+<pre>&lt;/pre&gt;&lt;script&gt;alert(1)&lt;/script&gt;&lt;img src=x onerror=alert(1)&gt;</pre>
+-- want
+<pre><code>&lt;/pre&gt;&lt;script&gt;alert(1)&lt;/script&gt;&lt;img src=x onerror=alert(1)&gt;</code></pre>
+
+== a pre holding markup
+<pre><b>bold</b> <a href="/x">link</a> <a href="javascript:alert(1)">bad</a><img src=x onerror=alert(1)><script>alert(1)</script><svg onload=alert(1)><p>out</p></svg></pre>
+-- want
+<pre><code>bold link bad
+out</code></pre>
+
+== the end of a pre breaking out
+<pre><code></pre><img src=x onerror=alert(1)>after</code>
+-- want
+<p>after</p>
+
+== a pre inside a pre, and a textarea in one
+<pre>a<pre>b</pre>c<textarea></pre><script>alert(1)</script></textarea>d</pre>e
+-- want
+<pre><code>a
+b
+cd</code></pre>
+<p>e</p>
+
+== a comment and CDATA in a pre
+<pre>a<!--</pre><script>alert(1)</script>-->b<![CDATA[</pre><img src=x onerror=alert(1)>]]>c</pre>
+-- want
+<pre><code>ab]]&gt;c</code></pre>
+
+== a carriage return written as a reference in a pre
+<pre>a&#13;b&#13;&#10;c&#x0D;<b>&#10;d</b>&#13e</pre>
+-- want
+<pre><code>a
+b
+c
+d
+e</code></pre>
+
+== a pre whose end tag is written oddly
+<pre>a</pre ><script>alert(1)</script><pre>b</PRE foo="</pre>"><img src=x onerror=alert(1)>c
+-- want
+<pre><code>a</code></pre>
+<pre><code>b</code></pre>
+<p>c</p>
+
+== code inside a and a inside code
+<a href="/x"><code>x</code></a> <code><a href="/y">y</a></code> <code><a href="javascript:alert(1)">z</a></code>
+-- want
+<p><a href="/x"><code>x</code></a> <a href="/y"><code>y</code></a> <code>z</code></p>
+
+== a rule with attributes
+<p>a</p><hr class="align-center" style="border:1px solid url(javascript:alert(1))" onclick="alert(1)" id="x" noshade size=9><p>b</p>
+-- want
+<p>a</p>
+<hr>
+<p>b</p>
+
+== rules first, doubled and last
+<hr/onmouseover=alert(1)><hr><p>a</p><hr><hr><p></p><hr><p>b</p><hr><hr>
+-- want
+<p>a</p>
+<hr>
+<p>b</p>
+<hr>
+
+== marks with attributes
+<u onclick=alert(1) style="text-decoration:none">a</u> <ins cite="javascript:alert(1)">b</ins> <s title="x">c</s> <del datetime=x>d</del> <strike>e</strike> <kbd onmouseover=x>f</kbd> <samp>g</samp> <tt>h</tt>
+-- want
+<p><u>a</u> <u>b</u> <s>c</s> <s>d</s> <s>e</s> <code>f</code> <code>g</code> <code>h</code></p>
+
+== mutation XSS: a code block in svg, a style in a code block
+<svg><pre><code>x</code></pre><style><img src=x onerror=alert(1)></style></svg><pre><style></pre><img src=x onerror=alert(1)></style>y</pre>
+-- want
+<pre><code>x</code></pre>
+<pre><code>y</code></pre>

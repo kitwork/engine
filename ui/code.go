@@ -340,7 +340,7 @@ func (t *codeToken) advice(text, ground string) string {
 	rung, under := base(text), base(ground)
 	pair := " trong router.colors bằng một cặp { light: \"#…\", dark: \"#…\" } đủ tương phản"
 	if t.look.Share > 0 {
-		return " Dấu nhắc là màu chữ quanh lệnh ở " + strconv.Itoa(t.look.Share) + "%: viết color trên thẻ chủ (hay phần tử bao lệnh) một màu tương phản mạnh hơn với nền " + under + ", hoặc đổi background."
+		return " Dấu nhắc là màu chữ quanh lệnh ở " + strconv.Itoa(t.look.Share) + "%: viết color trên <terminal> (hay phần tử bao lệnh) một màu tương phản mạnh hơn với nền " + under + ", hoặc đổi background."
 	}
 	if t.look.Background != "" && ground == t.look.Background {
 		return " Chữ và nền này engine tô theo router.colors: khai lại " + rung + " hoặc " + under + pair + "."

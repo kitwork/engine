@@ -19,7 +19,7 @@
   </header>
 
   <section gap="4" padding="6">
-    <box flex="column" large:flex="row" align="start" large:align="center" space="between" gap="3">
+    <box flex="column" large:flex="row" align="left" large:align="center" space="between" gap="3">
       <text heading="1" size="large">Đơn hàng hôm nay</text>
       <box flex="row" gap="2" wrap="true">
         <input type="search" placeholder="Tìm theo mã đơn hoặc tên khách" value="{{ keyword }}"
@@ -40,13 +40,13 @@
                  click="select(order.id)" pressed:scale="98" />
     </list>
 
-    <box component="dropdown" as="$filters" click-outside="$filters.close()"
-         pointer-enter,focus-in="$filters.preview()" pointer-leave,focus-out="$filters.hide()">
+    <dropdown as="$filters" click-outside="$filters.close()"
+              pointer-enter,focus-in="$filters.preview()" pointer-leave,focus-out="$filters.hide()">
       <button click="$filters.toggle()" gap="2">
         <icon value="adjustments"></icon>
         <text>Bộ lọc ({{ activeFilters.length }})</text>
       </button>
-      <popover place="below-end" padding="3" gap="2">
+      <popover place="below-right" padding="3" gap="2">
         <label flex="row" gap="2">
           <input type="checkbox" checked="{{ onlyLate }}" />
           <text>Chỉ đơn trễ hơn {{ lateMinutes }} phút</text>
@@ -56,7 +56,7 @@
           <text>Chỉ đơn giao tận nơi</text>
         </label>
       </popover>
-    </box>
+    </dropdown>
   </section>
 
   <section gap="4" padding="6" background="paper">
@@ -72,29 +72,31 @@
     </grid>
   </section>
 
-  <overlay if="selected" component="dialog" as="$detail" keydown:escape="$detail.close()">
-    <card padding="6" gap="4" container="small" radius="large" shadow="large">
-      <box flex="row" align="center" space="between">
-        <text heading="2">Đơn {{ selected.code }}</text>
-        <button click="$detail.close()" alt="Đóng"><icon value="x"></icon></button>
-      </box>
-      <list gap="1">
-        <item for="line of selected.lines" flex="row" space="between">
-          <text>{{ line.quantity }} × {{ line.name }}</text>
-          <text font="code">{{ money(line.quantity * line.price) }}</text>
-        </item>
-      </list>
-      <text weight="bold">Tổng: {{ money(total) }}</text>
-      <text>Mã đơn để tra cứu: <code>{{ selected.code }}</code></text>
-      <box flex="row" gap="2" align="end">
-        <button click="advance(selected.id)" background="brand" color="brand.on"
-                disabled="{{ selected.status === 'done' }}" disabled:opacity="50">Chuyển bước tiếp</button>
-        <button click="print(selected.id)" border="line">In hoá đơn</button>
-      </box>
-    </card>
+  <overlay if="selected">
+    <dialog as="$detail" keydown:escape="$detail.close()">
+      <card padding="6" gap="4" container="small" radius="large" shadow="large">
+        <box flex="row" align="center" space="between">
+          <text heading="2">Đơn {{ selected.code }}</text>
+          <button click="$detail.close()" alt="Đóng"><icon value="x"></icon></button>
+        </box>
+        <list gap="1">
+          <item for="line of selected.lines" flex="row" space="between">
+            <text>{{ line.quantity }} × {{ line.name }}</text>
+            <text font="code">{{ money(line.quantity * line.price) }}</text>
+          </item>
+        </list>
+        <text weight="bold">Tổng: {{ money(total) }}</text>
+        <text>Mã đơn để tra cứu: <code>{{ selected.code }}</code></text>
+        <box flex="row" gap="2" align="right">
+          <button click="advance(selected.id)" background="brand" color="brand.on"
+                  disabled="{{ selected.status === 'done' }}" disabled:opacity="50">Chuyển bước tiếp</button>
+          <button click="print(selected.id)" border="line">In hoá đơn</button>
+        </box>
+      </card>
+    </dialog>
   </overlay>
 
-  <box component="terminal" shell="bash" if="user.isStaff">kitwork logs --site {{ site.domain }} --since 1h</box>
+  <terminal shell="bash" if="user.isStaff">kitwork logs --site {{ site.domain }} --since 1h</terminal>
 
   <footer padding="6" gap="2" align="center">
     <text size="small" color="ink-30">Cập nhật {{ date(updatedAt) }} · {{ orders.length }} đơn</text>

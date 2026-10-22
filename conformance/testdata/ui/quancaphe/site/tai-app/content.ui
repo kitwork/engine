@@ -6,7 +6,7 @@
       tích điểm mỗi ly.</text>
   </section>
 
-  <card flex="column" medium:flex="row" align="start" space="between" gap="4" padding="6">
+  <card flex="column" medium:flex="row" align="left" space="between" gap="4" padding="6">
     <box gap="1">
       <text heading="2" size="mini">Sắp có trên App Store và Google Play</text>
       <text size="small" color="ink-30">Ứng dụng đang được thử với khách quen. Trong lúc chờ, đặt món ngay trên web.</text>

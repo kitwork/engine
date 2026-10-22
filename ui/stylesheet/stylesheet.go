@@ -9,7 +9,8 @@
 //	colors.<hash>.css  Colors(palette): the colour tokens of one colour chain (router.colors)
 //	fonts.<hash>.css   jit/fonts: @font-face and --font-body, --font-code
 //	icons.<hash>.css   jit/icons, inside the elements layer (Elements)
-//	page.<hash>.css    Rules.File(): the rule of every class any branch of the page can carry
+//	page.<hash>.css    Rules.File(): the rule of every class any branch of the page can carry, and the
+//	                   text scope of a richtext on a page that holds one (richtext.go)
 //
 // and, only when a class of the page holds while the page is scrolled (scrolled:shadow="small"), one
 // script, scrolled.<hash>.js (ScrolledScript), which keeps the flag those rules read.
@@ -33,9 +34,10 @@
 // the licence ships next to the data as WEBGRADIENTS_LICENSE). A gradient of the collection keeps its
 // name in .ui spelling (Warm Flame is warm-flame) and is the top layer the stylesheet writes, its colours
 // at the places of its stops, the same in light and dark; a linear one keeps the stylesheet's direction
-// (to right is to-end) or takes its angle's nearest direction word, at most 22.5deg away (20deg in this
-// collection: -20deg is to-top). Four are drawn short of the stylesheet: Arielle's Smile and Elegance at
-// the one radial size, and the blended layers under Raccoon Back, Elegance and Slick Carbon not drawn.
+// (to right is to-right, turned around on a page written right to left as every left and right is)
+// or takes its angle's nearest direction word, at most 22.5deg away (20deg in this collection: -20deg
+// is to-top). Four are drawn short of the stylesheet: Arielle's Smile and Elegance at the one radial
+// size, and the blended layers under Raccoon Back, Elegance and Slick Carbon not drawn.
 // Five, a base colour seen through translucent layers, are left out (Coup de Grace, Loon Crest, Sharp
 // Glass, Chemic Aqua, Earl Gray); a page writing one is told so. Twelve take another name; a page
 // writing the collection's name is told the new one:
@@ -158,15 +160,17 @@ func ScrolledScript() Script {
 // direction of a container, the parent of a placed child, the .ui tag word where several tags share
 // one HTML element, and the parts of the hosts it writes for Kitwork's own components (the
 // progressbar, the reader, the toast and the network, where each stands and how its notice comes and
-// goes). No page rule exists for them.
+// goes; the carousel's track; the countdown's time left). No page rule exists for them.
 func ElementWords() []string {
 	return []string{
 		"badge", "breadcrumb", "card", "error", "field", "flex-column", "flex-row", "grid", "hint",
 		"place-anchor", "popover", "progressbar", "reader", "toast",
-		"toast-bottom-end", "toast-bottom", "toast-bottom-start", "toast-top-end", "toast-top", "toast-top-start",
+		"toast-bottom-right", "toast-bottom", "toast-bottom-left", "toast-top-right", "toast-top", "toast-top-left",
 		"network",
-		"network-bottom-end", "network-bottom", "network-bottom-start", "network-top-end", "network-top", "network-top-start",
+		"network-bottom-right", "network-bottom", "network-bottom-left", "network-top-right", "network-top", "network-top-left",
 		"transition-fade", "transition-none",
+		"carousel", "carousel-track", "carousel-fade", "carousel-none",
+		"countdown-time",
 	}
 }
 

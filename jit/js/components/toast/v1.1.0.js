@@ -4,7 +4,7 @@
  * Kitwork UI. The author draws the stack and ONE notice, in markup; the engine (ui/toast.go) writes
  * the rest:
  *
- *   <box component="toast" as="$toast" place="bottom-end" gap="2">
+ *   <toast as="$toast" place="bottom-right" gap="2">
  *     <card for="notice of notices; key: notice.id" flex="row" gap="3" padding="3">
  *       <icon show="notice.tone == 'danger'" value="alert-circle" color="danger" />
  *       <box gap="1">
@@ -15,10 +15,10 @@
  *       </box>
  *       <button click="dismiss(notice.id)"><icon value="x" alt="Đóng thông báo" /></button>
  *     </card>
- *   </box>
+ *   </toast>
  *
- *   <div class="flex-column gap-2 toast toast-bottom-end" data-kitwork-component="toast: $toast"
- *        role="region" aria-label="Thông báo (F8)" tabindex="-1" data-kitwork-scope="place: 'bottom-end'; limit: 3">
+ *   <div class="flex-column gap-2 toast toast-bottom-right" data-kitwork-component="toast: $toast"
+ *        role="region" aria-label="Thông báo (F8)" tabindex="-1" data-kitwork-scope="place: 'bottom-right'; limit: 3">
  *     <div class="card …" data-kitwork-for="notice of notices; key: notice.id" data-kitwork-bind="data-leaving: notice.leaving">…</div>
  *     <span class="reader" role="status"></span>
  *     <span class="reader" role="alert"></span>
@@ -35,7 +35,9 @@
  *   waiting   how many older notices wait off screen (more than limit at once); their time is held
  *   paused    true while time stands still: the pointer on a notice, the keyboard in the stack, the
  *             page hidden, the window in the background
- *   place     the edge or corner (the engine hands it in); limit how many show at once (1 to 10)
+ *   place     the edge or corner (the engine hands it in: bottom-right, bottom, bottom-left, top-right,
+ *             top, top-left; left and right are the design's, turned around by the stylesheet on a page
+ *             written right to left); limit how many show at once (1 to 10)
  *
  *   show(message, options) → id       info / success / warning / danger(message, options) → id
  *   loading(message, options) → id   stays until updated or dismissed
@@ -88,7 +90,7 @@ var SPOKEN = 1000; // how long a sentence stays in its region: said by then, and
 var SWIPE_SHARE = 0.4; // of the notice's width, a drag that closes it
 var SWIPE_SPEED = 0.5; // px/ms, a flick that closes it
 var TEMPLATE_PAGE = 3000; // v1.0.0: one message, three seconds
-var EDGES = { "bottom-end": true, "bottom": true, "bottom-start": true, "top-end": true, "top": true, "top-start": true };
+var EDGES = { "bottom-right": true, "bottom": true, "bottom-left": true, "top-right": true, "top": true, "top-left": true };
 var NAME = /^[A-Za-z][A-Za-z0-9_-]*$/; // an author's id; the toast's own are numbers
 var DURATION = /^([0-9]+(?:\.[0-9]+)?)(ms|s)$/;
 
@@ -101,7 +103,7 @@ var toastDef = {
   notices: [],
   waiting: 0,
   paused: false,
-  place: "bottom-end",
+  place: "bottom-right",
   limit: 3,
   // a template page's (v1.0.0)
   visible: false,
@@ -186,7 +188,7 @@ var toastDef = {
 
     var host = context.host;
     own.top = String(this.place).indexOf("top") === 0;
-    if (!EDGES[String(this.place)]) complain("place của toast là một mép hay góc màn hình: bottom-end, bottom, bottom-start, top-end, top, top-start; không phải " + this.place);
+    if (!EDGES[String(this.place)]) complain("place của toast là một mép hay góc màn hình: bottom-right, bottom, bottom-left, top-right, top, top-left; không phải " + this.place);
     var limit = Math.floor(Number(this.limit));
     own.limit = limit >= 1 && limit <= 10 ? limit : 3;
     own.motion = window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : { matches: false };

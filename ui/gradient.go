@@ -213,18 +213,19 @@ func (c *compiler) checkGradients(n *Node, el *element, p *attrPlan) error {
 			return errAttr(n, t.attr, "%s%s trên <icon>: icon là một mặt nạ tô bằng nền của nó, chữ gradient không tô được icon (icon biến mất); tô icon bằng gradient là %s",
 				text, lead, strings.TrimSuffix(t.attr.Name, "color")+"background=\""+written+"\"")
 		}
-		background, inside := "", "<"+n.Tag+">"
+		tag := c.tagOf(n) // the author's: a component's tag, not the box it builds
+		background, inside := "", "<"+tag+">"
 		switch {
 		case len(grounds) > 0:
 			g := grounds[0]
 			written := g.attr.Name + "=\"" + strings.TrimSpace(g.attr.Value) + "\""
 			background = written + " trên cùng phần tử"
-			inside = "<" + n.Tag + " " + written + ">"
+			inside = "<" + tag + " " + written + ">"
 		case len(glasses) > 0:
 			g := glasses[0]
 			written := g.attr.Name + "=\"" + strings.TrimSpace(g.attr.Value) + "\""
 			background = "kính (" + written + ") trên cùng phần tử"
-			inside = "<" + n.Tag + " " + written + ">"
+			inside = "<" + tag + " " + written + ">"
 		case p.pinned && !writesAttribute(n, "background"):
 			background = "nền engine cho khung ghim vào mép (pin, để nội dung cuộn bên dưới không lộ qua)"
 		default:
@@ -236,7 +237,7 @@ func (c *compiler) checkGradients(n *Node, el *element, p *attrPlan) error {
 			continue
 		}
 		return errAttr(n, t.attr, "%s%s là chữ gradient: gradient được cắt theo nét chữ (background-clip:text), nên %s cũng bị cắt theo nét chữ, không còn là nền. "+
-			"Để chữ gradient trên một <text> riêng bên trong: %s<text %s>…</text></%s>", text, lead, background, inside, text, n.Tag)
+			"Để chữ gradient trên một <text> riêng bên trong: %s<text %s>…</text></%s>", text, lead, background, inside, text, tag)
 	}
 	if glass, gradient := gradientUnderGlass(c, p.paints); glass != nil {
 		g := gradient.attr.Name + "=\"" + strings.TrimSpace(gradient.attr.Value) + "\""
@@ -391,7 +392,7 @@ func (c *compiler) checkHiddenText(f *paint) {
 			c.hiddenText = errAttr(gradient.node, gradient.attr, "%s%s là chữ gradient: chữ bên trong thừa hưởng nét tô trong suốt của nó (-webkit-text-fill-color), "+
 				"và <%s> bên trong có %s phủ lên gradient, nên chữ của <%s> không hiện. "+
 				"Để chữ gradient trên một <text> riêng không bọc phần tử có nền (<text %s>…</text>), hoặc cho <%s> màu chữ riêng (color=\"ink\")",
-				text, lead, fr.tag, ground, fr.tag, text, fr.tag)
+				text, lead, c.paintTag(fr), ground, c.paintTag(fr), text, c.paintTag(fr))
 			return
 		}
 	}

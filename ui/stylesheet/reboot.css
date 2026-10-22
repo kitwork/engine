@@ -260,6 +260,68 @@
   :where(.breadcrumb) { flex-wrap: wrap; --kitwork-vertical: center; }
   :where(.breadcrumb > li) { --kitwork-vertical: center; }
 
+  /* carousel (ui/carousel.go): its <list> is the track. The browser moves it: a row that scrolls
+     sideways and snaps to each slide, so a finger, a trackpad and the arrow keys (the track takes the
+     focus) move it, smoothly unless less motion is asked for (the reboot's rule) or the host's
+     transition is none. A slide is the track's width unless the author gives it one (three cards a
+     row: width on <item>). The row reads align and space as flex-row does: the list's own direction
+     class comes before this rule. No scrollbar: the buttons, the dots and the gestures move it.
+     fade lays the slides on one another and shows the current one (aria-current, which the component
+     sets; before it starts, the first). */
+  :where(.carousel) { min-inline-size: 0; } /* in a row, it narrows with it: the track scrolls, the page does not widen */
+  /* what the author places over the slides (an arrow, the dots, written before the <list> or after) stands
+     above them: a slide that holds a placed caption is itself positioned, and would paint over it */
+  :where(.carousel > :not(.carousel-track)) { z-index: 1; }
+  :where(.carousel-track) {
+    flex-direction: row; justify-content: var(--kitwork-space, var(--kitwork-horizontal, normal));
+    align-items: var(--kitwork-vertical, normal); overflow-x: auto; overscroll-behavior-x: contain;
+    scroll-snap-type: x mandatory; scroll-behavior: smooth; scrollbar-width: none;
+  }
+  :where(.carousel-track)::-webkit-scrollbar { display: none; }
+  /* a mouse drags the track (the component): the open hand over a track of more than one slide, the
+     closed one (the component's) while it drags */
+  :where(.carousel-track:has(> :nth-child(2))) { cursor: grab; }
+  /* the width, not flex-basis: a width written on <item> (page layer) sets inline-size, which a basis
+     of 100% would outweigh, and every card would stay the track's width */
+  :where(.carousel-track > *) { flex: 0 0 auto; inline-size: 100%; min-inline-size: 0; scroll-snap-align: start; }
+  :where(.carousel-none > .carousel-track) { scroll-behavior: auto; }
+  /* fade does not scroll: a finger across it is the component's swipe, up and down the page's (without
+     pan-y the browser takes any drag for a pan and cancels the pointer); pinch-zoom stays the reader's */
+  :where(.carousel-fade > .carousel-track) { display: grid; overflow: hidden; scroll-snap-type: none; touch-action: pan-y pinch-zoom; }
+  :where(.carousel-fade > .carousel-track > *) {
+    grid-area: 1 / 1; opacity: 0; visibility: hidden;
+    transition: opacity 0.3s ease-out, visibility 0.3s allow-discrete;
+  }
+  :where(.carousel-fade > .carousel-track > [aria-current=true]),
+  :where(.carousel-fade > .carousel-track:not(:has(> [aria-current=true])) > :first-child) {
+    opacity: 1; visibility: visible;
+  }
+
+  /* countdown (ui/countdown.go): the author draws the time left in one <time>, the engine marks it.
+     Its digits are of one width, so the time does not shift sideways each second (1:11 and 1:00 take
+     the same room). */
+  :where(.countdown-time) { font-variant-numeric: tabular-nums; }
+  /* A <time> that holds fields (its time segments: role="group") is one long bar, a clock read and typed
+     as one field: it wears the field's look (the fill, the transparent edge a contrast theme draws, the
+     radius, the padding), and the fields in it wear none of their own, two digits wide (a digit is 1ch
+     with tabular figures; 2px more holds the caret at the end), the digits in the middle, so 05:00 and
+     02:00:00 read as one clock, the ":" between the fields the bar's. As wide as what it holds, in a row
+     or a column. A clock reads left to right on a page written right to left too. The focus ring and the
+     deeper fill are the bar's while a field in it has the focus; a field draws no ring of its own. */
+  :where(.countdown-time[role="group"]) {
+    display: inline-flex; align-items: center; inline-size: max-content; direction: ltr; cursor: text;
+    padding: 0.5rem 0.75rem; border: 1px solid transparent; border-radius: 0.375rem;
+    background: color-mix(in srgb, var(--ink) 5%, transparent);
+  }
+  :where(.countdown-time[role="group"]:focus-within) {
+    outline: 2px solid var(--kitwork-focus, var(--brand)); outline-offset: 2px;
+    background: color-mix(in srgb, var(--ink) 8%, transparent);
+  }
+  :where(.countdown-time[role="group"] input) {
+    inline-size: calc(2ch + 2px); padding: 0; border: 0; border-radius: 0; outline: none; text-align: center;
+    background: none;
+  }
+
   /* the hosts the engine writes for Kitwork's own components */
   :where(.progressbar) {
     position: fixed; inset-block-start: 0; inset-inline: 0; z-index: 50; block-size: 0; pointer-events: none;
@@ -277,16 +339,16 @@
     padding: max(0.75rem, calc(env(safe-area-inset-top, 0px) + 0.5rem)) max(0.75rem, calc(env(safe-area-inset-right, 0px) + 0.5rem))
       max(0.75rem, calc(env(safe-area-inset-bottom, 0px) + 0.5rem)) max(0.75rem, calc(env(safe-area-inset-left, 0px) + 0.5rem));
   }
-  :where(.toast-bottom-end, .toast-bottom, .toast-bottom-start, .network-bottom-end, .network-bottom, .network-bottom-start) { inset-block-end: 0; }
-  :where(.toast-top-end, .toast-top, .toast-top-start, .network-top-end, .network-top, .network-top-start) { inset-block-start: 0; }
+  :where(.toast-bottom-right, .toast-bottom, .toast-bottom-left, .network-bottom-right, .network-bottom, .network-bottom-left) { inset-block-end: 0; }
+  :where(.toast-top-right, .toast-top, .toast-top-left, .network-top-right, .network-top, .network-top-left) { inset-block-start: 0; }
   @media (min-width: 640px) {
     :where(.toast, .network) {
       inline-size: 26rem; max-inline-size: 100%;
       padding: max(1rem, calc(env(safe-area-inset-top, 0px) + 0.5rem)) max(1rem, calc(env(safe-area-inset-right, 0px) + 0.5rem))
         max(1rem, calc(env(safe-area-inset-bottom, 0px) + 0.5rem)) max(1rem, calc(env(safe-area-inset-left, 0px) + 0.5rem));
     }
-    :where(.toast-bottom-end, .toast-top-end, .network-bottom-end, .network-top-end) { inset-inline: auto 0; }
-    :where(.toast-bottom-start, .toast-top-start, .network-bottom-start, .network-top-start) { inset-inline: 0 auto; }
+    :where(.toast-bottom-right, .toast-top-right, .network-bottom-right, .network-top-right) { inset-inline: auto 0; }
+    :where(.toast-bottom-left, .toast-top-left, .network-bottom-left, .network-top-left) { inset-inline: 0 auto; }
     :where(.toast-bottom, .toast-top, .network-bottom, .network-top) { inset-inline: 0; margin-inline: auto; }
   }
   /* A network notice and the toast's at the same edge cover each other where their columns meet: under
@@ -295,10 +357,10 @@
      back when the toast is empty. :has() in a forgiving :where(): a browser without it keeps both at
      the edge. */
   @media (max-width: 51.99rem) {
-    :where(html:has(:is(.toast-bottom-end, .toast-bottom, .toast-bottom-start) > [data-kit-key]:not([data-leaving])))
-      :where(.network-bottom-end, .network-bottom, .network-bottom-start) { inset-block: 0 auto; }
-    :where(html:has(:is(.toast-top-end, .toast-top, .toast-top-start) > [data-kit-key]:not([data-leaving])))
-      :where(.network-top-end, .network-top, .network-top-start) { inset-block: auto 0; }
+    :where(html:has(:is(.toast-bottom-right, .toast-bottom, .toast-bottom-left) > [data-kit-key]:not([data-leaving])))
+      :where(.network-bottom-right, .network-bottom, .network-bottom-left) { inset-block: 0 auto; }
+    :where(html:has(:is(.toast-top-right, .toast-top, .toast-top-left) > [data-kit-key]:not([data-leaving])))
+      :where(.network-top-right, .network-top, .network-top-left) { inset-block: auto 0; }
   }
   /* A notice: it takes the click, a finger dragged across it is the toast's (up and down still scrolls),
      and a transparent edge a contrast theme draws. A long unbroken word (an address, a file name) breaks
@@ -318,13 +380,13 @@
   }
   @starting-style {
     :where(.toast > *, .network > *) { opacity: 0; translate: 0 0.5rem; }
-    :where(.toast-top-end > *, .toast-top > *, .toast-top-start > *, .network-top-end > *, .network-top > *, .network-top-start > *) { translate: 0 -0.5rem; }
+    :where(.toast-top-right > *, .toast-top > *, .toast-top-left > *, .network-top-right > *, .network-top > *, .network-top-left > *) { translate: 0 -0.5rem; }
     :where(.transition-fade > *) { opacity: 0; translate: none; }
   }
   :where(.toast > [data-leaving], .network > [hidden], .transition-fade > [hidden]) {
     opacity: 0; translate: 0 0.5rem; transition-duration: 0.15s;
   }
-  :where(.toast-top-end, .toast-top, .toast-top-start, .network-top-end, .network-top, .network-top-start) > :where([data-leaving], [hidden]) {
+  :where(.toast-top-right, .toast-top, .toast-top-left, .network-top-right, .network-top, .network-top-left) > :where([data-leaving], [hidden]) {
     translate: 0 -0.5rem;
   }
   :where(.transition-fade > [data-leaving], .transition-fade > [hidden]) { translate: none; }

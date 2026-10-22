@@ -294,8 +294,8 @@ func TestWebGradientStopsAreTheSource(t *testing.T) {
 
 // directionAngles are the eight direction words at their CSS angles.
 var directionAngles = map[string]float64{
-	"to-top": 0, "to-top-end": 45, "to-end": 90, "to-bottom-end": 135,
-	"to-bottom": 180, "to-bottom-start": 225, "to-start": 270, "to-top-start": 315,
+	"to-top": 0, "to-top-right": 45, "to-right": 90, "to-bottom-right": 135,
+	"to-bottom": 180, "to-bottom-left": 225, "to-left": 270, "to-top-left": 315,
 }
 
 // turnBetween is the smaller turn between two CSS angles, 0 to 180 degrees.
@@ -305,19 +305,21 @@ func turnBetween(a, b float64) float64 {
 }
 
 // Each linear gradient keeps the stylesheet's direction (decision W3 of 13/10/2026, read on the
-// stylesheet): a word as it is, to right to-end and to left to-start (both flip for right-to-left), an
-// angle the nearest of the eight direction words, 0deg to-top, 90deg to-end, 180deg to-bottom, a negative
-// angle the same turn less 360deg; a radial one is centred. Every lead the stylesheet writes is in the
-// tables below, written by hand, each angle checked to be the nearest word; the largest rounding is 20deg
-// (the -20deg gradients, to-top), within the 22.5deg any angle can be. Named: Night Fade to top, Malibu
-// Beach and Star Wine to right (gradients.json wrote 0deg: from the bottom up), Above Clouds to left,
-// Warm Flame 45deg to-top-end, Sunny Morning 120deg to-bottom-end, Kind Steel -20deg to-top, Sun Veggie
-// -225deg to-bottom-end, Itmeo Branding 180deg to-bottom, Raccoon Back -180deg to-bottom.
+// stylesheet): a word as it is, to right to-right and to left to-left (both mirror on a right-to-left
+// page, as every left and right of .ui does since 19/10/2026), an angle the nearest of the eight
+// direction words, 0deg to-top, 90deg to-right, 180deg to-bottom, a negative angle the same turn less
+// 360deg; a radial one is centred. Every lead the stylesheet writes is in the tables below, written by
+// hand, each angle checked to be the nearest word; the largest rounding is 20deg (the -20deg gradients,
+// to-top), within the 22.5deg any angle can be. Named: Night Fade to top, Malibu Beach and Star Wine to
+// right (gradients.json wrote 0deg: from the bottom up), Above Clouds to left, Warm Flame 45deg
+// to-top-right, Sunny Morning 120deg to-bottom-right, Kind Steel -20deg to-top, Sun Veggie -225deg
+// to-bottom-right, Itmeo Branding 180deg to-bottom, Raccoon Back -180deg to-bottom. CONTROL: to-bottom
+// names neither left nor right, so Spring Blue has no right-to-left rule.
 func TestWebGradientDirectionsAreTheNearestWord(t *testing.T) {
-	words := map[string]string{"to top": "to-top", "to right": "to-end", "to bottom": "to-bottom", "to left": "to-start"}
+	words := map[string]string{"to top": "to-top", "to right": "to-right", "to bottom": "to-bottom", "to left": "to-left"}
 	nearest := map[float64]string{
-		15: "to-top", 45: "to-top-end", 60: "to-top-end", 120: "to-bottom-end", 135: "to-bottom-end", 180: "to-bottom",
-		-20: "to-top", -60: "to-top-start", -180: "to-bottom", -225: "to-bottom-end",
+		15: "to-top", 45: "to-top-right", 60: "to-top-right", 120: "to-bottom-right", 135: "to-bottom-right", 180: "to-bottom",
+		-20: "to-top", -60: "to-top-left", -180: "to-bottom", -225: "to-bottom-right",
 	}
 	for angle, word := range nearest {
 		for other, at := range directionAngles {
@@ -354,8 +356,8 @@ func TestWebGradientDirectionsAreTheNearestWord(t *testing.T) {
 	if largest != 20 {
 		t.Errorf("the largest rounding is %vdeg, the docs say 20deg", largest)
 	}
-	for name, word := range map[string]string{"night-fade": "to-top", "malibu-beach": "to-end", "star-wine": "to-end", "above-clouds": "to-start",
-		"warm-flame": "to-top-end", "sunny-morning": "to-bottom-end", "kind-steel": "to-top", "sun-veggie": "to-bottom-end",
+	for name, word := range map[string]string{"night-fade": "to-top", "malibu-beach": "to-right", "star-wine": "to-right", "above-clouds": "to-left",
+		"warm-flame": "to-top-right", "sunny-morning": "to-bottom-right", "kind-steel": "to-top", "sun-veggie": "to-bottom-right",
 		"spring-blue": "to-bottom", "raccoon-back": "to-bottom"} {
 		if g, _ := p.Gradient(name); g.Direction != word {
 			t.Errorf("%s: %s, want %s", name, g.Direction, word)
@@ -376,7 +378,7 @@ func TestWebGradientDirectionsAreTheNearestWord(t *testing.T) {
 		}
 	}
 	if strings.Contains(css, ".background-spring-blue:where(:dir(rtl))") {
-		t.Errorf("to-bottom names no start or end: no right-to-left rule:\n%s", css)
+		t.Errorf("control: to-bottom names no left or right: no right-to-left rule:\n%s", css)
 	}
 }
 
@@ -437,7 +439,7 @@ func TestWebGradientsDrawTwoColoursEach(t *testing.T) {
 func TestWebGradientRenamesAreErrors(t *testing.T) {
 	p := mustPalette(t)
 	table := NewTable(p)
-	hero := Gradient{Type: "linear", Direction: "to-end", Stops: []Stop{{Color: "ink", At: 0}, {Color: "brand", At: 100}}}
+	hero := Gradient{Type: "linear", Direction: "to-right", Stops: []Stop{{Color: "ink", At: 0}, {Color: "brand", At: 100}}}
 	for original, name := range decidedRenames {
 		own := handSpelling(original)
 		if letters(own) == letters(name) {
@@ -536,7 +538,7 @@ func TestWebGradientNamesStayOutOfTheNamespace(t *testing.T) {
 	for _, token := range p.Tokens() {
 		tokens[letters(token)] = token
 	}
-	hero := Gradient{Type: "linear", Direction: "to-end", Stops: []Stop{{Color: "ink", At: 0}, {Color: "brand", At: 100}}}
+	hero := Gradient{Type: "linear", Direction: "to-right", Stops: []Stop{{Color: "ink", At: 0}, {Color: "brand", At: 100}}}
 	for _, name := range WebGradients() {
 		if !gradientName.MatchString(name) {
 			t.Errorf("%s is no gradient's name: lowercase words joined by -", name)

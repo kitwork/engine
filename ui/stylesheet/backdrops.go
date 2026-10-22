@@ -10,14 +10,15 @@ import "strings"
 // conformance fixture's), and a glass card (paper at 75%) with ink-30 on it reads over every point too.
 // Secondary text belongs on glass: ink-30 straight on a backdrop falls short (2.5–3.2:1 in light).
 //
-// Each is a linear ramp to the bottom end, the geometry of the reference it was fitted to: a coloured
-// corner at 0, a middle at 34 on the same family, a quiet neutral at 67 held to the far end. Light
-// mode thins from a corner of lightness .70–.775 into a light neutral of about .88; dark mode holds its
-// chroma through the middle (so a dark glass card stays told apart from the page where the page
-// passes through the dark paper's lightness) and falls into a soft black of about .17. Every stop is a
-// { light, dark } pair (decision D2), the same in every palette. A page wanting a quieter ground writes
-// it lighter, background="cirrus-30" (decision D3, its operators of 13/10/2026): in dark it pulls the
-// page toward the canvas, so a glass dashboard keeps the full gradient.
+// Each is a linear ramp to the bottom right (mirrored on a right-to-left page), the geometry of the
+// reference it was fitted to: a coloured corner at 0, a middle at 34 on the same family, a quiet
+// neutral at 67 held to the far end. Light mode thins from a corner of lightness .70–.775 into a light
+// neutral of about .88; dark mode holds its chroma through the middle (so a dark glass card stays told
+// apart from the page where the page passes through the dark paper's lightness) and falls into a soft
+// black of about .17. Every stop is a { light, dark } pair (decision D2), the same in every palette. A
+// page wanting a quieter ground writes it lighter, background="cirrus-30" (decision D3, its operators
+// of 13/10/2026): in dark it pulls the page toward the canvas, so a glass dashboard keeps the full
+// gradient.
 //
 // On a page (decision D4) the backdrop is painted on a layer fixed to the screen, behind everything:
 // the element the compiler writes first in <body>, <div class="page-backdrop background-cirrus"
@@ -32,9 +33,9 @@ import "strings"
 // layer on a move between pages of one page.ui (jit/hydrate/drive.js); another backdrop is another
 // page.ui, reached by a whole load.
 
-// backdrop is a page backdrop: a pair at 0, at 34 and at 67, to the bottom end.
+// backdrop is a page backdrop: a pair at 0, at 34 and at 67, to the bottom right.
 func backdrop(light0, dark0, light34, dark34, light67, dark67 string) Gradient {
-	return linear("to-bottom-end",
+	return linear("to-bottom-right",
 		Stop{Pair: Color{Light: light0, Dark: dark0}, At: 0},
 		Stop{Pair: Color{Light: light34, Dark: dark34}, At: 34},
 		Stop{Pair: Color{Light: light67, Dark: dark67}, At: 67})

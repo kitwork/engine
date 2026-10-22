@@ -3,20 +3,20 @@
  *
  * Kitwork UI (the engine writes everything but the author's words). The author writes:
  *
- *   <box component="tabs" as="$shell" persist="true" alt="Shell">
+ *   <tabs as="$shell" persist="true" alt="Shell">
  *     <button click="select('bash')">bash</button>
  *     <button click="select('powershell')">PowerShell</button>
- *   </box>
+ *   </tabs>
  *   <box show="$shell.selected == 'bash'">…</box>
  *   <box show="$shell.selected == 'powershell'">…</box>
  *
- * and the engine (ui/tabs.go) writes role="tablist" on the host; on each button whose click is
- * select('<name>') role="tab", value="<name>", an id, aria-controls and the bindings of aria-selected
- * and tabindex (selected == '<name>'); on each element whose show compares $shell.selected with a
- * tab's name role="tabpanel", an id, aria-labelledby and tabindex="0"; and, in the host's
- * data-kitwork-scope, selected: '<first tab>' (what the server painted) and persist: the name the
- * choice is kept under — for persist="true" the set of the tab names, sorted and joined by "+"
- * ('bash+powershell'), for persist="shell" that name.
+ * and the engine (ui/tabs.go) writes role="tablist" on the host (the box the tag builds); on each
+ * button whose click is select('<name>') role="tab", value="<name>", an id, aria-controls and the
+ * bindings of aria-selected and tabindex (selected == '<name>'); on each element whose show compares
+ * $shell.selected with a tab's name role="tabpanel", an id, aria-labelledby and tabindex="0"; and,
+ * in the host's data-kitwork-scope, selected: '<first tab>' (what the server painted) and persist:
+ * the name the choice is kept under — for persist="true" the set of the tab names, sorted and joined
+ * by "+" ('bash+powershell'), for persist="shell" that name.
  *
  * A template page (frozen, written before Kitwork UI) writes it all itself and reads `current`:
  *

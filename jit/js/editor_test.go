@@ -17,9 +17,11 @@ func TestEditorIsShippedWhenUsed(t *testing.T) {
 
 // A real contenteditable in a real browser: commands from the markup's own buttons, the pressed
 // state following the selection, a link that refuses javascript:, plain-text paste, and the
-// markdown-style line shortcuts.
+// markdown-style line shortcuts. This is the template editor (v1.0.0), the one a .kitwork.html page's
+// data-kit-component="editor" still gets (the kitwork.io site's components/editor page): the markup
+// alone says which file ships, as on that page, so no component is named here beside it.
 func TestBrowserEditorEditsFromTheMarkupsButtons(t *testing.T) {
-	runBrowserProof(t, "editor", []string{"editor"}, `
+	runBrowserProof(t, "editor", nil, `
 <div data-kit-component="editor" data-kit-alias="$post">
   <div role="toolbar" aria-label="Formatting">
     <button id="bold" data-kit-click="run('bold')" data-kit-bind:aria-pressed="isActive('bold') ? 'true' : 'false'">B</button>

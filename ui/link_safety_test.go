@@ -1,6 +1,11 @@
 package ui
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/kitwork/engine/utilities/richtext"
+)
 
 // A link goes to a page, a web address, an e-mail or a phone number; an image comes from the site, the
 // web or data:image (KITWORK_UI §7, "Link ra ngoài"). Script URLs never reach the HTML.
@@ -57,6 +62,104 @@ func TestExternalLinksAreMarked(t *testing.T) {
 		`<a href="https://kitwork.io/docs">Docs</a>`,                                     // the page's own host
 		`<a href="/about">About</a>`,
 		`<a href="mailto:hi@kitwork.io">Mail</a>`)
+}
+
+// A browser reads past a tab, a line break or a NUL in an address and reads a backslash as a slash, so
+// "/\evil.example", "/<TAB>/evil.example", "/<CR>/evil.example" and "\\evil.example" all go to the host
+// evil.example, and "https://evil.example\@kitwork.io" goes there too. The link helpers read an address
+// through richtext.NormalizeAddress: such a link is not a path of the site (a kept link gets no
+// data-kitwork-current) and it leaves the site (rel="external noopener").
+//
+// CONTROL: with internalLink and externalLink reading href as written (their NormalizeAddress line
+// removed), "/\evil.example" was marked as the site's own path and this test failed.
+func TestLinksABrowserReadsAsAnotherHost(t *testing.T) {
+	s := memorySite("", map[string]string{
+		"/site/page.ui":    `<page><header /><content /></page>`,
+		"/site/header.ui":  `<header><link value="{{ url }}">Đi</link></header>`,
+		"/site/content.ui": `<content><link value="{{ url }}">Đi</link></content>`,
+	})
+	s.Reload = true
+	page, err := s.Compile("/site")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, url := range []string{"/\\evil.example", "/\t/evil.example", "/\r/evil.example", "/\n/evil.example",
+		"/\x00/evil.example", "\\\\evil.example", "\\/evil.example", "https://evil.example\\@kitwork.io/"} {
+		if internalLink(url) {
+			t.Errorf("internalLink(%q) is true: a browser goes to evil.example", url)
+		}
+		if !externalLink(url, "https://kitwork.io") {
+			t.Errorf("externalLink(%q) is false: a browser goes to evil.example", url)
+		}
+		html := page.Render(Request{Path: "/", Origin: "https://kitwork.io", Scope: map[string]any{"url": url}})
+		if strings.Count(html, `rel="external noopener">Đi</a>`) != 2 || strings.Contains(html, "data-kitwork-current") {
+			t.Errorf("%q is written as the site's own link:\n%s", url, html)
+		}
+	}
+	// control: the site's own paths and host stay its own, a backslash in a path is still a path
+	for _, url := range []string{"/san-pham", "/a\\b", "https://kitwork.io\\@evil.example/"} {
+		if externalLink(url, "https://kitwork.io") {
+			t.Errorf("externalLink(%q) is true", url)
+		}
+		html := page.Render(Request{Path: "/", Origin: "https://kitwork.io", Scope: map[string]any{"url": url}})
+		mustNotContain(t, html, "rel=")
+	}
+	if !internalLink("/a\\b") || !internalLink("/san-pham") {
+		t.Errorf("a path of the site is not internal")
+	}
+}
+
+// The host a link goes to is the one a browser reads after the scheme and its slashes, not after the
+// first "//" anywhere in the address. On a page of https://kitwork.io, "http:evil.example/x//kitwork.io"
+// goes to evil.example (a scheme other than the page's is followed by a host however few slashes come
+// after it), and so does each address below with the "//kitwork.io" in its path, its query or its
+// fragment, behind a user or a port, with more slashes or a backslash, in capitals. <link> marks every
+// one rel="external noopener", as richtext.Display marks the same address in a post: one rule,
+// richtext.External. The site's own addresses, with another host's name in their path, stay its own.
+//
+// CONTROL: with externalLink reading the host after the first "//" (hostOf as it was), 60 of the 105
+// addresses (every one written "http:", "HTTP:", "http:/" or "http:\") were the site's own, written
+// without rel, and of the site's own, "http:kitwork.io/x//evil.example" and the host written with its
+// port were another host's; this test failed.
+func TestExternalLinkReadsTheHostAfterTheScheme(t *testing.T) {
+	s := memorySite("", map[string]string{"/site/content.ui": `<content><link value="{{ url }}">Đi</link></content>`})
+	s.Reload = true
+	page, err := s.Compile("/site")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const origin = "https://kitwork.io"
+	count := 0
+	for _, scheme := range []string{"http:", "HTTP:", "http:/", "http:\\", "http://", "HTTPS://", "//"} {
+		for _, host := range []string{"evil.example", "user@evil.example", "evil.example:8443"} {
+			for _, tail := range []string{"/x//kitwork.io", "?//kitwork.io", "#//kitwork.io", "//kitwork.io", "/a//kitwork.io/b"} {
+				url := scheme + host + tail
+				count++
+				if !externalLink(url, origin) || internalLink(url) {
+					t.Errorf("externalLink(%q) = %v, internalLink %v: a browser goes to evil.example", url, externalLink(url, origin), internalLink(url))
+					continue
+				}
+				html := page.Render(Request{Path: "/", Origin: origin, Scope: map[string]any{"url": url}})
+				if !strings.Contains(html, `rel="external noopener">Đi</a>`) {
+					t.Errorf("%q is written as the site's own link:\n%s", url, html)
+				}
+				if address, kept := richtext.Link(url); kept && !strings.Contains(richtext.Display(`<a href="`+address+`">x</a>`, origin), "rel=") {
+					t.Errorf("richtext.Display writes %q without rel, the ui with it", url)
+				}
+			}
+		}
+	}
+	if count != 105 {
+		t.Fatalf("%d addresses, want 105", count)
+	}
+	// control: the site's own host, another host's name in the path
+	for _, url := range []string{"https://kitwork.io/x//evil.example", "http:kitwork.io/x//evil.example", "https://user@KITWORK.io:443?//evil.example", "/x//evil.example"} {
+		if externalLink(url, origin) {
+			t.Errorf("externalLink(%q) is true: a browser stays on kitwork.io", url)
+		}
+		html := page.Render(Request{Path: "/", Origin: origin, Scope: map[string]any{"url": url}})
+		mustNotContain(t, html, "rel=")
+	}
 }
 
 func TestNewTab(t *testing.T) {

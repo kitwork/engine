@@ -20,7 +20,7 @@ import (
 // is open), $network's state, the notice (its icons shown with the name a screen reader hears,
 // icon:name, its title and words), its rectangle and those
 // of its icon, title and close button (to judge the alignment), whether it is inside the screen, the
-// edge it sits at (on screen, within 24px of the bottom or the top) and whether at the start, the
+// edge it sits at (on screen, within 24px of the bottom or the top) and whether at the left, the
 // contrast of its title, words, icon and close button against the card (computed colours, as the
 // screen paints them), the toast's notices on screen and how much of them the network notice covers,
 // how far the page scrolls sideways, the scheme, and where the screen is on the page (to picture it
@@ -86,7 +86,7 @@ const exampleNetworkSay = `(function (want) {
           out.x = r.left; out.y = r.top; out.width = r.width; out.height = r.height;
           out.inside = r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight;
           out.edge = r.bottom <= innerHeight && innerHeight - r.bottom <= 24 ? "bottom" : r.top >= 0 && r.top <= 24 ? "top" : "";
-          out.start = r.left <= 24;
+          out.left = r.left <= 24;
           out.ground = colour(ground);
           out.ink = colour(over(rgba(getComputedStyle(texts[0]).color), ground)) + " / " + colour(over(rgba(getComputedStyle(texts[1]).color), ground));
           out.contrast = { title: contrast(texts[0]), words: contrast(texts[1]), icon: contrast(icon), close: contrast(closeIcon) };
@@ -129,13 +129,13 @@ const (
 )
 
 // The network notice of the kitwork example, drawn by a real browser whose network DevTools takes away
-// and gives back: overlay.ui draws it once for the whole site, at the bottom start, its icon, title and
+// and gives back: overlay.ui draws it once for the whole site, at the bottom left, its icon, title and
 // words, and a close button, the network counted gone after a second (delay="1s") and "Back online"
 // said for four (duration="4s"); Drive moves between pages (router.reload(false)).
 //   - the page carries both times to the instance, in milliseconds;
 //   - online as a page starts, nothing shows;
 //   - offline: the notice opens after the delay, not before it is over and within 600ms after;
-//     wifi-off named Offline, "You are offline", inside the screen at the bottom start, its title and
+//     wifi-off named Offline, "You are offline", inside the screen at the bottom left, its title and
 //     words 4.5:1 and its icons 3:1 against the card, the page not scrolling sideways;
 //   - closed with its button, then a link of the navigation clicked (on a phone, in the menu): the page
 //     stays (its path, the move over) and the notice opens again at once: the visitor tried something;
@@ -163,8 +163,8 @@ func TestBrowserExampleNetworkShots(t *testing.T) {
 	// on every page
 	tenant, page := examplePage(t, "/components")
 	host := exampleNetworkParts.FindStringSubmatch(page)
-	if host == nil || !strings.HasSuffix(host[1], " network network-bottom-start") || !strings.Contains(host[2], `role="status"`) {
-		t.Fatalf("/components has no network host fixed at the bottom start, a status region: %q", host)
+	if host == nil || !strings.HasSuffix(host[1], " network network-bottom-left") || !strings.Contains(host[2], `role="status"`) {
+		t.Fatalf("/components has no network host fixed at the bottom left, a status region: %q", host)
 	}
 	if times := fmt.Sprintf(` data-kitwork-scope="delay: %d; duration: %d"`, exampleNetworkDelay, exampleNetworkDuration); !strings.Contains(host[2], times) {
 		t.Fatalf("/components' network host carries %q, want%s: overlay.ui's delay=\"1s\" duration=\"4s\"", host[2], times)
@@ -213,7 +213,7 @@ func TestBrowserExampleNetworkShots(t *testing.T) {
 		Path, Notice, Parts, Bar     string
 		Connected, Open, Shown       bool
 		X, Y, Width, Height          float64
-		Inside, Start                bool
+		Inside, Left                 bool
 		Edge                         string
 		Ground, Ink                  string
 		Contrast                     struct{ Title, Words, Icon, Close float64 }
@@ -266,17 +266,17 @@ func TestBrowserExampleNetworkShots(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		t.Logf("%s: %s | %s | inside %v %s start %v | ground %s ink %s | contrast title %.2f words %.2f icon %.2f close %.2f | toasts %d %s covered %.0fpx² | overflow %.0f | path %s menu %v bar %s | waited %.0fms",
-			name, at.Notice, at.Parts, at.Inside, at.Edge, at.Start, at.Ground, at.Ink, at.Contrast.Title, at.Contrast.Words, at.Contrast.Icon, at.Contrast.Close,
+		t.Logf("%s: %s | %s | inside %v %s left %v | ground %s ink %s | contrast title %.2f words %.2f icon %.2f close %.2f | toasts %d %s covered %.0fpx² | overflow %.0f | path %s menu %v bar %s | waited %.0fms",
+			name, at.Notice, at.Parts, at.Inside, at.Edge, at.Left, at.Ground, at.Ink, at.Contrast.Title, at.Contrast.Words, at.Contrast.Icon, at.Contrast.Close,
 			at.Toasts, at.Toast, at.Covered, at.Overflow, at.Path, at.Menu, at.Bar, at.Waited)
 	}
-	// a shown notice: inside the screen at the start of the edge named, readable, the page not
+	// a shown notice: inside the screen at the left of the edge named, readable, the page not
 	// scrolling sideways
 	readable := func(name string, at said, edge string) {
 		t.Helper()
-		if !at.Inside || !at.Start || at.Edge != edge || at.Overflow != 0 {
-			t.Errorf("%s: the notice at %.0f,%.0f %.0fx%.0f, inside %v, at the %s, at the start %v, overflow %.0f; want inside the screen at the %s start, no overflow",
-				name, at.X, at.Y, at.Width, at.Height, at.Inside, at.Edge, at.Start, at.Overflow, edge)
+		if !at.Inside || !at.Left || at.Edge != edge || at.Overflow != 0 {
+			t.Errorf("%s: the notice at %.0f,%.0f %.0fx%.0f, inside %v, at the %s, at the left %v, overflow %.0f; want inside the screen at the %s left, no overflow",
+				name, at.X, at.Y, at.Width, at.Height, at.Inside, at.Edge, at.Left, at.Overflow, edge)
 		}
 		if at.Contrast.Title < 4.5 || at.Contrast.Words < 4.5 || at.Contrast.Icon < 3 || at.Contrast.Close < 3 {
 			t.Errorf("%s: contrast %+v on %s, want the words 4.5:1 and the icons 3:1", name, at.Contrast, at.Ground)

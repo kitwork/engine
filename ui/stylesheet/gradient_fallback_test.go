@@ -16,7 +16,7 @@ func TestGradientTextWithAMixedStopNeedsColorMix(t *testing.T) {
 	const mixedCondition = "@supports ((background-clip:text) or (-webkit-background-clip:text)) and (color:color-mix(in srgb,red,red))"
 	p, _ := NewPalette(false)
 	site, err := p.WithGradients(map[string]Gradient{
-		"sitetext": {Type: "linear", Direction: "to-end", Stops: []Stop{{Color: "brand-30", At: 0}, {Color: "ink-10", At: 100}}},
+		"sitetext": {Type: "linear", Direction: "to-right", Stops: []Stop{{Color: "brand-30", At: 0}, {Color: "ink-10", At: 100}}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -36,7 +36,7 @@ func TestGradientTextWithAMixedStopNeedsColorMix(t *testing.T) {
 	if strings.Count(css, "@supports (background-clip:text) or") != 0 {
 		t.Errorf("no rule of gradient text with a color-mix() stop holds where color-mix() is not read:\n%s", css)
 	}
-	for _, name := range []string{"glow", "tint", "skeleton", "hairline", "fade-end"} {
+	for _, name := range []string{"glow", "tint", "skeleton", "hairline", "fade-right"} {
 		css := pageCSS(t, table, Intent{Name: "color", Value: name})
 		if !strings.Contains(css, mixedCondition+"{.color-"+name+"{background-image:") || strings.Contains(css, "@supports (background-clip:text) or") {
 			t.Errorf("%s as text: its stops are color-mix(), its rule needs color-mix() read:\n%s", name, css)

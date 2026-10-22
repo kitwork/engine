@@ -14,7 +14,7 @@ func TestPrefixedWordsFromElsewhereAreTold(t *testing.T) {
 		{`<content><box hover:rounded-t-lg>x</box></content>`, "content.ui:1:15",
 			`.ui viết thuộc tính: radius-top="medium" (.5rem). Các chữ: none, small, medium, large, full. Có tiền tố thì viết hover:radius-top="medium"`},
 		{`<content><box medium:border-top-left-radius="8px">x</box></content>`, "content.ui:1:15",
-			`medium:border-top-left-radius="8px": góc trên bên trái là radius-top-left (none, small, medium, large, full). Có tiền tố thì viết medium:radius-top-left`},
+			`medium:border-top-left-radius="8px": góc trên bên trái là radius-top-left (none, small, medium, large, full), tự lật khi trang viết từ phải sang trái. Có tiền tố thì viết medium:radius-top-left`},
 		{`<content><box large+focus:radius-left-top="large">x</box></content>`, "content.ui:1:15", `Có tiền tố thì viết large+focus:radius-top-left`},
 		{`<content><box medium:margin="4">x</box></content>`, "content.ui:1:15", `medium:margin="4": không có margin: khoảng cách giữa các phần là gap`},
 		{`<content><box medium:href="/x">x</box></content>`, "content.ui:1:15", `medium:href là chữ của web; đích của link là value`},

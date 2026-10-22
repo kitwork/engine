@@ -31,7 +31,7 @@ func TestNamedAliasesWrittenAnyWay(t *testing.T) {
 		if _, err := NewPalette(false, map[string]Color{"brand": {Light: together}}); err == nil || !strings.Contains(err.Error(), "viết "+css) {
 			t.Errorf("router.colors({ brand: %q }): %v, want it told to write %s", together, err, css)
 		}
-		if err := CheckGradient(together, Gradient{Type: "linear", Direction: "to-end", Stops: []Stop{{Color: "ink", At: 0}, {Color: "brand", At: 100}}}); err == nil ||
+		if err := CheckGradient(together, Gradient{Type: "linear", Direction: "to-right", Stops: []Stop{{Color: "ink", At: 0}, {Color: "brand", At: 100}}}); err == nil ||
 			!strings.Contains(err.Error(), "là cách viết khác của màu "+css) {
 			t.Errorf("router.gradients({ %s: … }): %v, want the colour's name taken", together, err)
 		}

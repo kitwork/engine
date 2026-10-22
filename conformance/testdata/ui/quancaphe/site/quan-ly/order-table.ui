@@ -5,7 +5,7 @@
         <text weight="bold" font="code">{{ order.id }}</text>
         <text size="small" color="ink-30">{{ order.items }}</text>
       </box>
-      <box flex="row" align="start" gap="4">
+      <box flex="row" align="left" gap="4">
         <text size="small" font="code" color="ink-30">{{ order.phone }}</text>
         <text weight="bold" font="code">{{ money(order.total) }}</text>
         <badge color="{{ order.tone }}"><text>{{ order.label }}</text></badge>

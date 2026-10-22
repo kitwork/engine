@@ -42,6 +42,17 @@ type Rules struct {
 	// focus is the keyboard focus ring a page backdrop asks for, light then dark ("" keeps the
 	// palette's): set on :root after colors.<hash>.css (Rules.CSS, Table.Backdrop)
 	focus [2]string
+	// scopes are the looks of what a Kitwork element holds that no attribute writes (the text inside a
+	// <richtext>: richtext.go), by the element's class: rules of the elements layer, in the page's
+	// stylesheet only when the page has that element. A page without one has the bytes it always had.
+	scopes map[string]scopeRules
+}
+
+// scopeRules is the look of what one kind of element holds: its rules, one a line, and the font weights
+// they set.
+type scopeRules struct {
+	css     string
+	weights []int
 }
 
 // pairValue is one custom property of the page with a value per mode (a gradient's { light, dark }
@@ -321,6 +332,19 @@ func (r *Rules) backdrop(ground, html string, pairs []pairValue, focus [2]string
 	}
 }
 
+// scope records the look of what an element holds (Table.Richtext): its rules, written in the elements
+// layer of the page's stylesheet under the element's class, the custom properties they read and the
+// font weights they set. Recorded once a page, however many such elements it has.
+func (r *Rules) scope(class, css string, pairs []pairValue, weights ...int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.scopes == nil {
+		r.scopes = map[string]scopeRules{}
+	}
+	r.scopes[class] = scopeRules{css: css, weights: weights}
+	r.addPairs(pairs)
+}
+
 // Backdrop is the gradient <page> paints as the page's backdrop, as written (cirrus, cirrus-70); "" when
 // it paints none (Table.Backdrop).
 func (r *Rules) Backdrop() string {
@@ -423,13 +447,11 @@ func media(state, width int) string {
 // fixed order, one rule a line; a rule that holds under an at-rule of its own inside its condition
 // (a glass's fallback) is that at-rule around it, on the same line. On a page with a material each
 // background class also hands its colour over, as --kitwork-background and --kitwork-glass. The
-// generator writes it compact itself, so development and production serve the same bytes. Empty when
-// the page records no rule: an empty page.css gets no link.
+// generator writes it compact itself, so development and production serve the same bytes. The looks of
+// what an element holds (scope: the text inside a <richtext>) come first, in @layer elements{…}, by
+// the element's class. Empty when the page records no rule: an empty page.css gets no link.
 func (r *Rules) CSS() []byte {
 	list := r.ordered()
-	if len(list) == 0 {
-		return nil
-	}
 	r.mu.Lock()
 	materials := r.materials
 	gradientText := r.gradientText
@@ -438,11 +460,28 @@ func (r *Rules) CSS() []byte {
 		pairs = append(pairs, r.pairs[name])
 	}
 	focus := r.focus
+	var scopes []string
+	for _, class := range sortedKeys(r.scopes) {
+		scopes = append(scopes, r.scopes[class].css)
+	}
 	r.mu.Unlock()
+	if len(list) == 0 && len(scopes) == 0 {
+		return nil
+	}
 	var b strings.Builder
 	b.WriteString(LayerStatement + "\n")
 	writePairs(&b, pairs)
 	writeFocus(&b, focus)
+	if len(scopes) > 0 {
+		// zero weight against reboot.css but the class: inside the element its rules beat the element looks
+		// of reboot.css (:where(blockquote)) whatever order the files arrive in, and every class of the
+		// page layer beats them
+		b.WriteString("@layer elements{\n")
+		for _, css := range scopes {
+			b.WriteString(css)
+		}
+		b.WriteString("}\n")
+	}
 	for layer, name := range layerNames {
 		started := false
 		open := ""
@@ -560,14 +599,24 @@ func (r *Rules) Has(class string) bool {
 	return r.classes[class]
 }
 
-// Weights lists the font weights the page's classes set (weight="semibold" → 600), ascending, so
-// fonts.<hash>.css can ship the weights the page uses; the weights of the elements before anything is
-// written are ElementWeights.
+// Weights lists the font weights the page's classes set (weight="semibold" → 600) and those of the
+// looks it records (a richtext's headings and strong text: scope), ascending, so fonts.<hash>.css can
+// ship the weights the page uses; the weights of the elements before anything is written are
+// ElementWeights.
 func (r *Rules) Weights() []int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out := make([]int, 0, len(r.weights))
+	seen := make(map[int]bool, len(r.weights))
 	for w := range r.weights {
+		seen[w] = true
+	}
+	for _, s := range r.scopes { // a richtext's headings and strong text
+		for _, w := range s.weights {
+			seen[w] = true
+		}
+	}
+	out := make([]int, 0, len(seen))
+	for w := range seen {
 		out = append(out, w)
 	}
 	sort.Ints(out)

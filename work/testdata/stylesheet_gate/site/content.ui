@@ -23,10 +23,10 @@
     <badge id="badge" color="success" background="paper"><text>Đã giao</text></badge>
     <badge id="badge-plain" color="success"><text>Đã giao</text></badge>
   </box>
-  <box component="dropdown" flex="row">
+  <dropdown flex="row">
     <button click="toggle()">Mở</button>
-    <popover id="popover" place="below-start"><badge place="top-end"><text>3</text></badge><text>thực đơn</text></popover>
-  </box>
+    <popover id="popover" place="below-left"><badge place="top-right"><text>3</text></badge><text>thực đơn</text></popover>
+  </dropdown>
   <box flex="row" gap="2">
     <icon id="icon-text" value="coffee"></icon>
     <link id="link" value="/x"><icon value="coffee"></icon><text>Đi</text></link>

@@ -1,16 +1,16 @@
 <box click-outside="close()" keydown:escape="close()">
   <button click="toggle()" expanded="{{ open }}" background="panel" radius="full" padding="2" border="none">
     <icon value="shopping-cart" alt="Giỏ hàng"></icon>
-    <badge place="top-end" show="items.length > 0" color="brand" alt="{{ items.length }} món trong giỏ">
+    <badge place="top-right" show="items.length > 0" color="brand" alt="{{ items.length }} món trong giỏ">
       <text>{{ items.length }}</text>
     </badge>
   </button>
 
-  <card show="open" place="below-end" flex="column" gap="4" padding="6" shadow="large">
+  <card show="open" place="below-right" flex="column" gap="4" padding="6" shadow="large">
     <text heading="2" size="mini">Giỏ hàng</text>
 
     <list gap="3" scroll="y" max-height="80">
-      <item for="line of items; key: line.id" flex="row" align="start" gap="3">
+      <item for="line of items; key: line.id" flex="row" align="left" gap="3">
         <text>{{ line.name }}</text>
         <input type="number" min="1" value="{{ line.quantity }}" alt="Số lượng {{ line.name }}"></input>
         <button click="remove(line.id)" border="none"><icon value="trash" alt="Xoá {{ line.name }}"></icon></button>

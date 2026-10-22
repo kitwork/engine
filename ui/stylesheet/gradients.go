@@ -13,15 +13,16 @@ import (
 // router.gradients and in the standard set:
 //
 //	router.gradients({
-//	  hero: { type: "linear", direction: "to-bottom-end", stops: [ { color: "brand", at: 0 }, { color: "violet", at: 100 } ] },
+//	  hero: { type: "linear", direction: "to-bottom-right", stops: [ { color: "brand", at: 0 }, { color: "violet", at: 100 } ] },
 //	  halo: { type: "radial", position: "top", stops: [ { color: "brand/40", at: 0 }, { color: "brand/0", at: 70 } ] }
 //	});
 //
-// type is linear, radial or conic. A linear gradient has a direction (to-top … to-bottom-end), a radial
-// or conic one a position (center, the default, top … bottom-end); start and end are the start and the
-// end of a line, so they flip for right-to-left. Stops are { color, at }: at from 0 to 100, never going
-// back; color a token (lighter -N, stronger +N, an alpha /N), white or black, or a named colour, exactly
-// as color= takes it, or a { light, dark } pair of colours, exactly as router.colors writes a token
+// type is linear, radial or conic. A linear gradient has a direction (to-top … to-bottom-right), a
+// radial or conic one a position (center, the default, top … bottom-right); left and right are the
+// design's left and right, so they mirror on a page written from right to left (decision of 19/10/2026:
+// start and end are gone from .ui). Stops are { color, at }: at from 0 to 100, never going back; color
+// a token (lighter -N, stronger +N, an alpha /N), white or black, or a named colour, exactly as color=
+// takes it, or a { light, dark } pair of colours, exactly as router.colors writes a token
 // (decision D2 of 13/10/2026: { color: { light: "#849cdd", dark: "#202f5e" }, at: 0 }). A page may
 // write any gradient lighter or stronger (decision D3, its operators of 13/10/2026): background="cirrus-80"
 // moves every stop 80% of the way to the mode's canvas, mixed in oklab as ink-30 is; background="cirrus+20"
@@ -29,9 +30,10 @@ import (
 // stops. A gradient has no alpha: an alpha is a stop's. Gradient names share one namespace with
 // colours: a gradient is never named like a token of the palette, a named colour, white, black,
 // transparent or a standard gradient (nor a colour's or a standard gradient's letters written another
-// way: slate-gray, fadetop), nor a keyword (none, auto, inherit…), nor ending in -<digits> (hero-2 would
-// read as hero lighter by 2%), and a token is never named like a standard gradient. The site's
-// gradients inherit down the folders as router.colors does, the nearest folder's winning per name.
+// way: slate-gray, fadetop), nor a standard gradient's old name (fade-start: retiredGradients), nor a
+// keyword (none, auto, inherit…), nor ending in -<digits> (hero-2 would read as hero lighter by 2%),
+// and a token is never named like a standard gradient. The site's gradients inherit down the folders
+// as router.colors does, the nearest folder's winning per name.
 //
 // On the web a gradient background is background-image (a colour background a later condition writes
 // takes it away again, background-image:none, on the element that has both: Rules.TakeBack); gradient
@@ -104,36 +106,38 @@ func fixedStop(hex string, at float64) Stop {
 // gradientTypes are the kinds of gradient there are.
 var gradientTypes = []string{"linear", "radial", "conic"}
 
-// gradientDirections are the directions of a linear gradient, as CSS writes them from left to right and
-// from right to left.
+// gradientDirections are the directions of a linear gradient, as CSS writes them on a page written from
+// left to right and on one written from right to left: left and right are the design's left and right,
+// and mirror on a right-to-left page. CSS has no logical word for a gradient's direction, so the
+// mirrored image is written again under :dir(rtl) (rightToLeft); a left-to-right page reads the first.
 var gradientDirections = map[string][2]string{
 	"to-top":          {"to top", "to top"},
 	"to-bottom":       {"to bottom", "to bottom"},
-	"to-start":        {"to left", "to right"},
-	"to-end":          {"to right", "to left"},
-	"to-top-start":    {"to top left", "to top right"},
-	"to-top-end":      {"to top right", "to top left"},
-	"to-bottom-start": {"to bottom left", "to bottom right"},
-	"to-bottom-end":   {"to bottom right", "to bottom left"},
+	"to-left":         {"to left", "to right"},
+	"to-right":        {"to right", "to left"},
+	"to-top-left":     {"to top left", "to top right"},
+	"to-top-right":    {"to top right", "to top left"},
+	"to-bottom-left":  {"to bottom left", "to bottom right"},
+	"to-bottom-right": {"to bottom right", "to bottom left"},
 }
 
-var gradientDirectionWords = []string{"to-top", "to-bottom", "to-start", "to-end", "to-top-start", "to-top-end", "to-bottom-start", "to-bottom-end"}
+var gradientDirectionWords = []string{"to-top", "to-bottom", "to-left", "to-right", "to-top-left", "to-top-right", "to-bottom-left", "to-bottom-right"}
 
-// gradientPositions are where a radial or a conic gradient is centred, from left to right and from
-// right to left.
+// gradientPositions are where a radial or a conic gradient is centred, on a page written from left to
+// right and on one written from right to left: left and right mirror, as a direction's do.
 var gradientPositions = map[string][2]string{
 	"center":       {"center", "center"},
 	"top":          {"top", "top"},
 	"bottom":       {"bottom", "bottom"},
-	"start":        {"left", "right"},
-	"end":          {"right", "left"},
-	"top-start":    {"top left", "top right"},
-	"top-end":      {"top right", "top left"},
-	"bottom-start": {"bottom left", "bottom right"},
-	"bottom-end":   {"bottom right", "bottom left"},
+	"left":         {"left", "right"},
+	"right":        {"right", "left"},
+	"top-left":     {"top left", "top right"},
+	"top-right":    {"top right", "top left"},
+	"bottom-left":  {"bottom left", "bottom right"},
+	"bottom-right": {"bottom right", "bottom left"},
 }
 
-var gradientPositionWords = []string{"center", "top", "bottom", "start", "end", "top-start", "top-end", "bottom-start", "bottom-end"}
+var gradientPositionWords = []string{"center", "top", "bottom", "left", "right", "top-left", "top-right", "bottom-left", "bottom-right"}
 
 // gradientKeywords are words that mean something else where a gradient's name stands — none (background
 // has none: transparent is token/0), auto, CSS's keywords for a value, current for the text's colour —
@@ -143,8 +147,31 @@ var gradientKeywords = map[string]bool{
 	"inherit": true, "initial": true, "unset": true, "revert": true, "revert-layer": true,
 }
 
-// physicalSides are the words of CSS a hand writes where .ui says start and end: what to write instead.
-var physicalSides = strings.NewReplacer("left", "start", "right", "end")
+// sideWords are the words .ui wrote for the sides of a line until 19/10/2026, and the word of today for
+// each: start is left and end is right, which mirror on a right-to-left page as start and end did.
+var sideWords = map[string]string{"start": "left", "end": "right"}
+
+// retiredGradients are the standard gradients renamed when left and right took the place of start and
+// end (decision of 19/10/2026), by their letters (letters), to the name of today: fade-start is
+// fade-left, fade-end is fade-right. A page that writes the old name, with any step after it, is told
+// the new one (renamedGradient), and no site gradient takes an old name (CheckGradient).
+// phoenix-start, of the WebGradients collection, keeps its name: there start is a word of a proper
+// name, not a side.
+var retiredGradients = map[string]string{"fadestart": "fade-left", "fadeend": "fade-right"}
+
+// retiredGradient is the name of today of the standard gradient a word names by its name before
+// 19/10/2026 (retiredGradients), however its letters are written: fade-start and FadeStart are
+// fade-left. ok is false for any other word.
+func retiredGradient(word string) (string, bool) {
+	name, ok := retiredGradients[letters(word)]
+	return name, ok
+}
+
+// retiredMessage is what a page or router.gradients is told for an old name of a standard gradient,
+// written with its step if it has one: fade-start-40 nay là fade-left-40.
+func retiredMessage(old, name string) string {
+	return old + " nay là " + name + ": start và end nay là left và right (tự lật khi trang viết từ phải sang trái)"
+}
 
 // gradientName is a gradient's name: lowercase words joined by - (hero, card-glow). No dot: a dotted
 // name is a token's (brand.on). Never ending in -<digits> either, which CheckGradient tells apart
@@ -166,15 +193,15 @@ func linear(direction string, stops ...Stop) Gradient {
 // roles; the last eight are fixed, built on named colours, the same in light and dark.
 var standardGradients = []standardGradient{
 	// content dissolving into the page: under a sticky header, at the foot of a clipped list, at the
-	// edges of a horizontal scroller (start and end flip for right-to-left)
+	// edges of a horizontal scroller (left and right mirror on a right-to-left page)
 	{"fade-top", linear("to-top", Stop{Color: "canvas/0", At: 0}, Stop{Color: "canvas", At: 100})},
 	{"fade-bottom", linear("to-bottom", Stop{Color: "canvas/0", At: 0}, Stop{Color: "canvas", At: 100})},
-	{"fade-start", linear("to-start", Stop{Color: "canvas/0", At: 0}, Stop{Color: "canvas", At: 100})},
-	{"fade-end", linear("to-end", Stop{Color: "canvas/0", At: 0}, Stop{Color: "canvas", At: 100})},
+	{"fade-left", linear("to-left", Stop{Color: "canvas/0", At: 0}, Stop{Color: "canvas", At: 100})},
+	{"fade-right", linear("to-right", Stop{Color: "canvas/0", At: 0}, Stop{Color: "canvas", At: 100})},
 	// a loading placeholder, its band in the middle more ink: darker in light, lighter in dark
-	{"skeleton", linear("to-end", Stop{Color: "ink-88", At: 0}, Stop{Color: "ink-88", At: 35}, Stop{Color: "ink-82", At: 50}, Stop{Color: "ink-88", At: 65}, Stop{Color: "ink-88", At: 100})},
+	{"skeleton", linear("to-right", Stop{Color: "ink-88", At: 0}, Stop{Color: "ink-88", At: 35}, Stop{Color: "ink-82", At: 50}, Stop{Color: "ink-88", At: 65}, Stop{Color: "ink-88", At: 100})},
 	// a divider that fades out at both ends, on a box one pixel tall
-	{"hairline", linear("to-end", Stop{Color: "line/0", At: 0}, Stop{Color: "line", At: 50}, Stop{Color: "line/0", At: 100})},
+	{"hairline", linear("to-right", Stop{Color: "line/0", At: 0}, Stop{Color: "line", At: 50}, Stop{Color: "line/0", At: 100})},
 	// a soft brand halo behind the top of a hero: the brand 85% of the way to the canvas, the tinted
 	// fill ink-30 still reads on (operators of 13/10/2026)
 	{"glow", Gradient{Type: "radial", Position: "top", Stops: []Stop{{Color: "brand-85", At: 0}, {Color: "brand-85/0", At: 70}}}},
@@ -183,22 +210,22 @@ var standardGradients = []standardGradient{
 	// gradient headline text: the page's ink warming into the brand, an engine colour (engine_colour.go):
 	// in light brand+40, 40% further from the canvas so the brand end reads as text on every palette
 	// measured; in dark the smallest step from 0 that reads, the brand itself on those palettes
-	{"headline", linear("to-end", Stop{Color: "ink", At: 0}, Stop{Color: HeadlineColour, At: 100})},
+	{"headline", linear("to-right", Stop{Color: "ink", At: 0}, Stop{Color: HeadlineColour, At: 100})},
 	// an inverse band that flips with the mode, under paper text; its brand start the same way
-	{"inverse", linear("to-bottom-end", Stop{Color: InverseColour, At: 0}, Stop{Color: "ink", At: 100})},
+	{"inverse", linear("to-bottom-right", Stop{Color: InverseColour, At: 0}, Stop{Color: "ink", At: 100})},
 	// scrims under white text over a photo, strongest at the edge they name
 	{"scrim-top", linear("to-top", Stop{Color: "black/55", At: 0}, Stop{Color: "black/80", At: 100})},
 	{"scrim-bottom", linear("to-bottom", Stop{Color: "black/55", At: 0}, Stop{Color: "black/80", At: 100})},
 	// a dark band that stays dark in both modes, under white text
-	{"night", linear("to-bottom-end", Stop{Color: "midnightblue", At: 0}, Stop{Color: "black", At: 100})},
+	{"night", linear("to-bottom-right", Stop{Color: "midnightblue", At: 0}, Stop{Color: "black", At: 100})},
 	// gold with a pale sheen: the paid plan, a Pro badge; black text
-	{"gilded", linear("to-bottom-end", Stop{Color: "metallic-gold", At: 0}, Stop{Color: "jasmine", At: 40}, Stop{Color: "darkgoldenrod", At: 100})},
+	{"gilded", linear("to-bottom-right", Stop{Color: "metallic-gold", At: 0}, Stop{Color: "jasmine", At: 40}, Stop{Color: "darkgoldenrod", At: 100})},
 	// deep blue into teal: a band under white text, or large headline text
-	{"ocean", linear("to-bottom-end", Stop{Color: "royalblue", At: 0}, Stop{Color: "teal", At: 100})},
+	{"ocean", linear("to-bottom-right", Stop{Color: "royalblue", At: 0}, Stop{Color: "teal", At: 100})},
 	// violet through orchid into pink: large headline text, or a band under black text
-	{"nebula", linear("to-end", Stop{Color: "mediumslateblue", At: 0}, Stop{Color: "mediumorchid", At: 50}, Stop{Color: "razzmatazz", At: 100})},
+	{"nebula", linear("to-right", Stop{Color: "mediumslateblue", At: 0}, Stop{Color: "mediumorchid", At: 50}, Stop{Color: "razzmatazz", At: 100})},
 	// crimson into burnt orange: a sale or launch band under white text, or large headline text
-	{"magma", linear("to-end", Stop{Color: "crimson", At: 0}, Stop{Color: "burnt-orange", At: 100})},
+	{"magma", linear("to-right", Stop{Color: "crimson", At: 0}, Stop{Color: "burnt-orange", At: 100})},
 	// a rainbow ring, pure decoration, seamless at any angle
 	{"prism", Gradient{Type: "conic", Position: "center", Stops: []Stop{{Color: "red", At: 0}, {Color: "orange", At: 17}, {Color: "gold", At: 33}, {Color: "limegreen", At: 50}, {Color: "deepskyblue", At: 67}, {Color: "blueviolet", At: 83}, {Color: "red", At: 100}}}},
 }
@@ -218,7 +245,7 @@ var builtinGradients = append(append(append([]standardGradient(nil), standardGra
 // arielles-smile) but twelve, renamed (webGradientRenames): light-blue would be the colour lightblue
 // written with a hyphen, Itmeo Branding is the author's own brand, nine are awkward in a product's code;
 // a page that writes the collection's name is told the new one (renamedGradient). Each is the top layer
-// the stylesheet writes: a linear one's direction the stylesheet's word (to right is to-end) or its
+// the stylesheet writes: a linear one's direction the stylesheet's word (to right is to-right) or its
 // angle's nearest — at most 22.5deg away, 20deg in this collection — a radial one centred, reaching the
 // box's farthest corner; its stops the stylesheet's colours at its places, each the same colour in light
 // and dark like a named colour (fixedStop); -N makes it quieter toward the canvas and +N stronger, as
@@ -309,9 +336,12 @@ func CheckGradient(name string, g Gradient) error {
 	fail := func(format string, args ...any) error {
 		return fmt.Errorf("router.gradients: %q "+format, append([]any{name}, args...)...)
 	}
+	retired, isRetired := retiredGradient(name)
 	switch {
 	case !gradientName.MatchString(name):
 		return fail("không phải tên gradient: chữ thường, các từ nối bằng - (hero, card-glow), không có dấu . (tên có dấu . là của token: brand.on)")
+	case isRetired:
+		return fmt.Errorf("router.gradients: %s", retiredMessage(name, retired)) // fade-start stays taken: it is fade-left
 	case stepNameError("router.gradients", name) != nil:
 		return stepNameError("router.gradients", name) // hero-2 would read as hero lighter by 2
 	case standardByName[name].Type != "":
@@ -352,14 +382,20 @@ func CheckGradient(name string, g Gradient) error {
 			return fail("là linear nên cần direction: %s", strings.Join(gradientDirectionWords, ", "))
 		}
 		if _, ok := gradientDirections[g.Direction]; !ok {
-			return fail("có direction %q: direction là %s%s", g.Direction, strings.Join(gradientDirectionWords, ", "), sideHint(g.Direction, gradientDirections))
+			if word, old := oldSide(g.Direction, gradientDirections); old {
+				return fmt.Errorf("router.gradients: %q, %s", name, oldSideMessage("direction", g.Direction, word))
+			}
+			return fail("có direction %q: direction là %s", g.Direction, strings.Join(gradientDirectionWords, ", "))
 		}
 	} else {
 		if g.Direction != "" {
 			return fail("là %s: không có direction, tâm của nó là position (%s)", g.Type, strings.Join(gradientPositionWords, ", "))
 		}
 		if _, ok := gradientPositions[g.Position]; !ok && g.Position != "" {
-			return fail("có position %q: position là %s%s", g.Position, strings.Join(gradientPositionWords, ", "), sideHint(g.Position, gradientPositions))
+			if word, old := oldSide(g.Position, gradientPositions); old {
+				return fmt.Errorf("router.gradients: %q, %s", name, oldSideMessage("position", g.Position, word))
+			}
+			return fail("có position %q: position là %s", g.Position, strings.Join(gradientPositionWords, ", "))
 		}
 	}
 	if len(g.Stops) < 2 {
@@ -436,15 +472,27 @@ func pairHex(v string) (hex, problem string) {
 	return h, ""
 }
 
-// sideHint is what to write for a direction or a position written with left or right: start and end,
-// which flip for right-to-left. "" when the word is not that.
-func sideHint(word string, words map[string][2]string) string {
-	if spelled := physicalSides.Replace(word); spelled != word {
-		if _, ok := words[spelled]; ok {
-			return "; trái phải viết start và end, tự lật khi viết từ phải sang trái: " + spelled
+// oldSide is the word of today for a direction or a position written with start or end (sideWords):
+// to-bottom-end is to-bottom-right, top-start is top-left. ok is false for a word with neither, and for
+// one that is still no word of words once each start and end is replaced (to-start-ish).
+func oldSide(word string, words map[string][2]string) (string, bool) {
+	parts := strings.Split(word, "-")
+	changed := false
+	for i, part := range parts {
+		if side, ok := sideWords[part]; ok {
+			parts[i], changed = side, true
 		}
 	}
-	return ""
+	spelled := strings.Join(parts, "-")
+	_, ok := words[spelled]
+	return spelled, changed && ok
+}
+
+// oldSideMessage is what router.gradients is told for a direction or a position written with start or
+// end (oldSide), attribute direction or position: direction="to-bottom-end": start và end nay là left
+// và right, viết direction="to-bottom-right".
+func oldSideMessage(attribute, old, word string) string {
+	return attribute + "=\"" + old + "\": start và end nay là left và right, viết " + attribute + "=\"" + word + "\" (tự lật khi trang viết từ phải sang trái)"
 }
 
 // ---- the palette's gradients ----
@@ -709,12 +757,14 @@ func premultipliedMix(a, b RGBA, f float64) RGBA {
 
 // ---- the table: background and color take a gradient ----
 
-// The conditions a gradient's rules hold under besides the class's own: right-to-left (start and end
-// flip), a browser that can clip a background to the text (gradient text), and forced colours, where
-// the system's colours replace the gradient. Gradient text with a color-mix() stop (lighter, an alpha)
-// also needs a browser that reads color-mix() (clipsToTextMixed): one that clips to the text without it
-// (Chrome and Edge 99–110, Safari 15.4–16.1, through -webkit-) drops both images and would keep the
-// transparent fill, the text gone; without the condition it keeps the first stop's solid colour.
+// The conditions a gradient's rules hold under besides the class's own: right-to-left (left and right
+// mirror, and CSS has no logical word for a gradient's direction or centre, so the mirrored image is
+// written under it), a browser that can clip a background to the text (gradient text), and forced
+// colours, where the system's colours replace the gradient. Gradient text with a color-mix() stop
+// (lighter, an alpha) also needs a browser that reads color-mix() (clipsToTextMixed): one that clips to
+// the text without it (Chrome and Edge 99–110, Safari 15.4–16.1, through -webkit-) drops both images and
+// would keep the transparent fill, the text gone; without the condition it keeps the first stop's solid
+// colour.
 const (
 	rightToLeft      = ":where(:dir(rtl))"
 	clipsToText      = "@supports (background-clip:text) or (-webkit-background-clip:text)"
@@ -722,10 +772,11 @@ const (
 	forcedColors     = "@media (forced-colors:active)"
 )
 
-// gradientImages is a gradient as background-image declarations, left to right and right to left (""
-// when nothing in it flips): one declaration, or, when a stop is a color-mix() (lighter, an alpha:
-// mixed), the same image again "in srgb" after it, so a browser that reads the interpolation space
-// interpolates in sRGB and one that does not keeps the first.
+// gradientImages is a gradient as background-image declarations, on a page written from left to right
+// and on one written from right to left ("" when nothing in it mirrors: to-top, center): one
+// declaration, or, when a stop is a color-mix() (lighter, an alpha: mixed), the same image again
+// "in srgb" after it, so a browser that reads the interpolation space interpolates in sRGB and one that
+// does not keeps the first.
 func (t *Table) gradientImages(g Gradient) (ltr, rtl string, mixed bool) {
 	var stops []string
 	for i, s := range g.Stops {
@@ -865,8 +916,8 @@ func (t *Table) pairsOf(g Gradient) []pairValue {
 }
 
 // readBackground reads background: a gradient of the palette is a background image (its own rule, the
-// image flipped for right-to-left, none in forced colours); anything else a colour (a gradient written
-// as no gradient is, the colour reading refuses with what to write: gradientMisused, oldColour).
+// image mirrored on a right-to-left page, none in forced colours); anything else a colour (a gradient
+// written as no gradient is, the colour reading refuses with what to write: gradientMisused, oldColour).
 func readBackground(t *Table, in Intent, v string) (reading, *Problem) {
 	g, ok := t.palette.Gradient(v)
 	if !ok {
@@ -883,9 +934,9 @@ func readBackground(t *Table, in Intent, v string) (reading, *Problem) {
 
 // readTextColour reads color: a gradient of the palette is gradient text — the colour of its first
 // stop, solid, then, where the browser clips a background to the text (and reads color-mix() when a
-// stop is one), the gradient behind the letters and their fill transparent (flipped for right-to-left),
-// and in forced colours the system's text colour again so the text never disappears; anything else a
-// colour (a gradient written as no gradient is, the colour reading refuses with what to write).
+// stop is one), the gradient behind the letters and their fill transparent (mirrored on a right-to-left
+// page), and in forced colours the system's text colour again so the text never disappears; anything
+// else a colour (a gradient written as no gradient is, the colour reading refuses with what to write).
 func readTextColour(t *Table, in Intent, v string) (reading, *Problem) {
 	g, ok := t.palette.Gradient(v)
 	if !ok {
@@ -1022,14 +1073,23 @@ func (t *Table) gradientWords(in Intent) string {
 // is oldColour's to tell: pink-blush-60). light-blue is also the colour lightblue written with a
 // hyphen: its message says both, and the fix stays the colour, which a hand writing light-blue means
 // far more often. A gradient of the collection the engine leaves out (webGradientsLeftOut:
-// coup-de-grace) is refused with why, and no name to write. base is the value's word as the colour
-// reading took it; its step and alpha, if it still has them, are taken off here (gradientWord). nil for
-// any other word, and in any other attribute.
+// coup-de-grace) is refused with why, and no name to write. A standard gradient's old name, from before
+// left and right took the place of start and end (retiredGradients), is refused with the name of today
+// and the step kept: fade-start-40 is fade-left-40, fade-end fade-right. base is the value's word as the
+// colour reading took it; its step and alpha, if it still has them, are taken off here (gradientWord).
+// nil for any other word, and in any other attribute.
 func (t *Table) renamedGradient(in Intent, v, base string) *Problem {
 	if colourOnly(in) || (in.Name != "background" && in.Name != "color") {
 		return nil
 	}
 	word := gradientWord(base)
+	if name, ok := retiredGradient(word); ok {
+		written := strings.TrimSpace(v)
+		step := newStep(strings.TrimPrefix(written, word)) // a gradient has no alpha: its step goes with it
+		p := problem(in, retiredMessage(written, name+step))
+		p.Suggestion = name + step
+		return p
+	}
 	if name, ok := webGradientsLeftOutLetters[letters(word)]; ok {
 		return problem(in, in.Name+"=\""+v+"\": "+word+" là gradient của bộ WebGradients mà Kitwork không có: bộ vẽ nó bằng màu "+
 			webGradientsLeftOut[name]+" dưới các lớp trong mờ trộn bằng background-blend-mode, còn gradient của Kitwork là một lớp màu; cần thì khai một gradient riêng tên "+name+" trong router.gradients")

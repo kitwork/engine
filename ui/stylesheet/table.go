@@ -23,7 +23,7 @@ type Intent struct {
 // attribute takes; the compiler reports it at the attribute's file:line:col. Suggestion, for an
 // editor's fix, replaces what is wrong when one replacement says it: the value when the value is wrong
 // (the nearest step "3", the new word "small", "white/50"), the attribute's name when the name is wrong
-// ("padding-start"), and name="value" when both change (space="4" is gap="4").
+// ("padding-left"), and name="value" when both change (space="4" is gap="4").
 //
 // Warning says the page renders as written and the author is only told: a number outside its range
 // that is drawn as the number written (columns="13"), a length off the spacing scale drawn as written
@@ -140,14 +140,10 @@ func init() {
 		{name: "padding-y", read: readSpacing("padding-block"), domain: list(spacingSteps)},
 		{name: "padding-top", read: readSpacing("padding-block-start"), domain: list(spacingSteps)},
 		{name: "padding-bottom", read: readSpacing("padding-block-end"), domain: list(spacingSteps)},
-		// left and right are the screen's sides and never flip; start and end are the line's and flip
-		// right to left. A side wins over an axis over padding; where a side and its twin are both
-		// written (padding-left with padding-start), the twin, later here, wins and the author is told
-		// (ui/classes.go, checkSides)
-		{name: "padding-left", read: readSpacing("padding-left"), domain: list(spacingSteps)},
-		{name: "padding-right", read: readSpacing("padding-right"), domain: list(spacingSteps)},
-		{name: "padding-start", read: readSpacing("padding-inline-start"), domain: list(spacingSteps)},
-		{name: "padding-end", read: readSpacing("padding-inline-end"), domain: list(spacingSteps)},
+		// left and right are the design's sides: logical CSS, so they mirror on a page written right to
+		// left (padding-left is the right edge in Arabic). A side wins over an axis over padding
+		{name: "padding-left", read: readSpacing("padding-inline-start"), domain: list(spacingSteps)},
+		{name: "padding-right", read: readSpacing("padding-inline-end"), domain: list(spacingSteps)},
 		{name: "scroll", read: readScroll, domain: words("x", "y")},
 		{name: "lines", read: readWhole(1, 10, "lines là số dòng tối đa, số nguyên từ 1 đến 10", func(n string) string {
 			return "display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:" + n + ";overflow:hidden"
@@ -158,24 +154,17 @@ func init() {
 		{name: "border", read: readBorder, domain: borderDomain},
 		{name: "radius", read: readRadius("border-radius"), domain: list(radiusWords)},
 		// the sides (two corners each), then the corners: within one condition a corner wins over a side
-		// and a side over radius, whatever order they are written in. top, bottom, left and right are
-		// the screen's and never flip; start and end are the line's and flip right to left. Each
-		// physical word comes before its logical twin, so the twin wins where both are written
-		// (ui/classes.go, checkSides)
+		// and a side over radius, whatever order they are written in. top and bottom set both corners of
+		// their edge, the same in either direction; left and right are the design's and logical CSS, so
+		// they mirror on a page written right to left (radius-top-left is the top right corner in Arabic)
 		{name: "radius-top", read: readRadius("border-top-left-radius", "border-top-right-radius"), domain: list(radiusWords)},
 		{name: "radius-bottom", read: readRadius("border-bottom-left-radius", "border-bottom-right-radius"), domain: list(radiusWords)},
-		{name: "radius-left", read: readRadius("border-top-left-radius", "border-bottom-left-radius"), domain: list(radiusWords)},
-		{name: "radius-right", read: readRadius("border-top-right-radius", "border-bottom-right-radius"), domain: list(radiusWords)},
-		{name: "radius-start", read: readRadius("border-start-start-radius", "border-end-start-radius"), domain: list(radiusWords)},
-		{name: "radius-end", read: readRadius("border-start-end-radius", "border-end-end-radius"), domain: list(radiusWords)},
-		{name: "radius-top-left", read: readRadius("border-top-left-radius"), domain: list(radiusWords)},
-		{name: "radius-top-right", read: readRadius("border-top-right-radius"), domain: list(radiusWords)},
-		{name: "radius-bottom-left", read: readRadius("border-bottom-left-radius"), domain: list(radiusWords)},
-		{name: "radius-bottom-right", read: readRadius("border-bottom-right-radius"), domain: list(radiusWords)},
-		{name: "radius-top-start", read: readRadius("border-start-start-radius"), domain: list(radiusWords)},
-		{name: "radius-top-end", read: readRadius("border-start-end-radius"), domain: list(radiusWords)},
-		{name: "radius-bottom-start", read: readRadius("border-end-start-radius"), domain: list(radiusWords)},
-		{name: "radius-bottom-end", read: readRadius("border-end-end-radius"), domain: list(radiusWords)},
+		{name: "radius-left", read: readRadius("border-start-start-radius", "border-end-start-radius"), domain: list(radiusWords)},
+		{name: "radius-right", read: readRadius("border-start-end-radius", "border-end-end-radius"), domain: list(radiusWords)},
+		{name: "radius-top-left", read: readRadius("border-start-start-radius"), domain: list(radiusWords)},
+		{name: "radius-top-right", read: readRadius("border-start-end-radius"), domain: list(radiusWords)},
+		{name: "radius-bottom-left", read: readRadius("border-end-start-radius"), domain: list(radiusWords)},
+		{name: "radius-bottom-right", read: readRadius("border-end-end-radius"), domain: list(radiusWords)},
 		{name: "shadow", read: readShadow, domain: list(shadowWords)},
 		{name: "opacity", read: readPercent("opacity", 0, 100, "opacity là độ hiện của cả phần tử, số nguyên từ 0 đến 100", false), domain: list(stepsOf(0, 100, 5))},
 		{name: "scale", read: readPercent("scale", 0, 200, "scale là phần trăm cỡ, số nguyên từ 0 đến 200 (95 là 95%)", true), domain: words("0", "50", "75", "90", "95", "100", "105", "110", "125", "150")},
@@ -216,28 +205,6 @@ func Rank(name string) int {
 		return rank
 	}
 	return -1
-}
-
-// Logical is the logical twin of a physical left or right attribute: the one that names the same side
-// or corner in a line written left to right (rightToLeft false) or right to left. padding-left is
-// padding-start left to right and padding-end right to left; radius-top-right is radius-top-end, then
-// radius-top-start. "" for any other name: top and bottom are the same in both directions, start and
-// end are the line's words already.
-func Logical(name string, rightToLeft bool) string {
-	if !IsPresentation(name) {
-		return ""
-	}
-	start, end := "start", "end"
-	if rightToLeft {
-		start, end = end, start
-	}
-	switch {
-	case strings.HasSuffix(name, "-left"):
-		return strings.TrimSuffix(name, "left") + start
-	case strings.HasSuffix(name, "-right"):
-		return strings.TrimSuffix(name, "right") + end
-	}
-	return ""
 }
 
 func words(w ...string) func(*Table, Intent) []string {
@@ -429,7 +396,7 @@ func (t *Table) domain(r *Rules, in Intent, strict bool) (map[string]string, []*
 			if refused == nil {
 				refused = err
 			}
-			continue // a word the tag does not take (align of text is start, center or end)
+			continue // a word the tag does not take (align of text is left, center or right)
 		}
 		for _, w := range warned {
 			if !told[w.Message] {
@@ -450,20 +417,20 @@ func (t *Table) domain(r *Rules, in Intent, strict bool) (map[string]string, []*
 var misnamed = map[string]struct{ suggestion, message string }{
 	"padding-inline":       {"padding-x", "trục đầu và cuối dòng là padding-x"},
 	"padding-block":        {"padding-y", "trục trên và dưới là padding-y"},
-	"padding-inline-start": {"padding-start", "cạnh đầu dòng là padding-start, tự lật khi viết từ phải sang trái"},
-	"padding-inline-end":   {"padding-end", "cạnh cuối dòng là padding-end, tự lật khi viết từ phải sang trái"},
+	"padding-inline-start": {"padding-left", "cạnh trái là padding-left (tự lật khi trang viết từ phải sang trái)"},
+	"padding-inline-end":   {"padding-right", "cạnh phải là padding-right (tự lật khi trang viết từ phải sang trái)"},
 	"padding-block-start":  {"padding-top", "cạnh trên là padding-top"},
 	"padding-block-end":    {"padding-bottom", "cạnh dưới là padding-bottom"},
-	// CSS's corner properties: the .ui corner says the side first (top, bottom), then left, right,
-	// start or end
-	"border-top-left-radius":     {"radius-top-left", "góc trên bên trái là radius-top-left (none, small, medium, large, full)"},
-	"border-top-right-radius":    {"radius-top-right", "góc trên bên phải là radius-top-right (none, small, medium, large, full)"},
-	"border-bottom-left-radius":  {"radius-bottom-left", "góc dưới bên trái là radius-bottom-left (none, small, medium, large, full)"},
-	"border-bottom-right-radius": {"radius-bottom-right", "góc dưới bên phải là radius-bottom-right (none, small, medium, large, full)"},
-	"border-start-start-radius":  {"radius-top-start", "góc trên đầu dòng là radius-top-start (none, small, medium, large, full), tự lật khi viết từ phải sang trái"},
-	"border-start-end-radius":    {"radius-top-end", "góc trên cuối dòng là radius-top-end (none, small, medium, large, full), tự lật khi viết từ phải sang trái"},
-	"border-end-start-radius":    {"radius-bottom-start", "góc dưới đầu dòng là radius-bottom-start (none, small, medium, large, full), tự lật khi viết từ phải sang trái"},
-	"border-end-end-radius":      {"radius-bottom-end", "góc dưới cuối dòng là radius-bottom-end (none, small, medium, large, full), tự lật khi viết từ phải sang trái"},
+	// CSS's corner properties, physical or logical: the .ui corner says the side first (top, bottom),
+	// then left or right, the design's, which mirror on a page written right to left
+	"border-top-left-radius":     {"radius-top-left", "góc trên bên trái là radius-top-left (none, small, medium, large, full), tự lật khi trang viết từ phải sang trái"},
+	"border-top-right-radius":    {"radius-top-right", "góc trên bên phải là radius-top-right (none, small, medium, large, full), tự lật khi trang viết từ phải sang trái"},
+	"border-bottom-left-radius":  {"radius-bottom-left", "góc dưới bên trái là radius-bottom-left (none, small, medium, large, full), tự lật khi trang viết từ phải sang trái"},
+	"border-bottom-right-radius": {"radius-bottom-right", "góc dưới bên phải là radius-bottom-right (none, small, medium, large, full), tự lật khi trang viết từ phải sang trái"},
+	"border-start-start-radius":  {"radius-top-left", "góc trên bên trái là radius-top-left (none, small, medium, large, full), tự lật khi trang viết từ phải sang trái"},
+	"border-start-end-radius":    {"radius-top-right", "góc trên bên phải là radius-top-right (none, small, medium, large, full), tự lật khi trang viết từ phải sang trái"},
+	"border-end-start-radius":    {"radius-bottom-left", "góc dưới bên trái là radius-bottom-left (none, small, medium, large, full), tự lật khi trang viết từ phải sang trái"},
+	"border-end-end-radius":      {"radius-bottom-right", "góc dưới bên phải là radius-bottom-right (none, small, medium, large, full), tự lật khi trang viết từ phải sang trái"},
 	// what .ui has no word for, or says another way
 	"margin":   {"", "không có margin: khoảng cách giữa các phần là gap của khung cha, khoảng đệm là padding của chính khung"},
 	"display":  {"", "không có display: hàng hay cột là flex, lưới là thẻ grid, ẩn hiện là show hoặc if"},
@@ -474,7 +441,7 @@ var misnamed = map[string]struct{ suggestion, message string }{
 	"font-size":             {"size", "cỡ chữ là size (mini, small, medium, large, huge)"},
 	"font-weight":           {"weight", "độ đậm của chữ là weight (normal, semibold, bold…)"},
 	"font-family":           {"font", "họ chữ là font, theo vai trò khai trong router.fonts (body, code)"},
-	"text-align":            {"align", "căn chữ là align (start, center, end)"},
+	"text-align":            {"align", "căn chữ là align (left, center, right; tự lật khi trang viết từ phải sang trái)"},
 	"text-transform":        {"case", "chữ hoa, chữ thường là case (upper, lower)"},
 	"line-clamp":            {"lines", "số dòng tối đa là lines"},
 	"background-color":      {"background", "màu nền là background, một token của bảng màu"},
@@ -501,23 +468,51 @@ func notPresentation(in Intent) *Problem {
 		p.Suggestion = m.suggestion
 		return p
 	}
+	if p := startEndName(in); p != nil {
+		return p
+	}
 	if p := misnamedSide(in); p != nil {
 		return p
 	}
 	return problem(in, written+in.Name+" không phải thuộc tính trình bày")
 }
 
-// tailwindPadding are Tailwind's padding names, each with the .ui attribute it is.
-var tailwindPadding = map[string]string{
-	"p": "padding", "px": "padding-x", "py": "padding-y", "pt": "padding-top", "pb": "padding-bottom",
-	"pl": "padding-left", "pr": "padding-right", "ps": "padding-start", "pe": "padding-end",
+// RenamedSide is the attribute that replaced a side or a corner named with start or end (padding-start
+// is padding-left, radius-top-end is radius-top-right, 19/10/2026), "" for any other name: what a call of a
+// layout or a component tells such a name, as any element does.
+func RenamedSide(name string) string {
+	if renamed := startEndRenamed(name); renamed != "" && IsPresentation(renamed) {
+		return renamed
+	}
+	return ""
 }
 
-// tailwindCorners are the sides and corners of Tailwind's rounded-…, each with the .ui attribute it is.
+// startEndName refuses a side or a corner named with start or end (padding-start, radius-top-end), the
+// words of the line that left and right replaced (19/10/2026), and names the attribute that replaced
+// it; nil for any other name.
+func startEndName(in Intent) *Problem {
+	renamed := startEndRenamed(in.Name)
+	if renamed == "" || !IsPresentation(renamed) {
+		return nil
+	}
+	p := problem(in, in.Name+" nay là "+renamed+": start và end nay là left và right (tự lật khi trang viết từ phải sang trái)")
+	p.Suggestion = renamed
+	return p
+}
+
+// tailwindPadding are Tailwind's padding names, each with the .ui attribute it is: Tailwind's start
+// and end (ps, pe) are .ui's left and right, which mirror the same way.
+var tailwindPadding = map[string]string{
+	"p": "padding", "px": "padding-x", "py": "padding-y", "pt": "padding-top", "pb": "padding-bottom",
+	"pl": "padding-left", "pr": "padding-right", "ps": "padding-left", "pe": "padding-right",
+}
+
+// tailwindCorners are the sides and corners of Tailwind's rounded-…, each with the .ui attribute it is:
+// Tailwind's start and end (s, e, ss, se, es, ee) are .ui's left and right, which mirror the same way.
 var tailwindCorners = map[string]string{
-	"t": "radius-top", "b": "radius-bottom", "l": "radius-left", "r": "radius-right", "s": "radius-start", "e": "radius-end",
+	"t": "radius-top", "b": "radius-bottom", "l": "radius-left", "r": "radius-right", "s": "radius-left", "e": "radius-right",
 	"tl": "radius-top-left", "tr": "radius-top-right", "bl": "radius-bottom-left", "br": "radius-bottom-right",
-	"ss": "radius-top-start", "se": "radius-top-end", "es": "radius-bottom-start", "ee": "radius-bottom-end",
+	"ss": "radius-top-left", "se": "radius-top-right", "es": "radius-bottom-left", "ee": "radius-bottom-right",
 }
 
 // radiusWordOf is the .ui word of a radius written in .ui's words or Tailwind's (lg is .5rem, medium).
@@ -532,7 +527,8 @@ func radiusWordOf(word string) (string, bool) {
 // misnamedSide answers a side or a corner written in another system's words, nil for any other name:
 // Tailwind's padding names, as an attribute (pl="4") or a class written as one (pl-4), Tailwind's
 // rounded sides and corners (rounded-t-lg, rounded-tl="xl"), and a .ui corner named the other way
-// round (radius-left-top). Its suggestion is the .ui name, or name="value" when the value is in the
+// round (radius-left-top, or radius-start-top in the old words, which is radius-top-left). Its
+// suggestion is the .ui name, or name="value" when the value is in the
 // name or is a word of Tailwind's too: Tailwind's sizes are read by their size, so rounded-t-lg (.5rem)
 // is radius-top="medium", as radius="lg" is radius="medium".
 func misnamedSide(in Intent) *Problem {
@@ -581,14 +577,21 @@ func misnamedSide(in Intent) *Problem {
 	}
 	if rest, ok := strings.CutPrefix(name, "radius-"); ok {
 		across, along, _ := strings.Cut(rest, "-")
+		if along != "top" && along != "bottom" {
+			return nil
+		}
 		switch across {
-		case "left", "right", "start", "end":
-			if along == "top" || along == "bottom" {
-				corner := "radius-" + along + "-" + across
-				p := problem(in, written+": góc viết cạnh trên hay dưới trước rồi mới đến "+across+": "+corner)
-				p.Suggestion = corner
-				return p
-			}
+		case "left", "right":
+			corner := "radius-" + along + "-" + across
+			p := problem(in, written+": góc viết cạnh trên hay dưới trước rồi mới đến "+across+": "+corner)
+			p.Suggestion = corner
+			return p
+		case "start", "end":
+			// the other way round and in the old words besides (radius-start-top): one fix says both
+			corner := "radius-" + along + "-" + startEndRenamed(across)
+			p := problem(in, written+": góc viết cạnh trên hay dưới trước rồi mới đến left hay right; start và end nay là left và right: "+corner+" (tự lật khi trang viết từ phải sang trái)")
+			p.Suggestion = corner
+			return p
 		}
 	}
 	return nil
@@ -680,24 +683,33 @@ func readShow(_ *Table, in Intent, v string) (reading, *Problem) {
 // carries a direction class, a text element never does.
 const textNotContainer = ":where(:not(.flex-row,.flex-column,.grid))"
 
+// textAlign is align on text as CSS text-align: left and right are the design's and logical CSS, so
+// they mirror on a page written right to left (left is start, the right edge in Arabic).
+var textAlign = map[string]string{"left": "start", "center": "center", "right": "end"}
+
 // readAlign sets the variables the direction classes read (reboot.css), so the same class places the
 // children whichever way medium:flex="row" turns the container. On text it also aligns the lines;
-// the class's own rule stays the same on every tag, so one class serves both.
+// the class's own rule stays the same on every tag, so one class serves both. A value written with
+// start or end, the old words, is refused with the left or right word that replaced it.
 func readAlign(_ *Table, in Intent, v string) (reading, *Problem) {
+	if renamed := startEndRenamed(v); renamed != "" {
+		if _, known := positions[renamed]; known {
+			return reading{}, startEndValue(in, v, renamed)
+		}
+	}
 	pos, ok := positions[v]
 	if textual(in.Tag) {
-		switch v {
-		case "start", "center", "end":
+		if text, isText := textAlign[v]; isText {
 			return reading{
 				declarations: "--kitwork-vertical:" + flexValue[pos[0]] + ";--kitwork-horizontal:" + flexValue[pos[1]],
-				scoped:       []scopedRule{{selector: textNotContainer, declarations: "text-align:" + v}},
+				scoped:       []scopedRule{{selector: textNotContainer, declarations: "text-align:" + text}},
 			}, nil
 		}
 		if ok {
 			// a position of a frame's children, where it does nothing: a text lays out no children
-			return reading{inert: true}, warning(in, "align=\""+v+"\" là vị trí các con của một khung, trên chữ không có tác dụng: align của text nhận start, center hoặc end")
+			return reading{inert: true}, warning(in, "align=\""+v+"\" là vị trí các con của một khung, trên chữ không có tác dụng: align của text nhận left, center hoặc right")
 		}
-		return reading{}, problem(in, "align của text nhận start, center hoặc end, không có \""+v+"\"")
+		return reading{}, problem(in, "align của text nhận left, center hoặc right, không có \""+v+"\"")
 	}
 	if !ok {
 		if v == "between" || v == "around" || v == "evenly" {
@@ -705,14 +717,14 @@ func readAlign(_ *Table, in Intent, v string) (reading, *Problem) {
 			p.Suggestion = "space=\"" + v + "\""
 			return reading{}, p
 		}
-		return reading{}, problem(in, "align nhận top-start, top, top-end, start, center, end, bottom-start, bottom hoặc bottom-end, không có \""+v+"\"")
+		return reading{}, problem(in, "align nhận top-left, top, top-right, left, center, right, bottom-left, bottom hoặc bottom-right, không có \""+v+"\"")
 	}
 	return reading{declarations: "--kitwork-vertical:" + flexValue[pos[0]] + ";--kitwork-horizontal:" + flexValue[pos[1]]}, nil
 }
 
 func alignDomain(_ *Table, in Intent) []string {
 	if textual(in.Tag) {
-		return []string{"start", "center", "end"}
+		return []string{"left", "center", "right"}
 	}
 	return positionWords
 }
@@ -838,14 +850,19 @@ func readRotate(_ *Table, in Intent, v string) (reading, *Problem) {
 	return read, nil
 }
 
+// readPlace reads place (values.go, places). A value written with start or end, the old words, is
+// refused with the left or right word that replaced it (below-start is below-left).
 func readPlace(_ *Table, in Intent, v string) (reading, *Problem) {
 	if d, ok := places[v]; ok {
 		return reading{declarations: d}, nil
 	}
+	if renamed := startEndRenamed(v); renamed != "" && places[renamed] != "" {
+		return reading{}, startEndValue(in, v, renamed)
+	}
 	if v == "before" || v == "after" {
 		return reading{}, problem(in, "place \""+v+"\" chưa được hỗ trợ ở bản này")
 	}
-	return reading{}, problem(in, "place nhận top-start, top, top-end, start, center, end, bottom-start, bottom, bottom-end, fill (bên trong cha) hoặc below-start, below, below-end, above-start, above, above-end (bên ngoài), không có \""+v+"\"")
+	return reading{}, problem(in, "place nhận top-left, top, top-right, left, center, right, bottom-left, bottom, bottom-right, fill (bên trong cha) hoặc below-left, below, below-right, above-left, above, above-right (bên ngoài), không có \""+v+"\"")
 }
 
 // readPin reads pin: the element keeps its place in the page and sticks to the top or bottom edge of

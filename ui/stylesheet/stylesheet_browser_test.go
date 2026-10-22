@@ -27,14 +27,23 @@ import (
 //     last, so without the layer statement at the top of page.css its layer would come first and
 //     lose to every element look;
 //   - the fixed order: a state beats a width, active beats open, disabled beats active;
+//   - a left or right word is logical CSS: padding-left pads the right edge under dir="rtl";
 //   - align and space through the variables, reset on every container; open: follows the nearest
 //     element that opens; show's own layer gives back the display a class set; the accessibility
 //     floor of [hidden]; an image with a ratio covers its box unless fit says otherwise;
 //   - colors.css: the tokens, the lighter colours and alphas, and the dark look under data-theme;
-//     a stronger colour is the custom property page.css sets for each mode.
+//     a stronger colour is the custom property page.css sets for each mode;
+//   - the text scope of a richtext (page.css, @layer elements): the room between its blocks, more above
+//     a heading than below it, the heading scale in em, list markers back, the link in kitwork-link and
+//     underlined in each mode, strong text bold, a quote set off by a line on its left and none of the
+//     fill reboot.css gives a <quote> (which a quote outside a richtext keeps), a class of the page
+//     layer on the richtext over the scope.
 //
 // Control: an icon rule outside every layer beats show-false (the reason Elements layers the icons);
-// the same rule inside the elements layer loses to it.
+// the same rule inside the elements layer loses to it. CONTROL of the scope: with its selectors at zero
+// weight (:where(.richtext) in place of .richtext), reboot.css, linked after page.css, gave the quote
+// inside a richtext its fill and its padding back and the heading its rem size, and this test failed
+// (run 20/10/2026 on an overlaid copy of richtext.go).
 func TestBrowserStylesheetsHoldInABrowser(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping the stylesheet browser proof in short mode")
@@ -94,9 +103,13 @@ func TestBrowserStylesheetsHoldInABrowser(t *testing.T) {
 		if _, err := table.Class(&rules, Intent{Tag: tag, Name: "color", Value: "brand"}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := table.Class(&rules, Intent{Tag: tag, Name: "align", Value: "end"}); err != nil {
+		if _, err := table.Class(&rules, Intent{Tag: tag, Name: "align", Value: "right"}); err != nil {
 			t.Fatal(err)
 		}
+	}
+
+	if err := table.Richtext(&rules); err != nil { // the text scope of a richtext
+		t.Fatal(err)
 	}
 
 	onHex, _, _ := palette.Value("brand.on")
@@ -109,7 +122,7 @@ func TestBrowserStylesheetsHoldInABrowser(t *testing.T) {
 <div class="flex-column ` + classes("width=400px") + `"><div id="width" class="` + classes("width=50%") + `"></div></div>
 <div id="ratio" class="flex-column ` + classes("width=160px aspect-ratio=16/9") + `"></div>
 <div id="sides" class="flex-column ` + classes("padding=4 padding-y=2 padding-top=8") + `"></div>
-<div dir="rtl" id="start" class="flex-column ` + classes("padding-start=4") + `"></div>
+<div dir="rtl" id="rtl-left" class="flex-column ` + classes("padding-left=4") + `"></div>
 <p id="token" class="` + classes("color=danger") + `">x</p>
 <p id="shade" class="` + classes("color=ink-30") + `">x</p>
 <p id="shade-reference" style="color:color-mix(in oklab,#2b211b 70%,#f6f3ee)">x</p>
@@ -144,15 +157,28 @@ func TestBrowserStylesheetsHoldInABrowser(t *testing.T) {
 <div id="align" class="flex-column ` + classes("medium:flex=row align=top") + `"><div id="align-child" class="flex-column"></div></div>
 <div id="space" class="flex-row ` + classes("align=center space=between") + `"></div>
 <div><button id="button" class="flex-row ` + classes("border=line") + `">x</button></div>
-<button id="button-written" class="flex-row ` + classes("align=start") + `">x</button>
+<button id="button-written" class="flex-row ` + classes("align=left") + `">x</button>
 <p id="text" class="` + classes("text: align=center") + `">x</p>
 <div id="box-center" class="flex-column ` + classes("align=center") + `"></div>
-<div class="flex-column place-anchor ` + classes("width=200px height=100px") + `"><div id="placed" class="` + classes("place=bottom-end width=20px height=10px") + `"></div></div>
+<div class="flex-column place-anchor ` + classes("width=200px height=100px") + `"><div id="placed" class="` + classes("place=bottom-right width=20px height=10px") + `"></div></div>
 <div id="hidden" class="flex-row" hidden></div>
 <img id="cover" alt="" src="` + image + `" class="` + classes("image: aspect-ratio=4/3") + `">
 <img id="contain" alt="" src="` + image + `" class="` + classes("image: aspect-ratio=4/3 fit=contain") + `">
 <img id="plain-image" alt="" src="` + image + `">
 <div><i id="icon" class="icon-test ` + classes("show=false") + `"></i><i id="icon-raw" class="icon-raw ` + classes("show=false") + `"></i></div>
+<div id="richtext" class="richtext"><h2 id="richtext-heading">Tiêu đề</h2>
+<p id="richtext-text">Một <a id="richtext-link" href="/menu">link</a> và <strong id="richtext-strong">chữ đậm</strong></p>
+<ul id="richtext-list">
+<li>một</li>
+<li id="richtext-item">hai</li>
+</ul>
+<blockquote id="richtext-quote">
+<p>trích</p>
+<p id="richtext-quote-text">dẫn</p>
+</blockquote>
+<h3 id="richtext-subheading">Mục</h3></div>
+<div class="richtext ` + classes("size=large") + `"><p>x</p><h2 id="richtext-large-heading">Lớn</h2></div>
+<blockquote id="quote-plain" class="flex-column"><p>trích</p></blockquote>
 `
 	reboot, colors := Reboot(), Colors(palette)
 	pageCSS := rules.CSS()
@@ -219,7 +245,7 @@ func TestBrowserStylesheetsHoldInABrowser(t *testing.T) {
 	  r.width50 = String(q("width").getBoundingClientRect().width);
 	  r.ratio = String(q("ratio").getBoundingClientRect().height);
 	  r.sides = ["top", "right", "bottom", "left"].map(function (side) { return style("sides", "padding-" + side); }).join(" ");
-	  r.start = style("start", "padding-right") + " " + style("start", "padding-left");
+	  r.rtlLeft = style("rtl-left", "padding-right") + " " + style("rtl-left", "padding-left");
 	  r.token = style("token", "color");
 	  r.shade = String(style("shade", "color") === style("shade-reference", "color"));
 	  r.lighterAlpha = String(style("lighter-alpha", "color") === style("lighter-alpha-reference", "color"));
@@ -250,10 +276,24 @@ func TestBrowserStylesheetsHoldInABrowser(t *testing.T) {
 	  r.hidden = style("hidden", "display");
 	  r.fit = [style("cover", "object-fit"), style("contain", "object-fit"), style("plain-image", "object-fit")].join(" ");
 	  r.icon = style("icon", "display") + " " + style("icon-raw", "display");
+	  r.richtextHeading = [style("richtext-heading", "font-size"), style("richtext-heading", "margin-top")].join(" ");
+	  r.richtextText = style("richtext-text", "margin-top");
+	  r.richtextLink = [style("richtext-link", "color"), style("richtext-link", "text-decoration-line")].join(" ");
+	  r.richtextStrong = style("richtext-strong", "font-weight");
+	  r.richtextList = [style("richtext-list", "list-style-type"), style("richtext-list", "padding-left"), style("richtext-list", "margin-top")].join(" ");
+	  r.richtextItem = style("richtext-item", "margin-top");
+	  r.richtextQuote = [style("richtext-quote", "border-left-width"), style("richtext-quote", "border-left-style"), style("richtext-quote", "border-left-color"),
+	    style("richtext-quote", "border-top-width"), style("richtext-quote", "padding-left"), style("richtext-quote", "padding-top"),
+	    style("richtext-quote", "background-color"), style("richtext-quote", "border-top-left-radius"), style("richtext-quote", "margin-top")].join(" ");
+	  r.richtextQuoteText = style("richtext-quote-text", "margin-top");
+	  r.richtextSubheading = [style("richtext-subheading", "font-size"), style("richtext-subheading", "margin-top")].join(" ");
+	  r.richtextLarge = style("richtext-large-heading", "font-size");
+	  r.quotePlain = String(style("quote-plain", "background-color") !== "rgba(0, 0, 0, 0)") + " " + style("quote-plain", "padding-left");
 	  r.focus = getComputedStyle(document.documentElement).getPropertyValue("--kitwork-focus").trim();
 	  r.light = getComputedStyle(document.documentElement).backgroundColor + " " + getComputedStyle(document.documentElement).color;
 	  document.documentElement.setAttribute("data-theme", "dark");
 	  r.dark = getComputedStyle(document.documentElement).backgroundColor + " " + getComputedStyle(document.documentElement).color + " " + style("token", "color") + " " + style("strong", "color");
+	  r.richtextLinkDark = style("richtext-link", "color");
 	  fetch("/report", { method: "POST", body: JSON.stringify(r) });
 	});
 	</script>`
@@ -333,7 +373,7 @@ func TestBrowserStylesheetsHoldInABrowser(t *testing.T) {
 		"width50":            "200",
 		"ratio":              "90",
 		"sides":              "32px 16px 8px 16px", // a side over an axis over padding
-		"start":              "16px 0px",           // start is the right edge when the writing runs right to left
+		"rtlLeft":            "16px 0px",           // padding-left is the right edge when the writing runs right to left
 		"token":              rgb("danger"),
 		"shade":              "true",
 		"lighterAlpha":       "true",
@@ -367,6 +407,21 @@ func TestBrowserStylesheetsHoldInABrowser(t *testing.T) {
 		"focus":              "#c8742c",           // the brand reaches 3:1 on canvas and paper: the ring is the brand
 		"light":              rgb("canvas") + " " + rgb("ink"),
 		"dark":               night("canvas") + " " + night("ink") + " " + night("danger") + " " + night("brand+15"),
+		// the text scope: the room in em of the block's own size, the heading's 1.5em of 16px first with
+		// no room above, the text after it half an em, a list one em, its items a quarter, the quote's
+		// second paragraph one em; a heading after a block 1.5em of its own size (h3: 18px, 27px above)
+		"richtextHeading":    "24px 0px",
+		"richtextText":       "8px",
+		"richtextLink":       rgb(LinkColour) + " underline",
+		"richtextLinkDark":   night(LinkColour),
+		"richtextStrong":     "700",
+		"richtextList":       "disc 24px 16px",
+		"richtextItem":       "4px",
+		"richtextQuote":      "4px solid " + rgb("line") + " 0px 16px 0px rgba(0, 0, 0, 0) 0px 16px",
+		"richtextQuoteText":  "16px",
+		"richtextSubheading": "18px 27px",
+		"richtextLarge":      "27px", // size="large" (1.125rem, page layer) on the richtext: its h2 is 1.5em of it
+		"quotePlain":         "true 16px",
 	}
 	for path, rulesOfFile := range expected {
 		want["parse "+path] = "rules=" + strconv.Itoa(len(rulesOfFile)) + " missing="

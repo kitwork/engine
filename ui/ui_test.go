@@ -129,14 +129,14 @@ func TestShowWithWidthsWritesDisplayClasses(t *testing.T) {
 }
 
 // A false show is the bare hidden attribute wherever it is decided: a show of the page's data, a show
-// at the host of a Kitwork component, and a show the browser keeps up to date inside the component. The
-// kernel shows and hides with hidden too, so a show binding can always reveal what the server hid;
-// an inline display:none would outlive the binding.
+// on the tag of a Kitwork component (<dropdown show=…>, written on the host it builds), and a show the
+// browser keeps up to date inside the component. The kernel shows and hides with hidden too, so a show
+// binding can always reveal what the server hid; an inline display:none would outlive the binding.
 func TestFalseShowIsTheHiddenAttribute(t *testing.T) {
 	src := `<content>
   <text show="sale">giảm giá</text>
-  <box component="dropdown" show="signedIn"><text>tài khoản</text></box>
-  <box component="dropdown"><card show="open"><text>menu</text></card></box>
+  <dropdown show="signedIn"><text>tài khoản</text></dropdown>
+  <dropdown><card show="open"><text>menu</text></card></dropdown>
 </content>`
 	html := render(t, src, map[string]any{"sale": false, "signedIn": false})
 	mustContain(t, html,
@@ -411,7 +411,7 @@ func TestProgressbarIsOnEveryPageThatDoesNotReload(t *testing.T) {
 // Written in page.ui, the bar takes its colour and its name from there, and is not added twice.
 func TestProgressbarWrittenInPage(t *testing.T) {
 	s := memorySite("", map[string]string{
-		"/site/page.ui":    `<page><box component="progressbar" color="ink-30" alt="Đang mở trang" /><header /><content /></page>`,
+		"/site/page.ui":    `<page><progressbar color="ink-30" alt="Đang mở trang" /><header /><content /></page>`,
 		"/site/header.ui":  `<header><text>Quán</text></header>`,
 		"/site/content.ui": `<content><text>x</text></content>`,
 	})
@@ -443,16 +443,16 @@ func TestProgressbarPlacementErrors(t *testing.T) {
 	}{
 		{"inside the header", map[string]string{
 			"/site/page.ui": `<page><header /><content /></page>`, "/site/content.ui": content,
-			"/site/header.ui": `<header><box component="progressbar" /><text>Quán</text></header>`,
+			"/site/header.ui": `<header><progressbar /><text>Quán</text></header>`,
 		}, "progressbar đặt trong page.ui"},
 		{"inside the content", map[string]string{
-			"/site/content.ui": `<content><box component="progressbar" /><text>x</text></content>`,
+			"/site/content.ui": `<content><progressbar /><text>x</text></content>`,
 		}, "progressbar đặt trong page.ui"},
 		{"a word that is none of .ui", map[string]string{
-			"/site/page.ui": `<page><box component="progressbar" lang="vi" /><content /></page>`, "/site/content.ui": content,
+			"/site/page.ui": `<page><progressbar lang="vi" /><content /></page>`, "/site/content.ui": content,
 		}, "progressbar chỉ nhận color"},
 		{"content inside", map[string]string{
-			"/site/page.ui": `<page><box component="progressbar">Đang tải</box><content /></page>`, "/site/content.ui": content,
+			"/site/page.ui": `<page><progressbar>Đang tải</progressbar><content /></page>`, "/site/content.ui": content,
 		}, "progressbar không có nội dung con"},
 	}
 	for _, c := range cases {
@@ -463,7 +463,7 @@ func TestProgressbarPlacementErrors(t *testing.T) {
 	// below the header, twice, value= or a site that reloads: drawn as written and warned of
 	// (diagnostics_compile_test.go)
 	// control: the same page.ui compiles on a site that does not reload
-	s := memorySite("", map[string]string{"/site/page.ui": `<page><box component="progressbar" /><content /></page>`, "/site/content.ui": content})
+	s := memorySite("", map[string]string{"/site/page.ui": `<page><progressbar /><content /></page>`, "/site/content.ui": content})
 	if _, err := s.Compile("/site"); err != nil {
 		t.Errorf("a bar first in page.ui must compile: %v", err)
 	}
@@ -479,16 +479,16 @@ func TestProgressbarDelay(t *testing.T) {
 		})
 		return renderAt(t, s, ".", "/", nil)
 	}
-	mustContain(t, page(`<box component="progressbar" delay="0" />`), `data-kitwork-delay="0"`)
-	mustContain(t, page(`<box component="progressbar" delay="400" />`), `data-kitwork-delay="400"`)
+	mustContain(t, page(`<progressbar delay="0" />`), `data-kitwork-delay="0"`)
+	mustContain(t, page(`<progressbar delay="400" />`), `data-kitwork-delay="400"`)
 	// control: the default, written or not, puts nothing on the page
-	mustNotContain(t, page(`<box component="progressbar" delay="120" />`), "data-kitwork-delay")
-	mustNotContain(t, page(`<box component="progressbar" />`), "data-kitwork-delay")
+	mustNotContain(t, page(`<progressbar delay="120" />`), "data-kitwork-delay")
+	mustNotContain(t, page(`<progressbar />`), "data-kitwork-delay")
 	mustNotContain(t, page(``), "data-kitwork-delay")
 
 	for _, bad := range []string{`"-1"`, `"fast"`, `"1.5"`, `"{{ wait }}"`} { // "10001": a warning
 		s := memorySite("", map[string]string{
-			"/site/page.ui":    `<page><box component="progressbar" delay=` + bad + ` /><content /></page>`,
+			"/site/page.ui":    `<page><progressbar delay=` + bad + ` /><content /></page>`,
 			"/site/content.ui": `<content><text>x</text></content>`,
 		})
 		if _, err := s.Compile("/site"); err == nil {
@@ -508,15 +508,15 @@ func TestProgressbarThickness(t *testing.T) {
 		html, css := renderWithCSS(t, s, ".", "/", nil)
 		return html + "\n" + css
 	}
-	mustContain(t, page(`<box component="progressbar" thickness="4" />`), `class="thickness-4 background-brand"`, `.thickness-4{block-size:4px}`)
-	mustContain(t, page(`<box component="progressbar" thickness="8" color="ink" />`), `class="thickness-8 background-ink"`, `.thickness-8{block-size:8px}`)
+	mustContain(t, page(`<progressbar thickness="4" />`), `class="thickness-4 background-brand"`, `.thickness-4{block-size:4px}`)
+	mustContain(t, page(`<progressbar thickness="8" color="ink" />`), `class="thickness-8 background-ink"`, `.thickness-8{block-size:8px}`)
 	// control: unwritten, the default
-	mustContain(t, page(`<box component="progressbar" />`), `class="thickness-1 background-brand"`, `.thickness-1{block-size:1px}`)
-	mustContain(t, page(`<box component="progressbar" thickness="1" />`), `.thickness-1{block-size:1px}`) // 1 is 1px, not the spacing scale's 4px
+	mustContain(t, page(`<progressbar />`), `class="thickness-1 background-brand"`, `.thickness-1{block-size:1px}`)
+	mustContain(t, page(`<progressbar thickness="1" />`), `.thickness-1{block-size:1px}`) // 1 is 1px, not the spacing scale's 4px
 	mustContain(t, page(``), `class="thickness-1 background-brand"`)
 	for _, bad := range []string{`"0"`, `"0.5"`, `"2px"`, `"thin"`} { // "9": drawn, a warning
 		s := memorySite("", map[string]string{
-			"/site/page.ui":    `<page><box component="progressbar" thickness=` + bad + ` /><content /></page>`,
+			"/site/page.ui":    `<page><progressbar thickness=` + bad + ` /><content /></page>`,
 			"/site/content.ui": `<content><text>x</text></content>`,
 		})
 		_, err := s.Compile("/site")

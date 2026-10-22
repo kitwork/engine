@@ -15,7 +15,7 @@ import (
 // are the site's, so are names with digits that are no step (hero2, hero-x2, h2o-glow), and
 // background="none" stays an error on a palette without such a gradient.
 func TestGradientNameIsNoKeywordNorAStandardSpelledOtherwise(t *testing.T) {
-	hero := Gradient{Type: "linear", Direction: "to-end", Stops: []Stop{{Color: "ink", At: 0}, {Color: "brand", At: 100}}}
+	hero := Gradient{Type: "linear", Direction: "to-right", Stops: []Stop{{Color: "ink", At: 0}, {Color: "brand", At: 100}}}
 	for name, want := range map[string]string{
 		"none":         `router.gradients: "none" là một từ khoá, không phải tên: background="none" hay color="none" không bao giờ là một gradient; đặt tên khác`,
 		"auto":         `router.gradients: "auto" là một từ khoá, không phải tên`,

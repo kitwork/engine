@@ -10,7 +10,7 @@ import (
 )
 
 // backdropBarFiles is a site whose page has a backdrop (cirrus) and the light/dark toggle a Kitwork UI
-// page writes (component="appearance"), with a second page under the same page.ui that Drive moves to
+// page writes (<appearance>), with a second page under the same page.ui that Drive moves to
 // without a reload (router.reload(false)). Its colours have a dark look; the page follows the device.
 var backdropBarFiles = map[string]string{
 	"localhost/router.work": `import { router } from "kitwork";
@@ -18,7 +18,7 @@ var backdropBarFiles = map[string]string{
 router.colors({ brand: "#c8742c", canvas: { light: "#f6f9fc", dark: "#0f1822" } });
 router.reload(false);
 `,
-	"localhost/page.ui":      `<page background="cirrus"><header><button component="appearance" click="toggle()">Đổi</button><link value="/b">Sang b</link></header><content /></page>`,
+	"localhost/page.ui":      `<page background="cirrus"><header><appearance click="toggle()">Đổi</appearance><link value="/b">Sang b</link></header><content /></page>`,
 	"localhost/content.ui":   `<content><text>Trang đầu</text></content>`,
 	"localhost/b/content.ui": `<content><text>Trang b</text></content>`,
 }

@@ -13,13 +13,13 @@ import (
 )
 
 // networkHost is the network the overlay of networkBrowserFiles draws, as an author would: placed at
-// the bottom start, a notice of its own (an icon for each side of the connection, the words of each,
+// the bottom left, a notice of its own (an icon for each side of the connection, the words of each,
 // close()), and its two events said through the toast too, so a step counts them on screen. It counts
 // the network gone at once (delay="0"): the proofs that use it are about what follows once it is
 // counted (the notice, close(), Drive staying, history), each step on the timing it was written for;
 // the wait itself, the component's own second, is TestBrowserNetworkTimes'. "Back online" keeps the
 // component's own four seconds (no duration written).
-const networkHost = `  <box component="network" as="$network" place="bottom-start" delay="0" offline="$toast.info('Mất mạng.', { duration: 0 })" online="$toast.info('Có mạng lại.', { duration: 0 })">
+const networkHost = `  <network as="$network" place="bottom-left" delay="0" offline="$toast.info('Mất mạng.', { duration: 0 })" online="$toast.info('Có mạng lại.', { duration: 0 })">
     <card id="notice" show="open" flex="row" gap="3" padding="3" shadow="large">
       <icon show="!connected" value="wifi-off" alt="Ngoại tuyến" />
       <icon show="connected" value="wifi" alt="Trực tuyến" />
@@ -29,7 +29,7 @@ const networkHost = `  <box component="network" as="$network" place="bottom-star
       </box>
       <button id="close" click="close()"><icon value="x" alt="Đóng" /></button>
     </card>
-  </box>
+  </network>
 `
 
 // networkBrowserFiles is a site that moves with Drive (router.reload(false)): its overlay holds the toast
@@ -175,8 +175,8 @@ func networkReload(d *devtools) {
 // in a real browser whose network DevTools takes away and gives back, step by step, its host counting
 // the network gone at once (delay="0", networkHost):
 //   - online as it starts: the notice closed (open false), connected true, nothing said: online is never
-//     said where nothing went missing; the host is a status region fixed at the bottom start;
-//   - offline: the notice shows, wifi-off and the offline words, at the bottom start of the screen; the
+//     said where nothing went missing; the host is a status region fixed at the bottom left;
+//   - offline: the notice shows, wifi-off and the offline words, at the bottom left of the screen; the
 //     component says offline once, and the author's handler on the host runs (the toast);
 //   - close() closes it; the window saying offline again changes nothing (not open, not said again);
 //   - offline, a link clicked: the page stays (its address, its words; no browser error page) and the

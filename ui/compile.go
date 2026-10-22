@@ -3,7 +3,6 @@ package ui
 import (
 	"fmt"
 	"html"
-	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -35,8 +34,8 @@ type Page struct {
 	// palette is the route's colour chain, for a document shown with its stylesheets inline
 	palette *stylesheet.Palette
 	// rightToLeft says the site's router.language, the one the compile read (Site.Language), is written
-	// right to left: the document carries dir="rtl", so start and end flip in the browser exactly as the
-	// warnings of left and right said they would (checkSides)
+	// right to left: the document carries dir="rtl", so left and right, which the stylesheet writes as
+	// logical CSS, mirror in the browser
 	rightToLeft bool
 	// aliases are the page's aliases of a component the browser runs: on the server $files.selected
 	// reads the instance as it starts, the value the kernel starts it from (render)
@@ -80,6 +79,15 @@ type ctx struct {
 	// element is in that blueprint, where what reads the notice is bound (a link's value too)
 	toast    *toastScope
 	toastRow bool
+	// carousel is the carousel host around, whose track, slides and dots are found here (carousel.go):
+	// set inside a carousel's host, nil outside one and inside any component nested in it
+	carousel *carouselScope
+	// countdown is the countdown host around, whose <time> holds the time left (countdown.go): set inside
+	// a countdown's host, nil outside one and inside any component nested in it
+	countdown *countdownScope
+	// editor is the editor host around, whose writing area, toolbars and link popover are found here
+	// (editor.go): set inside an editor's host, nil outside one and inside any component nested in it
+	editor *editorScope
 	// onScreen says, by width (0 the narrowest, then stylesheet.Widths()), why everything here is always
 	// on the screen at that width, so lazy can skip nothing there (a frame pinned to an edge around at
 	// that width, an overlay, a popover), with where that is; nil or "" elsewhere
@@ -164,6 +172,11 @@ type forSite struct {
 type fieldIDs struct {
 	control string
 	hint    string
+	// label and error are the ids of the field's <label> and <error> when it holds an editor: the
+	// writing area is a box of text no <label for> names, so it is labelled by the label and described
+	// by the hint and the error (editor.go); "" for any other field
+	label string
+	error string
 }
 
 // callSite carries what a call adds to the element it compiles: for a region, the root of its file;
@@ -198,6 +211,8 @@ type callSite struct {
 	// network is the host of a network: where it floats, and whether it is a status region
 	// (network.go); nil for every other call
 	network *networkSpec
+	// carousel is the host of a carousel (carousel.go); nil for every other call
+	carousel *carouselScope
 }
 
 type compiler struct {
@@ -218,6 +233,11 @@ type compiler struct {
 	sources    map[string]componentSource
 	reads      map[string]map[string]bool
 	nearest    map[string]string
+	// hostTags are the tags the author wrote for the hosts their components' tags built (asHost), for a
+	// message (tagOf); logicNamed is whether the site defines logic under a tag's name, by name
+	// (namedLikeATag)
+	hostTags   map[*Node]string
+	logicNamed map[string]string
 	// view is what the route's view declares (router.work): a name a component and the view both
 	// declare cannot be read inside the component's host
 	view map[string]bool
@@ -243,6 +263,9 @@ type compiler struct {
 	// calls through the toast's alias are checked once every as is known (toast.go, checkToastCalls)
 	toast         *toastScope
 	aliasExprs    []aliasExpr
+	carousels     []*carouselScope  // every carousel of the page, told at its end (checkCarousels)
+	countdowns    []*countdownScope // every countdown of the page, its alias's calls checked at its end (checkCountdowns)
+	editors       []*editorScope    // every editor of the page, what reads its alias checked at its end (checkEditors)
 	aliasExprSeen map[aliasExprKey]bool
 
 	// table reads presentation attributes against the route's colour chain; rules is the page's
@@ -335,7 +358,8 @@ func (s *Site) compile(routeDir, contentFile string) (*Page, error) {
 	}
 	c := &compiler{site: s, routeDir: routeDir, files: map[string]bool{}, seq: map[string]int{},
 		components: map[string]*componentDef{}, called: map[string]*componentDef{}, sources: map[string]componentSource{}, reads: map[string]map[string]bool{},
-		nearest: map[string]string{}, table: stylesheet.NewTable(s.Palette), rules: &stylesheet.Rules{}, uses: map[string]bool{},
+		nearest: map[string]string{}, hostTags: map[*Node]string{}, logicNamed: map[string]string{},
+		table: stylesheet.NewTable(s.Palette), rules: &stylesheet.Rules{}, uses: map[string]bool{},
 		out: &Page{palette: s.Palette, rightToLeft: rightToLeft(s.Language)}}
 	view, viewFile := s.viewNames(routeDir)
 	c.view = view
@@ -399,6 +423,16 @@ func (s *Site) compile(routeDir, contentFile string) (*Page, error) {
 	if err := c.checkToastCalls(); err != nil { // what each call through the toast's alias says (toast.go)
 		return nil, err
 	}
+	// what each call through a countdown's alias calls, and a countdown nothing starts (countdown.go)
+	if err := c.checkCountdowns(); err != nil {
+		return nil, err
+	}
+	// what reads an editor through its alias: its state, never its commands (editor.go)
+	if err := c.checkEditors(); err != nil {
+		return nil, err
+	}
+	// a carousel that plays by itself and nothing on the page stops it (carousel.go)
+	c.checkCarousels()
 	if c.hiddenText != nil { // gradient text an element under it hides (gradient.go)
 		return nil, c.hiddenText
 	}
@@ -440,15 +474,32 @@ func (c *compiler) element(n *Node, cx ctx, site *callSite) (op, error) {
 		return nil, errAt(n, "lồng quá sâu (có thể một UI tự gọi lại chính nó)")
 	}
 	c.lint(n)
+	if a := componentAttribute(n); a != nil {
+		return nil, componentWritten(n, a) // a component is written as its tag (host.go)
+	}
+	if message, refused := refusedTags[n.Tag]; refused {
+		return nil, errAt(n, "%s", message) // <raw>, <prose>…: a saved post is a richtext (richtext.go)
+	}
+	if n.Tag == "wysiwyg" {
+		return nil, errAt(n, "không có thẻ <wysiwyg>: %s", editorInstead) // (editor.go)
+	}
+	if kit := kitworkComponents[n.Tag]; kit != nil {
+		return c.kitworkCall(n, kit, cx) // one of Kitwork's components, by its tag (host.go)
+	}
 	info, known := catalog[n.Tag]
 	if !known {
-		return c.layoutCall(n, cx) // a layout piece, by its tag (layout.go)
+		return c.layoutCall(n, cx) // a piece of the site, by its tag: a layout or a component (layout.go)
 	}
 	if err := c.namedLikeATag(n); err != nil {
 		return nil, err
 	}
-	if a := attrNamed(n, "component"); a.Name == "component" {
-		return c.componentCall(n, cx, site)
+	if n.Tag == "content" && cx.editor != nil {
+		return c.editorContent(n, cx) // the writing area of the editor around (editor.go), no region
+	}
+	if n.Tag == "group" {
+		if err := editorGroupPlace(n, cx); err != nil { // a group of an editor's toolbar, only there (editor.go)
+			return nil, err
+		}
 	}
 	if info.region && n.Tag != "page" && len(n.SignificantChildren()) == 0 {
 		return c.region(n, cx)
@@ -483,6 +534,9 @@ func (c *compiler) lint(n *Node) {
 		c.warn(n.File, n.Line, n.Column, fmt.Sprintf("tên thẻ <%s> viết thường: <%s> (tên thẻ không phân biệt hoa thường, nên đây là <%s>)", n.written, n.Tag, n.Tag))
 	}
 	_, kitworkTag := catalog[n.Tag]
+	if k := kitworkComponents[n.Tag]; k != nil && k.root == "" {
+		kitworkTag = true // the tag builds a box or a button, whose words these are; a UI of its own takes inputs
+	}
 	for i := range n.Attrs {
 		a := &n.Attrs[i]
 		if a.Bare {
@@ -734,8 +788,12 @@ func (c *compiler) region(n *Node, cx ctx) (op, error) {
 		switch {
 		case name == "source", name == "if", name == "show":
 		case strings.HasSuffix(name, ":show"):
-		case name == "component":
-			return nil, errAttr(n, a, "<%s /> rỗng là chỗ gọi vùng, lấy %s.ui; component của vùng đặt trên gốc của file đó (<%s component=\"…\">…</%s>), hoặc trên một thẻ bên trong", n.Tag, n.Tag, n.Tag, n.Tag)
+		case name == "as":
+			alias := strings.TrimSpace(a.Value)
+			if err := aliasWritten(n, a, alias); err != nil {
+				return nil, err
+			}
+			return nil, errAttr(n, a, "as đặt tên cho một instance; vùng <%s> là layout, không có instance để gọi: bỏ as, hoặc đặt nó trên một component bên trong %s.ui (<dropdown as=\"%s\">)", n.Tag, n.Tag, alias)
 		default:
 			// a word of the web, a typo in the name or in the value is that error first (question 1); a
 			// known word whose value reads goes on the root of the region's file
@@ -776,8 +834,8 @@ func (c *compiler) region(n *Node, cx ctx) (op, error) {
 		}
 		if logic := strings.TrimSuffix(file, ".ui") + ".work"; c.site.exists(logic) {
 			return nil, &Error{File: rel(c.site, logic), Line: 1, Column: 1, Message: fmt.Sprintf(
-				"vùng không có file .work: điều %s làm là một component trên gốc của %s (<%s component=\"…\">) hoặc trên một thẻ bên trong",
-				n.Tag, filepath.Base(file), n.Tag)}
+				"vùng không có file .work: điều %s làm là một component bên trong %s, viết bằng thẻ của nó (<dropdown>, <shop-cart>)",
+				n.Tag, filepath.Base(file))}
 		}
 	}
 	c.lint(root) // the root of a region's file, or the route's content, is compiled here, never through element()
@@ -801,8 +859,8 @@ func (c *compiler) region(n *Node, cx ctx) (op, error) {
 		}
 	}
 	rootCtx := ctx{file: root.File, kept: n.Tag != "content", container: cx.container, aliases: cx.aliases, pageBackground: cx.pageBackground, paint: cx.paint}
-	if a := attrNamed(&merged, "component"); a.Name == "component" {
-		return c.componentCall(&merged, rootCtx, site)
+	if a := componentAttribute(&merged); a != nil {
+		return nil, componentWritten(&merged, a) // a component is a tag inside the region (host.go)
 	}
 	if err := c.checkReads(&merged, rootCtx, nil); err != nil {
 		return nil, err
@@ -972,7 +1030,6 @@ func (c *compiler) attributes(n *Node, el *element) (*attrPlan, error) {
 		value string
 	}
 	var showWidths []widthShow
-	var sides []sideWritten // presentation as written, for checkSides (classes.go)
 
 	for i := range n.Attrs {
 		a := &n.Attrs[i]
@@ -1104,7 +1161,6 @@ func (c *compiler) attributes(n *Node, el *element) (*attrPlan, error) {
 			p.order = append(p.order, name)
 			continue
 		}
-		sides = append(sides, sideWritten{attr: a, name: base, width: narrowest(pre.widths), states: pre.states})
 		if strings.Contains(a.Value, "{{") {
 			if base == "container" && el.tag == "page" {
 				return nil, errAttr(n, a, "container của <page> là một chữ cố định (%s), không đổi theo dữ liệu", widthScaleWords)
@@ -1160,7 +1216,6 @@ func (c *compiler) attributes(n *Node, el *element) (*attrPlan, error) {
 		// both are drawn as written; with place the element floats over its parent, so pin does nothing
 		c.warn(n.File, p.pin.Line, p.pin.Column, "pin và place không đi cùng nhau: phần tử có place đã nổi trên cha, không nằm trong dòng chảy để ghim")
 	}
-	c.checkSides(n, sides) // a left or right with its start or end twin, and left or right on a site written right to left
 	if err := c.checkGradients(n, el, p); err != nil {
 		return nil, err // gradient text over a background, a glass over a gradient (gradient.go)
 	}
@@ -1359,6 +1414,11 @@ func isEvent(name string) bool {
 // generic compiles a catalog element with the shared rules and the tag's own attributes.
 func (c *compiler) generic(n *Node, info tagInfo, cx ctx, site *callSite) (op, error) {
 	c.requireName(n)
+	if n.Tag == "richtext" {
+		if err := c.richtextPlace(n, cx); err != nil { // a block, with nothing inside (richtext.go)
+			return nil, err
+		}
+	}
 	if n.Tag == "popover" {
 		var err error
 		if n, err = c.popoverShow(n); err != nil {
@@ -1402,7 +1462,7 @@ func (c *compiler) generic(n *Node, info tagInfo, cx ctx, site *callSite) (op, e
 	if n.Tag == "popover" {
 		c.tellLazyAround(cx, "<popover>", n, lazyCuts)
 	} else if p.outside != nil {
-		c.tellLazyAround(cx, fmt.Sprintf("<%s %s=\"%s\"> (đặt ra ngoài cha)", n.Tag, p.outside.Name, strings.TrimSpace(p.outside.Value)), n, lazyCuts)
+		c.tellLazyAround(cx, fmt.Sprintf("<%s %s=\"%s\"> (đặt ra ngoài cha)", c.tagOf(n), p.outside.Name, strings.TrimSpace(p.outside.Value)), n, lazyCuts)
 	}
 	// <page background="cirrus">: the background goes on a layer fixed to the screen (backdrop.go)
 	backdrop, err := c.pageBackdrop(n, p)
@@ -1451,6 +1511,12 @@ func (c *compiler) generic(n *Node, info tagInfo, cx ctx, site *callSite) (op, e
 		frame.written = append(frame.written, &paintIntent{name: "background", node: n, states: []string{"focus"}, values: []string{focus}})
 	}
 	c.measureOwn(n, frame)
+	if n.Tag == "richtext" {
+		// the text scope in the page's stylesheet, and its words and links measured here (richtext.go)
+		if err := c.richtextScope(n, frame); err != nil {
+			return nil, err
+		}
+	}
 	if n.Tag == "badge" {
 		c.uses["badge"] = true
 	}
@@ -1462,6 +1528,15 @@ func (c *compiler) generic(n *Node, info tagInfo, cx ctx, site *callSite) (op, e
 	}
 	classes = append(classes, p.classes...)
 	classes = append(classes, p.show...)
+	if cx.carousel != nil && cx.carousel.track == n {
+		classes = append(classes, "carousel-track") // the row that scrolls and snaps (carousel.go)
+	}
+	if cx.countdown != nil && cx.countdown.time == n {
+		classes = append(classes, "countdown-time") // the time left, its digits one width (countdown.go)
+	}
+	if cx.editor != nil {
+		classes = append(classes, cx.editor.editorClasses(n)...) // a toolbar, the link's popover (editor.go)
+	}
 	if info.region && n.Tag != "overlay" && !writesWidth(n) {
 		// the cap of <page container="…">; a region that writes its own width keeps its own. overlay is
 		// a layer over the screen, not a band of the page: what it holds floats, so it is not capped.
@@ -1494,14 +1569,18 @@ func (c *compiler) generic(n *Node, info tagInfo, cx ctx, site *callSite) (op, e
 		writeAttr(&attrs, "aria-label", c.toastRegion(site.toast))
 		attrs.WriteString(` tabindex="-1"`)
 	}
-	if site != nil && site.network != nil && site.network.status {
-		// a notice drawn inside: what shows there, and what it changes to, a screen reader says (network.go).
-		// An <li> keeps its role in its list: it is a live region by the two words role="status" means.
-		if info.html == "li" {
-			attrs.WriteString(` aria-live="polite" aria-atomic="true"`)
-		} else {
-			attrs.WriteString(` role="status"`)
+	if site != nil && site.carousel != nil {
+		// a region a screen reader names, said to be a carousel (carousel.go)
+		region, _ := c.carouselWords()
+		attrs.WriteString(` role="region"`)
+		writeAttr(&attrs, "aria-roledescription", region)
+		if !site.carousel.labelBound { // an alt that reads data is the host's own, bound like any <box alt>
+			writeAttr(&attrs, "aria-label", c.carouselLabel(site.carousel))
 		}
+	}
+	if site != nil && site.network != nil && site.network.status {
+		// a notice drawn inside: what shows there, and what it changes to, a screen reader says (network.go)
+		attrs.WriteString(` role="status"`)
 	}
 	blueprint := cx.toast != nil && cx.toast.template == n && o.forEach != nil
 	if blueprint {
@@ -1518,6 +1597,20 @@ func (c *compiler) generic(n *Node, info tagInfo, cx ctx, site *callSite) (op, e
 			return nil, err
 		}
 	}
+	if cx.carousel != nil {
+		// the track, a slide or a dot of the carousel around (carousel.go)
+		if err := c.carouselElement(n, p, o, &attrs, cx); err != nil {
+			return nil, err
+		}
+	}
+	if cx.editor != nil {
+		// a toolbar, a command button, the link's popover and its address of the editor around (editor.go)
+		if err := c.editorElement(n, p, o, &attrs, cx); err != nil {
+			return nil, err
+		}
+	} else if err := c.editorMenuElement(n, p, o, &attrs); err != nil {
+		return nil, err // the trigger, the popover or a command of a dropdown of an editor's toolbar (editor.go)
+	}
 	scope := cx.scope
 	runtime, err := c.runtimeAttributes(n, p, o, scope)
 	if err != nil {
@@ -1525,6 +1618,9 @@ func (c *compiler) generic(n *Node, info tagInfo, cx ctx, site *callSite) (op, e
 	}
 	if site != nil && site.showBind != "" {
 		runtime.binds = append(runtime.binds, site.showBind)
+	}
+	if bind := cx.editor.selectBind(n); bind != "" {
+		runtime.binds = append(runtime.binds, bind) // a select of an editor's format, two-way (editor.go)
 	}
 	if blueprint {
 		// a notice fading out (reboot.css): the engine's binding, never the author's (toast.go)
@@ -1596,6 +1692,27 @@ func (c *compiler) generic(n *Node, info tagInfo, cx ctx, site *callSite) (op, e
 			if hasChild(n, "hint") {
 				childCtx.field.hint = childCtx.field.control + "-hint"
 			}
+			if c.holdsEditor(n) {
+				// the writing area is labelled by the label and described by the error too (editor.go);
+				// the label is then its name, which an if or a for could take away
+				if label, around := c.fieldFind(n, "label", nil, map[string]bool{}); label != nil {
+					if around != nil {
+						a := attrNamed(around, "if")
+						if a.Name != "if" {
+							a = attrNamed(around, "for")
+						}
+						return nil, errAttr(around, a, "%s này có thể bỏ <label> ở %s:%d:%d, tên của vùng viết của editor (aria-labelledby trỏ vào nó): <label> của field có editor luôn có mặt",
+							a.Name, label.File, label.Line, label.Column)
+					}
+					childCtx.field.label = childCtx.field.control + "-label"
+				}
+				if c.fieldHolds(n, "error") {
+					childCtx.field.error = childCtx.field.control + "-error"
+				}
+			}
+		}
+		if cx.editor != nil && cx.editor.inPopover(n) {
+			childCtx.field = nil // the address input is the editor's, never the field's control (editor.go)
 		}
 		if n.Tag != "item" && n.Tag != "field" && n.Tag != "accordions" {
 			childCtx.breadcrumb = false
@@ -1609,7 +1726,7 @@ func (c *compiler) generic(n *Node, info tagInfo, cx ctx, site *callSite) (op, e
 				}
 				normal = append(normal, ch)
 			}
-			if err := checkListChildren(n, normal); err != nil {
+			if err := c.checkListChildren(n, normal); err != nil {
 				return nil, err
 			}
 			o.children, err = c.childNodes(normal, childCtx)
@@ -1630,6 +1747,9 @@ func (c *compiler) generic(n *Node, info tagInfo, cx ctx, site *callSite) (op, e
 			if o.children, err = c.toastChildren(n, childCtx); err != nil {
 				return nil, err
 			}
+		} else if o.richtext != nil {
+			// the value, cleaned for the page's origin each request (richtext.go)
+			o.children = []op{&richtextOp{value: o.richtext}}
 		} else {
 			parent := n
 			if n.Tag == "page" {
@@ -1696,7 +1816,8 @@ func (c *compiler) popoverShow(n *Node) (*Node, error) {
 
 // sharedTag are the .ui tags whose HTML element another tag also makes: their look is keyed by the
 // tag word as a class (reboot.css), the others' by the element itself.
-var sharedTag = map[string]bool{"card": true, "badge": true, "popover": true, "field": true, "hint": true, "error": true}
+var sharedTag = map[string]bool{"card": true, "badge": true, "popover": true, "field": true, "hint": true, "error": true,
+	"richtext": true}
 
 // neutralSteps are the fill of a neutral button, written as the author's background would be (one
 // table, one page stylesheet): translucent ink, as a system's fills are (decision F1, 13/10/2026), so
@@ -1747,9 +1868,10 @@ func engineWords(n *Node, info tagInfo, cx ctx) []string {
 }
 
 // containsPlaceChild reports whether a child of n is placed against it: written with place="…", or a
-// popover, which hangs below the start edge of what opens it even when it writes no place. A place the
-// page drops (with a warning) places nothing: a fragment builds no element, so what it holds stands
-// in n, and a reader takes no place.
+// popover, which hangs below the left edge of what opens it (as place="below-left" does, mirrored on a
+// page written right to left) even when it writes no place. A place the page drops (with a warning)
+// places nothing: a fragment builds no element, so what it holds stands in n, and a reader takes no
+// place.
 func (c *compiler) containsPlaceChild(n *Node) bool {
 	for _, ch := range n.Elements() {
 		switch ch.Tag {
@@ -1775,17 +1897,10 @@ func (c *compiler) containsPlaceChild(n *Node) bool {
 	return false
 }
 
-// placedOnScreen reports whether an element is the host of Kitwork's toast or network: their place is
-// an edge of the screen, not a place against the parent (toast.go, network.go). A site's own component
-// of either name places against its parent like any other.
+// placedOnScreen reports whether an element is Kitwork's toast or network: their place is an edge of
+// the screen, not a place against the parent (toast.go, network.go).
 func (c *compiler) placedOnScreen(n *Node) bool {
-	a := attrNamed(n, "component")
-	name := strings.TrimSpace(a.Value)
-	if name != "toast" && name != "network" {
-		return false
-	}
-	def, err := c.resolve(n, a, name)
-	return err == nil && def != nil && def.kitwork != nil
+	return n.Tag == "toast" || n.Tag == "network"
 }
 
 // writesWidth reports whether an element writes its own container or max-width, with or without a prefix.
@@ -1808,7 +1923,7 @@ func hasChild(n *Node, tag string) bool {
 	return false
 }
 
-func checkListChildren(n *Node, children []*Node) error {
+func (c *compiler) checkListChildren(n *Node, children []*Node) error {
 	for _, ch := range children {
 		if ch.IsText() {
 			if strings.TrimSpace(ch.Text) != "" {
@@ -1816,10 +1931,35 @@ func checkListChildren(n *Node, children []*Node) error {
 			}
 			continue
 		}
-		switch ch.Tag {
-		case "item", "fragment":
+		if ch.Tag == "fragment" {
+			continue
+		}
+		root, file := c.rootOf(ch)
+		switch {
+		case root == "item" && ch.Tag == "item":
+			if err := c.itemHoldsNoItem(ch, "list"); err != nil {
+				return err
+			}
+		case root == "item":
+			// a piece of the site whose file's root is an item: it is the list's item (KITWORK_UI §13)
+		case strings.HasSuffix(file, ".ui"):
+			return errAt(ch, "con của list là item; %s có gốc <%s>: bọc <%s> trong <item>", file, root, ch.Tag)
+		case file != "":
+			return errAt(ch, "con của list là item; %s dựng một <%s>: bọc <%s> trong <item>", file, root, ch.Tag)
 		default:
 			return errAt(ch, "con của list là item (danh sách rỗng thì thêm empty); bọc <%s> trong <item>", ch.Tag)
+		}
+	}
+	return nil
+}
+
+// itemHoldsNoItem refuses a piece of the site whose root is an item written straight inside an item of
+// a list or a breadcrumb (parent): the page would have an item inside an item (<li><li>), where the
+// piece is the parent's item itself.
+func (c *compiler) itemHoldsNoItem(item *Node, parent string) error {
+	for _, ch := range item.Elements() {
+		if root, file := c.rootOf(ch); root == "item" && file != "" {
+			return errAt(ch, "%s có gốc <item>: <%s> đã là một mục, đặt nó thẳng trong <%s>, không bọc trong <item>", file, ch.Tag, parent)
 		}
 	}
 	return nil
@@ -2069,7 +2209,8 @@ func (c *compiler) tagAttributes(n *Node, info tagInfo, p *attrPlan, o *elemOp, 
 			}
 			o.selectValue = in
 		}
-		if cx.field != nil {
+		// the field around an editor is its writing area's: a select inside it (its format) is not its control (editor.go)
+		if cx.field != nil && !cx.editor.holdsField(cx.field) {
 			writeAttr(w, "id", cx.field.control)
 			if cx.field.hint != "" {
 				writeAttr(w, "aria-describedby", cx.field.hint)
@@ -2105,12 +2246,26 @@ func (c *compiler) tagAttributes(n *Node, info tagInfo, p *attrPlan, o *elemOp, 
 	case "label":
 		if cx.field != nil {
 			writeAttr(w, "for", cx.field.control)
+			if cx.field.label != "" {
+				writeAttr(w, "id", cx.field.label) // what names an editor's writing area (editor.go)
+			}
 		}
 	case "hint":
 		if cx.field != nil && cx.field.hint != "" {
 			writeAttr(w, "id", cx.field.hint)
 		}
+	case "error":
+		if cx.field != nil && cx.field.error != "" {
+			writeAttr(w, "id", cx.field.error) // what describes an editor's writing area (editor.go)
+		}
 	case "time":
+		if cx.countdown != nil && cx.countdown.time == n {
+			// the time left of the countdown around: a timer, its datetime the parts (countdown.go)
+			if err := c.countdownElement(n, o, w, cx); err != nil {
+				return err
+			}
+			break
+		}
 		a := required("value")
 		if a == nil {
 			return errAt(n, "time cần value (thời điểm máy đọc được)")
@@ -2121,10 +2276,18 @@ func (c *compiler) tagAttributes(n *Node, info tagInfo, p *attrPlan, o *elemOp, 
 	case "popover":
 		// it shows when the component around it opens: closed in the page as built (a show written on it
 		// was read and left out by popoverShow)
-		// unplaced it hangs below the start edge of what opens it (reboot.css); a written place replaces
-		// that whole
+		// unplaced it hangs below the left edge of what opens it, as place="below-left" does (reboot.css,
+		// mirrored on a page written right to left); a written place replaces that whole
 		w.WriteString(" hidden")
-	case "badge", "accordions", "box", "card", "section", "list", "item":
+	case "richtext":
+		if err := c.richtextValue(n, required("value"), p, o, cx); err != nil {
+			return err
+		}
+	case "form":
+		if err := c.formWords(n, take, w, cx); err != nil {
+			return err
+		}
+	case "badge", "accordions", "box", "card", "section", "list", "item", "group":
 		if a := take("alt"); a != nil {
 			if err := c.attrValue(n, a, "aria-label", false, o, w); err != nil {
 				return err
@@ -2300,7 +2463,7 @@ func (c *compiler) webWord(n *Node, a *Attr) string {
 		message := "title là chữ của web, .ui không có; tên đọc được là chữ bên trong phần tử"
 		switch {
 		case tagWord(n.Tag, "alt"):
-			message += ", hoặc alt (<" + n.Tag + " alt=\"…\">)"
+			message += ", hoặc alt (<" + c.tagOf(n) + " alt=\"…\">)"
 		case n.Tag == "link" || n.Tag == "button":
 			message += ", hoặc alt trên icon hay ảnh bên trong (<icon value=\"x\" alt=\"Đóng\" />)"
 		}
@@ -2315,6 +2478,11 @@ func (c *compiler) webWord(n *Node, a *Attr) string {
 		return "class là chữ của web; .ui không có class: trình bày viết bằng thuộc tính của nó (gap, padding, background…)"
 	case "style":
 		return "style là chữ của web; .ui không có style: trình bày viết bằng thuộc tính của nó (gap, padding, background…)"
+	case "contenteditable":
+		return "contenteditable là chữ của web; " + editorInstead // a box a person writes in is an editor (editor.go)
+	}
+	if htmlAttributes[strings.ToLower(name)] {
+		return name + " không có: " + htmlFromData // html=, v-html, innerHTML… (richtext.go)
 	}
 	if strings.HasPrefix(name, "on") {
 		if event, ok := htmlEvents[name[2:]]; ok {
@@ -2348,6 +2516,20 @@ func (c *compiler) prefixedWebWord(n *Node, a *Attr, chain, base string) string 
 		message += ". Có tiền tố thì viết " + chain + ":" + told.Suggestion // the table's suggestions are presentation attributes
 	}
 	return message
+}
+
+// renamedSide is the error of a side or a corner named with start or end at a call of a layout or a
+// component (<product-card padding-start="4" />): the words left and right replaced on 19/10/2026, told
+// the way any element tells them, the prefix kept; "" for any other name, which the call tells itself
+// (an input it reads, the look that is the file's).
+func (c *compiler) renamedSide(n *Node, a *Attr, chain, base string) string {
+	if stylesheet.RenamedSide(base) == "" {
+		return ""
+	}
+	if chain != "" {
+		return c.prefixedWebWord(n, a, chain, base)
+	}
+	return c.webWord(n, a)
 }
 
 // readValue reads the value of a word of .ui written where it does nothing, the way the tag that reads
@@ -2452,6 +2634,8 @@ func wordValueProblem(name, value string) string {
 		if !autocompleteValue(strings.ToLower(value)) {
 			return fmt.Sprintf("autocomplete là on, off hoặc tên trường của HTML (email, username, current-password, new-password, one-time-code, name, tel, street-address, postal-code…, có thể kèm section-…, shipping hay billing), không có %q", value)
 		}
+	case "method":
+		return methodProblem(value) // form.go
 	}
 	return ""
 }
@@ -2861,7 +3045,7 @@ func (c *compiler) quote(n *Node, cx ctx, site *callSite) (op, error) {
 	o := &elemOp{tag: tag}
 	classes := []string{}
 	if tag == "blockquote" {
-		// a block of text that stacks: its rule on the start edge is reboot.css's
+		// a block of text that stacks: its look (a quiet panel, padding, radius) is reboot.css's
 		classes = append(classes, "flex-column")
 	}
 	classes = append(classes, p.classes...)
@@ -3009,8 +3193,8 @@ func (c *compiler) summary(n *Node, cx ctx) (op, error) {
 	if !ok || (info.kind != kindContainer && n.Tag != "text") {
 		return nil, errAt(n, "phần đầu của accordion là box hoặc text, không phải <%s>", n.Tag)
 	}
-	if a := attrNamed(n, "component"); a.Name == "component" {
-		return nil, errAttr(n, a, "phần đầu của accordion thành <summary> của nó: component đặt trên một thẻ bên trong")
+	if a := componentAttribute(n); a != nil {
+		return nil, componentWritten(n, a)
 	}
 	c.lint(n) // the header is compiled here, never through element()
 	// its click="toggle()" is the accordion's own word, left out below (the browser opens <details>):
@@ -3068,8 +3252,7 @@ func (c *compiler) summary(n *Node, cx ctx) (op, error) {
 }
 
 // withProgressbar checks the page's progressbar and, on a site that moves between pages without a
-// reload, gives a page that writes none the one it would have written: <box component="progressbar" />
-// at the top.
+// reload, gives a page that writes none the one it would have written: <progressbar /> at the top.
 // The bar belongs to the whole frame, above the header, never inside a region: a page without a
 // header, or one that hides it on a phone, still shows that the next page is coming.
 func (c *compiler) withProgressbar(page *Node) (*Node, error) {
@@ -3096,18 +3279,13 @@ func (c *compiler) withProgressbar(page *Node) (*Node, error) {
 		return page, nil
 	}
 	with := *page
-	bar := &Node{Tag: "box", Bare: true, File: page.File, Line: page.Line, Column: page.Column,
-		Attrs: []Attr{{Name: "component", Value: "progressbar", Line: page.Line, Column: page.Column}}}
+	bar := &Node{Tag: "progressbar", Bare: true, File: page.File, Line: page.Line, Column: page.Column}
 	with.Children = append([]*Node{bar}, page.Children...)
 	return &with, nil
 }
 
-// isProgressbar reports whether an element is a call of the progressbar: component="progressbar",
-// by its name or its path.
-func isProgressbar(n *Node) bool {
-	v, ok := n.Attr("component")
-	return ok && path.Base(strings.TrimSpace(v)) == "progressbar"
-}
+// isProgressbar reports whether an element is a call of the progressbar.
+func isProgressbar(n *Node) bool { return n.Tag == "progressbar" }
 
 // withReader gives a page that writes no <reader /> the one it would have written, on a site that
 // moves between pages without a reload: such a move does not tell a screen reader that the page
@@ -3217,8 +3395,7 @@ const (
 	progressLongestDelay = 10000
 )
 
-// progressbar is the move between pages, <box component="progressbar" color="…" delay="…"
-// thickness="…" />: the page's view of the work in flight that Drive reports, through the kernel's
+// progressbar is the move between pages, <progressbar color="…" delay="…" thickness="…" />: the page's view of the work in flight that Drive reports, through the kernel's
 // progressbar component (a page that has one gets no bar of Drive's own). Its UI is Kitwork's, so
 // color, thickness, delay and alt are its inputs, fixed when the page is built. It sticks to the top
 // edge and takes no room, so the header below it does not move.
@@ -3227,7 +3404,7 @@ func (c *compiler) progressbar(n *Node, cx ctx) (op, error) {
 		return nil, errAt(n, "progressbar đặt trong page.ui, ở đầu <page>, trên <header />; không đặt trong vùng hay nội dung")
 	}
 	if len(n.SignificantChildren()) > 0 {
-		return nil, errAt(n, "progressbar không có nội dung con; viết <box component=\"progressbar\" />")
+		return nil, errAt(n, "progressbar không có nội dung con; viết <progressbar />")
 	}
 	color := "brand"
 	label := "" // the page's language says it unless alt does (progressNameOp)
@@ -3387,8 +3564,12 @@ func (c *compiler) breadcrumbElement(n *Node, cx ctx, site *callSite) (op, error
 			}
 			continue
 		}
-		if ch.Tag != "item" {
+		if root, _ := c.rootOf(ch); root != "item" {
 			return nil, errAt(ch, "con của breadcrumb chỉ là item; dấu ngăn đặt trong item")
+		} else if ch.Tag == "item" {
+			if err := c.itemHoldsNoItem(ch, "breadcrumb"); err != nil {
+				return nil, err
+			}
 		}
 	}
 	// the trail wraps and centres its entries across (reboot.css's breadcrumb)

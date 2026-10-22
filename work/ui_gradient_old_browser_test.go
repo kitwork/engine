@@ -30,7 +30,7 @@ func TestBrowserGradientTextWithoutColorMix(t *testing.T) {
 		"localhost/router.work": `import { router } from "kitwork";
 
 router.colors({ brand: "#c8742c" });
-router.gradients({ ember: { type: "linear", direction: "to-end", stops: [ { color: "ink-10", at: 0 }, { color: "brand+15", at: 100 } ] } });
+router.gradients({ ember: { type: "linear", direction: "to-right", stops: [ { color: "ink-10", at: 0 }, { color: "brand+15", at: 100 } ] } });
 `,
 		"localhost/page.ui":    `<page><content /></page>`,
 		"localhost/content.ui": `<content padding="4"><text heading="1" size="huge" color="ember">MMMMMMMM</text></content>`,

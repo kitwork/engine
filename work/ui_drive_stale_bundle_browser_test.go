@@ -22,13 +22,13 @@ router.bundle({ javascript: "split" });
 	"localhost/page.ui": `<page><content /></page>`,
 	"localhost/content.ui": `<content>
   <text id="title">Một</text>
-  <box component="dropdown"><button id="open" click="toggle()" expanded="{{ open }}">Mở</button></box>
+  <dropdown><button id="open" click="toggle()" expanded="{{ open }}">Mở</button></dropdown>
   <link id="next" value="/hai">Hai</link>
 </content>`,
 	"localhost/hai/content.ui": `<content>
   <text id="title">Hai</text>
-  <box component="dropdown"><button id="open" click="toggle()" expanded="{{ open }}">Mở</button></box>
-  <box id="mode"><button component="appearance" click="toggle()">Đổi</button></box>
+  <dropdown><button id="open" click="toggle()" expanded="{{ open }}">Mở</button></dropdown>
+  <box id="mode"><appearance click="toggle()">Đổi</appearance></box>
 </content>`,
 }
 

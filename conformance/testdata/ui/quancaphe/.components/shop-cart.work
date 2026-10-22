@@ -1,8 +1,8 @@
-// Giỏ hàng: component đầy đủ = logic này + giao diện `cart.ui` (gốc site). Ở `.components/` cấp identity,
-// nên mọi site của identity dùng chung; tên trong `define` trùng tên file. Không file nào import nó:
-// trang gọi nó bằng `<box component="cart" as="$cart" />` (gốc của `cart.ui` là `<box>`, nên chỗ gọi
-// viết đúng thẻ đó, rỗng). Có logic nên là component; `product-card.ui` chỉ có giao diện nên là layout,
-// gọi bằng thẻ của nó (`<product-card for="…" />`).
+// Giỏ hàng: component đầy đủ = logic này + giao diện `shop-cart.ui` (gốc site). Ở `.components/` cấp
+// identity, nên mọi site của identity dùng chung; tên trong `define` trùng tên file, và có gạch ngang vì
+// tên không gạch ngang là thẻ của Kitwork. Không file nào import nó: trang gọi nó bằng thẻ của nó,
+// `<shop-cart as="$cart" />`, rỗng (giao diện nằm trong `shop-cart.ui`, gốc của nó là phần tử chủ).
+// `product-card.ui` chỉ có giao diện nên là layout, cũng gọi bằng thẻ của nó (`<product-card for="…" />`).
 //
 // Engine (10/10/2026) chưa chạy `component.define` (bước 4) và chưa có đường ống (bước 3): giỏ hàng hiện
 // dựng tĩnh, rỗng. Logic viết sẵn theo đặc tả mục 17 để là đích cho hai bước đó.
@@ -10,7 +10,7 @@
 import { component, database } from "kitwork";
 import { findProduct } from "../.shared/menu.work";
 
-component.define("cart", () => {
+component.define("shop-cart", () => {
   var open = false;
   var items = [];
   var phone = "";

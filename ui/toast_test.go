@@ -8,9 +8,9 @@ import (
 // toastNotice is the least a notice is drawn with: its words and a dismiss button with a name.
 const toastNotice = `<card for="notice of notices; key: notice.id"><text>{{ notice.message }}</text><button click="dismiss(notice.id)"><icon value="x" alt="Đóng thông báo" /></button></card>`
 
-// toastStack is a toast host with that notice; words are written on the host, after component=.
+// toastStack is a <toast> with that notice; words are written on the tag, after its name.
 func toastStack(words string) string {
-	return `<box component="toast"` + words + `>` + toastNotice + `</box>`
+	return `<toast` + words + `>` + toastNotice + `</toast>`
 }
 
 // toastSite is a site whose overlay.ui holds the toast written and whose content.ui is content.
@@ -22,9 +22,10 @@ func toastSite(overlay, content string) map[string]string {
 	}
 }
 
-// The toast the author draws (17/10/2026, docs/components/toast.md): the host is the stack — the classes
-// of where it stands, a region named for a screen reader with the key that reaches it, tabindex -1, the
-// alias, place and limit for the instance — and the one notice inside is the blueprint the kernel draws
+// The toast the author draws (17/10/2026, docs/components/toast.md): <toast> builds its host, a box
+// (18/10/2026), and the host is the stack — the classes of where it stands, a region named for a screen
+// reader with the key that reaches it, tabindex -1, the alias, place and limit for the instance — and
+// the one notice inside is the blueprint the kernel draws
 // a row of for each notice: data-kitwork-for, written once, never a row painted by the server, each
 // value that reads the notice bound (text, show, a link's address, an event), data-leaving bound to the
 // notice's leaving. Last, the two regions a screen reader hears, each saying what is added to it alone
@@ -33,7 +34,7 @@ func toastSite(overlay, content string) map[string]string {
 // stays theirs. A page in English names the region in English. CONTROL: alt names it, place and limit
 // written go in as written.
 func TestToastHostAndBlueprint(t *testing.T) {
-	overlay := `<box component="toast" as="$toast" gap="2" padding="4">
+	overlay := `<toast as="$toast" gap="2" padding="4">
   <card for="notice of notices; key: notice.id" flex="row" gap="3" padding="3">
     <icon show="notice.tone == 'danger'" value="alert-circle" color="danger" />
     <box gap="1">
@@ -46,10 +47,10 @@ func TestToastHostAndBlueprint(t *testing.T) {
   </card>
   <text show="waiting > 0">{{ 'Còn ' + waiting }}</text>
   <button click="clear()">Đóng tất cả</button>
-</box>`
+</toast>`
 	html := compileQuiet(t, toastSite(overlay, `<content><button click="$toast.danger('Không lưu được.')">Lưu</button></content>`))
 	mustContain(t, html,
-		`<div class="flex-column gap-2 padding-4 toast toast-bottom-end" data-kitwork-component="toast: $toast" role="region" aria-label="Thông báo (F8)" tabindex="-1" data-kitwork-scope="place: &#39;bottom-end&#39;; limit: 3">`,
+		`<div class="flex-column gap-2 padding-4 toast toast-bottom-right" data-kitwork-component="toast: $toast" role="region" aria-label="Thông báo (F8)" tabindex="-1" data-kitwork-scope="place: &#39;bottom-right&#39;; limit: 3">`,
 		`<div class="card flex-row gap-3 padding-3" data-kitwork-for="notice of notices; key: notice.id" data-kitwork-bind="data-leaving: notice.leaving">`,
 		`<i class="color-danger icon-alert-circle" aria-hidden="true" data-kitwork-bind="show: notice.tone == &#39;danger&#39;" hidden></i>`,
 		`<p class="weight-bold" data-kitwork-bind="show: notice.title; text: notice.title" hidden></p>`,
@@ -75,81 +76,91 @@ func TestToastHostAndBlueprint(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustContain(t, page.Render(Request{Path: "/"}), `aria-label="Notifications (F8)"`)
-	html = compileQuiet(t, toastSite(toastStack(` as="$toast" place="top-start" limit="5" alt="Tin nhắn"`), `<content><text>x</text></content>`))
-	mustContain(t, html, `class="flex-column toast toast-top-start" data-kitwork-component="toast: $toast" role="region" aria-label="Tin nhắn (F8)" tabindex="-1" data-kitwork-scope="place: &#39;top-start&#39;; limit: 5">`)
+	html = compileQuiet(t, toastSite(toastStack(` as="$toast" place="top-left" limit="5" alt="Tin nhắn"`), `<content><text>x</text></content>`))
+	mustContain(t, html, `class="flex-column toast toast-top-left" data-kitwork-component="toast: $toast" role="region" aria-label="Tin nhắn (F8)" tabindex="-1" data-kitwork-scope="place: &#39;top-left&#39;; limit: 5">`)
 	// the toast's place is an edge of the screen: the overlay around it is no parent a child is placed
 	// against (no place-anchor); a box placed below its parent makes one (the CONTROL)
-	mustContain(t, html, `<div class="flex-column"><div class="flex-column toast toast-top-start"`)
-	html = compileQuiet(t, toastSite(`<box><box place="below-start"><text>gợi ý</text></box></box>`+toastStack(` as="$toast"`), `<content><text>x</text></content>`))
+	mustContain(t, html, `<div class="flex-column"><div class="flex-column toast toast-top-left"`)
+	html = compileQuiet(t, toastSite(`<box><box place="below-left"><text>gợi ý</text></box></box>`+toastStack(` as="$toast"`), `<content><text>x</text></content>`))
 	mustContain(t, html, `<div class="flex-column place-anchor">`)
 }
 
-// What the toast does not take is told where it is written, in the author's words: the empty host of
-// before 17/10/2026 (and any host with no notice), a notice not right under the host, two, a for over
-// another list, a key that is not the notice's id, no dismiss button, one with no name or one a show
-// can hide (on it, on a frame around it, on the notice itself: a danger notice stays), a field the
-// notice does not have, a component in a notice, a second toast, a host that is no box, if, for or
-// show on the host, a place, a limit or persist it does not take, a blueprint that is no frame.
+// What the toast does not take is told where it is written, in the author's words: the empty <toast />
+// of before 17/10/2026 (and any toast with no notice), a notice not right under the tag, two, a for
+// over another list, a key that is not the notice's id, no dismiss button, one with no name or one a
+// show can hide (on it, on a frame around it, on the notice itself: a danger notice stays), a field the
+// notice does not have, a component in a notice, a second toast, if, for or show on the tag, a place, a
+// limit or persist it does not take, a blueprint that is no frame. The forms of before 18/10/2026 —
+// component="toast" on a box, or on a section (the toast builds a box, 18/10/2026: there is no host to
+// choose any more) — are the error of component= written, which writes the tag. A place of before
+// 19/10/2026 (bottom-end, top-start) is told the left or right word that replaced it.
 // CONTROL: each written right compiles (TestToastHostAndBlueprint).
 func TestToastWrittenWrongIsAnError(t *testing.T) {
 	dismiss := `<button click="dismiss(notice.id)"><icon value="x" alt="Đóng" /></button>`
 	for _, c := range []struct{ name, overlay, needle, says string }{
-		{"the empty host of before", `<box component="toast" as="$toast" />`, `<box`,
-			`toast cần một mẫu thông báo bên trong thẻ chủ: <card for="notice of notices; key: notice.id">`},
-		{"a host with no notice", `<box component="toast" as="$toast"><text>x</text></box>`, `<box`, "toast cần một mẫu thông báo"},
-		{"a notice not right under the host", `<box component="toast" as="$toast"><box><card for="notice of notices; key: notice.id">` + dismiss + `</card></box></box>`, `for=`,
-			"mẫu thông báo là con trực tiếp của thẻ chủ toast"},
-		{"two notices", `<box component="toast" as="$toast">` + toastNotice + `<box for="n of notices; key: n.id"><button click="dismiss(n.id)"><icon value="x" alt="Đóng" /></button></box></box>`, `for="n of`,
-			"toast có hai mẫu thông báo (overlay.ui:1:45 và overlay.ui:1:214): mỗi toast một mẫu"},
-		{"the old list", `<box component="toast" as="$toast"><card for="item of items; key: item.id"><button click="dismiss(item.id)"><icon value="x" alt="Đóng" /></button></card></box>`, `for=`,
+		{"the empty host of before", `<toast as="$toast" />`, `<toast`,
+			`toast cần một mẫu thông báo bên trong <toast>: <card for="notice of notices; key: notice.id">`},
+		{"a host with no notice", `<toast as="$toast"><text>x</text></toast>`, `<toast`, "toast cần một mẫu thông báo"},
+		{"a notice not right under the host", `<toast as="$toast"><box><card for="notice of notices; key: notice.id">` + dismiss + `</card></box></toast>`, `for=`,
+			"mẫu thông báo là con trực tiếp của <toast>: đưa phần tử có for=\"… of notices\" lên ngay dưới <toast>"},
+		{"two notices", `<toast as="$toast">` + toastNotice + `<box for="n of notices; key: n.id"><button click="dismiss(n.id)"><icon value="x" alt="Đóng" /></button></box></toast>`, `for="n of`,
+			"toast có hai mẫu thông báo (overlay.ui:1:29 và overlay.ui:1:198): mỗi toast một mẫu"},
+		{"the old list", `<toast as="$toast"><card for="item of items; key: item.id"><button click="dismiss(item.id)"><icon value="x" alt="Đóng" /></button></card></toast>`, `for=`,
 			`danh sách của toast là notices (items là tên cũ): viết for="item of notices; key: item.id"`},
-		{"no key", `<box component="toast" as="$toast"><card for="notice of notices">` + dismiss + `</card></box>`, `for=`,
+		{"no key", `<toast as="$toast"><card for="notice of notices">` + dismiss + `</card></toast>`, `for=`,
 			"mẫu thông báo cần key: notice.id"},
-		{"another key", `<box component="toast" as="$toast"><card for="notice of notices; key: notice.message">` + dismiss + `</card></box>`, `for=`,
+		{"another key", `<toast as="$toast"><card for="notice of notices; key: notice.message">` + dismiss + `</card></toast>`, `for=`,
 			"mẫu thông báo cần key: notice.id"},
-		{"no dismiss button", `<box component="toast" as="$toast"><card for="notice of notices; key: notice.id"><text>{{ notice.message }}</text></card></box>`, `<card`,
+		{"no dismiss button", `<toast as="$toast"><card for="notice of notices; key: notice.id"><text>{{ notice.message }}</text></card></toast>`, `<card`,
 			`mỗi thông báo cần một nút đóng: <button click="dismiss(notice.id)">`},
-		{"a dismiss button with no name", `<box component="toast" as="$toast"><card for="notice of notices; key: notice.id"><button click="dismiss(notice.id)"><icon value="x" /></button></card></box>`, `<button`,
+		{"a dismiss button with no name", `<toast as="$toast"><card for="notice of notices; key: notice.id"><button click="dismiss(notice.id)"><icon value="x" /></button></card></toast>`, `<button`,
 			"nút đóng của thông báo cần tên đọc được"},
-		{"a dismiss button that hides", `<box component="toast" as="$toast"><card for="notice of notices; key: notice.id"><text>{{ notice.message }}</text><button show="notice.tone == 'nothing'" click="dismiss(notice.id)"><icon value="x" alt="Đóng" /></button></card></box>`, `show=`,
+		{"a dismiss button that hides", `<toast as="$toast"><card for="notice of notices; key: notice.id"><text>{{ notice.message }}</text><button show="notice.tone == 'nothing'" click="dismiss(notice.id)"><icon value="x" alt="Đóng" /></button></card></toast>`, `show=`,
 			"nút đóng của thông báo luôn hiện: bỏ show ở đây"},
-		{"a dismiss button hidden from a width", `<box component="toast" as="$toast"><card for="notice of notices; key: notice.id"><text>{{ notice.message }}</text><button medium:show="false" click="dismiss(notice.id)"><icon value="x" alt="Đóng" /></button></card></box>`, `medium:show=`,
+		{"a dismiss button hidden from a width", `<toast as="$toast"><card for="notice of notices; key: notice.id"><text>{{ notice.message }}</text><button medium:show="false" click="dismiss(notice.id)"><icon value="x" alt="Đóng" /></button></card></toast>`, `medium:show=`,
 			"nút đóng của thông báo luôn hiện: bỏ medium:show ở đây"},
-		{"a dismiss button in a box that hides", `<box component="toast" as="$toast"><card for="notice of notices; key: notice.id"><text>{{ notice.message }}</text><box show="notice.loading">` + dismiss + `</box></card></box>`, `show=`,
+		{"a dismiss button in a box that hides", `<toast as="$toast"><card for="notice of notices; key: notice.id"><text>{{ notice.message }}</text><box show="notice.loading">` + dismiss + `</box></card></toast>`, `show=`,
 			"nút đóng của thông báo (overlay.ui:1:"},
-		{"a notice that hides with its dismiss button", `<box component="toast" as="$toast"><card for="notice of notices; key: notice.id" show="notice.title"><text>{{ notice.message }}</text>` + dismiss + `</card></box>`, `show=`,
+		{"a notice that hides with its dismiss button", `<toast as="$toast"><card for="notice of notices; key: notice.id" show="notice.title"><text>{{ notice.message }}</text>` + dismiss + `</card></toast>`, `show=`,
 			"luôn hiện: bỏ show trên khung bọc nó"},
-		{"a field it does not have", `<box component="toast" as="$toast"><card for="notice of notices; key: notice.id"><text>{{ notice.text }}</text>` + dismiss + `</card></box>`, `{{ notice.text`,
+		{"a field it does not have", `<toast as="$toast"><card for="notice of notices; key: notice.id"><text>{{ notice.text }}</text>` + dismiss + `</card></toast>`, `{{ notice.text`,
 			"notice không có text: câu là notice.message"},
-		{"a field near one", `<box component="toast" as="$toast"><card for="notice of notices; key: notice.id"><text>{{ notice.titel }}</text>` + dismiss + `</card></box>`, `{{ notice.titel`,
+		{"a field near one", `<toast as="$toast"><card for="notice of notices; key: notice.id"><text>{{ notice.titel }}</text>` + dismiss + `</card></toast>`, `{{ notice.titel`,
 			"notice không có titel; một thông báo có id, message, title"},
-		{"a field of the action it does not have", `<box component="toast" as="$toast"><card for="notice of notices; key: notice.id"><button show="notice.action.href" click="act(notice.id)">x</button>` + dismiss + `</card></box>`, `show=`,
+		{"a field of the action it does not have", `<toast as="$toast"><card for="notice of notices; key: notice.id"><button show="notice.action.href" click="act(notice.id)">x</button>` + dismiss + `</card></toast>`, `show=`,
 			"notice.action không có href: viết notice.action.link"},
-		{"a component in a notice", `<box component="toast" as="$toast"><card for="notice of notices; key: notice.id"><box component="dropdown"><button click="toggle()">x</button></box>` + dismiss + `</card></box>`, `component="dropdown"`,
-			"mẫu thông báo không chứa component: một phần tử, một component"},
-		{"a blueprint that is no frame", `<box component="toast" as="$toast"><button for="notice of notices; key: notice.id" click="dismiss(notice.id)">x</button></box>`, `<button`,
+		{"a component in a notice", `<toast as="$toast"><card for="notice of notices; key: notice.id"><dropdown><button click="toggle()">x</button></dropdown>` + dismiss + `</card></toast>`, `<dropdown`,
+			"mẫu thông báo không chứa component (<dropdown>): một phần tử, một component"},
+		{"a blueprint that is no frame", `<toast as="$toast"><button for="notice of notices; key: notice.id" click="dismiss(notice.id)">x</button></toast>`, `<button`,
 			"mẫu thông báo là một khung"},
-		{"a host that is no box", `<section component="toast" as="$toast">` + toastNotice + `</section>`, `component=`,
-			"toast đặt trên <box>: chồng thông báo là một khung"},
+		// the forms of before 18/10/2026: component= on a box, and on another frame (the toast builds a box)
+		{"component= on a box", `<box component="toast" as="$toast">` + toastNotice + `</box>`, `component=`,
+			`component= đã bỏ: component là một thẻ, viết <toast as="$toast">…</toast>`},
+		{"component= on a section", `<section component="toast" as="$toast">` + toastNotice + `</section>`, `component=`,
+			`component= đã bỏ: component là một thẻ, viết <toast as="$toast">…</toast> (<toast> dựng một <box>; cần <section> thì đặt nó bên trong)`},
 		{"if on the host", toastStack(` as="$toast" if="ready"`), `if=`, "toast luôn có mặt và có một trên mỗi trang: bỏ if"},
 		{"show on the host", toastStack(` as="$toast" show="ready"`), `show=`, "toast luôn có mặt và có một trên mỗi trang: bỏ show"},
-		{"a place of a parent", toastStack(` as="$toast" place="below-end"`), `place=`,
-			`place của toast là một mép hay góc màn hình: bottom-end, bottom, bottom-start, top-end, top, top-start; không phải "below-end"`},
+		{"a place of a parent", toastStack(` as="$toast" place="below-right"`), `place=`,
+			`place của toast là một mép hay góc màn hình: bottom-right, bottom, bottom-left, top-right, top, top-left; không phải "below-right"`},
+		// the places of before 19/10/2026: start and end are now left and right (they mirror on a page
+		// written right to left); the network's test holds the other two
+		{"a place of before: bottom-end", toastStack(` as="$toast" place="bottom-end"`), `place=`,
+			`place="bottom-end": start và end nay là left và right, viết place="bottom-right" (tự lật khi trang viết từ phải sang trái)`},
+		{"a place of before: top-start", toastStack(` as="$toast" place="top-start"`), `place=`,
+			`place="top-start": start và end nay là left và right, viết place="top-left" (tự lật khi trang viết từ phải sang trái)`},
 		{"a place from data", toastStack(` as="$toast" place="{{ where }}"`), `place=`, "place của toast là chữ cố định, không có {{ }}"},
 		{"a place by width", toastStack(` as="$toast" medium:place="top"`), `medium:place=`, "place của toast không nhận tiền tố"},
 		{"a limit past ten", toastStack(` as="$toast" limit="12"`), `limit=`, `limit là số thông báo hiện cùng lúc, từ 1 đến 10 (mặc định 3), không phải "12"`},
 		{"persist", toastStack(` as="$toast" persist="true"`), `persist=`, "toast không giữ gì qua các lần ghé"},
 		{"a role", toastStack(` as="$toast" role="status"`), `role=`, `vai trò của toast là việc của engine (role="region"`},
-		{"a second toast", toastStack(` as="$toast"`) + toastStack(` as="$other"`), `component="toast" as="$other`,
-			"trang đã có một toast ở overlay.ui:1:15: mỗi trang một chồng thông báo"},
+		{"a second toast", toastStack(` as="$toast"`) + toastStack(` as="$other"`), `<toast as="$other`,
+			"trang đã có một toast ở overlay.ui:1:10: mỗi trang một chồng thông báo"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			at := where("overlay.ui", `<overlay>`+c.overlay+`</overlay>`, c.needle)
 			mustFail(t, toastSite(c.overlay, `<content><text>x</text></content>`), at, c.says)
 		})
 	}
-	// a toast written as a tag is a component: written on a <box>, with its notice inside
-	mustFail(t, content(`<content><toast as="$toast" /></content>`), "content.ui:1:10: ", `toast có logic (component của Kitwork): viết <box component="toast" as="$toast">…</box>`)
 }
 
 // What works and is probably not meant is a warning, and the page renders: a toast with no as (nothing
@@ -158,13 +169,13 @@ func TestToastWrittenWrongIsAnError(t *testing.T) {
 // written right warns of nothing (TestToastHostAndBlueprint compiles it quietly).
 func TestToastWarnings(t *testing.T) {
 	stack := toastStack(``)
-	compileWarns(t, toastSite(stack, `<content><text>x</text></content>`), where("overlay.ui", `<overlay>`+stack+`</overlay>`, `component=`),
-		`toast không có as: trang không gọi được show; viết as="$toast"`)
-	silent := `<box component="toast" as="$toast"><card for="notice of notices; key: notice.id"><text>{{ notice.title }}</text><button click="dismiss(notice.id)"><icon value="x" alt="Đóng" /></button></card></box>`
+	compileWarns(t, toastSite(stack, `<content><text>x</text></content>`), where("overlay.ui", `<overlay>`+stack+`</overlay>`, `<toast`),
+		`toast không có as: trang không gọi được show; viết <toast as="$toast"> rồi gọi $toast.success('Đã lưu.') ở bất cứ đâu`)
+	silent := `<toast as="$toast"><card for="notice of notices; key: notice.id"><text>{{ notice.title }}</text><button click="dismiss(notice.id)"><icon value="x" alt="Đóng" /></button></card></toast>`
 	compileWarns(t, toastSite(silent, `<content><text>x</text></content>`), where("overlay.ui", `<overlay>`+silent+`</overlay>`, `<card`),
 		"mẫu thông báo không hiện notice.message: thông báo sẽ không có chữ")
 	lazy := `<content><section lazy="600px">` + toastStack(` as="$toast"`) + `</section></content>`
-	compileWarns(t, content(lazy), strings.TrimSuffix(where("content.ui", lazy, `lazy=`), " "), `lazy="600px": khung này giữ <box component="toast"> ở content.ui:1:`)
+	compileWarns(t, content(lazy), strings.TrimSuffix(where("content.ui", lazy, `lazy=`), " "), `lazy="600px": khung này giữ <toast> ở content.ui:1:`)
 }
 
 // Each call through the toast's alias is read once the page is compiled (checkToastCalls): a function
@@ -178,14 +189,14 @@ func TestToastWarnings(t *testing.T) {
 // does not change with, a duration too short to read or to reach its button. CONTROL: the calls of the
 // design, against a blueprint that draws it all, compile quietly.
 func TestToastCallsAreRead(t *testing.T) {
-	full := `<box component="toast" as="$toast"><card for="notice of notices; key: notice.id">` +
+	full := `<toast as="$toast"><card for="notice of notices; key: notice.id">` +
 		`<icon show="notice.tone == 'danger'" value="alert-circle" color="danger" />` +
 		`<text show="notice.title" weight="bold">{{ notice.title }}</text><text>{{ notice.message }}</text>` +
 		`<button show="notice.action.click" click="act(notice.id)">{{ notice.action.label }}</button>` +
 		`<link show="notice.action.link" value="{{ notice.action.link }}">{{ notice.action.label }}</link>` +
-		`<button click="dismiss(notice.id)"><icon value="x" alt="Đóng" /></button></card></box>`
+		`<button click="dismiss(notice.id)"><icon value="x" alt="Đóng" /></button></card></toast>`
 	call := func(click string) string {
-		return `<content><box component="tabs" as="$files"><button click="select('a')">a</button></box><box show="$files.selected == 'a'"><text>a</text></box><button click="` + click + `">x</button></content>`
+		return `<content><tabs as="$files"><button click="select('a')">a</button></tabs><box show="$files.selected == 'a'"><text>a</text></box><button click="` + click + `">x</button></content>`
 	}
 	for _, good := range []string{
 		`$toast.success('Đã lưu.')`,
@@ -218,7 +229,8 @@ func TestToastCallsAreRead(t *testing.T) {
 		{`$toast.success('x', { tone: 'danger' })`, "success đã là tone; bỏ tone, hay gọi $toast.danger(…)"},
 		{`$toast.show('x', { duration: 3000 })`, "duration: 3000 thiếu đơn vị: viết duration: '3000ms'"},
 		{`$toast.show('x', { duration: 3 })`, "duration: 3 thiếu đơn vị: viết duration: '3s'"},
-		{`$toast.show('x', { duration: '3 s' })`, "duration: '3 s' không phải một thời lượng"},
+		{`$toast.show('x', { duration: '3 s' })`, "duration: '3 s' có khoảng trắng trước đơn vị, .ui viết số liền đơn vị: viết duration: '3s'"},
+		{`$toast.show('x', { duration: 'soon' })`, "duration: 'soon' không phải một thời lượng"},
 		{`$toast.show('x', { duration: -3 })`, "duration không âm"},
 		{`$toast.show('x', { duration: '90s' })`, "dài hơn 60 giây: thông báo ở lại tới khi đóng thì viết duration: 0"},
 		{`$toast.show('x', { action: { click: () => $toast.clear() } })`, "action cần label"},
@@ -268,7 +280,7 @@ func TestToastCallsAreRead(t *testing.T) {
 // material="none", and the toast beside a glass frame, warn of nothing.
 func TestToastInsideGlassIsAWarning(t *testing.T) {
 	glass := `<content><section material="glass">` + toastStack(` as="$toast"`) + `</section></content>`
-	compileWarns(t, content(glass), where("content.ui", glass, `component=`),
+	compileWarns(t, content(glass), where("content.ui", glass, `<toast`),
 		"toast trong khung kính (material ở content.ui:1:19) bám theo khung đó, không theo màn hình")
 	compileQuiet(t, content(`<content><section material="none">`+toastStack(` as="$toast"`)+`</section></content>`))
 	compileQuiet(t, content(`<content><section material="glass"><text>x</text></section>`+toastStack(` as="$toast"`)+`</content>`))

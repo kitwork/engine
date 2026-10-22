@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-// directionFiles is a site in a language given by router.language with each side and corner the
-// warnings of left and right speak of: a physical side and its logical neighbour, a corner and the
-// twin the right-to-left warning advises, two pairs on one element.
+// directionFiles is a site in a language given by router.language with a box for each side and corner
+// left and right name: the left side, the right one, the top left corner, the top right one, both sides
+// on one element and both bottom corners on one element.
 func directionFiles(language string) map[string]string {
 	return map[string]string{
 		"localhost/router.work": `import { router } from "kitwork";
@@ -18,18 +18,17 @@ router.language("` + language + `");
 		"localhost/page.ui": `<page><content /></page>`,
 		"localhost/content.ui": `<content padding="4" gap="4">
   <box id="left" padding-left="4"><text>a</text></box>
-  <box id="start" padding-start="4"><text>b</text></box>
+  <box id="right" padding-right="4"><text>b</text></box>
   <box id="corner" radius-top-left="large"><text>c</text></box>
-  <box id="end" radius-top-end="large"><text>d</text></box>
-  <box id="twins" padding-left="1" padding-end="3"><text>e</text></box>
-  <box id="apart" padding-left="1" padding-start="3"><text>f</text></box>
-  <box id="bottom" radius-bottom-left="small" radius-bottom-start="large"><text>g</text></box>
+  <box id="other" radius-top-right="large"><text>d</text></box>
+  <box id="sides" padding-left="1" padding-right="3"><text>e</text></box>
+  <box id="bottom" radius-bottom-left="small" radius-bottom-right="large"><text>f</text></box>
 </content>`,
 	}
 }
 
 // directionProbe reads the direction of the document, the left and right padding of each box and its
-// four corners (top left, top right, bottom left, bottom right).
+// four corners (top left, top right, bottom left, bottom right), as the screen has them.
 const directionProbe = `<script>
 window.addEventListener("load", function () {
   var report = {};
@@ -41,11 +40,10 @@ window.addEventListener("load", function () {
     };
     report.direction = getComputedStyle(document.documentElement).direction;
     report.left = sides("left");
-    report.start = sides("start");
+    report.right = sides("right");
     report.corner = corners("corner");
-    report.end = corners("end");
-    report.twins = sides("twins");
-    report.apart = sides("apart");
+    report.other = corners("other");
+    report.sides = sides("sides");
     report.bottom = corners("bottom");
   } catch (problem) { report.error = String(problem && problem.stack || problem); }
   var close = function () { window.close(); };
@@ -53,19 +51,19 @@ window.addEventListener("load", function () {
 });
 </script>`
 
-// The page a router.language("ar") site serves runs right to left in a real browser, so what the
-// compile warns of left and right is what the page does (review 13/10/2026):
+// The page a router.language("ar") site serves runs right to left in a real browser, and the left and
+// right it writes mirror there (Quốc, 19/10/2026: start and end became left and right, and the
+// stylesheet writes them as logical CSS), so the left of a line written left to right is the right of
+// one written right to left:
 //   - the served <html> carries dir="rtl" and the document's direction is rtl;
-//   - padding-start is the right side, padding-left stays on the left;
-//   - radius-top-left is told "Viết radius-top-end để giữ đúng chỗ này": radius-top-end rounds that
-//     same corner;
-//   - padding-left with padding-end is told the twin, padding-end winning: one left side, padding-end's;
-//   - padding-left with padding-start, and radius-bottom-left with radius-bottom-start, are no twins
-//     there and are not told so: each sets its own side or corner.
+//   - padding-left is the right side of the screen, padding-right the left;
+//   - radius-top-left rounds the top right corner, radius-top-right the top left;
+//   - padding-left with padding-right on one element, and radius-bottom-left with radius-bottom-right,
+//     each set a side or a corner of their own, mirrored;
+//   - nothing is said of left and right while developing: no warning.
 //
-// CONTROL: the same markup on a router.language("en") site runs left to right: start is the left, the
-// twins are padding-left with padding-start and radius-bottom-left with radius-bottom-start, each told
-// and measured so, and nothing is said of the right-to-left direction.
+// CONTROL: the same markup on a router.language("en") site runs left to right: each side and corner is
+// where its name says, and nothing is said either, so the measurements tell the two directions apart.
 func TestBrowserRightToLeftSiteRunsRightToLeft(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping the direction browser proof in short mode")
@@ -76,39 +74,26 @@ func TestBrowserRightToLeftSiteRunsRightToLeft(t *testing.T) {
 	}
 	for _, run := range []struct {
 		language, html string
-		told           []string
 		measured       map[string]string
 	}{
-		{"ar", `<html lang="ar" dir="rtl"`, []string{
-			`content.ui:2:18: padding-left="4": trang viết từ phải sang trái (router.language "ar") mà left và right không lật theo hướng viết, nên cạnh trái ở đây là phía cuối dòng. Viết padding-end để giữ đúng chỗ này`,
-			`content.ui:4:20: radius-top-left="large": trang viết từ phải sang trái (router.language "ar") mà left và right không lật theo hướng viết, nên góc trên bên trái ở đây là phía cuối dòng. Viết radius-top-end để giữ đúng chỗ này`,
-			`content.ui:6:19: padding-left="1": trang viết từ phải sang trái`,
-			`content.ui:6:19: padding-left="1" và padding-end="3" (content.ui:6:36) cùng là cạnh trái khi dòng viết từ phải sang trái (router.language "ar"): padding-end thắng`,
-			`content.ui:7:19: padding-left="1": trang viết từ phải sang trái`,
-			`content.ui:8:20: radius-bottom-left="small": trang viết từ phải sang trái`,
-		}, map[string]string{
+		{"ar", `<html lang="ar" dir="rtl"`, map[string]string{
 			"direction": "rtl",
-			"left":      "16px 0px",
-			"start":     "0px 16px",         // the start of a line right to left is its right
-			"corner":    "12px 0px 0px 0px", // the left never flips
-			"end":       "12px 0px 0px 0px", // the twin the warning advises: the same corner
-			"twins":     "12px 0px",         // one left side: padding-end's, as told
-			"apart":     "4px 12px",         // two sides, no twin
-			"bottom":    "0px 0px 6px 12px", // two corners, no twin
+			"left":      "0px 16px",         // the left of a line right to left is the right of the screen
+			"right":     "16px 0px",         // and its right the left
+			"corner":    "0px 12px 0px 0px", // top left, mirrored: the top right corner
+			"other":     "12px 0px 0px 0px", // top right, mirrored: the top left corner
+			"sides":     "12px 4px",         // padding-left="1" on the right, padding-right="3" on the left
+			"bottom":    "0px 0px 12px 6px", // bottom-left small on the right, bottom-right large on the left
 		}},
 		// CONTROL
-		{"en", `<html lang="en"`, []string{
-			`content.ui:7:19: padding-left="1" và padding-start="3" (content.ui:7:36) cùng là cạnh trái khi dòng viết từ trái sang phải: padding-start thắng`,
-			`content.ui:8:20: radius-bottom-left="small" và radius-bottom-start="large" (content.ui:8:47) cùng là góc dưới bên trái khi dòng viết từ trái sang phải: radius-bottom-start thắng`,
-		}, map[string]string{
+		{"en", `<html lang="en"`, map[string]string{
 			"direction": "ltr",
 			"left":      "16px 0px",
-			"start":     "16px 0px",
+			"right":     "0px 16px",
 			"corner":    "12px 0px 0px 0px",
-			"end":       "0px 12px 0px 0px",
-			"twins":     "4px 12px",
-			"apart":     "12px 0px",
-			"bottom":    "0px 0px 12px 0px",
+			"other":     "0px 12px 0px 0px",
+			"sides":     "4px 12px",
+			"bottom":    "0px 0px 6px 12px",
 		}},
 	} {
 		var tenant *Tenant
@@ -120,15 +105,8 @@ func TestBrowserRightToLeftSiteRunsRightToLeft(t *testing.T) {
 		if !strings.Contains(page, run.html+">") {
 			t.Errorf("%s: the served document:\n got  %s\n want %s>", run.language, linesWith(page, "<html"), run.html)
 		}
-		lines := warningLines(printed)
-		if len(lines) != len(run.told) {
-			t.Errorf("%s: want %d warnings, got\n %s", run.language, len(run.told), strings.Join(lines, "\n "))
-		} else {
-			for i, said := range run.told {
-				if !strings.HasPrefix(lines[i], "cảnh báo: "+said) {
-					t.Errorf("%s: warning %d\n got  %s\n want %s…", run.language, i, lines[i], said)
-				}
-			}
+		if lines := warningLines(printed); len(lines) != 0 {
+			t.Errorf("%s: nothing is said of left and right, got\n %s", run.language, strings.Join(lines, "\n "))
 		}
 		server, reports := serveWithProbe(t, tenant, directionProbe)
 		got := runBrowser(t, browser, server.URL+"/", "direction, "+run.language, 1000, "", reports)

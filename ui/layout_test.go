@@ -42,11 +42,11 @@ func TestLayoutReadsTheContextOfItsCall(t *testing.T) {
 	button := `<button click="toggle()" expanded="{{ open }}"><text>{{ user.name }}</text></button>`
 	scope := map[string]any{"user": map[string]any{"name": "Quốc"}, "open": true}
 	called := renderAt(t, memorySite("", map[string]string{
-		"/site/content.ui":        `<content><box component="dropdown" as="$account"><account-button /></box></content>`,
+		"/site/content.ui":        `<content><dropdown as="$account"><account-button /></dropdown></content>`,
 		"/site/account-button.ui": button,
 	}), ".", "/", scope)
 	inPlace := renderAt(t, memorySite("", map[string]string{
-		"/site/content.ui": `<content><box component="dropdown" as="$account">` + button + `</box></content>`,
+		"/site/content.ui": `<content><dropdown as="$account">` + button + `</dropdown></content>`,
 	}), ".", "/", scope)
 	if called != inPlace {
 		t.Errorf("a layout call renders what its file renders in place:\n call     %s\n in place %s", called, inPlace)
@@ -59,12 +59,12 @@ func TestLayoutReadsTheContextOfItsCall(t *testing.T) {
 	}
 	mustNotContain(t, called, "account-button", "data-kitwork-scope")
 
-	// inside a component's .ui the layout reads the component's names: note is cart's, not the page's
+	// inside a component's .ui the layout reads the component's names: note is shop-cart's, not the page's
 	html := renderAt(t, memorySite("", map[string]string{
-		"/site/content.ui":   `<content><box component="cart" /></content>`,
-		"/site/cart.ui":      `<box><cart-note /></box>`,
-		"/site/cart-note.ui": `<text>{{ note }}</text>`,
-		"/site/cart.work":    cartLogic,
+		"/site/content.ui":     `<content><shop-cart /></content>`,
+		"/site/shop-cart.ui":   `<box><cart-note /></box>`,
+		"/site/cart-note.ui":   `<text>{{ note }}</text>`,
+		"/site/shop-cart.work": cartLogic,
 	}), ".", "/", map[string]any{"note": "của trang"})
 	mustContain(t, html, "<p>chưa có</p>")
 	mustNotContain(t, html, "của trang")
@@ -88,7 +88,9 @@ func TestLayoutInputs(t *testing.T) {
 		{`<content><product-card hover:product="{{ x }}" /></content>`, "hover:product=", "trình bày của product-card nằm trong product-card.ui"},
 		{`<content><product-card click="go()" /></content>`, "click=", "sự kiện click đặt trong product-card.ui: product-card là layout, hành vi nằm trong file của nó"},
 		{`<content><product-card><text>x</text></product-card></content>`, "<product-card", "product-card là layout nên thẻ gọi để rỗng: nội dung con không phải slot; nội dung nằm trong product-card.ui"},
-		{`<content><product-card component="cart" /></content>`, "component=", `<product-card> là layout, không là thẻ chủ của component: component="cart" đặt trên một thẻ của Kitwork`},
+		// component= is gone (18/10/2026): on a layout's call too it is the removed attribute, which says
+		// the component is its own tag
+		{`<content><product-card component="shop-cart" /></content>`, "component=", `component= đã bỏ: component là một thẻ, viết <shop-cart />`},
 		{`<content><product-card large:if="x" /></content>`, "large:if=", "if không nhận tiền tố"},
 		{`<content><product-card product /></content>`, "product ", "product cần một giá trị"},
 		// a show with a prefix moves onto the root of another file: what is wrong with it is said here
@@ -130,58 +132,51 @@ func TestLayoutIfAndShowAtTheCall(t *testing.T) {
 	mustNotContain(t, html, "Mới")
 }
 
-// A layout piece has no logic, so component= is not how it is called: the error says to call it by its
-// tag (with source= when the value pinned a place). A site file named like a Kitwork component keeps
-// its meaning: <dropdown /> is the site's layout, and Kitwork's dropdown is reached by its path.
+// component= is gone (18/10/2026): written to call a layout piece it is the error of the removed
+// attribute, at that attribute, and the error writes the call as the layout's tag — with source= when
+// the value pinned a place. CONTROL: the call the error writes compiles, and renders the layout.
 func TestLayoutWrittenAsAComponent(t *testing.T) {
-	card := map[string]string{"/site/product-card.ui": productCard}
-	with := func(content string, more map[string]string) map[string]string {
-		files := map[string]string{"/site/content.ui": content}
-		for k, v := range card {
-			files[k] = v
-		}
-		for k, v := range more {
-			files[k] = v
-		}
-		return files
+	with := func(content string) map[string]string {
+		return map[string]string{"/site/content.ui": content, "/site/product-card.ui": productCard}
 	}
-	for _, c := range []struct {
-		content string
-		more    map[string]string
-		says    string
-	}{
-		{`<content><card component="product-card" for="product of products" /></content>`, nil, "product-card là layout (chỉ có giao diện, không có logic): viết <product-card … />"},
-		{`<content><card component="product-card" /></content>`, nil, "product-card là layout (chỉ có giao diện, không có logic): viết <product-card />"},
-		{`<content><card component="./product-card" /></content>`, nil, `product-card là layout (chỉ có giao diện, không có logic): viết <product-card source="./product-card" />`},
-		{`<content><box component="dropdown"><text>x</text></box></content>`, map[string]string{"/site/dropdown.ui": `<box><text>menu</text></box>`},
-			`dropdown là layout (chỉ có giao diện, không có logic): viết <dropdown />; dropdown.ui ở đây là file của site, còn component dropdown của Kitwork viết component="kitwork/components/dropdown"`},
+	for _, c := range []struct{ content, says string }{
+		{`<content><card component="product-card" for="product of products" /></content>`, "component= đã bỏ: component là một thẻ, viết <product-card />"},
+		{`<content><card component="./product-card" /></content>`, `component= đã bỏ: component là một thẻ, viết <product-card source="./product-card" />`},
 	} {
-		mustFail(t, with(c.content, c.more), where("content.ui", c.content, "component="), c.says)
+		mustFail(t, with(c.content), where("content.ui", c.content, "component="), c.says)
 	}
-	// a component Kitwork has not built yet is not offered by its path
-	got := compileError(t, with(`<content><box component="tooltip"><text>x</text></box></content>`, map[string]string{"/site/tooltip.ui": `<box><text>x</text></box>`}))
-	if !strings.Contains(got, "tooltip là layout (chỉ có giao diện, không có logic): viết <tooltip />") || strings.Contains(got, "kitwork/components/tooltip") {
-		t.Errorf("a site tooltip.ui written component=: %s", got)
+	// CONTROL
+	html := renderAt(t, memorySite("", with(`<content><product-card for="product of products" /><product-card source="./product-card" product="{{ products[0] }}" /></content>`)),
+		".", "/", map[string]any{"products": products()})
+	if got := strings.Count(html, "<h3>Cà phê sữa</h3>"); got != 2 {
+		t.Errorf("the tag and the tag with source= both call product-card.ui: want two cards of Cà phê sữa, got %d:\n%s", got, html)
 	}
-	// a branch's file too: <dropdown /> there is the branch's layout
-	mustContain(t, renderAt(t, memorySite("", map[string]string{
-		"/site/quan-ly/content.ui":  `<content><dropdown /></content>`,
-		"/site/quan-ly/dropdown.ui": `<box><text>menu quản lý</text></box>`,
-	}), "quan-ly", "/quan-ly", nil), "<p>menu quản lý</p>")
-	// controls: the tag calls the layout, and Kitwork's dropdown is still there by its path
-	mustContain(t, mustCompile(t, with(`<content><dropdown /><box component="kitwork/components/dropdown"><button click="toggle()">x</button></box></content>`,
-		map[string]string{"/site/dropdown.ui": `<box><text>menu</text></box>`})),
-		`<div class="flex-column"><p>menu</p></div>`, `data-kitwork-component="dropdown"`)
+	mustContain(t, html, "<h3>Bạc xỉu</h3>")
 }
 
-// A layout that gains logic is a component: every call written as its tag says how to write it, with
-// the root tag of its .ui. Logic beside a branch's .ui is read by nothing, which is an error, not a
-// layout that silently stays one.
+// A layout that gains logic is a component called by the same tag (18/10/2026): its calls stay as
+// they are, and its own names now cover the page's — open here is the component's false, not the
+// page's true. CONTROL: without the .work the same call is the layout, reading the page's open. Logic
+// beside a branch's .ui is read by nothing, which is an error, not a layout that silently stays one.
 func TestLayoutThatGainsLogic(t *testing.T) {
-	logic := `import { component } from "kitwork"; component.define("product-card", () => { var open = false; });`
-	content := `<content><grid><product-card for="product of products" /></grid></content>`
-	mustFail(t, map[string]string{"/site/content.ui": content, "/site/product-card.ui": productCard, "/site/product-card.work": logic},
-		where("content.ui", content, "<product-card"), `product-card có logic (product-card.work): viết <card component="product-card" … />`)
+	files := map[string]string{
+		"/site/content.ui":        `<content><grid><product-card for="product of products" /></grid></content>`,
+		"/site/product-card.ui":   `<card><text>{{ product.name }}</text><text show="open">mở</text></card>`,
+		"/site/product-card.work": `import { component } from "kitwork"; component.define("product-card", () => { var open = false; });`,
+	}
+	scope := map[string]any{"products": products(), "open": true}
+	html := renderAt(t, memorySite("", files), ".", "/", scope)
+	mustContain(t, html, "<p>Cà phê sữa</p>", "<p>Bạc xỉu</p>")
+	if got := strings.Count(html, `<p hidden>mở</p>`); got != 2 {
+		t.Errorf("each card is the component, whose open is false: want two hidden lines, got %d:\n%s", got, html)
+	}
+	// CONTROL
+	delete(files, "/site/product-card.work")
+	html = renderAt(t, memorySite("", files), ".", "/", scope)
+	if got := strings.Count(html, `<p>mở</p>`); got != 2 {
+		t.Errorf("the layout reads the page's open, true: want two lines shown, got %d:\n%s", got, html)
+	}
+	mustNotContain(t, html, "hidden>mở")
 
 	branch := map[string]string{
 		"/site/quan-ly/content.ui":       `<content><order-table /></content>`,
@@ -193,19 +188,15 @@ func TestLayoutThatGainsLogic(t *testing.T) {
 		!strings.Contains(err.Error(), "order-table.work không được đọc: logic của component đặt ở gốc site (components.work hoặc order-table.work) hoặc .components/order-table.work của identity; ở đây quan-ly/order-table.ui là layout") {
 		t.Errorf("a .work beside a branch's layout: %v", err)
 	}
-	// the same written component=: the branch's .work is read by nothing there either
-	branch["/site/quan-ly/content.ui"] = `<content><list component="order-table" /></content>`
-	if _, err := memorySite("", branch).Compile("/site/quan-ly"); err == nil || !strings.HasPrefix(err.Error(), "quan-ly/order-table.work:1:1: ") {
-		t.Errorf("a .work beside a branch's .ui, written component=: %v", err)
-	}
 	// control: without it the branch's layout is called by its tag
-	branch["/site/quan-ly/content.ui"] = `<content><order-table /></content>`
 	delete(branch, "/site/quan-ly/order-table.work")
 	mustContain(t, renderAt(t, memorySite("", branch), "quan-ly", "/quan-ly", nil), "<p>đơn</p>")
 }
 
-// A tag of Kitwork always means Kitwork's: a .ui file in reach named like a core tag or a Kitwork
-// element would never be called, so it is an error at that file. Region files are the regions'.
+// A tag of Kitwork always means Kitwork's: a .ui file in reach named like a core tag, a Kitwork element
+// or a Kitwork component would never be called, so it is an error at that file — a branch's too (since
+// 18/10/2026 a site's dropdown.ui no longer stands in for Kitwork's dropdown). Region files are the
+// regions'.
 func TestLayoutNamedLikeATag(t *testing.T) {
 	for _, c := range []struct {
 		files map[string]string
@@ -220,6 +211,10 @@ func TestLayoutNamedLikeATag(t *testing.T) {
 			"../.components/icon.ui:1:1: ", "icon.ui đặt tên trùng phần tử <icon> của Kitwork: <icon> luôn là phần tử của Kitwork"},
 		{map[string]string{"/site/content.ui": `<content><dialog /></content>`, "/site/dialog.ui": `<box><text>x</text></box>`},
 			"dialog.ui:1:1: ", "dialog.ui đặt tên trùng phần tử <dialog> của Kitwork"},
+		{map[string]string{"/site/content.ui": `<content><dropdown><text>x</text></dropdown></content>`, "/site/dropdown.ui": `<box><text>menu</text></box>`},
+			"dropdown.ui:1:1: ", "dropdown.ui đặt tên trùng component <dropdown> của Kitwork: <dropdown> luôn là component của Kitwork nên file này không bao giờ được gọi"},
+		{map[string]string{"/site/shop/content.ui": `<content><dropdown /></content>`, "/site/shop/dropdown.ui": `<box><text>menu của shop</text></box>`},
+			"shop/dropdown.ui:1:1: ", "dropdown.ui đặt tên trùng component <dropdown> của Kitwork"},
 	} {
 		route := "/site"
 		if _, ok := c.files["/site/shop/content.ui"]; ok {
@@ -240,22 +235,25 @@ func TestLayoutNamedLikeATag(t *testing.T) {
 }
 
 // The root of a layout piece takes the call's for, if, show, span and place: it is an element of
-// Kitwork that takes them, and it does not repeat itself.
+// Kitwork that takes them, and it does not repeat itself. A component's tag is no such root (the call
+// would put its words on the component), and component= on the root is the removed attribute.
 func TestLayoutRoot(t *testing.T) {
 	for _, c := range []struct{ ui, needle, says string }{
-		{`<card for="x of xs"><text>x</text></card>`, "for=", `gốc của promo.ui không mang for: lặp mấy lần là việc của chỗ gọi (<promo for="…" />)`},
-		{`<box component="dropdown"><button click="toggle()">x</button></box>`, "component=", `gốc của promo.ui mang component="dropdown": chỗ gọi <promo /> đặt for, if, show, span, place lên chính gốc này`},
-		{`<page><content /></page>`, "<page", "gốc của promo.ui là <page>: page là khung của trang"},
-		{`<navbar><link value="/">x</link></navbar>`, "<navbar", "gốc của promo.ui là vùng <navbar>: vùng gọi bằng thẻ của nó"},
-		{`<fragment if="x"><text>x</text></fragment>`, "<fragment", "gốc của promo.ui là <fragment>, không dựng phần tử nào"},
-		{`<promo-line />`, "<promo-line", "gốc của promo.ui là <promo-line>, không phải thẻ của Kitwork"},
+		{`<card for="x of xs"><text>x</text></card>`, "for=", `gốc của shop-promo.ui không mang for: lặp mấy lần là việc của chỗ gọi (<shop-promo for="…" />)`},
+		{`<box component="dropdown"><button click="toggle()">x</button></box>`, "component=", `component= đã bỏ: component là một thẻ, viết <dropdown>…</dropdown>`},
+		{`<dropdown><button click="toggle()">x</button></dropdown>`, "<dropdown", `gốc của shop-promo.ui là <dropdown>, một component: chỗ gọi <shop-promo /> đặt for, if, show, span, place lên chính gốc này, nên gốc không là một component; bọc <dropdown> trong một <box>`},
+		{`<page><content /></page>`, "<page", "gốc của shop-promo.ui là <page>: page là khung của trang"},
+		{`<navbar><link value="/">x</link></navbar>`, "<navbar", "gốc của shop-promo.ui là vùng <navbar>: vùng gọi bằng thẻ của nó"},
+		{`<fragment if="x"><text>x</text></fragment>`, "<fragment", "gốc của shop-promo.ui là <fragment>, không dựng phần tử nào"},
+		// promo-line is a layout (promo-line.ui, no logic), not a component
+		{`<promo-line />`, "<promo-line", "gốc của shop-promo.ui là <promo-line>, không phải thẻ của Kitwork"},
 	} {
-		mustFail(t, map[string]string{"/site/content.ui": `<content><promo /></content>`, "/site/promo.ui": c.ui, "/site/promo-line.ui": `<box><text>x</text></box>`},
-			where("promo.ui", c.ui, c.needle), c.says)
+		mustFail(t, map[string]string{"/site/content.ui": `<content><shop-promo /></content>`, "/site/shop-promo.ui": c.ui, "/site/promo-line.ui": `<box><text>x</text></box>`},
+			where("shop-promo.ui", c.ui, c.needle), c.says)
 	}
 	// control: a layout piece may hold a component and a layout piece inside its root
-	mustContain(t, mustCompile(t, map[string]string{"/site/content.ui": `<content><promo /></content>`,
-		"/site/promo.ui":      `<box><box component="dropdown"><button click="toggle()">x</button></box><promo-line /></box>`,
+	mustContain(t, mustCompile(t, map[string]string{"/site/content.ui": `<content><shop-promo /></content>`,
+		"/site/shop-promo.ui": `<box><dropdown><button click="toggle()">x</button></dropdown><promo-line /></box>`,
 		"/site/promo-line.ui": `<text>dòng</text>`}),
 		`data-kitwork-component="dropdown"`, "<p>dòng</p>")
 }
@@ -288,28 +286,35 @@ func TestLayoutLookupFromTheWritingFolder(t *testing.T) {
 	mustNotContain(t, renderAt(t, memorySite("", files), ".", "/", nil), "giỏ của shop")
 }
 
-// source takes another file for the call: a name looked up like the tag's own, or a path. What it takes
-// is a layout piece.
+// source takes another file of the site for the call: a name looked up like the tag's own, or a path.
+// What it takes is a layout piece or, since 18/10/2026, a component of the site: the call is then that
+// component's. A name without a dash is never the site's.
 func TestLayoutSource(t *testing.T) {
 	files := func(content string) map[string]string {
 		return map[string]string{
 			"/site/content.ui":            content,
 			"/site/product-card.ui":       productCard,
 			"/site/product-card-small.ui": `<box><text>{{ product.name }}</text></box>`,
-			"/site/shop/compact.ui":       `<box><text>gọn {{ product.name }}</text></box>`,
-			"/site/cart.ui":               `<box><text>giỏ</text></box>`,
-			"/site/cart.work":             cartLogic,
+			"/site/shop/card-compact.ui":  `<box><text>gọn {{ product.name }}</text></box>`,
+			"/site/shop/compact.ui":       `<box><text>gọn</text></box>`, // there, but named without a dash
+			"/site/shop-cart.ui":          `<box><text>giỏ {{ note }}</text></box>`,
+			"/site/shop-cart.work":        cartLogic,
 		}
 	}
-	scope := map[string]any{"product": map[string]any{"name": "Bạc xỉu"}}
-	html := renderAt(t, memorySite("", files(`<content><product-card source="product-card-small" /><product-card source="./shop/compact" /></content>`)), ".", "/", scope)
+	scope := map[string]any{"product": map[string]any{"name": "Bạc xỉu"}, "note": "của trang"}
+	html := renderAt(t, memorySite("", files(`<content><product-card source="product-card-small" /><product-card source="./shop/card-compact" /></content>`)), ".", "/", scope)
 	mustContain(t, html, `<div class="flex-column"><p>Bạc xỉu</p></div>`, "<p>gọn Bạc xỉu</p>")
 	mustNotContain(t, html, `class="card`)
+	// a component taken by source: its own note, not the page's
+	html = renderAt(t, memorySite("", files(`<content><product-card source="shop-cart" /></content>`)), ".", "/", scope)
+	mustContain(t, html, "<p>giỏ chưa có</p>")
+	mustNotContain(t, html, `class="card`, "của trang")
 	for _, c := range []struct{ content, says string }{
-		{`<content><product-card source="cart" /></content>`, `source lấy một layout (chỉ có giao diện); cart có logic (cart.work) nên là component: viết component="cart" trên một thẻ`},
-		{`<content><product-card source="nothing" /></content>`, `không tìm thấy layout nothing (source="nothing")`},
+		{`<content><product-card source="cart" /></content>`, `source là tên của một layout hay component của site (viết thường, nối bằng gạch ngang) hoặc đường dẫn tới nó, không phải "cart"`},
+		{`<content><product-card source="no-such-card" /></content>`, `không tìm thấy no-such-card (source="no-such-card")`},
 		{`<content><product-card source="{{ kind }}" /></content>`, "source là một tên cố định, không có {{ }}"},
-		{`<content><product-card source="Small" /></content>`, `source là tên của một layout (viết thường, nối bằng gạch ngang) hoặc đường dẫn tới nó, không phải "Small"`},
+		{`<content><product-card source="Small" /></content>`, `source là tên của một layout hay component của site (viết thường, nối bằng gạch ngang) hoặc đường dẫn tới nó, không phải "Small"`},
+		{`<content><product-card source="./shop/compact" /></content>`, `đường dẫn kết thúc bằng tên của site, có gạch ngang (product-card), không phải "compact": tên không gạch ngang là của Kitwork`},
 	} {
 		mustFail(t, files(c.content), where("content.ui", c.content, "source="), c.says)
 	}
@@ -319,15 +324,14 @@ func TestLayoutSource(t *testing.T) {
 // repeats and removes nothing by live state yet), and an input read from live state would be printed
 // once with no instance to keep it: errors. Its show follows the live state.
 func TestLayoutCallInsideALiveComponent(t *testing.T) {
-	note := map[string]string{"/site/note.ui": `<card><text>{{ label ?? 'x' }}</text></card>`}
 	with := func(content string) map[string]string {
-		return map[string]string{"/site/content.ui": content, "/site/note.ui": note["/site/note.ui"]}
+		return map[string]string{"/site/content.ui": content, "/site/mode-note.ui": `<card><text>{{ label ?? 'x' }}</text></card>`}
 	}
-	content := `<content><box component="appearance"><note label="{{ dark ? 'tối' : 'sáng' }}" /></box></content>`
+	content := `<content><appearance><mode-note label="{{ dark ? 'tối' : 'sáng' }}" /></appearance></content>`
 	mustFail(t, with(content), where("content.ui", content, "label="),
-		"giá trị của label đọc trạng thái sống của appearance: note là layout, không có instance ở trình duyệt giữ giá trị đó")
+		"giá trị của label đọc trạng thái sống của appearance: mode-note là layout, không có instance ở trình duyệt giữ giá trị đó")
 	// control: an input from the page's data is the server's, inside a live component too
-	html := renderAt(t, memorySite("", with(`<content><box component="appearance"><note label="{{ greeting }}" /></box></content>`)), ".", "/", map[string]any{"greeting": "chào"})
+	html := renderAt(t, memorySite("", with(`<content><appearance><mode-note label="{{ greeting }}" /></appearance></content>`)), ".", "/", map[string]any{"greeting": "chào"})
 	mustContain(t, html, "<p>chào</p>")
 	mustNotContain(t, html, "text: label")
 }
@@ -339,16 +343,16 @@ func TestLayoutInputsCoverTheNamesAround(t *testing.T) {
 	files := func(content string) map[string]string {
 		return map[string]string{"/site/content.ui": content, "/site/mode-label.ui": `<text>{{ mode }}</text>`}
 	}
-	html := mustCompile(t, files(`<content><box component="appearance"><mode-label mode="{{ 'tối' }}" /></box></content>`))
-	mustContain(t, html, "<p>tối</p>")
+	html := mustCompile(t, files(`<content><appearance><mode-label mode="{{ 'tối' }}" /></appearance></content>`))
+	mustContain(t, html, "<span>tối</span>") // the host is appearance's button: a text in it is a <span>
 	mustNotContain(t, html, "text: mode")
 	// control: without the input, mode is appearance's, kept up to date by the kernel
-	mustContain(t, mustCompile(t, files(`<content><box component="appearance"><mode-label /></box></content>`)), `data-kitwork-bind="text: mode"`)
+	mustContain(t, mustCompile(t, files(`<content><appearance><mode-label /></appearance></content>`)), `data-kitwork-bind="text: mode"`)
 
 	// an input is a level around a component inside the file: a name both declare is a warning there
 	panel := map[string]string{
 		"/site/content.ui":    `<content><menu-panel open="{{ start }}" /></content>`,
-		"/site/menu-panel.ui": `<box><text>{{ open }}</text><box component="dropdown"><text show="open">x</text></box></box>`,
+		"/site/menu-panel.ui": `<box><text>{{ open }}</text><dropdown><text show="open">x</text></dropdown></box>`,
 	}
 	partsWarns(t, panel, where("menu-panel.ui", panel["/site/menu-panel.ui"], "show="),
 		"open ở đây là của dropdown, mà đầu vào của menu-panel bao ngoài cũng khai open: một tên một nghĩa")

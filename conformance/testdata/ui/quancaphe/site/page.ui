@@ -1,5 +1,5 @@
 <page background="canvas" color="ink" container="wide">
-  <box component="progressbar" color="brand" delay="0" thickness="1"></box>
+  <progressbar color="brand" delay="0" thickness="1"></progressbar>
   <header />
   <content />
   <footer />

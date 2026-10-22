@@ -7,12 +7,12 @@ import (
 )
 
 // The bar between pages on a template page. Drive draws no bar of its own (10/10/2026): the bar is the
-// kernel's progressbar component, and a Kitwork UI page always has one (<box component="progressbar" />, or the one
+// kernel's progressbar component, and a Kitwork UI page always has one (<progressbar />, or the one
 // the engine puts first in <page>). A template page (.kitwork.html) on a site that moves without a
 // reload gets the same component here, at the top of <body>, unless it placed one itself.
 //
 // Its line takes --kitwork-progress when the site sets it (kitwork.io colours Drive's bar that way)
-// and the brand otherwise, 1px, shown after 120ms: what <box component="progressbar" /> is by default.
+// and the brand otherwise, 1px, shown after 120ms: what <progressbar /> is by default.
 
 // progressbarHostRe finds a progressbar host in either form: data-kit-component="progressbar[@version]"
 // (a template page's own), or the engine's data-kitwork-component="progressbar[@version][: $alias]".

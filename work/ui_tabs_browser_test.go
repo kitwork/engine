@@ -36,47 +36,47 @@ router.view(() => {
 	"localhost/page.ui": `<page><content /></page>`,
 	"localhost/content.ui": `<content padding="4" gap="4">
   <box id="window" max-width="640px">
-    <box component="terminal" as="$code" typing="2s" background="panel" radius="medium">
+    <terminal as="$code" typing="2s" background="panel" radius="medium">
       <box flex="row" align="center" gap="2" padding-x="3" padding-y="2">
-        <box component="tabs" as="$files" persist="true" alt="Tệp" flex="row" gap="1">
+        <tabs as="$files" persist="true" alt="Tệp" flex="row" gap="1">
           <button id="tab-router" click="select('router')">router.work</button>
           <button id="tab-page" click="select('page')">page.ui</button>
-        </box>
+        </tabs>
         <button id="copy" click="copy()">{{ copied ? 'Đã chép' : 'Chép' }}</button>
       </box>
       <box id="file-router" show="$files.selected == 'router'" padding="4"><code language="work">{{ routerCode }}</code></box>
       <box id="file-page" show="$files.selected == 'page'" padding="4"><code language="ui">{{ pageCode }}</code></box>
-    </box>
+    </terminal>
   </box>
-  <box component="tabs" as="$also" persist="true" selected="router" alt="Cũng vậy" flex="row" gap="1">
+  <tabs as="$also" persist="true" selected="router" alt="Cũng vậy" flex="row" gap="1">
     <button click="select('page')">page</button>
     <button click="select('router')">router</button>
-  </box>
+  </tabs>
   <box id="also-router" show="$also.selected == 'router'"><text>router</text></box>
   <box id="also-page" show="$also.selected == 'page'"><text>page</text></box>
-  <box component="tabs" as="$other" alt="Riêng" flex="row" gap="1">
+  <tabs as="$other" alt="Riêng" flex="row" gap="1">
     <button click="select('router')">router</button>
     <button click="select('page')">page</button>
-  </box>
+  </tabs>
   <box id="other-router" show="$other.selected == 'router'"><text>router</text></box>
   <box id="other-page" show="$other.selected == 'page'"><text>page</text></box>
-  <box component="tabs" as="$partial" persist="true" alt="Bộ khác" flex="row" gap="1">
+  <tabs as="$partial" persist="true" alt="Bộ khác" flex="row" gap="1">
     <button click="select('router')">router</button>
     <button click="select('go')">go</button>
-  </box>
+  </tabs>
   <box id="partial-router" show="$partial.selected == 'router'"><text>router</text></box>
   <box id="partial-go" show="$partial.selected == 'go'"><text>go</text></box>
-  <box component="tabs" as="$shell" persist="shell" alt="Shell" flex="row" gap="1">
+  <tabs as="$shell" persist="shell" alt="Shell" flex="row" gap="1">
     <button click="select('bash')">bash</button>
     <button click="select('powershell')">PowerShell</button>
-  </box>
+  </tabs>
   <box id="shell-bash" show="$shell.selected == 'bash'"><text>bash</text></box>
   <box id="shell-powershell" show="$shell.selected == 'powershell'"><text>PowerShell</text></box>
-  <box component="tabs" as="$console" persist="shell" alt="Console" flex="row" gap="1">
+  <tabs as="$console" persist="shell" alt="Console" flex="row" gap="1">
     <button id="console-bash" click="select('bash')">bash</button>
     <button id="console-powershell" click="select('powershell')">PowerShell</button>
     <button id="console-cmd" click="select('cmd')">cmd</button>
-  </box>
+  </tabs>
   <box id="console-bash-panel" show="$console.selected == 'bash'"><text>bash</text></box>
   <box id="console-powershell-panel" show="$console.selected == 'powershell'"><text>PowerShell</text></box>
   <box id="console-cmd-panel" show="$console.selected == 'cmd'"><text>cmd</text></box>

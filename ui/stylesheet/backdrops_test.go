@@ -28,10 +28,10 @@ var designedBackdrops = []struct {
 }
 
 // The page backdrops are the designed set: twelve names in their order round the hue wheel, each a
-// linear ramp to the bottom end with a { light, dark } pair at 0, 34 and 67, exactly the chosen colours;
-// each reads as a gradient under another name, and none is named like a colour, a token of the default
-// palette or a standard gradient. They are every palette's gradients, and the standard set stays the
-// eighteen.
+// linear ramp to the bottom right with a { light, dark } pair at 0, 34 and 67, exactly the chosen
+// colours; each reads as a gradient under another name, and none is named like a colour, a token of the
+// default palette or a standard gradient. They are every palette's gradients, and the standard set stays
+// the eighteen.
 func TestBackdropsAreTheDesignedSet(t *testing.T) {
 	var names []string
 	for _, d := range designedBackdrops {
@@ -47,8 +47,8 @@ func TestBackdropsAreTheDesignedSet(t *testing.T) {
 			t.Errorf("%s is no gradient of the palette", d.name)
 			continue
 		}
-		if g.Type != "linear" || g.Direction != "to-bottom-end" || len(g.Stops) != 3 {
-			t.Errorf("%s is %s %s with %d stops, want linear to-bottom-end with 3", d.name, g.Type, g.Direction, len(g.Stops))
+		if g.Type != "linear" || g.Direction != "to-bottom-right" || len(g.Stops) != 3 {
+			t.Errorf("%s is %s %s with %d stops, want linear to-bottom-right with 3", d.name, g.Type, g.Direction, len(g.Stops))
 			continue
 		}
 		for i, at := range []float64{0, 34, 67} {
@@ -177,7 +177,7 @@ func TestGradientPairsPerMode(t *testing.T) {
 	}
 
 	ramp := func(s Stop) Gradient {
-		return Gradient{Type: "linear", Direction: "to-end", Stops: []Stop{s, {Color: "canvas", At: 100}}}
+		return Gradient{Type: "linear", Direction: "to-right", Stops: []Stop{s, {Color: "canvas", At: 100}}}
 	}
 	for stop, want := range map[Stop]string{
 		{Pair: Color{Light: "#849cdd"}}:                                  `router.gradients: "hero" điểm dừng 1: cặp màu thiếu dark: color { light, dark } viết cả hai`,

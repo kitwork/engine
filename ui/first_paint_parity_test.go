@@ -40,35 +40,35 @@ func TestFirstPaintIsWhatTheKernelLeaves(t *testing.T) {
 		`<text>{{ open > 1 ? 'big' : 'small' }}</text><text>{{ JSON.stringify(open) }}</text><text>{{ open }}</text>`
 	page := `<content>` +
 		// CONTROL: plain data, one {{ }} each
-		`<box component="dropdown" open="{{ start }}"><text>{{ open ? 'on' : 'off' }}</text><box alt="{{ open ? 'x' : 'y' }}">a</box>` + inside + `</box>` +
+		`<dropdown open="{{ start }}"><text>{{ open ? 'on' : 'off' }}</text><box alt="{{ open ? 'x' : 'y' }}">a</box>` + inside + `</dropdown>` +
 		// more than one {{ }}: the parts' texts joined, never added
-		`<box component="dropdown" open="{{ start }}"><text>{{ open ? 1 : 0 }}{{ open ? 2 : 0 }}</text><text>{{ open }}{{ open }}</text>` +
+		`<dropdown open="{{ start }}"><text>{{ open ? 1 : 0 }}{{ open ? 2 : 0 }}</text><text>{{ open }}{{ open }}</text>` +
 		`<text>{{ open ? 1 : 0 }}{{ open ? 2 : 0 }} items</text><box alt="{{ open ? 1 : 0 }}{{ open ? 2 : 0 }}">b</box>` +
 		`<text>{{ open ? 'x' : '' }}{{ { valueOf: () => 1, toString: () => 'T' } }}</text>` +
 		`<text>{{ open ? null : 1 }}{{ open ? [1, 2] : 3 }}</text>` +
 		// an object whose text is a lambda, as an attribute: run in the scope that made it
-		`<box alt="{{ { toString: () => open ? 'yes' : 'no' } }}">c</box><box alt="{{ [{ toString: () => open ? 'yes' : 'no' }] }}">d</box></box>` +
+		`<box alt="{{ { toString: () => open ? 'yes' : 'no' } }}">c</box><box alt="{{ [{ toString: () => open ? 'yes' : 'no' }] }}">d</box></dropdown>` +
 		// an aria attribute of null or undefined is not there; false and 0 are text
-		`<box component="dropdown" open="{{ stop }}"><box alt="{{ open ? 'x' : null }}">e</box><box alt="{{ open ? 'x' : {}.y }}">f</box>` +
-		`<box alt="{{ open }}">g</box><box alt="{{ open ? 1 : 0 }}">h</box></box>` +
+		`<dropdown open="{{ stop }}"><box alt="{{ open ? 'x' : null }}">e</box><box alt="{{ open ? 'x' : {}.y }}">f</box>` +
+		`<box alt="{{ open }}">g</box><box alt="{{ open ? 1 : 0 }}">h</box></dropdown>` +
 		// inputs the browser reads back as the value the server painted with
-		`<box component="dropdown" open="{{ 1 / 0 }}">` + inside + `</box>` +
-		`<box component="dropdown" open="{{ -1 / 0 }}">` + inside + `</box>` +
-		`<box component="dropdown" open="{{ 0 / 0 }}">` + inside + `</box>` +
-		`<box component="dropdown" open="{{ -0 }}">` + inside + `</box>` +
-		`<box component="dropdown" open="{{ nothing.here }}">` + inside + `</box>` +
-		`<box component="dropdown" open="{{ (x) => x + 1 }}">` + inside + `</box>` +
-		`<box component="dropdown" open="{{ Math }}">` + inside + `</box>` +
-		`<box component="dropdown" open="{{ Math.max }}">` + inside + `</box>` +
-		`<box component="dropdown" open="{{ ''.trim }}">` + inside + `</box>` +
-		`<box component="dropdown" open="{{ Math.max.bind(null, 7) }}">` + inside + `</box>` +
-		`<box component="dropdown" open="{{ Array(2) }}">` + inside + `</box>` +
-		`<box component="dropdown" open="{{ [1].concat(Array(1), [2]) }}">` + inside + `</box>` +
-		`<box component="dropdown" open="{{ { b: 0 / 0, a: [1 / 0, {}.x] } }}">` + inside + `</box>` +
-		`<box component="dropdown" open="{{ JSON.rawJSON('12') }}">` + inside + `</box>` +
-		`<box component="dropdown" open="{{ deep }}">` + inside + `</box>` +
-		`<box component="dropdown" open="{{ [1, 2].values() }}">` + inside + `</box>` +
-		`<box component="dropdown" open="{{ ratio }}">` + inside + `</box>` +
+		`<dropdown open="{{ 1 / 0 }}">` + inside + `</dropdown>` +
+		`<dropdown open="{{ -1 / 0 }}">` + inside + `</dropdown>` +
+		`<dropdown open="{{ 0 / 0 }}">` + inside + `</dropdown>` +
+		`<dropdown open="{{ -0 }}">` + inside + `</dropdown>` +
+		`<dropdown open="{{ nothing.here }}">` + inside + `</dropdown>` +
+		`<dropdown open="{{ (x) => x + 1 }}">` + inside + `</dropdown>` +
+		`<dropdown open="{{ Math }}">` + inside + `</dropdown>` +
+		`<dropdown open="{{ Math.max }}">` + inside + `</dropdown>` +
+		`<dropdown open="{{ ''.trim }}">` + inside + `</dropdown>` +
+		`<dropdown open="{{ Math.max.bind(null, 7) }}">` + inside + `</dropdown>` +
+		`<dropdown open="{{ Array(2) }}">` + inside + `</dropdown>` +
+		`<dropdown open="{{ [1].concat(Array(1), [2]) }}">` + inside + `</dropdown>` +
+		`<dropdown open="{{ { b: 0 / 0, a: [1 / 0, {}.x] } }}">` + inside + `</dropdown>` +
+		`<dropdown open="{{ JSON.rawJSON('12') }}">` + inside + `</dropdown>` +
+		`<dropdown open="{{ deep }}">` + inside + `</dropdown>` +
+		`<dropdown open="{{ [1, 2].values() }}">` + inside + `</dropdown>` +
+		`<dropdown open="{{ ratio }}">` + inside + `</dropdown>` +
 		`</content>`
 	deep := map[string]any{"end": 1.0}
 	for i := 0; i < 20; i++ {

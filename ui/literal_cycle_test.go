@@ -27,7 +27,7 @@ func TestLiteralOfAScopeThatHoldsItself(t *testing.T) {
 	// the page. JSON.stringify of a value that holds itself fails, as in JavaScript, and a text of more
 	// than one part is one expression (16/10/2026), so the whole text is empty; the page is served
 	page := `<content><text>{{ x = $ }}</text><text>{{ b = $ }}</text><text>[{{ JSON.stringify(b) }}]</text>` +
-		`<box component="dropdown" open="{{ x }}"><button click="toggle()">x</button></box></content>`
+		`<dropdown open="{{ x }}"><button click="toggle()">x</button></dropdown></content>`
 	html := render(t, page, map[string]any{"a": 1.0})
 	mustContain(t, html, `&#39;a&#39;: 1, &#39;b&#39;: null, `, `&#39;x&#39;: null}"`, `<p></p>`)
 	if len(html) > 4096 {

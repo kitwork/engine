@@ -32,8 +32,10 @@ import (
 // advice, each code its own (code.go); a kind the site's router.highlight colours is the author's colour,
 // told at the call in router.work on the page's canvas, paper and panel (tellHighlight) and at
 // language= on any other ground; a terminal's prompt is the text around its command at 70%,
-// measured where it stands (terminal.go). The arithmetic (luminance, the ratio, a colour lighter or
-// stronger as the browser paints it, an alpha composited) is the stylesheet's (stylesheet/contrast.go).
+// measured where it stands (terminal.go); a richtext's words are measured where it stands, whatever its
+// value holds, and its links in the engine's link colour, told at the richtext (richtext.go). The
+// arithmetic (luminance, the ratio, a colour lighter or stronger as the browser paints it, an alpha
+// composited) is the stylesheet's (stylesheet/contrast.go).
 //
 // What is not measured: an icon without alt (decoration), text inside a control written
 // disabled="true" and every disabled: colour (WCAG's inactive components), placeholder text, an option
@@ -64,6 +66,20 @@ type paint struct {
 	// colour, fill and weight are the engine's, read from the palette's roles, or whose colour the site's
 	// router.highlight sets (look.Source); nil for every other element
 	token *codeToken
+	// part is a part of a Kitwork element the engine writes and gives its look, never the author (a link
+	// inside a richtext: richtext.go); nil for every other element
+	part *elementPart
+}
+
+// paintTag is the tag of the element painted, as the author wrote it, for a message: a component's
+// tag (<dropdown>) for the box it built.
+func (c *compiler) paintTag(f *paint) string {
+	if f.node != nil {
+		if tag, ok := c.hostTags[f.node]; ok {
+			return tag
+		}
+	}
+	return f.tag
 }
 
 // pinAt is a pin from the width it starts at (0 every screen): on for top, bottom or a value from
@@ -300,6 +316,9 @@ func (f *paint) look(width int) stylesheet.Look {
 	if f.token != nil {
 		// the span's own rule (stylesheet.Table.Code): its colour wins over any colour around the code
 		return stylesheet.Look{Text: f.token.look.Color, Surface: f.token.look.Background, Weight: f.token.look.Weight}
+	}
+	if f.part != nil {
+		return f.part.look // the part's own rule (a richtext's link): its colour wins over any colour around it
 	}
 	return stylesheet.LookOf(f.html, f.classes, f.inputType, width)
 }
@@ -625,8 +644,11 @@ func (c *compiler) textOf(f *paint, k cond, m stylesheet.Mode, s *swaps, icon bo
 			}
 			rgba, ok := palette.Paint(v, m)
 			what := "chữ " + v + " mặc định của <" + fr.tag + ">"
-			if fr.token != nil {
+			switch {
+			case fr.token != nil:
 				what = fr.token.what(v)
+			case fr.part != nil:
+				what = fr.part.what(v, fr.tag)
 			}
 			return []shade{{rgba: rgba, value: v, owner: fr, what: what}}, ok
 		}
@@ -1174,9 +1196,10 @@ func (c *compiler) reportContrast(f *paint, k cond, m stylesheet.Mode, p pairing
 	message += "; " + need + "."
 
 	// a token of a code element is coloured by the engine from the palette's roles, or by the site's
-	// router.highlight: no attribute the author writes on the code changes it, so no colour to write is
-	// suggested here (codeToken.advice says where it changes)
-	codeText := f.token != nil
+	// router.highlight, and so is a part of a Kitwork element (a richtext's link): no attribute the author
+	// writes there changes it, so no colour to write is suggested here (codeToken.advice and
+	// elementPart.advice say where it changes)
+	codeText := f.token != nil || f.part != nil
 	var tries []colourTry
 	if !codeText {
 		tries = c.tries(f, k, p)
@@ -1189,7 +1212,7 @@ func (c *compiler) reportContrast(f *paint, k cond, m stylesheet.Mode, p pairing
 		}
 		use = t.write
 		if t.on != nil && t.on != f {
-			use += " trên <" + t.on.tag + "> (" + t.on.node.File + ":" + strconv.Itoa(t.on.node.Line) + ":" + strconv.Itoa(t.on.node.Column) + ")"
+			use += " trên <" + c.paintTag(t.on) + "> (" + t.on.node.File + ":" + strconv.Itoa(t.on.node.Line) + ":" + strconv.Itoa(t.on.node.Column) + ")"
 		}
 		use += c.ratiosText(worst)
 		owner := p.text.owner
@@ -1238,6 +1261,8 @@ func (c *compiler) reportContrast(f *paint, k cond, m stylesheet.Mode, p pairing
 		all, alone = c.readable(f, conds, p, icon)
 	}
 	switch {
+	case f.part != nil:
+		message += f.part.advice(p.text.value, p.ground.top.value, f.tag)
 	case codeText:
 		message += f.token.advice(p.text.value, p.ground.top.value)
 	case surface != "":
@@ -1277,7 +1302,7 @@ func (c *compiler) reportContrast(f *paint, k cond, m stylesheet.Mode, p pairing
 
 	node, line, column := f.node, f.node.Line, f.node.Column
 	switch {
-	case codeText && f.token.language.attr != nil && f.token.language.attr.Line > 0:
+	case f.token != nil && f.token.language.attr != nil && f.token.language.attr.Line > 0:
 		// told at the attribute that names the language: what chose these colours
 		node, line, column = f.token.language.node, f.token.language.attr.Line, f.token.language.attr.Column
 	case codeText:
@@ -1427,8 +1452,10 @@ func (c *compiler) hold(h *heldPair) {
 // the pair is its text's own: a colour short on the page's canvas, on a card's paper, or short on its
 // background and on what lies behind it alike. It is told alone.
 func (c *compiler) groupKey(h *heldPair) string {
-	if h.f.token != nil {
-		return "" // a token of a code element: its advice is its own (codeToken.advice: the engine's, or router.highlight's), told at its code
+	if h.f.token != nil || h.f.part != nil {
+		// a token of a code element, a part of a Kitwork element: its advice is its own (codeToken.advice:
+		// the engine's, or router.highlight's; elementPart.advice), told at its code or its element
+		return ""
 	}
 	top := h.p.ground.top
 	source := writtenSource(top)

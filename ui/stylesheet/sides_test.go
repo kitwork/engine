@@ -7,31 +7,26 @@ import (
 	"testing"
 )
 
-// The sides and corners decided 13/10/2026 ("start với end nó hợp với flex hơn", and padding-left is
-// a word of the web worth keeping): padding-left and padding-right pad the screen's side and never
-// flip; radius has its sides (top, bottom, left, right: two corners each) and its corners (top-left…),
-// physical, and their logical twins (start, end; top-start…), which flip right to left. Each makes the
-// class as written and exactly its CSS.
+// The sides and corners (decided 13/10/2026; start and end replaced by left and right, 19/10/2026):
+// padding-left and padding-right pad a side; radius has its sides (top, bottom, left, right: two
+// corners each) and its corners (top-left…). top and bottom are the screen's and write physical CSS,
+// the same in either direction; left and right are the design's and write logical CSS
+// (padding-inline-start, border-start-start-radius), so they mirror on a page written right to left
+// (sides_browser_test.go measures it). Each makes the class as written and exactly its CSS.
 func TestSidesAndCornersMakeTheirClassAndExactCSS(t *testing.T) {
 	table := NewTable(nil)
 	for _, c := range []struct{ name, value, rule string }{
-		{"padding-left", "4", `.padding-left-4{padding-left:1rem}`},
-		{"padding-right", "2", `.padding-right-2{padding-right:.5rem}`},
-		{"padding-left", "0.5", `.padding-left-0\.5{padding-left:.125rem}`},
+		{"padding-left", "4", `.padding-left-4{padding-inline-start:1rem}`},
+		{"padding-right", "2", `.padding-right-2{padding-inline-end:.5rem}`},
+		{"padding-left", "0.5", `.padding-left-0\.5{padding-inline-start:.125rem}`},
 		{"radius-top", "large", `.radius-top-large{border-top-left-radius:.75rem;border-top-right-radius:.75rem}`},
 		{"radius-bottom", "none", `.radius-bottom-none{border-bottom-left-radius:0;border-bottom-right-radius:0}`},
-		{"radius-left", "small", `.radius-left-small{border-top-left-radius:.375rem;border-bottom-left-radius:.375rem}`},
-		{"radius-right", "medium", `.radius-right-medium{border-top-right-radius:.5rem;border-bottom-right-radius:.5rem}`},
-		{"radius-start", "full", `.radius-start-full{border-start-start-radius:999px;border-end-start-radius:999px}`},
-		{"radius-end", "large", `.radius-end-large{border-start-end-radius:.75rem;border-end-end-radius:.75rem}`},
-		{"radius-top-left", "large", `.radius-top-left-large{border-top-left-radius:.75rem}`},
-		{"radius-top-right", "small", `.radius-top-right-small{border-top-right-radius:.375rem}`},
-		{"radius-bottom-left", "full", `.radius-bottom-left-full{border-bottom-left-radius:999px}`},
-		{"radius-bottom-right", "none", `.radius-bottom-right-none{border-bottom-right-radius:0}`},
-		{"radius-top-start", "large", `.radius-top-start-large{border-start-start-radius:.75rem}`},
-		{"radius-top-end", "medium", `.radius-top-end-medium{border-start-end-radius:.5rem}`},
-		{"radius-bottom-start", "small", `.radius-bottom-start-small{border-end-start-radius:.375rem}`},
-		{"radius-bottom-end", "full", `.radius-bottom-end-full{border-end-end-radius:999px}`},
+		{"radius-left", "small", `.radius-left-small{border-start-start-radius:.375rem;border-end-start-radius:.375rem}`},
+		{"radius-right", "medium", `.radius-right-medium{border-start-end-radius:.5rem;border-end-end-radius:.5rem}`},
+		{"radius-top-left", "large", `.radius-top-left-large{border-start-start-radius:.75rem}`},
+		{"radius-top-right", "small", `.radius-top-right-small{border-start-end-radius:.375rem}`},
+		{"radius-bottom-left", "full", `.radius-bottom-left-full{border-end-start-radius:999px}`},
+		{"radius-bottom-right", "none", `.radius-bottom-right-none{border-end-end-radius:0}`},
 	} {
 		var r Rules
 		class, err := table.Class(&r, Intent{Name: c.name, Value: c.value})
@@ -68,19 +63,18 @@ func TestSidesAndCornersMakeTheirClassAndExactCSS(t *testing.T) {
 // Within one condition a corner beats a side and a side beats radius, and padding-left beats
 // padding-x beats padding, whatever order they are written in: the intents below are recorded in the
 // reverse order (the most specific first), and the rules still come out general first, so the later,
-// more specific one wins. Each physical word comes before its logical twin. CONTROL: sorted as text
-// the same classes would put radius after radius-bottom and padding-x after padding-left, so the order
-// is the table's and not an accident of the names.
+// more specific one wins. A physical side (radius-bottom) and a logical one (radius-left) share the
+// bottom-left corner: the later in the table, radius-left, wins it. CONTROL: sorted as text the same
+// classes would put radius after radius-bottom and padding-x after padding-left, so the order is the
+// table's and not an accident of the names.
 func TestCornerBeatsSideBeatsRadiusWhateverTheOrderWritten(t *testing.T) {
 	table := NewTable(nil)
 	var r Rules
 	written := []Intent{ // most specific first
-		{Name: "radius-top-start", Value: "small"},
 		{Name: "radius-top-left", Value: "full"},
-		{Name: "radius-start", Value: "small"},
+		{Name: "radius-left", Value: "small"},
 		{Name: "radius-bottom", Value: "none"},
 		{Name: "radius", Value: "large"},
-		{Name: "padding-start", Value: "3"},
 		{Name: "padding-left", Value: "1"},
 		{Name: "padding-x", Value: "4"},
 		{Name: "padding", Value: "8"},
@@ -94,12 +88,10 @@ func TestCornerBeatsSideBeatsRadiusWhateverTheOrderWritten(t *testing.T) {
 		`.padding-8{`,
 		`.padding-x-4{`,
 		`.padding-left-1{`,
-		`.padding-start-3{`,
 		`.radius-large{`,
 		`.radius-bottom-none{`,
-		`.radius-start-small{`,
+		`.radius-left-small{`,
 		`.radius-top-left-full{`,
-		`.radius-top-start-small{`,
 	}
 	var got []string
 	for _, line := range strings.Split(string(r.CSS()), "\n") {
@@ -117,16 +109,19 @@ func TestCornerBeatsSideBeatsRadiusWhateverTheOrderWritten(t *testing.T) {
 	}
 	// Rank says the same order to the compiler
 	for _, pair := range [][2]string{
-		{"padding", "padding-x"}, {"padding-x", "padding-left"}, {"padding-left", "padding-start"},
-		{"padding-right", "padding-end"}, {"radius", "radius-bottom"}, {"radius-left", "radius-start"},
-		{"radius-end", "radius-top-left"}, {"radius-top-left", "radius-top-start"}, {"radius-bottom-right", "radius-bottom-end"},
+		{"padding", "padding-x"}, {"padding-x", "padding-left"}, {"padding-x", "padding-right"},
+		{"radius", "radius-bottom"}, {"radius-bottom", "radius-left"}, {"radius-top", "radius-right"},
+		{"radius-right", "radius-top-left"}, {"radius-left", "radius-bottom-right"},
 	} {
 		if Rank(pair[0]) >= Rank(pair[1]) || Rank(pair[0]) < 0 {
 			t.Errorf("%s ranks %d, %s %d: the second must win", pair[0], Rank(pair[0]), pair[1], Rank(pair[1]))
 		}
 	}
-	if Rank("pl") != -1 {
-		t.Error("a name the table does not read has no rank")
+	// a name the table does not read has no rank: Tailwind's, and the start and end words that are gone
+	for _, name := range []string{"pl", "padding-start", "radius-end", "radius-top-start"} {
+		if Rank(name) != -1 {
+			t.Errorf("%s ranks %d: a name the table does not read has no rank", name, Rank(name))
+		}
 	}
 	// CONTROL
 	names := []string{"radius-large", "radius-bottom-none", "padding-x-4", "padding-left-1"}
@@ -138,23 +133,24 @@ func TestCornerBeatsSideBeatsRadiusWhateverTheOrderWritten(t *testing.T) {
 }
 
 // A prefix works for each new attribute as for every presentation attribute: medium:radius-bottom is
-// min-width 768px, hover:padding-left holds where a pointer hovers.
+// min-width 768px, hover:padding-left holds where a pointer hovers, and the logical CSS of a left or
+// right word is the same under a prefix.
 func TestSidesAndCornersTakePrefixes(t *testing.T) {
 	table := NewTable(nil)
 	var r Rules
 	got := classes(t, table, &r,
 		Intent{Width: "medium", Name: "radius-bottom", Value: "large"},
 		Intent{State: "hover", Name: "padding-left", Value: "4"},
-		Intent{Width: "large", State: "focus", Name: "radius-top-start", Value: "none"},
+		Intent{Width: "large", State: "focus", Name: "radius-top-left", Value: "none"},
 	)
-	if got != "medium:radius-bottom-large hover:padding-left-4 large+focus:radius-top-start-none" {
+	if got != "medium:radius-bottom-large hover:padding-left-4 large+focus:radius-top-left-none" {
 		t.Fatalf("classes %q", got)
 	}
 	css := string(r.CSS())
 	for _, rule := range []string{
 		"@media (min-width:768px){\n" + `.medium\:radius-bottom-large{border-bottom-left-radius:.75rem;border-bottom-right-radius:.75rem}` + "\n}",
-		"@media (hover:hover){\n" + `.hover\:padding-left-4:where(:hover){padding-left:1rem}` + "\n}",
-		"@media (min-width:1024px){\n" + `.large\+focus\:radius-top-start-none:where(:focus-visible){border-start-start-radius:0}` + "\n}",
+		"@media (hover:hover){\n" + `.hover\:padding-left-4:where(:hover){padding-inline-start:1rem}` + "\n}",
+		"@media (min-width:1024px){\n" + `.large\+focus\:radius-top-left-none:where(:focus-visible){border-start-start-radius:0}` + "\n}",
 	} {
 		if !strings.Contains(css, rule) {
 			t.Errorf("lacks\n%s\nin\n%s", rule, css)
@@ -162,47 +158,85 @@ func TestSidesAndCornersTakePrefixes(t *testing.T) {
 	}
 }
 
-// Logical is the twin of a physical left or right: the logical word for the same side in a line
-// written left to right, and the other one right to left, where left is the end of the line. Top,
-// bottom and the logical words have none.
-func TestLogicalTwinOfEachPhysicalSide(t *testing.T) {
-	for name, want := range map[string][2]string{
-		"padding-left":        {"padding-start", "padding-end"},
-		"padding-right":       {"padding-end", "padding-start"},
-		"radius-left":         {"radius-start", "radius-end"},
-		"radius-right":        {"radius-end", "radius-start"},
-		"radius-top-left":     {"radius-top-start", "radius-top-end"},
-		"radius-top-right":    {"radius-top-end", "radius-top-start"},
-		"radius-bottom-left":  {"radius-bottom-start", "radius-bottom-end"},
-		"radius-bottom-right": {"radius-bottom-end", "radius-bottom-start"},
+// start and end, the line's words, were replaced by left and right (19/10/2026): a side or a corner
+// named with start or end is an error that names the attribute that replaced it, the editor's fix,
+// written as a page or from data; the new word makes its class. No attribute of the table is named
+// with start or end any more, and every left or right word writes logical CSS, no physical left or
+// right property, so each mirrors on a page written right to left. CONTROL: a name with start that no
+// attribute replaced (radius-middle-start) is only "not a presentation attribute", with no suggestion.
+func TestStartAndEndSideNamesAreErrorsNamingLeftAndRight(t *testing.T) {
+	table := NewTable(nil)
+	for _, c := range []struct{ old, renamed, value string }{
+		{"padding-start", "padding-left", "4"},
+		{"padding-end", "padding-right", "2"},
+		{"radius-start", "radius-left", "large"},
+		{"radius-end", "radius-right", "small"},
+		{"radius-top-start", "radius-top-left", "full"},
+		{"radius-top-end", "radius-top-right", "medium"},
+		{"radius-bottom-start", "radius-bottom-left", "none"},
+		{"radius-bottom-end", "radius-bottom-right", "large"},
 	} {
-		if got := [2]string{Logical(name, false), Logical(name, true)}; got != want {
-			t.Errorf("%s: twins %v, want %v", name, got, want)
+		message := c.old + " nay là " + c.renamed + ": start và end nay là left và right (tự lật khi trang viết từ phải sang trái)"
+		var r Rules
+		class, err := table.Class(&r, Intent{Name: c.old, Value: c.value})
+		var p *Problem
+		if !errors.As(err, &p) || p.Warning || p.Message != message || p.Suggestion != c.renamed || p.Name != c.old {
+			t.Errorf("%s=%q: %#v (%v)\nwant the error %q, suggestion %q", c.old, c.value, p, err, message, c.renamed)
 		}
-		for _, twin := range want {
-			if !IsPresentation(twin) {
-				t.Errorf("%s's twin %s is not an attribute", name, twin)
+		if class != "" || len(r.Classes()) != 0 {
+			t.Errorf("%s=%q: drew %q, recorded %v", c.old, c.value, class, r.Classes())
+		}
+		// from data the same error
+		if _, err := table.Domain(nil, Intent{Name: c.old}); !errors.As(err, &p) || p.Message != message || p.Suggestion != c.renamed {
+			t.Errorf("%s from data: %v, want %q", c.old, err, message)
+		}
+		// the new word makes its class
+		if class, err := table.Class(nil, Intent{Name: c.renamed, Value: c.value}); err != nil || class != c.renamed+"-"+c.value {
+			t.Errorf("%s=%q: class %q, %v", c.renamed, c.value, class, err)
+		}
+	}
+	for _, name := range Attributes() {
+		for _, part := range strings.Split(name, "-") {
+			if part == "start" || part == "end" {
+				t.Errorf("%s: an attribute is still named with start or end", name)
 			}
 		}
-	}
-	for _, name := range []string{"padding", "padding-x", "padding-top", "padding-start", "radius", "radius-top", "radius-bottom",
-		"radius-start", "radius-top-start", "radius-bottom-end", "align", "pl", "text-left"} {
-		if got := Logical(name, false) + Logical(name, true); got != "" {
-			t.Errorf("%s has no twin, got %q", name, got)
+		left, right := strings.HasSuffix(name, "-left"), strings.HasSuffix(name, "-right")
+		if !left && !right {
+			continue
+		}
+		value := "4"
+		if strings.HasPrefix(name, "radius-") {
+			value = "large"
+		}
+		var r Rules
+		if _, err := table.Class(&r, Intent{Name: name, Value: value}); err != nil {
+			t.Errorf("%s=%q: %v", name, value, err)
+			continue
+		}
+		css := string(r.CSS())
+		_, declarations, _ := strings.Cut(css, "{\n.")
+		_, declarations, _ = strings.Cut(declarations, "{")
+		if strings.Contains(declarations, "left") || strings.Contains(declarations, "right") ||
+			!(strings.Contains(declarations, "inline-start") || strings.Contains(declarations, "inline-end") ||
+				strings.Contains(declarations, "-start-radius") || strings.Contains(declarations, "-end-radius")) {
+			t.Errorf("%s=%q writes no logical CSS, so it would not mirror right to left:\n%s", name, value, css)
 		}
 	}
-	// every physical left or right of the table has its twin, so none is left out of the warnings
-	for _, name := range Attributes() {
-		physical := strings.HasSuffix(name, "-left") || strings.HasSuffix(name, "-right")
-		if physical != (Logical(name, false) != "") {
-			t.Errorf("%s: physical %v, twin %q", name, physical, Logical(name, false))
-		}
+	// CONTROL
+	var p *Problem
+	if _, err := table.Class(nil, Intent{Name: "radius-middle-start", Value: "large"}); !errors.As(err, &p) ||
+		p.Message != `radius-middle-start="large": radius-middle-start không phải thuộc tính trình bày` || p.Suggestion != "" {
+		t.Errorf("CONTROL radius-middle-start: %v", err)
 	}
 }
 
 // Words for a side or a corner from elsewhere are typos with the .ui word to write (decision 13/10/2026):
 // Tailwind's padding names and classes (pl, pl-4), Tailwind's rounded sides and corners, CSS's corner
-// properties and a corner named the other way round. Tailwind's sizes are read by their size, as
+// properties and a corner named the other way round. Tailwind's start and end (ps, rounded-s,
+// rounded-ee) and CSS's logical sides and corners (padding-inline-start, border-end-start-radius) are
+// .ui's left and right, which mirror the same way (19/10/2026); a corner the other way round in the old
+// words (radius-end-bottom) is told both fixes in one. Tailwind's sizes are read by their size, as
 // radius="lg" is: rounded-t-lg is .5rem, so radius-top="medium" (the decision's sketch said "large";
 // the measured size and radius="lg" say medium). CONTROL: a name like none of them is only "not a
 // presentation attribute", with no suggestion.
@@ -216,22 +250,31 @@ func TestSidesFromElsewhereAreSuggested(t *testing.T) {
 		{Intent{Name: "rounded-t-lg"}, `rounded-t-lg là chữ của Tailwind; .ui viết thuộc tính: radius-top="medium" (.5rem)`, `radius-top="medium"`},
 		{Intent{Name: "rounded-tl", Value: "xl"}, `radius-top-left="large"`, `radius-top-left="large"`},
 		{Intent{Name: "rounded-b"}, `radius-bottom="small"`, `radius-bottom="small"`},
-		{Intent{Name: "rounded-ee-2xl"}, `radius-bottom-end="large"`, `radius-bottom-end="large"`},
-		{Intent{Name: "rounded-s-full"}, `radius-start="full"`, `radius-start="full"`},
+		{Intent{Name: "rounded-ee-2xl"}, `rounded-ee-2xl là chữ của Tailwind; .ui viết thuộc tính: radius-bottom-right="large"`, `radius-bottom-right="large"`},
+		{Intent{Name: "rounded-ss-lg"}, `radius-top-left="medium"`, `radius-top-left="medium"`},
+		{Intent{Name: "rounded-s-full"}, `radius-left="full"`, `radius-left="full"`},
+		{Intent{Name: "rounded-e"}, `radius-right="small"`, `radius-right="small"`},
 		{Intent{Name: "rounded-lg"}, `radius="medium"`, `radius="medium"`},
 		{Intent{Name: "rounded-tr", Value: "8px"}, `.ui viết radius-top-right (none, small, medium, large, full)`, "radius-top-right"},
 		{Intent{Name: "border-top-left-radius", Value: "8px"}, `góc trên bên trái là radius-top-left`, "radius-top-left"},
 		{Intent{Name: "border-bottom-right-radius", Value: "8px"}, "radius-bottom-right", "radius-bottom-right"},
-		{Intent{Name: "border-end-start-radius", Value: "8px"}, `góc dưới đầu dòng là radius-bottom-start`, "radius-bottom-start"},
+		{Intent{Name: "border-end-start-radius", Value: "8px"},
+			`border-end-start-radius="8px": góc dưới bên trái là radius-bottom-left (none, small, medium, large, full), tự lật khi trang viết từ phải sang trái`, "radius-bottom-left"},
+		{Intent{Name: "border-start-end-radius", Value: "8px"}, "góc trên bên phải là radius-top-right", "radius-top-right"},
 		{Intent{Name: "radius-left-top", Value: "large"}, `radius-left-top="large": góc viết cạnh trên hay dưới trước rồi mới đến left: radius-top-left`, "radius-top-left"},
-		{Intent{Name: "radius-end-bottom", Value: "small"}, "radius-bottom-end", "radius-bottom-end"},
+		{Intent{Name: "radius-end-bottom", Value: "small"},
+			`radius-end-bottom="small": góc viết cạnh trên hay dưới trước rồi mới đến left hay right; start và end nay là left và right: radius-bottom-right (tự lật khi trang viết từ phải sang trái)`, "radius-bottom-right"},
+		{Intent{Name: "radius-start-top", Value: "large"}, "start và end nay là left và right: radius-top-left", "radius-top-left"},
 		{Intent{Name: "pl", Value: "4"}, `pl="4": pl là chữ viết tắt của Tailwind; .ui viết đủ chữ: padding-left`, "padding-left"},
 		{Intent{Name: "pr", Value: "2"}, "padding-right", "padding-right"},
-		{Intent{Name: "ps", Value: "2"}, "padding-start", "padding-start"},
+		{Intent{Name: "ps", Value: "2"}, `ps="2": ps là chữ viết tắt của Tailwind; .ui viết đủ chữ: padding-left`, "padding-left"},
+		{Intent{Name: "pe", Value: "2"}, `pe="2": pe là chữ viết tắt của Tailwind; .ui viết đủ chữ: padding-right`, "padding-right"},
 		{Intent{Name: "px", Value: "2"}, "padding-x", "padding-x"},
 		{Intent{Name: "pl-4"}, `pl-4 là lớp của Tailwind; .ui viết thuộc tính: padding-left="4"`, `padding-left="4"`},
+		{Intent{Name: "pe-4"}, `pe-4 là lớp của Tailwind; .ui viết thuộc tính: padding-right="4"`, `padding-right="4"`},
 		{Intent{Name: "pr-0.5"}, `padding-right="0.5"`, `padding-right="0.5"`},
-		{Intent{Name: "padding-inline-start", Value: "4"}, "cạnh đầu dòng là padding-start", "padding-start"},
+		{Intent{Name: "padding-inline-start", Value: "4"}, `padding-inline-start="4": cạnh trái là padding-left (tự lật khi trang viết từ phải sang trái)`, "padding-left"},
+		{Intent{Name: "padding-inline-end", Value: "4"}, `padding-inline-end="4": cạnh phải là padding-right (tự lật khi trang viết từ phải sang trái)`, "padding-right"},
 		{Intent{Name: "padding-block-end", Value: "4"}, "padding-bottom", "padding-bottom"},
 		// CONTROL: not Tailwind's, not CSS's, not a corner turned round
 		{Intent{Name: "rounded-x"}, "rounded-x không phải thuộc tính trình bày", ""},

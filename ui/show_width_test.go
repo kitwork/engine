@@ -15,7 +15,7 @@ import (
 // CONTROL: a text whose show is written (show="false" medium:show="true") is shown from medium by its
 // classes alone, and is not told.
 func TestWidthShowsWhatALiveShowHides(t *testing.T) {
-	tabs := `<box component="tabs" as="$files" alt="Files"><button click="select('a')">a</button><button click="select('b')">b</button></box>`
+	tabs := `<tabs as="$files" alt="Files"><button click="select('a')">a</button><button click="select('b')">b</button></tabs>`
 	frames := tabsCompile(t, `<content>`+tabs+`<box show="$files.selected == 'a'" medium:show="true"><text>a</text></box><box show="$files.selected == 'b'" medium:show="true"><text>b</text></box></content>`)
 	mustContain(t, frames.Render(Request{Path: "/"}),
 		`<div class="flex-column medium:show-true" id="kitwork-tabpanel-1-1" role="tabpanel" aria-labelledby="kitwork-tab-1-1" tabindex="0" data-kitwork-bind="show: $files.selected == &#39;a&#39;">`,

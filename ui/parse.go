@@ -10,6 +10,7 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 // Node is one piece of a parsed .ui file: an element or a run of text.
@@ -277,6 +278,9 @@ func (p *parser) readOpenTag() (*Node, bool, error) {
 			// what a bare attribute means is the tag's to say: `required` on an input is required="true"
 			// (compile.go lint), `open` at the call of a layout is an input without a value
 			node.Attrs = append(node.Attrs, Attr{Name: attrName, Bare: true, Line: aline, Column: acolumn})
+			if err := p.twice(node, name); err != nil {
+				return nil, false, err
+			}
 			continue
 		}
 		p.advance(1)
@@ -296,7 +300,64 @@ func (p *parser) readOpenTag() (*Node, bool, error) {
 		value := p.src[vstart:p.pos]
 		p.advance(1)
 		node.Attrs = append(node.Attrs, Attr{Name: attrName, Value: value, Line: aline, Column: acolumn})
+		if err := p.twice(node, name); err != nil {
+			return nil, false, err
+		}
 	}
+}
+
+// twice refuses the attribute just read when the element already has it. Before, the second one
+// silently won on the host of a component (transition="fade" transition="none" was none) and both were
+// kept on a tag (gap="2" gap="3" wrote gap-2 gap-3, the stylesheet's order deciding). The name is
+// compared as written, prefix and all: gap and medium:gap are two attributes. An event is the event
+// with what follows its ':', the pair the kernel listens for (keydown:escape and keydown:enter are two),
+// so the same event in two lists (click, then pointer-enter,click), or twice in one (click,click), is
+// written twice too.
+func (p *parser) twice(node *Node, tag string) error {
+	last := len(node.Attrs) - 1
+	a := node.Attrs[last]
+	listens := func(b Attr) bool { return isEvent(b.Name) && !scrollArea(b.Name, b.Value) }
+	for _, b := range node.Attrs[:last] {
+		if b.Name == a.Name && !(listens(a) && listens(b)) { // scroll="y" then scroll="load()" is scroll twice
+			return p.errorAt(a.Line, a.Column, fmt.Sprintf("%s viết hai lần trên <%s> (lần đầu ở %s): giữ một", a.Name, tag, p.at(b.Line, b.Column)))
+		}
+	}
+	if !listens(a) {
+		return nil
+	}
+	// the attributes before this one never repeat an event (each was read the same way), so the first
+	// event met twice is one of this attribute's
+	first := map[string][2]int{}
+	for _, b := range node.Attrs {
+		if !listens(b) {
+			continue
+		}
+		head, modifiers, _ := strings.Cut(b.Name, ":")
+		offset := 0
+		for _, event := range strings.Split(head, ",") {
+			// a name is one line, so an event of a list is as many columns right of the attribute as
+			// there are characters before it
+			at := [2]int{b.Line, b.Column + utf8.RuneCountInString(b.Name[:offset])}
+			offset += len(event) + 1
+			if earlier, ok := first[event+":"+modifiers]; ok {
+				written := event
+				if modifiers != "" {
+					written += ":" + modifiers
+				}
+				return p.errorAt(at[0], at[1], fmt.Sprintf("sự kiện %s viết hai lần trên <%s> (lần đầu ở %s): giữ một", written, tag, p.at(earlier[0], earlier[1])))
+			}
+			first[event+":"+modifiers] = at
+		}
+	}
+	return nil
+}
+
+// at is a place in the file being read, file:line:column, as an error names it.
+func (p *parser) at(line, column int) string {
+	if p.file == "" {
+		return fmt.Sprintf("%d:%d", line, column)
+	}
+	return fmt.Sprintf("%s:%d:%d", p.file, line, column)
 }
 
 // readText reads until the next tag, treating {{ … }} as opaque so a `<` inside an expression

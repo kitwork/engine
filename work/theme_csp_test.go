@@ -70,10 +70,10 @@ func TestServedUIPageAllowsTheTabsPrepaintInItsPolicy(t *testing.T) {
 				`router.guard((ctx, response) => { response.header("Content-Security-Policy", "` + policy + `"); });` + "\n",
 			"localhost/page.ui": `<page><content /></page>`,
 			"localhost/content.ui": `<content>
-  <box component="tabs" as="$files"` + persist + ` alt="Files" flex="row">
+  <tabs as="$files"` + persist + ` alt="Files" flex="row">
     <button click="select('a')">a</button>
     <button click="select('b')">b</button>
-  </box>
+  </tabs>
   <box show="$files.selected == 'a'"><text>a</text></box>
   <box show="$files.selected == 'b'"><text>b</text></box>
 </content>`,

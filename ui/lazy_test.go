@@ -47,12 +47,12 @@ func TestLazyClassesInThePage(t *testing.T) {
 func TestLazyOnScreenIsAWarning(t *testing.T) {
 	page := func(header, content string) map[string]string {
 		return map[string]string{
-			"/site/page.ui":          `<page><header /><content /></page>`,
-			"/site/header.ui":        header,
-			"/site/content.ui":       content,
-			"/site/menu-band.ui":     `<box lazy="true"><text>menu</text></box>`,
-			"/site/cart.ui":          `<box><box lazy="400px"><text>giỏ</text></box></box>`,
-			"/.components/cart.work": cartLogic,
+			"/site/page.ui":               `<page><header /><content /></page>`,
+			"/site/header.ui":             header,
+			"/site/content.ui":            content,
+			"/site/menu-band.ui":          `<box lazy="true"><text>menu</text></box>`,
+			"/site/shop-cart.ui":          `<box><box lazy="400px"><text>giỏ</text></box></box>`,
+			"/.components/shop-cart.work": cartLogic,
 		}
 	}
 	plain := `<content><text>a</text></content>`
@@ -74,15 +74,15 @@ func TestLazyOnScreenIsAWarning(t *testing.T) {
 			"content.ui:1:28", `phần tử này luôn ở trên màn hình (nó được ghim vào mép màn hình, pin ở content.ui:1:15)`},
 		{"a layout piece in the pinned header", page(`<header pin="top"><menu-band /></header>`, plain),
 			"menu-band.ui:1:6", `(nằm trong khung ghim vào mép màn hình, pin ở header.ui:1:9)`},
-		{"a component's own .ui in the pinned header", page(`<header pin="top"><box component="cart" /></header>`, plain),
-			"cart.ui:1:11", `(nằm trong khung ghim vào mép màn hình, pin ở header.ui:1:9)`},
+		{"a component's own .ui in the pinned header", page(`<header pin="top"><shop-cart /></header>`, plain),
+			"shop-cart.ui:1:11", `(nằm trong khung ghim vào mép màn hình, pin ở header.ui:1:9)`},
 		{"inside an overlay", map[string]string{
 			"/site/page.ui":    `<page><content /><overlay /></page>`,
 			"/site/overlay.ui": `<overlay><box lazy="true"><text>thông báo</text></box></overlay>`,
 			"/site/content.ui": plain},
 			"overlay.ui:1:15", `(nằm trong <overlay> ở overlay.ui:1:1, lớp nổi trên màn hình)`},
-		{"inside a popover", content(`<content><box component="dropdown"><button click="toggle()">m</button><popover><box lazy="true"><text>x</text></box></popover></box></content>`),
-			"content.ui:1:85", `(nằm trong <popover> ở content.ui:1:71, nổi trên màn hình khi mở)`},
+		{"inside a popover", content(`<content><dropdown><button click="toggle()">m</button><popover><box lazy="true"><text>x</text></box></popover></dropdown></content>`),
+			"content.ui:1:69", `(nằm trong <popover> ở content.ui:1:55, nổi trên màn hình khi mở)`},
 		{"on the content", content(`<content lazy="true"><text>a</text></content>`),
 			"content.ui:1:10", `lazy trên <content>: vùng nội dung luôn có phần ở trên màn hình, trình duyệt không bao giờ bỏ qua nó; đặt lazy trên từng phần ở xa màn hình bên trong (section, grid, card…)`},
 		{"on the page", map[string]string{"/site/page.ui": `<page lazy="true"><content /></page>`, "/site/content.ui": plain},
@@ -104,7 +104,7 @@ func TestLazyOnScreenIsAWarning(t *testing.T) {
 	// no lazy, the same layout piece and component outside the header: no warning
 	for _, files := range []map[string]string{
 		page(`<header pin="top"><box lazy="false"><text>Quán</text></box></header>`, `<content><section lazy="true"><text>a</text></section></content>`),
-		page(`<header pin="top"><text>Quán</text></header>`, `<content><menu-band /><box component="cart" /><box pin="top" background="paper"><text>b</text></box><box lazy="true"><text>c</text></box></content>`),
+		page(`<header pin="top"><text>Quán</text></header>`, `<content><menu-band /><shop-cart /><box pin="top" background="paper"><text>b</text></box><box lazy="true"><text>c</text></box></content>`),
 		// lazy and pin at widths that never meet (the review of 15/10/2026)
 		page(`<header><text>Quán</text></header>`, `<content><box lazy="true" large:lazy="false" large:pin="top" background="paper"><text>giỏ</text></box></content>`),
 		page(`<header pin="none" large:pin="top"><box lazy="true" large:lazy="false"><text>Quán</text></box></header>`, plain),
@@ -114,10 +114,10 @@ func TestLazyOnScreenIsAWarning(t *testing.T) {
 	}
 	// a popover that writes lazy inside the pinned header is told once, of itself: it is on the screen
 	// when open, whatever holds it
-	s := memorySite("", page(`<header pin="top"><box component="dropdown"><button click="toggle()">m</button><popover lazy="true"><text>x</text></popover></box></header>`, plain))
+	s := memorySite("", page(`<header pin="top"><dropdown><button click="toggle()">m</button><popover lazy="true"><text>x</text></popover></dropdown></header>`, plain))
 	s.Reload = true
 	_, warned := compileDiagnose(t, s)
-	if len(warned) != 1 || !strings.HasPrefix(warned[0], "header.ui:1:89: lazy trên <popover>: khung nổi ở trên màn hình khi mở") {
+	if len(warned) != 1 || !strings.HasPrefix(warned[0], "header.ui:1:73: lazy trên <popover>: khung nổi ở trên màn hình khi mở") {
 		t.Errorf("want one warning, of the popover itself, got:\n%s", strings.Join(warned, "\n"))
 	}
 }
@@ -129,7 +129,7 @@ func TestLazyOnScreenIsAWarning(t *testing.T) {
 // with what it holds and where; the page draws lazy as written (15/10/2026, the review of lazy: none of
 // these was told). CONTROL: the same popover, toast and placed part beside the lazy frame, not inside.
 func TestLazyAroundWhatFloatsIsAWarning(t *testing.T) {
-	dropdown := `<box component="dropdown"><button click="toggle()">m</button><popover><text>x</text></popover></box>`
+	dropdown := `<dropdown><button click="toggle()">m</button><popover><text>x</text></popover></dropdown>`
 	cases := []struct {
 		name, source, needle, says string
 	}{
@@ -138,9 +138,9 @@ func TestLazyAroundWhatFloatsIsAWarning(t *testing.T) {
 		{"a popover in a footer lazy below large", `<content><footer lazy="true" large:lazy="false">` + dropdown + `</footer></content>`, `lazy="true"`,
 			`lazy="true": khung này giữ <popover> ở content.ui:1:`},
 		{"a toast", `<content><section lazy="600px">` + toastStack(` as="$toast"`) + `</section></content>`, `lazy="600px"`,
-			`lazy="600px": khung này giữ <box component="toast"> ở content.ui:1:`},
-		{"a part placed below its parent", `<content><section lazy="true"><box><box place="below-start"><text>gợi ý</text></box></box></section></content>`, `lazy="true"`,
-			`lazy="true": khung này giữ <box place="below-start"> (đặt ra ngoài cha) ở content.ui:1:`},
+			`lazy="600px": khung này giữ <toast> ở content.ui:1:`},
+		{"a part placed below its parent", `<content><section lazy="true"><box><box place="below-left"><text>gợi ý</text></box></box></section></content>`, `lazy="true"`,
+			`lazy="true": khung này giữ <box place="below-left"> (đặt ra ngoài cha) ở content.ui:1:`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -155,8 +155,8 @@ func TestLazyAroundWhatFloatsIsAWarning(t *testing.T) {
 	for name, files := range map[string]map[string]string{
 		"a layout piece": {"/site/content.ui": `<content><section lazy="true"><menu-band /></section></content>`,
 			"/site/menu-band.ui": `<box>` + dropdown + `</box>`},
-		"a component's own .ui": {"/site/content.ui": `<content><section lazy="true"><box component="cart" /></section></content>`,
-			"/site/cart.ui": `<box>` + dropdown + `</box>`, "/.components/cart.work": cartLogic},
+		"a component's own .ui": {"/site/content.ui": `<content><section lazy="true"><shop-cart /></section></content>`,
+			"/site/shop-cart.ui": `<box>` + dropdown + `</box>`, "/.components/shop-cart.work": cartLogic},
 	} {
 		t.Run(name, func(t *testing.T) {
 			compileWarns(t, files, "content.ui:1:19", `lazy="true": khung này giữ <popover> ở `)
@@ -169,5 +169,5 @@ func TestLazyAroundWhatFloatsIsAWarning(t *testing.T) {
 		t.Errorf("want one warning, got:\n%s", strings.Join(warned, "\n"))
 	}
 	// control: beside the lazy frame, not inside
-	compileQuiet(t, content(`<content><section lazy="true"><text>a</text></section>`+dropdown+toastStack(` as="$toast"`)+`<box><box place="below-start"><text>gợi ý</text></box></box></content>`))
+	compileQuiet(t, content(`<content><section lazy="true"><text>a</text></section>`+dropdown+toastStack(` as="$toast"`)+`<box><box place="below-left"><text>gợi ý</text></box></box></content>`))
 }

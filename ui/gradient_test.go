@@ -140,11 +140,12 @@ func TestGradientErrors(t *testing.T) {
 }
 
 // A page with a gradient: its stylesheet has the gradient's rules, the classes are the attributes as
-// written, and the right-to-left rule comes with a gradient that names start or end. The colour written
-// for medium on the gradient's element takes the gradient back there, on that element only (the colour's
-// selector with the gradient's class in :where()).
+// written, and the right-to-left rule comes with a gradient that names left or right (fade-right turns
+// to the left under :dir(rtl)). The colour written for medium on the gradient's element takes the
+// gradient back there, on that element only (the colour's selector with the gradient's class in
+// :where()). fade-end, the name of before 19/10/2026, is an error with a test of its own.
 func TestGradientClassesOnAPage(t *testing.T) {
-	s := memorySite("", content(`<content><box background="fade-end" medium:background="paper"><text heading="1" color="headline">Kitwork</text></box></content>`))
+	s := memorySite("", content(`<content><box background="fade-right" medium:background="paper"><text heading="1" color="headline">Kitwork</text></box></content>`))
 	s.Reload = true
 	page, err := s.Compile("/site")
 	if err != nil {
@@ -152,21 +153,39 @@ func TestGradientClassesOnAPage(t *testing.T) {
 	}
 	html := page.Render(Request{Path: "/"})
 	css := string(page.Stylesheet().CSS)
-	for _, want := range []string{`background-fade-end medium:background-paper`, `color-headline`} {
+	for _, want := range []string{`background-fade-right medium:background-paper`, `color-headline`} {
 		if !strings.Contains(html, want) {
 			t.Errorf("the page misses the class %q:\n%s", want, html)
 		}
 	}
 	for _, want := range []string{
-		`.background-fade-end{background-image:linear-gradient(to right,`,
-		`.background-fade-end:where(:dir(rtl)){background-image:linear-gradient(to left,`,
-		".medium\\:background-paper{background-color:var(--paper)}\n.medium\\:background-paper:where(.background-fade-end){background-image:none}\n",
+		`.background-fade-right{background-image:linear-gradient(to right,`,
+		`.background-fade-right:where(:dir(rtl)){background-image:linear-gradient(to left,`,
+		".medium\\:background-paper{background-color:var(--paper)}\n.medium\\:background-paper:where(.background-fade-right){background-image:none}\n",
 		`-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent`,
 	} {
 		if !strings.Contains(css, want) {
 			t.Errorf("the page's stylesheet misses %q:\n%s", want, css)
 		}
 	}
+}
+
+// fade-start and fade-end, the standard gradients named fade-left and fade-right since left and right
+// took the place of start and end (decision of 19/10/2026), are a compile error on a page at the
+// attribute that writes one, the whole error exactly, telling the name of today with the step kept,
+// under a condition too. CONTROL: the same page with the names of today compiles.
+func TestOldGradientNameOnAPageIsAnError(t *testing.T) {
+	for _, c := range []struct{ source, want string }{
+		{`<content><box background="fade-start"><text>Cuộn tiếp</text></box></content>`,
+			`content.ui:1:15: fade-start nay là fade-left: start và end nay là left và right (tự lật khi trang viết từ phải sang trái)`},
+		{`<content><box medium:background="fade-start-40"><text>Cuộn tiếp</text></box></content>`,
+			`content.ui:1:15: fade-start-40 nay là fade-left-40: start và end nay là left và right (tự lật khi trang viết từ phải sang trái)`},
+		{`<content><text heading="1" color="fade-end">Kitwork</text></content>`,
+			`content.ui:1:28: fade-end nay là fade-right: start và end nay là left và right (tự lật khi trang viết từ phải sang trái)`},
+	} {
+		mustFailExactly(t, content(c.source), c.want)
+	}
+	mustCompile(t, content(`<content><box background="fade-right" medium:background="fade-left-40"><text>Cuộn tiếp</text></box></content>`))
 }
 
 // The advice for a ground that is a site's gradient names router.gradients, never router.colors, which
@@ -182,7 +201,7 @@ func TestContrastAdviceForAGradientGround(t *testing.T) {
 		t.Fatal(err)
 	}
 	grey, err = grey.WithGradients(map[string]stylesheet.Gradient{
-		"mist": {Type: "linear", Direction: "to-end", Stops: []stylesheet.Stop{{Color: "dimgray", At: 0}, {Color: "dimgray", At: 100}}},
+		"mist": {Type: "linear", Direction: "to-right", Stops: []stylesheet.Stop{{Color: "dimgray", At: 0}, {Color: "dimgray", At: 100}}},
 	})
 	if err != nil {
 		t.Fatal(err)

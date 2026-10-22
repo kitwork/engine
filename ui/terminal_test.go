@@ -74,14 +74,15 @@ func terminalText(t *testing.T, body string) string {
 	return html.UnescapeString(codeTags.ReplaceAllString(inner, ""))
 }
 
-// The terminal is what the author wrote: the host keeps its tag and its words with the kernel's
-// component and its typing (milliseconds), everything inside is the page's markup as anywhere else,
-// and the engine adds only a prompt before each command — inside its <pre>, outside the <code>, so
-// neither a selection nor a copy takes it — and an empty polite status region last. No window, no bar,
-// no class of its own. The whole page, byte for byte; the full text is in the HTML, every prompt,
-// command and line the author wrote, before any script; the prompt's rule is in the page's stylesheet.
+// The terminal is what the author wrote: <terminal> builds a box, its host, that keeps the tag's words
+// with the kernel's component and its typing (milliseconds), everything inside is the page's markup as
+// anywhere else, and the engine adds only a prompt before each command — inside its <pre>, outside the
+// <code>, so neither a selection nor a copy takes it — and an empty polite status region last. No
+// window, no bar, no class of its own. The whole page, byte for byte; the full text is in the HTML,
+// every prompt, command and line the author wrote, before any script; the prompt's rule is in the
+// page's stylesheet.
 func TestTerminalIsWhatTheAuthorWrote(t *testing.T) {
-	page := terminalPage(t, `<content><box component="terminal" typing="3s" background="panel" radius="medium">
+	page := terminalPage(t, `<content><terminal typing="3s" background="panel" radius="medium">
   <box flex="row" align="center" gap="3" padding-x="4" padding-y="2">
     <text size="small" font="code">bash</text>
   </box>
@@ -90,7 +91,7 @@ func TestTerminalIsWhatTheAuthorWrote(t *testing.T) {
     <text color="ink-30">added 1 package in 2s</text>
     <code>kitwork dev</code>
   </box>
-</box></content>`)
+</terminal></content>`)
 	body := page.Render(Request{Path: "/"})
 	want := `<body class="flex-column"><main class="flex-column">` +
 		`<div class="flex-column background-panel radius-medium" data-kitwork-component="terminal" data-kitwork-scope="typing: 3000">` +
@@ -143,7 +144,7 @@ func TestTerminalPromptFollowsTheLanguage(t *testing.T) {
 		{`language="ui"`, "", ` class="language-ui"`},
 	} {
 		command := `select 1`
-		body := terminalPage(t, `<content><box component="terminal"><code `+c.language+`>`+command+`</code></box></content>`).Render(Request{Path: "/"})
+		body := terminalPage(t, `<content><terminal><code `+c.language+`>`+command+`</code></terminal></content>`).Render(Request{Path: "/"})
 		coloured := command
 		if name := strings.TrimSuffix(strings.TrimPrefix(c.language, `language="`), `"`); name != "" {
 			var err error
@@ -159,13 +160,13 @@ func TestTerminalPromptFollowsTheLanguage(t *testing.T) {
 		mustContain(t, body, `<pre>`+prompt+`<code`+c.class+`>`+coloured+`</code></pre>`)
 	}
 	// from data: the prompt of the value the page renders with
-	page := terminalPage(t, `<content><box component="terminal"><code language="{{ language }}">ls</code></box></content>`)
+	page := terminalPage(t, `<content><terminal><code language="{{ language }}">ls</code></terminal></content>`)
 	for language, prompt := range map[string]string{"powershell": "PS&gt; ", "python": "&gt;&gt;&gt; ", "bash": "$ ", "go": "", "work": ""} {
 		body := page.Render(Request{Path: "/", Scope: map[string]any{"language": language}})
 		mustContain(t, body, `<pre><span class="code-prompt">`+prompt+`</span><code class="language-`+language+`">`)
 	}
 	// in a line: one span, its look and its for with it
-	inline := terminalPage(t, `<content><box component="terminal"><text>Chạy <code language="powershell" for="command of commands" color="brand+15">{{ command }}</code> rồi xem</text></box></content>`)
+	inline := terminalPage(t, `<content><terminal><text>Chạy <code language="powershell" for="command of commands" color="brand+15">{{ command }}</code> rồi xem</text></terminal></content>`)
 	body := inline.Render(Request{Path: "/", Scope: map[string]any{"commands": []any{"ls", "dir"}}})
 	ls, _, _ := highlightHTML("powershell", "ls")
 	dir, _, _ := highlightHTML("powershell", "dir")
@@ -183,15 +184,15 @@ func TestTerminalPromptFollowsTheLanguage(t *testing.T) {
 // no prompt, a nested terminal's has its own. A terminal whose only <code> is a nested component's has
 // no command, and says so; so does an empty host.
 func TestTerminalCommandsAreItsOwnCode(t *testing.T) {
-	page := terminalPage(t, `<content><box component="terminal">
+	page := terminalPage(t, `<content><terminal>
   <box flex="row"><code>git status</code><text>bash</text></box>
-  <box component="dropdown">
+  <dropdown>
     <button click="toggle()">Mở</button>
     <popover><code>not a command</code></popover>
-  </box>
-  <box component="terminal"><code language="python">print(1)</code></box>
+  </dropdown>
+  <terminal><code language="python">print(1)</code></terminal>
   <code language="sql">select 1</code>
-</box></content>`)
+</terminal></content>`)
 	body := page.Render(Request{Path: "/"})
 	inner := terminalInner(t, body)
 	if got := strings.Count(inner, `class="code-prompt"`); got != 3 {
@@ -203,12 +204,12 @@ func TestTerminalCommandsAreItsOwnCode(t *testing.T) {
 		`<span class="code-prompt">&gt;&gt;&gt; </span><code class="language-python">`,
 		`<span class="code-prompt">sql&gt; </span><code class="language-sql">`)
 	cases := []struct{ source, needle, says string }{
-		{`<content><box component="terminal"><box component="dropdown"><button click="toggle()">Mở</button><popover><code>ls</code></popover></box></box></content>`, `<box`,
+		{`<content><terminal><dropdown><button click="toggle()">Mở</button><popover><code>ls</code></popover></dropdown></terminal></content>`, `<terminal`,
 			`terminal cần ít nhất một lệnh: một <code> bên trong (mỗi <code> trong terminal là một lệnh, trừ <code> của một component lồng bên trong)`},
-		{`<content><box component="terminal"><text>chỉ có chữ</text></box></content>`, `<box`,
+		{`<content><terminal><text>chỉ có chữ</text></terminal></content>`, `<terminal`,
 			`terminal cần ít nhất một lệnh: một <code> bên trong (mỗi <code> trong terminal là một lệnh, trừ <code> của một component lồng bên trong)`},
-		{`<content><box component="terminal"></box></content>`, `<box`,
-			`terminal cần ít nhất một lệnh bên trong: <box component="terminal"><code>lệnh</code></box> (mỗi <code> bên trong là một lệnh)`},
+		{`<content><terminal></terminal></content>`, `<terminal`,
+			`terminal cần ít nhất một lệnh bên trong: <terminal><code>lệnh</code></terminal> (mỗi <code> bên trong là một lệnh)`},
 	}
 	for _, c := range cases {
 		if got, want := terminalError(t, c.source), where("content.ui", c.source, c.needle)+c.says; got != want {
@@ -233,7 +234,7 @@ func TestTerminalShellIsRemoved(t *testing.T) {
 		`shell`:                     "bash",
 		`medium:shell="powershell"`: "powershell",
 	} {
-		source := `<content><box component="terminal" ` + attribute + `><code>ls</code></box></content>`
+		source := `<content><terminal ` + attribute + `><code>ls</code></terminal></content>`
 		if got, want := terminalError(t, source), where("content.ui", source, attribute)+says(language); got != want {
 			t.Errorf("%s:\n got  %s\n want %s", attribute, got, want)
 		}
@@ -248,7 +249,7 @@ func TestTerminalShellIsRemoved(t *testing.T) {
 // value from data, a prefix.
 func TestTerminalTypingIsADuration(t *testing.T) {
 	terminal := func(attribute string) string {
-		return `<content><box component="terminal" ` + attribute + `><code>kitwork dev</code></box></content>`
+		return `<content><terminal ` + attribute + `><code>kitwork dev</code></terminal></content>`
 	}
 	for attribute, scope := range map[string]string{
 		`typing="3s"`:    ` data-kitwork-scope="typing: 3000"`,
@@ -281,7 +282,7 @@ func TestTerminalTypingIsADuration(t *testing.T) {
 		`typing="0s"`:           `typing="0s" là không giây: không gõ thì bỏ typing; gõ thì viết một thời lượng như typing="3s"`,
 		`typing="0"`:            `typing="0" là không giây: không gõ thì bỏ typing; gõ thì viết một thời lượng như typing="3s"`,
 		`typing="fast"`:         `typing="fast" không phải một thời lượng: viết typing="3s" hoặc typing="800ms" (tổng thời gian gõ mọi lệnh)`,
-		`typing="3 s"`:          `typing="3 s" không phải một thời lượng: viết typing="3s" hoặc typing="800ms" (tổng thời gian gõ mọi lệnh)`,
+		`typing="3 s"`:          `typing="3 s" có khoảng trắng trước đơn vị, .ui viết số liền đơn vị: viết typing="3s"`,
 		`typing="{{ moving }}"`: `typing của terminal là một thời lượng cố định (typing="3s"), không có {{ }}: nó được quyết một lần khi trang dựng`,
 		`medium:typing="3s"`:    `typing của terminal không nhận tiền tố: nó được quyết một lần khi trang dựng`,
 	} {
@@ -298,10 +299,10 @@ func TestTerminalTypingIsADuration(t *testing.T) {
 // is one its grammar takes. CONTROL: inside a component that does not give copy() (a dropdown), copy()
 // is the error it always was.
 func TestTerminalGivesCopyAndCopied(t *testing.T) {
-	page := terminalPage(t, `<content><box component="terminal" as="$install">
+	page := terminalPage(t, `<content><terminal as="$install">
   <box flex="row"><button click="copy()">{{ copied ? 'Đã chép' : 'Chép' }}</button></box>
   <code>kitwork dev</code>
-</box></content>`)
+</terminal></content>`)
 	body := page.Render(Request{Path: "/"})
 	mustContain(t, body,
 		`data-kitwork-component="terminal: $install"`,
@@ -311,7 +312,7 @@ func TestTerminalGivesCopyAndCopied(t *testing.T) {
 			t.Errorf("%s: %v", expression, err)
 		}
 	}
-	source := `<content><box component="dropdown"><button click="copy()">Chép</button><popover><text>x</text></popover></box></content>`
+	source := `<content><dropdown><button click="copy()">Chép</button><popover><text>x</text></popover></dropdown></content>`
 	if got, want := terminalError(t, source), where("content.ui", source, "click=")+
 		`bên trong dropdown sự kiện click chỉ gọi tên của component (close, open, toggle); sự kiện của trang chạy ở client là bước 2`; got != want {
 		t.Errorf("CONTROL: copy() where no component gives it:\n got  %s\n want %s", got, want)
@@ -325,18 +326,18 @@ func TestTerminalGivesCopyAndCopied(t *testing.T) {
 // light ground, it tells nothing; on a host painted ink with color="paper" (the decision's dark
 // terminal) the prompt reads.
 func TestTerminalPromptIsMeasured(t *testing.T) {
-	light := `<content><box component="terminal"><code language="bash">ls</code></box></content>`
+	light := `<content><terminal><code language="bash">ls</code></terminal></content>`
 	contrastPasses(t, darkPalette(t), content(light))
-	paper := `<content><box component="terminal" background="ink" color="paper"><code>ls</code><code>pwd</code></box></content>`
+	paper := `<content><terminal background="ink" color="paper"><code>ls</code><code>pwd</code></terminal></content>`
 	if told := contrastCompile(t, darkPalette(t), content(paper)); strings.Contains(told, "prompt") {
 		t.Errorf("CONTROL: paper on ink, the prompt reads:\n%s", told)
 	}
-	dark := `<content><box component="terminal" background="ink"><code language="bash">ls</code><code>pwd</code></box></content>`
+	dark := `<content><terminal background="ink"><code language="bash">ls</code><code>pwd</code></terminal></content>`
 	told := contrastCompile(t, darkPalette(t), content(dark))
 	for _, want := range []string{
 		where("content.ui", dark, "language=") + "chữ prompt (ink 70%) trong khối mã trên nền ink chỉ ",
 		where("content.ui", dark, "<code>pwd") + "chữ prompt (ink 70%) trong khối mã trên nền ink chỉ ",
-		"Dấu nhắc là màu chữ quanh lệnh ở 70%: viết color trên thẻ chủ (hay phần tử bao lệnh) một màu tương phản mạnh hơn với nền ink, hoặc đổi background.",
+		"Dấu nhắc là màu chữ quanh lệnh ở 70%: viết color trên <terminal> (hay phần tử bao lệnh) một màu tương phản mạnh hơn với nền ink, hoặc đổi background.",
 	} {
 		if !strings.Contains(told, want) {
 			t.Errorf("a host painted ink: want %q in\n%s", want, told)
@@ -347,23 +348,22 @@ func TestTerminalPromptIsMeasured(t *testing.T) {
 	}
 }
 
-// The host keeps the words of its tag and of a call, as the host of any component without a UI: its
-// presentation, as, if and for read where it stands. A card hosts it too. CONTROL: what is inside reads
-// the row of the for.
+// The box <terminal> builds keeps the words of the tag, as the host of any component without a UI: its
+// presentation, as, if and for read where it stands. CONTROL: what is inside reads the row of the for.
 func TestTerminalHostKeepsItsWords(t *testing.T) {
 	page := terminalPage(t, `<content>
-  <box component="terminal" as="$install" background="panel" padding-x="2"><code>kitwork dev</code></box>
-  <card component="terminal" for="step of steps" if="steps"><code language="bash">{{ step }}</code></card>
+  <terminal as="$install" background="panel" padding-x="2"><code>kitwork dev</code></terminal>
+  <terminal for="step of steps" if="steps" radius="medium"><code language="bash">{{ step }}</code></terminal>
 </content>`)
 	body := page.Render(Request{Path: "/", Scope: map[string]any{"steps": []any{"go build", "go test"}}})
 	mustContain(t, body,
 		`<div class="flex-column background-panel padding-x-2" data-kitwork-component="terminal: $install">`,
-		`<div class="card flex-column" data-kitwork-component="terminal">`)
-	if got := strings.Count(body, `<div class="card flex-column"`); got != 2 {
+		`<div class="flex-column radius-medium" data-kitwork-component="terminal">`)
+	if got := strings.Count(body, `<div class="flex-column radius-medium"`); got != 2 {
 		t.Errorf("a for on the host repeats the terminal: %d", got)
 	}
 	mustContain(t, body, `<code class="language-bash"><span class="code-function">go</span> build</code>`, `<code class="language-bash"><span class="code-function">go</span> test</code>`)
-	if none := page.Render(Request{Path: "/"}); strings.Contains(none, `class="card flex-column"`) {
+	if none := page.Render(Request{Path: "/"}); strings.Contains(none, `class="flex-column radius-medium"`) {
 		t.Errorf("if on the host leaves it out:\n%s", none)
 	}
 }

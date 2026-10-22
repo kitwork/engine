@@ -17,6 +17,9 @@ type Request struct {
 	Origin string
 	// Scope holds the names the page reads: the locals of router.work's view and its imports.
 	Scope map[string]any
+	// Method is the request's method ("GET" when empty): a page that answers another (a POST whose save
+	// was refused, shown again) paints its editors unsaved (editor.go).
+	Method string
 
 	Title       string
 	Description string
@@ -65,6 +68,7 @@ func (p *Page) render(req Request) (string, []string) {
 	for name, v := range req.Scope { // the author's names win over the built-in helpers
 		scope[name] = v
 	}
+	scope[requestMethodName] = req.Method // what an editor's unsaved reads, under a name no markup writes
 	for _, a := range p.aliases {
 		if _, taken := scope[a.alias]; !taken {
 			scope[a.alias] = a.start(scope)
@@ -210,8 +214,8 @@ func (p *Page) Document(req Request) string {
 	b.WriteString("<!doctype html>\n<html")
 	writeAttr(&b, "lang", language)
 	if p.rightToLeft {
-		// the browser takes the direction from dir, never from lang: the compile's language, so start and
-		// end flip where its warnings of left and right said (Request.Language changes lang only)
+		// the browser takes the direction from dir, never from lang: the compile's language, so left and
+		// right mirror on the page the stylesheet wrote them for (Request.Language changes lang only)
 		writeAttr(&b, "dir", "rtl")
 	}
 	if req.Appearance == "light" || req.Appearance == "dark" {

@@ -6,13 +6,13 @@ import (
 )
 
 // A page compiled for a site written right to left carries dir="rtl" on <html> (review 13/10/2026):
-// the browser does not take the direction from lang, so without it start and end land where left and
-// right do and the warnings of left and right (checkSides) describe a page that is not served. The
-// direction is the compile's, Site.Language, the one the warnings read: a request's own language
-// (a view's ctx language) changes lang only, so the warnings and the page never disagree. CONTROL: a
-// site written left to right (none written, vi, en, a code that only starts like ar) writes no dir.
+// the browser does not take the direction from lang, and left and right, which the stylesheet writes as
+// logical CSS since 19/10/2026 (padding-left is padding-inline-start), mirror only under dir. The
+// direction is the compile's, Site.Language (Page.rightToLeft): a request's own language (a view's ctx
+// language) changes lang only. CONTROL: a site written left to right (none written, vi, en, a code that
+// only starts like ar) writes no dir.
 func TestRightToLeftSiteWritesItsDirection(t *testing.T) {
-	source := content(`<content><box padding-start="4"><text>x</text></box></content>`)
+	source := content(`<content><box padding-left="4"><text>x</text></box></content>`)
 	for _, c := range []struct{ site, request, want string }{
 		{"ar", "ar", `<html lang="ar" dir="rtl">`},
 		{"he_IL", "he-IL", `<html lang="he-IL" dir="rtl">`},

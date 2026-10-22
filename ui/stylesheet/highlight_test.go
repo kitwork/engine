@@ -51,7 +51,7 @@ func TestHighlightKeysAreTheKinds(t *testing.T) {
 		}
 	}
 	for key, want := range map[string]string{
-		"plain":             `plain là chữ thường của khối mã, không có màu riêng: nó theo màu chữ của <code>; viết color= trên <code> (hay trên thẻ chủ của terminal)`,
+		"plain":             `plain là chữ thường của khối mã, không có màu riêng: nó theo màu chữ của <code>; viết color= trên <code> (hay trên <terminal>)`,
 		"Plain":             `plain là chữ thường của khối mã, không có màu riêng`,
 		"PLAIN":             `plain là chữ thường của khối mã, không có màu riêng`,
 		"keywrod":           `không có loại chữ "keywrod"; gần nhất: keyword`,

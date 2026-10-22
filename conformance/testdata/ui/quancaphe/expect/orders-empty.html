@@ -7,8 +7,8 @@
     <div class="flex-row align-center gap-2">
       <button class="flex-row background-panel radius-full padding-2 border-none" data-kitwork-component="appearance" type="button" data-kitwork-event="click: toggle()"><i class="icon-moon" role="img" aria-label="Đổi giao diện sáng/tối" data-kitwork-class="icon-moon: (dark ? &#39;sun&#39; : &#39;moon&#39;) == &#39;moon&#39;; icon-sun: (dark ? &#39;sun&#39; : &#39;moon&#39;) == &#39;sun&#39;"></i></button>
       <div class="flex-column place-anchor">
-        <button class="flex-row place-anchor background-panel radius-full padding-2 border-none" type="button" aria-expanded="false"><i class="icon-shopping-cart" role="img" aria-label="Giỏ hàng"></i><span class="badge flex-row place-top-end color-brand" aria-label="0 món trong giỏ" hidden><span>0</span></span></button>
-        <div class="card place-below-end flex-column gap-4 padding-6 shadow-large" hidden>
+        <button class="flex-row place-anchor background-panel radius-full padding-2 border-none" type="button" aria-expanded="false"><i class="icon-shopping-cart" role="img" aria-label="Giỏ hàng"></i><span class="badge flex-row place-top-right color-brand" aria-label="0 món trong giỏ" hidden><span>0</span></span></button>
+        <div class="card place-below-right flex-column gap-4 padding-6 shadow-large" hidden>
           <h2 class="size-mini">Giỏ hàng</h2>
           <ul class="flex-column gap-3 scroll-y max-height-80" role="list">
             <li class="flex-column color-ink-30" role="status">Chưa có món nào.</li>
@@ -37,7 +37,7 @@
       </div>
       <div class="flex-column place-anchor" data-kitwork-component="dropdown: $account" data-kitwork-event="click-outside: close(); keydown.escape: close()">
         <button class="flex-row align-center gap-2 background-panel radius-full border-none" type="button" data-kitwork-bind="aria-expanded: open" data-kitwork-event="click: toggle()" aria-expanded="false"><i class="icon-user" aria-hidden="true"></i><span>Quốc</span></button>
-        <div class="popover flex-column place-below-end padding-2" hidden data-kitwork-bind="show: open">
+        <div class="popover flex-column place-below-right padding-2" hidden data-kitwork-bind="show: open">
           <ul class="flex-column gap-1" role="list">
             <li class="flex-column"><a class="padding-2 radius-small hover:background-panel" href="/don-hang" aria-current="page" data-kitwork-current="">Đơn hàng của tôi</a></li>
             <li class="flex-column"><a class="padding-2 radius-small hover:background-panel" href="/quan-ly" data-kitwork-current="">Quản lý</a></li>
@@ -64,8 +64,8 @@
     <div class="flex-row gap-4"><a class="size-small color-ink-30 hover:color-ink" href="/ve-chung-toi" data-kitwork-current="">Về chúng tôi</a><a class="size-small color-ink-30 hover:color-ink" href="/dieu-khoan" data-kitwork-current="">Điều khoản</a><a class="size-small color-ink-30 hover:color-ink" href="/tai-app" data-kitwork-current="">Tải ứng dụng</a></div>
   </footer>
   <div class="flex-column">
-    <div class="flex-column gap-2 toast toast-bottom-end" data-kitwork-component="toast: $toast" role="region" aria-label="Thông báo (F8)" tabindex="-1" data-kitwork-scope="place: &#39;bottom-end&#39;; limit: 3">
-      <div class="card flex-row align-top-start gap-3 padding-3 shadow-large" data-kitwork-for="notice of notices; key: notice.id" data-kitwork-bind="data-leaving: notice.leaving"><i class="color-success icon-circle-check" aria-hidden="true" data-kitwork-bind="show: notice.tone == &#39;success&#39;" hidden></i><i class="color-danger icon-alert-circle" aria-hidden="true" data-kitwork-bind="show: notice.tone == &#39;danger&#39;" hidden></i>
+    <div class="flex-column gap-2 toast toast-bottom-right" data-kitwork-component="toast: $toast" role="region" aria-label="Thông báo (F8)" tabindex="-1" data-kitwork-scope="place: &#39;bottom-right&#39;; limit: 3">
+      <div class="card flex-row align-top-left gap-3 padding-3 shadow-large" data-kitwork-for="notice of notices; key: notice.id" data-kitwork-bind="data-leaving: notice.leaving"><i class="color-success icon-circle-check" aria-hidden="true" data-kitwork-bind="show: notice.tone == &#39;success&#39;" hidden></i><i class="color-danger icon-alert-circle" aria-hidden="true" data-kitwork-bind="show: notice.tone == &#39;danger&#39;" hidden></i>
         <p data-kitwork-bind="text: notice.message"></p>
         <button class="flex-row background-ink/6 hover:background-ink/10 pressed:background-ink/14 disabled:background-ink/4 padding-1" type="button" data-kitwork-event="click: dismiss(notice.id)"><i class="icon-x" role="img" aria-label="Đóng thông báo"></i></button>
       </div><span class="reader" role="status" aria-atomic="false"></span><span class="reader" role="alert" aria-atomic="false"></span></div>

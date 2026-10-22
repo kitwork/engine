@@ -10,8 +10,8 @@ import (
 // with the same three values. It is no CSS transition — .ui never writes that property, the engine
 // animates a state change itself — so a value written the CSS way is told what to write instead.
 //
-//	<box component="toast" as="$toast" transition="fade">
-//	<box component="network" place="bottom-start" transition="slide">
+//	<toast as="$toast" transition="fade">
+//	<network place="bottom-left" transition="slide">
 //
 //   - slide: comes in from the edge its place names and goes back to it. The default of a placed host
 //     (the toast always is); a host in the flow has no edge, so slide there is an error.
@@ -40,7 +40,7 @@ func transitionClasses(transition string) []string {
 	return nil
 }
 
-// transitionOf reads transition= on the host of who (toast, network): one of the three, a word fixed when
+// transitionOf reads transition= on the host of who (toast, network, carousel): one of the three, a word fixed when
 // the page compiles. A value of CSS's transition (a property, a time, an easing) is told it is not one.
 func transitionOf(n *Node, a *Attr, chain, who string) (string, error) {
 	value := strings.TrimSpace(a.Value)
@@ -54,7 +54,11 @@ func transitionOf(n *Node, a *Attr, chain, who string) (string, error) {
 	case containsName(transitions, value):
 		return value, nil
 	case cssTransition(value):
-		return "", errAttr(n, a, "transition=%q là cách viết của CSS; transition của .ui là kiểu hiệu ứng: slide (trượt từ mép), fade (hiện dần, mờ dần) hay none (ngay); nhanh chậm là việc của engine", value)
+		slide := "trượt từ mép" // a notice's
+		if who == "carousel" {
+			slide = "trượt ngang tới trang sau"
+		}
+		return "", errAttr(n, a, "transition=%q là cách viết của CSS; transition của .ui là kiểu hiệu ứng: slide (%s), fade (hiện dần, mờ dần) hay none (ngay); nhanh chậm là việc của engine", value, slide)
 	}
 	if first, rest, ok := strings.Cut(strings.ToLower(value), "-"); ok || strings.Contains(value, " ") {
 		if !ok {
@@ -79,7 +83,8 @@ func cssTransition(value string) bool {
 		return true
 	}
 	for _, word := range strings.FieldsFunc(value, func(r rune) bool { return unicode.IsSpace(r) || r == ',' }) {
-		if durationRe.MatchString(word) {
+		// a time as CSS writes one: seconds or milliseconds (CSS has no minute)
+		if d := readDuration(word); (d.problem == durationRead || d.problem == durationZero) && (d.unit == "s" || d.unit == "ms") {
 			return true
 		}
 		switch word {

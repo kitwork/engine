@@ -1,0 +1,176 @@
+# What editors put on the clipboard, written by hand in the shape they have: Google Docs, Microsoft
+# Word, a web page copied from a browser, a spreadsheet, a rich text editor's value, plain text, a
+# rendered markdown page, a code editor. Clean reads tags and a block's alignment only: the underline,
+# strikethrough and code font Google Docs and code editors write in a span's style are the editor's to
+# map when it pastes (the browser side), not Clean's. Same format as xss.txt.
+
+== Google Docs: headings, a link, a list with a second level
+<meta charset="utf-8"><b style="font-weight:normal;" id="docs-internal-guid-6a1c2b3e-7fff-4d2a-9b1e-0c1d2e3f4a5b"><h1 dir="ltr" style="line-height:1.38;margin-top:20pt;margin-bottom:6pt;"><span style="font-size:20pt;font-family:Arial,sans-serif;color:#000000;background-color:transparent;font-weight:400;font-style:normal;font-variant:normal;text-decoration:none;vertical-align:baseline;white-space:pre;white-space:pre-wrap;">Kế hoạch quý 4</span></h1><p dir="ltr" style="line-height:1.38;margin-top:0pt;margin-bottom:0pt;"><span style="font-size:11pt;font-family:Arial,sans-serif;color:#000000;background-color:transparent;font-weight:700;font-style:normal;">Mục tiêu:</span><span style="font-size:11pt;font-family:Arial,sans-serif;color:#000000;background-color:transparent;font-weight:400;">&nbsp;tăng trưởng, xem </span><a href="https://kitwork.io/docs" style="text-decoration:none;"><span style="font-size:11pt;font-family:Arial,sans-serif;color:#1155cc;background-color:transparent;font-weight:400;text-decoration:underline;-webkit-text-decoration-skip:none;text-decoration-skip-ink:none;">tài liệu</span></a><span style="font-size:11pt;">.</span></p><br><ul style="margin-top:0;margin-bottom:0;padding-inline-start:48px;"><li dir="ltr" style="list-style-type:disc;font-size:11pt;font-family:Arial,sans-serif;color:#000000;" aria-level="1"><p dir="ltr" style="line-height:1.38;margin-top:0pt;margin-bottom:0pt;" role="presentation"><span style="font-size:11pt;">Một</span></p></li><ul style="margin-top:0;margin-bottom:0;padding-inline-start:48px;"><li dir="ltr" style="list-style-type:circle;" aria-level="2"><p dir="ltr" role="presentation"><span style="font-size:11pt;">Hai, cấp hai</span></p></li></ul><li dir="ltr" aria-level="1"><p dir="ltr" role="presentation"><span>Ba</span></p></li></ul><h2 dir="ltr"><span style="font-size:16pt;">Ghi chú</span></h2><p dir="ltr"><span style="font-style:italic;">Không</span><span> in nghiêng ở đây.</span></p></b><br class="Apple-interchange-newline">
+-- want
+<h2>Kế hoạch quý 4</h2>
+<p>Mục tiêu: tăng trưởng, xem <a href="https://kitwork.io/docs">tài liệu</a>.</p>
+<ul>
+<li>Một</li>
+<li>Hai, cấp hai</li>
+<li>Ba</li>
+</ul>
+<h2>Ghi chú</h2>
+<p>Không in nghiêng ở đây.</p>
+
+== Google Docs: one paragraph
+<meta charset="utf-8"><b style="font-weight:normal;" id="docs-internal-guid-0f1e2d3c-7fff-1111-2222-333344445555"><span style="font-size:11pt;font-family:Arial,sans-serif;color:#000000;background-color:transparent;font-weight:400;font-style:normal;font-variant:normal;text-decoration:none;vertical-align:baseline;white-space:pre;white-space:pre-wrap;">Chỉ một dòng.</span></b>
+-- want
+<p>Chỉ một dòng.</p>
+
+== Microsoft Word: title, marks, a link, a list paragraph, an empty paragraph
+<html xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns:m="http://schemas.microsoft.com/office/2004/12/omml" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta http-equiv=Content-Type content="text/html; charset=utf-8">
+<meta name=ProgId content=Word.Document>
+<meta name=Generator content="Microsoft Word 15">
+<link rel=File-List href="file:///C:/Users/quoc/AppData/Local/Temp/msohtmlclip1/01/clip_filelist.xml">
+<!--[if gte mso 9]><xml>
+ <o:OfficeDocumentSettings>
+  <o:AllowPNG/>
+ </o:OfficeDocumentSettings>
+</xml><![endif]-->
+<style>
+<!--
+ /* Font Definitions */
+ @font-face {font-family:"Cambria Math"; panose-1:2 4 5 3 5 4 6 3 2 4;}
+p.MsoNormal, li.MsoNormal, div.MsoNormal {margin:0cm; font-size:11.0pt;}
+-->
+</style>
+</head>
+<body lang=VI style='tab-interval:36.0pt;word-wrap:break-word'>
+<!--StartFragment-->
+<p class=MsoTitle><span lang=VI>Báo cáo tháng<o:p></o:p></span></p>
+<p class=MsoNormal><b><span lang=VI>Đậm</span></b><span lang=VI> và <i>nghiêng</i>,&nbsp;liên kết <a href="https://kitwork.io/">Kitwork</a>.<o:p></o:p></span></p>
+<p class=MsoListParagraphCxSpFirst style='text-indent:-18.0pt;mso-list:l0 level1 lfo1'><![if !supportLists]><span style='font-family:Symbol'>·<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span></span><![endif]><span lang=VI>Mục một<o:p></o:p></span></p>
+<p class=MsoNormal><o:p>&nbsp;</o:p></p>
+<h2><span lang=VI>Phần hai<o:p></o:p></span></h2>
+<p class=MsoNormal><u>gạch chân</u> <s>gạch ngang</s> H<sub>2</sub>O x<sup>2</sup></p>
+<!--EndFragment-->
+</body>
+</html>
+-- want
+<p>Báo cáo tháng</p>
+<p><strong>Đậm</strong> và <em>nghiêng</em>, liên kết <a href="https://kitwork.io/">Kitwork</a>.</p>
+<p>· Mục một</p>
+<h2>Phần hai</h2>
+<p><u>gạch chân</u> <s>gạch ngang</s> H2O x2</p>
+
+== a web page copied from a browser
+<meta charset='utf-8'><h1 class="title" style="font-size: 2em; color: rgb(17, 17, 17);">Kitwork engine</h1><p style="margin: 0px 0px 16px; color: rgb(51, 51, 51);">A <code style="background: rgb(240, 240, 240);">.ui</code> page is a file. See the <a href="https://kitwork.io/docs/ui" target="_blank" rel="noopener" style="color: rgb(0, 102, 204);">guide</a> <img src="https://kitwork.io/arrow.svg" alt="" width="12"> or the <a href="/roadmap">roadmap</a>.</p><figure><img src="shot.png" alt="Screenshot"><figcaption>A page in the browser</figcaption></figure><pre style="background: rgb(246, 248, 250);"><code>import { db } from "./database.work"
+const get = () =&gt; db.users.all()</code></pre><blockquote><p>Dễ như JS, chặt như TS.</p></blockquote><ol><li>Install</li><li>Write a page</li></ol>
+-- want
+<h2>Kitwork engine</h2>
+<p>A <code>.ui</code> page is a file. See the <a href="https://kitwork.io/docs/ui">guide</a> or the <a href="/roadmap">roadmap</a>.</p>
+<p>A page in the browser</p>
+<pre><code>import { db } from "./database.work"
+const get = () =&gt; db.users.all()</code></pre>
+<blockquote>
+<p>Dễ như JS, chặt như TS.</p>
+</blockquote>
+<ol>
+<li>Install</li>
+<li>Write a page</li>
+</ol>
+
+== a spreadsheet range
+<meta charset="utf-8"><google-sheets-html-origin><style type="text/css"><!--td {border: 1px solid #cccccc;}br {mso-data-placement:same-cell;}--></style><table xmlns="http://www.w3.org/1999/xhtml" cellspacing="0" cellpadding="0" dir="ltr" border="1" style="table-layout:fixed;font-size:10pt;font-family:Arial;width:0px;border-collapse:collapse;border:none"><colgroup><col width="100"/><col width="100"/></colgroup><tbody><tr style="height:21px;"><td style="overflow:hidden;padding:2px 3px 2px 3px;vertical-align:bottom;font-weight:bold;">Sản phẩm</td><td style="overflow:hidden;padding:2px 3px 2px 3px;vertical-align:bottom;font-weight:bold;">Giá</td></tr><tr style="height:21px;"><td>Cà phê sữa</td><td style="text-align:right;">29.000</td></tr></tbody></table>
+-- want
+<p>Sản phẩm</p>
+<p>Giá</p>
+<p>Cà phê sữa</p>
+<p class="align-right">29.000</p>
+
+== a rich text editor's value
+<p>Xin chào <strong>Quốc</strong>,</p><p><br></p><p>Đây là <em>ghi chú</em> với <a href="https://kitwork.io" target="_blank">liên kết</a>.</p><ul><li><p>Một</p></li><li><p>Hai</p><p>dòng hai</p></li></ul><p></p>
+-- want
+<p>Xin chào <strong>Quốc</strong>,</p>
+<p>Đây là <em>ghi chú</em> với <a href="https://kitwork.io">liên kết</a>.</p>
+<ul>
+<li>Một</li>
+<li>Hai<br>dòng hai</li>
+</ul>
+
+== a contenteditable value without p
+Dòng đầu<div>Dòng hai</div><div><br></div><div>Dòng bốn</div>
+-- want
+<p>Dòng đầu</p>
+<p>Dòng hai</p>
+<p>Dòng bốn</p>
+
+== plain text from a form
+Chào anh,{LF}{LF}Đơn hàng #1024 đã giao.{LF}Cảm ơn anh!{LF}{LF}{LF}  -- Quán cà phê
+-- want
+<p>Chào anh,</p>
+<p>Đơn hàng #1024 đã giao.<br>Cảm ơn anh!</p>
+<p>-- Quán cà phê</p>
+
+== plain text with Windows line breaks and markup-like characters
+1 < 2 && 3 > 2{CR}{LF}a <3 b, "quoted" & 'single'{CR}{LF}{CR}{LF}&amp; stays as written
+-- want
+<p>1 &lt; 2 &amp;&amp; 3 &gt; 2<br>a &lt;3 b, "quoted" &amp; 'single'</p>
+<p>&amp;amp; stays as written</p>
+
+== Apple Notes style divs and breaks
+<div><b>Mua sắm</b></div><div>sữa<br>bánh mì<br></div><div><br></div><ul><li>trứng</li></ul>
+-- want
+<p><strong>Mua sắm</strong></p>
+<p>sữa<br>bánh mì</p>
+<ul>
+<li>trứng</li>
+</ul>
+
+== definition list and address
+<dl><dt>KitDB</dt><dd>SQL nhỏ, một bộ file.</dd><dt>Drive</dt><dd>Điều hướng không tải lại.</dd></dl><address>Hà Nội</address>
+-- want
+<p>KitDB</p>
+<p>SQL nhỏ, một bộ file.</p>
+<p>Drive</p>
+<p>Điều hướng không tải lại.</p>
+<p>Hà Nội</p>
+
+== Google Docs: a centred title, a right-aligned line, justified text, underline, strikethrough and a code font in spans
+<meta charset="utf-8"><b style="font-weight:normal;" id="docs-internal-guid-1a2b3c4d-7fff-0000-1111-222233334444"><p dir="ltr" style="line-height:1.38;text-align: center;margin-top:0pt;margin-bottom:0pt;"><span style="font-size:20pt;font-family:Arial,sans-serif;font-weight:700;">Thực đơn mùa thu</span></p><p dir="ltr" style="line-height:1.38;text-align: right;margin-top:0pt;margin-bottom:0pt;"><span style="font-size:11pt;font-family:Arial,sans-serif;font-style:italic;">Hà Nội, tháng 10</span></p><p dir="ltr" style="line-height:1.38;text-align: justify;margin-top:0pt;margin-bottom:0pt;"><span style="font-size:11pt;text-decoration:underline;">gạch chân</span><span style="font-size:11pt;"> và </span><span style="font-size:11pt;text-decoration:line-through;">gạch ngang</span><span style="font-size:11pt;"> và </span><span style="font-size:11pt;font-family:'Courier New',monospace;">mã</span></p><h3 dir="ltr" style="line-height:1.38;text-align: center;margin-top:16pt;margin-bottom:4pt;"><span style="font-size:14pt;">Đồ uống</span></h3></b>
+-- want
+<p class="align-center">Thực đơn mùa thu</p>
+<p class="align-right">Hà Nội, tháng 10</p>
+<p>gạch chân và gạch ngang và mã</p>
+<h3 class="align-center">Đồ uống</h3>
+
+== Microsoft Word: centred and right-aligned paragraphs, a small heading, insertions and deletions
+<p class=MsoNormal align=center style='text-align:center'><b><span lang=VI>Hợp đồng</span></b></p>
+<p class=MsoNormal align=right style='text-align:right'><span lang=VI>Số 12/2026</span></p>
+<p class=MsoNormal style='text-align:justify'><span lang=VI>Điều 1. Hai bên thoả thuận.<o:p></o:p></span></p>
+<h4><span lang=VI>Điều khoản nhỏ<o:p></o:p></span></h4>
+<p class=MsoNormal align=center><ins cite="mailto:quoc@kitwork.io" datetime="2026-10-20T09:00">thêm</ins> <del cite="mailto:quoc@kitwork.io">bỏ</del></p>
+-- want
+<p class="align-center"><strong>Hợp đồng</strong></p>
+<p class="align-right">Số 12/2026</p>
+<p>Điều 1. Hai bên thoả thuận.</p>
+<h4>Điều khoản nhỏ</h4>
+<p class="align-center"><u>thêm</u> <s>bỏ</s></p>
+
+== a rendered markdown page: small headings, inline code, keys, a highlighted code block, a rule
+<h4 dir="auto">Cài đặt</h4><p dir="auto">Chạy <code class="notranslate">go test ./...</code> rồi <kbd>Ctrl</kbd>+<kbd>C</kbd>.</p><div class="highlight highlight-source-go notranslate position-relative overflow-auto" dir="auto"><pre><span class="pl-k">func</span> <span class="pl-en">main</span>() {
+{TAB}<span class="pl-s1">fmt</span>.<span class="pl-en">Println</span>(<span class="pl-s">"xin chào"</span>)
+}</pre></div><hr><h5 dir="auto">Ghi chú</h5><h6 dir="auto">Nhỏ nhất</h6><p dir="auto"><del>cũ</del> <ins>mới</ins> <samp>out</samp> <tt>tt</tt></p>
+-- want
+<h4>Cài đặt</h4>
+<p>Chạy <code>go test ./...</code> rồi <code>Ctrl</code>+<code>C</code>.</p>
+<pre><code>func main() {
+{TAB}fmt.Println("xin chào")
+}</code></pre>
+<hr>
+<h5>Ghi chú</h5>
+<h6>Nhỏ nhất</h6>
+<p><s>cũ</s> <u>mới</u> <code>out</code> <code>tt</code></p>
+
+== a code editor's copy: a div a line, white space and a code font in style
+<meta charset='utf-8'><div style="color: #cccccc;background-color: #1f1f1f;font-family: Consolas, 'Courier New', monospace;font-weight: normal;font-size: 14px;line-height: 19px;white-space: pre;"><div><span style="color: #569cd6;">const</span><span style="color: #cccccc;"> </span><span style="color: #4fc1ff;">x</span><span style="color: #cccccc;"> = </span><span style="color: #b5cea8;">1</span><span style="color: #cccccc;">;</span></div><div><span style="color: #cccccc;">    </span><span style="color: #dcdcaa;">log</span><span style="color: #cccccc;">(</span><span style="color: #4fc1ff;">x</span><span style="color: #cccccc;">);</span></div></div>
+-- want
+<p>const x = 1;</p>
+<p>log(x);</p>

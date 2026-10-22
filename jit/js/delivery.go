@@ -3,6 +3,7 @@ package js
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -18,6 +19,9 @@ import (
 //	<script data-kitwork-generated="directive"  src="/_kitwork/directives/intersect.0b7d….js" defer></script>
 //	<script data-kitwork-generated="service"    src="/_kitwork/services/studioState.e2a9….js" defer></script>
 //	<script data-kitwork-generated="component"  src="/_kitwork/components/menu.c47a….js" defer></script>
+//
+// (and /_kitwork/parts/editor-paste.<hash>.js, which no page links: the component it is part of loads
+// it itself when it needs it, PartAsset.)
 //
 // Each name is <role>.<hash>.js, grouped by what the file IS, never by its type (the extension says
 // that): one-of-a-kind files at the top, kinds with many files in a folder of their own.
@@ -89,7 +93,7 @@ type Options struct {
 // Asset is one served file.
 type Asset struct {
 	Path   string // the URL, /_kitwork/…
-	Role   string // runtime | drive | directive | service | component — the data-kitwork-generated value
+	Role   string // runtime | drive | directive | service | component — the data-kitwork-generated value; part (PartAsset)
 	Body   []byte
 	Digest string // the whole SHA-256, hex — the ETag
 }
@@ -118,6 +122,8 @@ func buildAsset(role, name, source string) *Asset {
 		dir = "services/"
 	case "directive":
 		dir = "directives/"
+	case "part":
+		dir = "parts/"
 	}
 	return &Asset{
 		Path:   AssetPrefix + dir + name + "." + digest[:hashLength] + ".js",
@@ -180,7 +186,7 @@ func componentAsset(key string, site Site) *Asset {
 			return nil
 		}
 		return cachedAsset("component:"+name+"@"+version, func() *Asset {
-			return buildAsset("component", name, wrapComponent(source))
+			return buildAsset("component", name, wrapComponent(withParts(source)))
 		})
 	}
 	source := siteComponent(site, name)
@@ -190,6 +196,60 @@ func componentAsset(key string, site Site) *Asset {
 	sum := sha256.Sum256([]byte(source))
 	return cachedAsset("site:"+name+"|"+hex.EncodeToString(sum[:]), func() *Asset {
 		return buildAsset("component", name, wrapComponent(source))
+	})
+}
+
+// A part is a file a catalogue component loads itself when it needs it, never with the page: the
+// editor's reading of a paste or a drop (parts/editor-paste.js, 21/10/2026), which most visits never
+// use. Its name on the wire is parts/<name>.<hash>.js. The component's source names it without its
+// hash, "/_kitwork/parts/editor-paste.js" in quotes, and the file the page gets has the name with its
+// hash in that place (withParts), so the component's own hash follows the part's bytes too. Only the
+// exact current name is answered: a component of another build would hand a part of this one what it
+// no longer expects, so it gets nothing and does without (the editor pastes plain words).
+//
+// A part may name another the same way (parts/editor-format.js, 21/10/2026, loads
+// parts/editor-markdown.js when Markdown is first chosen): its file has the other's name with its hash
+// in that place too. A part naming itself keeps the name as written (its hash would be its own bytes).
+
+// partNameRe is a part's name, as its file in parts/ is named.
+var partNameRe = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+
+// partInSourceRe finds a part named in a component's source, without its hash.
+var partInSourceRe = regexp.MustCompile(`"/_kitwork/parts/([a-z][a-z0-9-]*)\.js"`)
+
+// PartAsset is the part file parts/<name>.js, or nil when there is none.
+func PartAsset(name string) *Asset {
+	if !partNameRe.MatchString(name) {
+		return nil
+	}
+	return cachedAsset("part:"+name, func() *Asset {
+		source, err := jsFS.ReadFile("parts/" + name + ".js")
+		if err != nil {
+			return nil
+		}
+		return buildAsset("part", name, wrapComponent(partsNamed(strings.TrimSpace(string(source)), name)))
+	})
+}
+
+// withParts writes, in place of each part a component's source names without its hash, the part's
+// current name; a name no part has stays as written.
+func withParts(source string) string { return partsNamed(source, "") }
+
+// partsNamed is withParts for the source of the part self ("" for a component's), which keeps its own
+// name as written.
+func partsNamed(source, self string) string {
+	if !strings.Contains(source, `"`+AssetPrefix+"parts/") {
+		return source
+	}
+	return partInSourceRe.ReplaceAllStringFunc(source, func(quoted string) string {
+		name := partInSourceRe.FindStringSubmatch(quoted)[1]
+		if name == self {
+			return quoted
+		}
+		if part := PartAsset(name); part != nil {
+			return `"` + part.Path + `"`
+		}
+		return quoted
 	})
 }
 
@@ -308,6 +368,10 @@ func AssetAt(path string, site Site) (asset *Asset, exact bool) {
 		asset = directiveAsset(strings.TrimPrefix(label, "directives/"))
 	case label == "services/assembly":
 		asset = AssemblyAsset()
+	case strings.HasPrefix(label, "parts/"):
+		if part := PartAsset(strings.TrimPrefix(label, "parts/")); part != nil && part.Path == current {
+			asset = part // its exact current name only (PartAsset)
+		}
 	case strings.HasPrefix(label, "services/"):
 		name, version, versioned := strings.Cut(strings.TrimPrefix(label, "services/"), "@")
 		// A name written before 11/10/2026 carried the version the engine had then. The engine

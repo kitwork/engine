@@ -42,14 +42,24 @@ func compileExpr(source string, at *Node, attr *Attr) (*expr, error) {
 		}
 		return nil, &Error{File: at.File, Line: line, Column: column, Message: "biểu thức không hợp lệ: " + strings.TrimSpace(source) + " (" + err.Error() + ")"}
 	}
-	if callsSafe(ir) {
-		line, column := at.Line, at.Column
-		if attr != nil {
-			line, column = attr.Line, attr.Column
+	for _, refused := range refusedCalls {
+		if callsName(ir, refused.name) {
+			line, column := at.Line, at.Column
+			if attr != nil {
+				line, column = attr.Line, attr.Column
+			}
+			return nil, &Error{File: at.File, Line: line, Column: column, Message: refused.message}
 		}
-		return nil, &Error{File: at.File, Line: line, Column: column, Message: safeInExpression}
 	}
 	return &expr{source: strings.TrimSpace(source), ir: ir}, nil
+}
+
+// refusedCalls are the bare names an expression of .ui never calls, each with its error, in the order
+// they are looked for: safe (no failure to catch), raw (HTML from data is a richtext's, cleaned on the
+// server: richtext.go).
+var refusedCalls = []struct{ name, message string }{
+	{"safe", safeInExpression},
+	{"raw", "raw() không có: " + htmlFromData},
 }
 
 // safeInExpression is the compile error of an expression that calls safe (14/10/2026). An expression
@@ -59,9 +69,9 @@ func compileExpr(source string, at *Node, attr *Attr) (*expr, error) {
 // view reads the failure (const { value, error } = safe(() => …)) and the page shows that data.
 const safeInExpression = "biểu thức .ui không có lỗi để bắt: gọi safe(() => …) trong router.view rồi đọc kết quả"
 
-// callsSafe reports whether an expression's IR calls the bare name safe: ["call", ["$", "safe"], …],
+// callsName reports whether an expression's IR calls a bare name (safe, raw): ["call", ["$", name], …],
 // outside a lambda that names a parameter so.
-func callsSafe(ir any) bool {
+func callsName(ir any, name string) bool {
 	node, ok := ir.([]any)
 	if !ok || len(node) == 0 {
 		return false
@@ -69,7 +79,7 @@ func callsSafe(ir any) bool {
 	if _, op := node[0].(string); !op {
 		// a list of nodes (arguments, elements, pairs): every one of them
 		for _, child := range node {
-			if callsSafe(child) {
+			if callsName(child, name) {
 				return true
 			}
 		}
@@ -79,34 +89,34 @@ func callsSafe(ir any) bool {
 	case "#":
 		return false // a literal: its text is data
 	case "call":
-		if callee, ok := node[1].([]any); ok && len(callee) == 2 && callee[0] == "$" && callee[1] == "safe" {
+		if callee, ok := node[1].([]any); ok && len(callee) == 2 && callee[0] == "$" && callee[1] == name {
 			return true
 		}
 	case "=>":
-		if len(node) > 1 && namesSafe(node[1]) {
+		if len(node) > 1 && namesParameter(node[1], name) {
 			return false
 		}
 	}
 	for _, child := range node[1:] {
-		if callsSafe(child) {
+		if callsName(child, name) {
 			return true
 		}
 	}
 	return false
 }
 
-// namesSafe reports whether a lambda's parameter list names safe.
-func namesSafe(params any) bool {
+// namesParameter reports whether a lambda's parameter list names name.
+func namesParameter(params any, name string) bool {
 	switch list := params.(type) {
 	case []string:
-		for _, name := range list {
-			if name == "safe" {
+		for _, parameter := range list {
+			if parameter == name {
 				return true
 			}
 		}
 	case []any:
-		for _, name := range list {
-			if name == "safe" {
+		for _, parameter := range list {
+			if parameter == name {
 				return true
 			}
 		}
@@ -249,6 +259,15 @@ func parseInterpolation(source string, at *Node, attr *Attr) (*interpolation, er
 		}
 		if start > 0 {
 			out.parts = append(out.parts, part{text: rest[:start]})
+		}
+		if strings.HasPrefix(rest[start:], "{{{") {
+			// Handlebars' and Mustache's unescaped output: .ui escapes every {{ }}, and writes HTML from data
+			// only through a richtext (richtext.go)
+			line, column := at.Line, at.Column
+			if attr != nil {
+				line, column = attr.Line, attr.Column
+			}
+			return nil, &Error{File: at.File, Line: line, Column: column, Message: "{{{ }}} không có: " + htmlFromData}
 		}
 		end := closingBraces(rest[start+2:])
 		if end < 0 {

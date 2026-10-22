@@ -178,6 +178,10 @@ func checkToken(name string) error {
 	case standardByName[name].Type != "":
 		// glow already means the standard gradient: one namespace for colours and gradients (gradients.go)
 		return fmt.Errorf("router.colors: %q đã là tên một %s (background=%q): tên màu và tên gradient chung một chỗ, đặt tên token theo vai trò khác", name, builtinKind(name), name)
+	case func() bool { _, retired := retiredGradient(name); return retired }():
+		// fade-start is a name the page is told to rename (fade-left): no token takes it either
+		renamed, _ := retiredGradient(name)
+		return fmt.Errorf("router.colors: %s", retiredMessage(name, renamed))
 	case !tokenName.MatchString(name):
 		return fmt.Errorf("router.colors: %q is not a token name: lowercase words joined by - or . (brand, chart.muted), each part after a dot starting with a letter (ink-30 is ink made lighter in the markup, not a token)", name)
 	case strings.HasSuffix(variable(name), "-dark"):

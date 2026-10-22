@@ -23,7 +23,7 @@ router.reload(false);
 `,
 	"localhost/page.ui": `<page><content /><overlay /></page>`,
 	"localhost/overlay.ui": `<overlay>
-  <box component="toast" as="$toast" gap="2">
+  <toast as="$toast" gap="2">
     <card for="notice of notices; key: notice.id" flex="row" gap="3" padding="3" shadow="large">
       <icon show="notice.loading" value="loader-2" />
       <icon show="notice.tone == 'info' && !notice.loading" value="info-circle" />
@@ -40,7 +40,7 @@ router.reload(false);
       <button click="dismiss(notice.id)"><icon value="x" alt="Đóng thông báo" /></button>
     </card>
     <text show="waiting > 0">{{ 'Còn ' + waiting + ' thông báo' }}</text>
-  </box>
+  </toast>
 </overlay>`,
 	"localhost/content.ui": `<content padding="4" gap="2">
   <button id="before">Trước</button>
@@ -54,10 +54,10 @@ router.reload(false);
   <button id="done" click="$toast.update('save', 'Đã lưu.', { tone: 'success' })">done</button>
   <button id="stay" click="$toast.info('Ở lại tới khi đóng.', { duration: 0 })">stay</button>
   <button id="short" click="$toast.info('Hai giây.', { duration: '2s' })">short</button>
-  <box component="tabs" as="$files" alt="Tệp" flex="row" gap="1">
+  <tabs as="$files" alt="Tệp" flex="row" gap="1">
     <button click="select('a')">a</button>
     <button click="select('b')">b</button>
-  </box>
+  </tabs>
   <box id="panel-a" show="$files.selected == 'a'"><text>a</text></box>
   <box id="panel-b" show="$files.selected == 'b'"><text>b</text></box>
   <link id="next" value="/tiep">Tiếp</link>

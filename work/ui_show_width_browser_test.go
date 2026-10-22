@@ -22,10 +22,10 @@ router.colors({ brand: "#c8742c" });
 `,
 	"localhost/page.ui": `<page><content /></page>`,
 	"localhost/content.ui": `<content padding="4" gap="4">
-  <box component="tabs" as="$f" alt="F" flex="row" gap="1">
+  <tabs as="$f" alt="F" flex="row" gap="1">
     <button id="tab-a" click="select('a')">a</button>
     <button id="tab-b" click="select('b')">b</button>
-  </box>
+  </tabs>
   <box id="a" show="$f.selected == 'a'" medium:show="true"><text>a</text></box>
   <box id="b" show="$f.selected == 'b'" medium:show="true"><text>b</text></box>
   <box id="c" show="$f.selected == 'b'" medium:show="true" large:show="false"><text>c</text></box>
@@ -136,7 +136,7 @@ func TestBrowserWidthShowWarnsWhereItStaysHidden(t *testing.T) {
 	}
 	lines := []string{
 		`<content padding="4" gap="4">`,
-		`<box component="tabs" as="$f" alt="F" flex="row" gap="1"><button id="tab-a" click="select('a')">a</button><button id="tab-b" click="select('b')">b</button></box>`,
+		`<tabs as="$f" alt="F" flex="row" gap="1"><button id="tab-a" click="select('a')">a</button><button id="tab-b" click="select('b')">b</button></tabs>`,
 		`<box show="$f.selected == 'a'"><text>a</text></box>`,
 	}
 	atLine := map[int]string{}

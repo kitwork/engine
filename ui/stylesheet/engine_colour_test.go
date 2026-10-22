@@ -12,6 +12,7 @@ var engineLight = map[string]map[string]string{
 		CodeColour("brand"): "brand+35", CodeColour("success"): "success+35", CodeColour("warning"): "warning+55",
 		CodeColour("info"): "info+25", CodeColour("danger"): "danger+25", CodeColour("inserted"): "success+45",
 		CodeColour("deleted"): "danger+40", ErrorColour: "danger+25", HeadlineColour: "brand+40", InverseColour: "brand+40",
+		LinkColour: "brand+35",
 	},
 	"Kit Design": {BadgeColour("brand"): "brand+15", BadgeColour("success"): "success+35", BadgeColour("warning"): "warning+55",
 		BadgeColour("danger"): "danger+25", BadgeColour("info"): "info+20"},
@@ -38,7 +39,7 @@ func roleOf(name string) engineRole {
 // plan); each mode's value reads 4.5:1 on the role's grounds and is the least multiple of 5 from that
 // mode's floor that does; dark is the accent itself on all five, its hue kept (lightness under 0.95,
 // chroma at least 30% of the token's). CONTROL: the palette has every role and a badge text for each
-// accent that grows a label, fifteen in all, so a role dropped from engineColours fails here; and the
+// accent that grows a label, sixteen in all, so a role dropped from engineColours fails here; and the
 // one step of before, used in dark, loses its hue (warning+55 is #ffffff there).
 func TestEngineColoursPerMode(t *testing.T) {
 	kitLight := map[string]string{
@@ -46,7 +47,7 @@ func TestEngineColoursPerMode(t *testing.T) {
 		BadgeColour("danger"): "#ce0029", BadgeColour("info"): "#0064b2", CodeColour("brand"): "#4500de",
 		CodeColour("success"): "#007642", CodeColour("warning"): "#8c5c00", CodeColour("info"): "#005fa9",
 		CodeColour("danger"): "#ce0029", CodeColour("inserted"): "#006a3a", CodeColour("deleted"): "#b30022",
-		ErrorColour: "#ce0029", HeadlineColour: "#4000d1", InverseColour: "#4000d1",
+		ErrorColour: "#ce0029", HeadlineColour: "#4000d1", InverseColour: "#4000d1", LinkColour: "#4500de",
 	}
 	for name, p := range codePalettes(t) {
 		accents := 0
@@ -55,7 +56,7 @@ func TestEngineColoursPerMode(t *testing.T) {
 				accents++
 			}
 		}
-		if len(p.engine) != len(engineRoles)+accents || len(p.engine) != 15 {
+		if len(p.engine) != len(engineRoles)+accents || len(p.engine) != 16 {
 			t.Errorf("%s: %d engine colours, want the %d roles and a badge for each of %d accents", name, len(p.engine), len(engineRoles), accents)
 		}
 		for engine := range p.engine {
@@ -207,7 +208,7 @@ func TestEngineColoursAreNotAuthorWords(t *testing.T) {
 			t.Errorf("color=%q compiles; an engine colour is not the author's", v)
 		}
 	}
-	if _, err := kit.WithGradients(map[string]Gradient{"hero": {Type: "linear", Direction: "to-end", Stops: []Stop{{Color: "kitwork-headline", At: 0}, {Color: "brand", At: 100}}}}); err == nil {
+	if _, err := kit.WithGradients(map[string]Gradient{"hero": {Type: "linear", Direction: "to-right", Stops: []Stop{{Color: "kitwork-headline", At: 0}, {Color: "brand", At: 100}}}}); err == nil {
 		t.Error("a router.gradients stop takes kitwork-headline")
 	}
 	if _, err := NewPalette(false, map[string]Color{"kitwork.error": {Light: "#123456"}}); err == nil {

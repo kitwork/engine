@@ -37,14 +37,14 @@ func TestProgressbarNameIsInThePageLanguage(t *testing.T) {
 	}
 	// written in page.ui with no alt, the bar is named the same way
 	written := compile(map[string]string{
-		"/site/page.ui":    `<page><box component="progressbar" color="ink-30" /><content /></page>`,
+		"/site/page.ui":    `<page><progressbar color="ink-30" /><content /></page>`,
 		"/site/content.ui": `<content><text>x</text></content>`,
 	})
 	mustContain(t, written.Render(Request{Path: "/", Language: "en"}), `aria-label="Loading the next page"`, `background-ink-30`)
 	mustContain(t, written.Render(Request{Path: "/", Language: "vi"}), `aria-label="Đang chuyển trang"`)
 	// an alt the author wrote is the name whatever the language
 	named := compile(map[string]string{
-		"/site/page.ui":    `<page><box component="progressbar" alt="Opening the page" /><content /></page>`,
+		"/site/page.ui":    `<page><progressbar alt="Opening the page" /><content /></page>`,
 		"/site/content.ui": `<content><text>x</text></content>`,
 	})
 	for _, language := range []string{"", "vi", "en"} {

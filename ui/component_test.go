@@ -8,10 +8,12 @@ import (
 )
 
 // cartLogic is the cart of KITWORK_UI §17, cut to what these tests read: state written out, a value
-// computed by a function, and the bare-`var` form the parser produces today.
+// computed by a function, and the bare-`var` form the parser produces today. Its name has a dash, as
+// every name of the site does since 18/10/2026 (a name without one is Kitwork's): shop-cart, called
+// <shop-cart …>, its files shop-cart.ui and shop-cart.work.
 const cartLogic = `import { component } from "kitwork";
 
-component.define("cart", () => {
+component.define("shop-cart", () => {
   var open = false;
   var items = [];
   var note = "chưa có";
@@ -81,9 +83,9 @@ func mustCompile(t *testing.T, files map[string]string) string {
 // here declares total, items and open too; the cart must not print them.
 func TestComponentNamesCoverThePage(t *testing.T) {
 	files := map[string]string{
-		"/site/content.ui":       `<content><box component="cart" as="$cart" /></content>`,
-		"/site/cart.ui":          cartUI,
-		"/.components/cart.work": cartLogic,
+		"/site/content.ui":            `<content><shop-cart as="$cart" /></content>`,
+		"/site/shop-cart.ui":          cartUI,
+		"/.components/shop-cart.work": cartLogic,
 	}
 	page := map[string]any{
 		"user":  "Quốc", // a name the component does not declare reaches it from the page
@@ -100,7 +102,7 @@ func TestComponentNamesCoverThePage(t *testing.T) {
 		"<p>Quốc</p>")
 	mustNotContain(t, html, "29.000đ", "3 món", "của trang")
 	// its logic does not run on the client yet (step 4): no host the kernel would look for in vain
-	mustNotContain(t, html, `data-kitwork-component="cart`)
+	mustNotContain(t, html, `data-kitwork-component="shop-cart`)
 }
 
 // if and show at a call are read where the call stands: whether the component is there, and whether
@@ -108,9 +110,9 @@ func TestComponentNamesCoverThePage(t *testing.T) {
 // names: show="open" at a cart's call is an error, not a silent read of either open.
 func TestComponentCallIfAndShowReadWhereTheCallStands(t *testing.T) {
 	files := map[string]string{
-		"/site/content.ui": `<content><box component="cart" show="visible" /><box component="cart" if="!visible" /></content>`,
-		"/site/cart.ui":    `<box><text>giỏ</text></box>`,
-		"/site/cart.work":  cartLogic,
+		"/site/content.ui":     `<content><shop-cart show="visible" /><shop-cart if="!visible" /></content>`,
+		"/site/shop-cart.ui":   `<box><text>giỏ</text></box>`,
+		"/site/shop-cart.work": cartLogic,
 	}
 	html := renderAt(t, memorySite("", files), ".", "/", map[string]any{"visible": true})
 	mustContain(t, html, `<div class="flex-column"><p>giỏ</p>`)
@@ -126,13 +128,13 @@ func TestComponentCallIfAndShowReadWhereTheCallStands(t *testing.T) {
 	}
 
 	for _, c := range []struct{ source, needle, says string }{
-		{`<content><box component="cart" show="open" /></content>`, `show=`, "show đọc bên ngoài thẻ chủ; open là của cart: đặt nó trong cart.ui"},
-		{`<content><box component="cart" if="items.length" /></content>`, `if=`, "if đọc bên ngoài thẻ chủ: có thẻ chủ hay không, lặp mấy lần quyết trước khi cart có; items là của cart"},
-		{`<content><box component="cart" for="x of items" /></content>`, `for=`, "for đọc bên ngoài thẻ chủ"},
-		{`<content><box component="cart" for="x of xs; key: note" /></content>`, `for=`, "key đọc bên ngoài thẻ chủ"},
-		{`<content><box component="cart" note="{{ open }}" /></content>`, `note=`, "giá trị của note đọc bên ngoài thẻ chủ; open là của cart"},
+		{`<content><shop-cart show="open" /></content>`, `show=`, "show đọc ở chỗ gọi, bên ngoài <shop-cart>; open là của shop-cart: đặt nó trong shop-cart.ui"},
+		{`<content><shop-cart if="items.length" /></content>`, `if=`, "if đọc ở chỗ gọi, bên ngoài <shop-cart>: có <shop-cart> hay không, lặp mấy lần quyết trước khi nó có; items là của shop-cart"},
+		{`<content><shop-cart for="x of items" /></content>`, `for=`, "for đọc ở chỗ gọi, bên ngoài <shop-cart>"},
+		{`<content><shop-cart for="x of xs; key: note" /></content>`, `for=`, "key đọc ở chỗ gọi, bên ngoài <shop-cart>"},
+		{`<content><shop-cart note="{{ open }}" /></content>`, `note=`, "giá trị của note đọc ở chỗ gọi, bên ngoài <shop-cart>; open là của shop-cart"},
 	} {
-		mustFail(t, map[string]string{"/site/content.ui": c.source, "/site/cart.ui": `<box><text>{{ note }}</text></box>`, "/site/cart.work": cartLogic},
+		mustFail(t, map[string]string{"/site/content.ui": c.source, "/site/shop-cart.ui": `<box><text>{{ note }}</text></box>`, "/site/shop-cart.work": cartLogic},
 			where("content.ui", c.source, c.needle), c.says)
 	}
 }
@@ -141,9 +143,9 @@ func TestComponentCallIfAndShowReadWhereTheCallStands(t *testing.T) {
 // starting value.
 func TestComponentDataAtTheCallWins(t *testing.T) {
 	files := map[string]string{
-		"/site/content.ui": `<content><box component="cart" note="{{ greeting }}" /></content>`,
-		"/site/cart.ui":    `<box><text>{{ note }}</text></box>`,
-		"/site/cart.work":  cartLogic,
+		"/site/content.ui":     `<content><shop-cart note="{{ greeting }}" /></content>`,
+		"/site/shop-cart.ui":   `<box><text>{{ note }}</text></box>`,
+		"/site/shop-cart.work": cartLogic,
 	}
 	html := renderAt(t, memorySite("", files), ".", "/", map[string]any{"greeting": "chào"})
 	mustContain(t, html, "<p>chào</p>")
@@ -183,28 +185,35 @@ func TestLayoutPiecesAndInstanceErrors(t *testing.T) {
 		where("content.ui", source, `as=`), "as đặt tên cho một instance; product-card là layout (chỉ có giao diện, không có logic) nên không có instance để gọi")
 
 	got := compileError(t, map[string]string{
-		"/site/content.ui": `<content><box component="cart" /></content>`,
-		"/site/cart.ui":    `<box><text>x</text></box>`,
-		"/site/cart.work":  `import { component } from "kitwork"; component.define("giohang", () => { var open = false; });`,
+		"/site/content.ui":     `<content><shop-cart /></content>`,
+		"/site/shop-cart.ui":   `<box><text>x</text></box>`,
+		"/site/shop-cart.work": `import { component } from "kitwork"; component.define("shop-giohang", () => { var open = false; });`,
 	})
-	if !strings.HasPrefix(got, "cart.work:1:1: ") || !strings.Contains(got, `component.define("cart", …)`) {
-		t.Errorf("a cart.work without define(\"cart\"): %s", got)
+	if !strings.HasPrefix(got, "shop-cart.work:1:1: ") || !strings.Contains(got, `component.define("shop-cart", …)`) {
+		t.Errorf("a shop-cart.work without define(\"shop-cart\"): %s", got)
 	}
 }
 
 // components.work at the site root may hold several components; one that does not define the name is
-// skipped, and the identity's .components/ is looked at next.
+// skipped, and the identity's .components/ is looked at next. Kitwork's own names are not a step of
+// that lookup: a define of one in the site is an error at its file.
 func TestComponentLookupOrder(t *testing.T) {
 	files := map[string]string{
-		"/site/content.ui":       `<content><box component="cart" /></content>`,
-		"/site/cart.ui":          `<box><text>{{ note }}</text></box>`,
-		"/site/components.work":  `import { component } from "kitwork"; component.define("menu", () => { var note = "menu"; });`,
-		"/.components/cart.work": cartLogic,
+		"/site/content.ui":            `<content><shop-cart /></content>`,
+		"/site/shop-cart.ui":          `<box><text>{{ note }}</text></box>`,
+		"/site/components.work":       `import { component } from "kitwork"; component.define("site-menu", () => { var note = "menu"; });`,
+		"/.components/shop-cart.work": cartLogic,
 	}
 	mustContain(t, renderAt(t, memorySite("", files), ".", "/", nil), "<p>chưa có</p>")
 
-	files["/site/components.work"] = `import { component } from "kitwork"; component.define("cart", () => { var note = "gốc site"; });`
+	files["/site/components.work"] = `import { component } from "kitwork"; component.define("shop-cart", () => { var note = "gốc site"; });`
 	mustContain(t, renderAt(t, memorySite("", files), ".", "/", nil), "<p>gốc site</p>")
+
+	// a name without a dash is Kitwork's and is never looked up in the site: the same components.work
+	// defining dropdown would never be read, so it is an error at that file
+	files["/site/content.ui"] = `<content><dropdown><text>x</text></dropdown></content>`
+	files["/site/components.work"] = `import { component } from "kitwork"; component.define("dropdown", () => { var open = true; });`
+	mustFail(t, files, "components.work:1:1: ", `component.define("dropdown", …) đặt tên trùng thẻ <dropdown> của Kitwork: <dropdown> luôn là component của Kitwork nên logic này không bao giờ được đọc`)
 }
 
 func funcOf(v any) any {
@@ -213,13 +222,13 @@ func funcOf(v any) any {
 
 // Kitwork's components cover the page the same way: the page's open does not open the dropdown, and
 // the server does not know the viewer's appearance — its dark is unknown, so the first paint shows the
-// light state whatever the page says. show written on the host reads where the call stands, and may
+// light state whatever the page says. show written on the tag reads where the call stands, and may
 // not read the component's own names.
 func TestBuiltinComponentNamesCoverThePage(t *testing.T) {
 	html := render(t, `<content>
-  <box component="dropdown" as="$account" show="signedIn"><button click="toggle()" expanded="{{ open }}">Tài khoản</button></box>
-  <box component="appearance"><button click="toggle()"><icon value="{{ dark ? 'sun' : 'moon' }}" alt="Đổi giao diện"></icon></button></box>
-  <box component="dropdown" show="menu"><text>menu</text></box>
+  <dropdown as="$account" show="signedIn"><button click="toggle()" expanded="{{ open }}">Tài khoản</button></dropdown>
+  <appearance click="toggle()"><icon value="{{ dark ? 'sun' : 'moon' }}" alt="Đổi giao diện"></icon></appearance>
+  <dropdown show="menu"><text>menu</text></dropdown>
 </content>`, map[string]any{"open": true, "dark": true, "signedIn": false, "menu": true})
 	mustContain(t, html,
 		`data-kitwork-component="dropdown: $account" hidden`,
@@ -228,29 +237,33 @@ func TestBuiltinComponentNamesCoverThePage(t *testing.T) {
 		`<i class="icon-moon"`)
 	mustNotContain(t, html, `aria-expanded="true"`, `<i class="icon-sun"`)
 
-	source := `<content><box component="dropdown" show="open"><text>menu</text></box></content>`
+	source := `<content><dropdown show="open"><text>menu</text></dropdown></content>`
 	mustFail(t, map[string]string{"/site/content.ui": source}, where("content.ui", source, `show=`),
-		"show đọc bên ngoài thẻ chủ; open là của dropdown: đặt nó lên phần con")
+		"show đọc ở chỗ gọi, bên ngoài <dropdown>; open là của dropdown: đặt nó lên phần con")
 }
 
-// The host of a component without a UI is the author's tag: <box component="dropdown"> is one
-// element, the box itself carrying the marker first (the dropdown host the kernel has always read,
-// byte for byte), and appearance can sit on the very button that toggles it.
-func TestComponentOnTheAuthorsHost(t *testing.T) {
-	html := render(t, `<content><box component="dropdown" as="$account" click-outside="close()" keydown:escape="close()">
+// A component is written as its tag, and the tag builds one element, its host, on a tag Kitwork fixes
+// (KITWORK_UI §13, 18/10/2026): <dropdown> is a box carrying the marker first (the dropdown host the
+// kernel has always read, byte for byte), <appearance> the very button that toggles it, with nothing
+// around it. What the author writes on the tag (an event, a border) is that host's. CONTROL: the
+// author no longer picks the host — the old <box component="appearance"> is the error of the removed
+// attribute, which says <appearance> builds a <button> and that a box the author needs goes inside it.
+func TestComponentTagBuildsItsHost(t *testing.T) {
+	html := render(t, `<content><dropdown as="$account" click-outside="close()" keydown:escape="close()">
   <button click="toggle()" expanded="{{ open }}">Quốc</button>
-  <popover place="below-end"><text>menu</text></popover>
-</box></content>`, nil)
+  <popover place="below-right"><text>menu</text></popover>
+</dropdown></content>`, nil)
 	mustContain(t, html, `<div class="flex-column place-anchor" data-kitwork-component="dropdown: $account" data-kitwork-event="click-outside: close(); keydown.escape: close()">`)
 
-	html = render(t, `<content><button component="appearance" click="toggle()" border="none"><icon value="{{ dark ? 'sun' : 'moon' }}" alt="Đổi"></icon></button></content>`, nil)
+	html = render(t, `<content><appearance click="toggle()" border="none"><icon value="{{ dark ? 'sun' : 'moon' }}" alt="Đổi"></icon></appearance></content>`, nil)
 	mustContain(t, html, `<button class="flex-row border-none" data-kitwork-component="appearance" type="button" data-kitwork-event="click: toggle()"><i class="icon-moon"`)
 	if strings.Count(html, "<div") != 0 {
 		t.Errorf("the button is the host: no element around it, got:\n%s", html)
 	}
-	// control: the same component on a box gets the box
-	mustContain(t, render(t, `<content><box component="appearance"><button click="toggle()">x</button></box></content>`, nil),
-		`<div class="flex-column" data-kitwork-component="appearance"><button`)
+	// CONTROL
+	source := `<content><box component="appearance"><button click="toggle()">x</button></box></content>`
+	mustFail(t, map[string]string{"/site/content.ui": source}, where("content.ui", source, `component=`),
+		"component= đã bỏ: component là một thẻ, viết <appearance>…</appearance> (<appearance> dựng một <button>; cần <box> thì đặt nó bên trong)")
 }
 
 // A popover that writes no place still hangs below the start edge of what opens it (reboot.css:
@@ -258,16 +271,16 @@ func TestComponentOnTheAuthorsHost(t *testing.T) {
 // is positioned against some element further out. Control: a host whose child is neither placed nor
 // a popover is no anchor.
 func TestUnplacedPopoverIsAnchoredToItsHost(t *testing.T) {
-	html := render(t, `<content><box component="dropdown" as="$menu">
+	html := render(t, `<content><dropdown as="$menu">
   <button click="toggle()" expanded="{{ open }}">Menu</button>
   <popover><text>mục</text></popover>
-</box></content>`, nil)
+</dropdown></content>`, nil)
 	mustContain(t, html, `<div class="flex-column place-anchor" data-kitwork-component="dropdown: $menu">`, `<div class="popover flex-column" hidden data-kitwork-bind="show: open">`)
 	if !strings.Contains(rebootCSS(), ":where(.place-anchor){position:relative}") {
 		t.Errorf("place-anchor must make its element the popover's containing block in reboot.css")
 	}
 
-	control := render(t, `<content><box component="dropdown"><button click="toggle()">Menu</button><box><text>mục</text></box></box></content>`, nil)
+	control := render(t, `<content><dropdown><button click="toggle()">Menu</button><box><text>mục</text></box></dropdown></content>`, nil)
 	mustContain(t, control, `<div class="flex-column" data-kitwork-component="dropdown">`)
 	mustNotContain(t, control, "place-anchor")
 }
@@ -289,9 +302,10 @@ func TestAppearanceStateIsModeAndDark(t *testing.T) {
 		t.Errorf("the server does not know the viewer's choice: want mode system and dark unknown, got %v", state)
 	}
 
-	html := render(t, `<content><box component="appearance"><text>{{ resolved }}</text><text>{{ dark }}</text></box></content>`,
+	html := render(t, `<content><appearance><text>{{ resolved }}</text><text>{{ dark }}</text></appearance></content>`,
 		map[string]any{"resolved": "của trang", "dark": "cũng của trang"})
-	mustContain(t, html, `<p>của trang</p>`, `data-kitwork-bind="text: dark"`)
+	// the host is a button, so a text in it is a <span>
+	mustContain(t, html, `<span>của trang</span>`, `data-kitwork-bind="text: dark"`)
 	mustNotContain(t, html, `text: resolved`, "cũng của trang")
 }
 
@@ -302,11 +316,11 @@ func TestAppearanceStateIsModeAndDark(t *testing.T) {
 // page event inside a component, is an error until the page itself runs on the client.
 func TestBuiltinComponentRunsInTheBrowser(t *testing.T) {
 	html := render(t, `<content>
-  <box component="dropdown" as="$account" click-outside="close()" keydown:escape="close()">
+  <dropdown as="$account" click-outside="close()" keydown:escape="close()">
     <button click="toggle()" expanded="{{ open }}"><text>{{ user.name }}</text></button>
-    <popover place="below-end"><list><item><link value="/don-hang">Đơn</link></item></list></popover>
-  </box>
-  <box component="appearance"><button click="toggle()"><icon value="{{ dark ? 'sun' : 'moon' }}" alt="Đổi"></icon><text>{{ mode }}</text></button></box>
+    <popover place="below-right"><list><item><link value="/don-hang">Đơn</link></item></list></popover>
+  </dropdown>
+  <appearance click="toggle()"><icon value="{{ dark ? 'sun' : 'moon' }}" alt="Đổi"></icon><text>{{ mode }}</text></appearance>
 </content>`, map[string]any{"user": map[string]any{"name": "Quốc"}})
 	mustContain(t, html,
 		`data-kitwork-component="dropdown: $account" data-kitwork-event="click-outside: close(); keydown.escape: close()"`,
@@ -318,11 +332,11 @@ func TestBuiltinComponentRunsInTheBrowser(t *testing.T) {
 	mustNotContain(t, html, `text: user.name`, `class.icon`)
 
 	for source, want := range map[string]string{
-		`<content><box component="appearance"><button click="toggle(); log()">x</button></box></content>`: "nhiều câu lệnh",
-		`<content><box component="appearance"><button click="go(page)">x</button></box></content>`:        "bên trong appearance sự kiện click chỉ gọi tên của component",
-		`<content><box component="appearance"><text>{{ dark + user.name }}</text></box></content>`:        "đọc cả tên của component lẫn user",
-		`<content><box component="appearance"><icon value="{{ mode }}" alt=""></icon></box></content>`:    "phải viết ra mọi giá trị",
-		`<content><box component="appearance"><text>Đang {{ mode }} lúc này</text></box></content>`:       "",
+		`<content><appearance click="toggle(); log()">x</appearance></content>`:               "nhiều câu lệnh",
+		`<content><appearance click="go(page)">x</appearance></content>`:                      "bên trong appearance sự kiện click chỉ gọi tên của component",
+		`<content><appearance><text>{{ dark + user.name }}</text></appearance></content>`:     "đọc cả tên của component lẫn user",
+		`<content><appearance><icon value="{{ mode }}" alt=""></icon></appearance></content>`: "phải viết ra mọi giá trị",
+		`<content><appearance><text>Đang {{ mode }} lúc này</text></appearance></content>`:    "",
 	} {
 		_, err := memorySite("", map[string]string{"/site/content.ui": source}).Compile("/site")
 		if want == "" {
@@ -374,10 +388,10 @@ func TestClassPairNameFollowsTheSplitter(t *testing.T) {
 // undo each other), and a class the grouped name cannot carry (a variant) is refused; an opacity and a
 // glass (glass/60, the thin glass since 13/10/2026) are names it carries.
 func TestBuiltinComponentTogglesClassesByName(t *testing.T) {
-	html := render(t, `<content><box component="dropdown">
+	html := render(t, `<content><dropdown>
   <button click="toggle()" expanded="{{ open }}" background="{{ open ? 'panel' : 'paper' }}">Tài khoản</button>
   <badge color="{{ open ? 'ink' : 'ink-30' }}"><text>mới</text></badge>
-</box></content>`, nil)
+</dropdown></content>`, nil)
 	when := func(value string) string {
 		return "(open ? &#39;panel&#39; : &#39;paper&#39;) == &#39;" + value + "&#39;"
 	}
@@ -391,12 +405,12 @@ func TestBuiltinComponentTogglesClassesByName(t *testing.T) {
 	mustNotContain(t, html, "class.")
 
 	for source, want := range map[string]string{
-		`<content><box component="appearance"><box hover:background="{{ dark ? 'brand' : 'ink' }}">x</box></box></content>`: "class hover:background-brand đổi theo trạng thái",
+		`<content><appearance><box hover:background="{{ dark ? 'brand' : 'ink' }}">x</box></appearance></content>`: "class hover:background-brand đổi theo trạng thái",
 		// control: the same values without the variant are names the pair can carry, an opacity too
-		`<content><box component="appearance"><box background="{{ dark ? 'brand' : 'ink' }}" color="white">x</box></box></content>`:  "",
-		`<content><box component="appearance"><box background="{{ dark ? 'ink/50' : 'ink' }}" color="white">x</box></box></content>`: "",
+		`<content><appearance><box background="{{ dark ? 'brand' : 'ink' }}" color="white">x</box></appearance></content>`:  "",
+		`<content><appearance><box background="{{ dark ? 'ink/50' : 'ink' }}" color="white">x</box></appearance></content>`: "",
 		// and so are a colour lighter and a colour stronger (13/10/2026): - and + are letters of a name
-		`<content><box component="appearance"><box background="{{ dark ? 'brand+15' : 'ink-30' }}" color="white">x</box></box></content>`: "",
+		`<content><appearance><box background="{{ dark ? 'brand+15' : 'ink-30' }}" color="white">x</box></appearance></content>`: "",
 	} {
 		_, err := memorySite("", map[string]string{"/site/content.ui": source}).Compile("/site")
 		if want == "" {
@@ -411,8 +425,8 @@ func TestBuiltinComponentTogglesClassesByName(t *testing.T) {
 	}
 
 	// the thin and the thick glass follow a state, as glass.thin and glass.thick did before 13/10/2026
-	glass := render(t, `<content><box component="appearance"><box material="{{ dark ? 'glass/60' : 'none' }}">x</box>`+
-		`<box material="{{ dark ? 'glass/88' : 'glass' }}">y</box></box></content>`, nil)
+	glass := render(t, `<content><appearance><box material="{{ dark ? 'glass/60' : 'none' }}">x</box>`+
+		`<box material="{{ dark ? 'glass/88' : 'glass' }}">y</box></appearance></content>`, nil)
 	thin := "(dark ? &#39;glass/60&#39; : &#39;none&#39;) == "
 	thick := "(dark ? &#39;glass/88&#39; : &#39;glass&#39;) == "
 	mustContain(t, glass,

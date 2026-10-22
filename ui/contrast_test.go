@@ -298,13 +298,13 @@ func TestContrastAtTheCallSite(t *testing.T) {
 	layout["/site/content.ui"] = `<content><section><price-tag /></section></content>`
 	contrastPasses(t, nil, layout)
 
-	component := content(`<content><section background="ink"><box component="cart" /></section></content>`)
-	component["/site/cart.ui"] = `<box><text color="ink-30">Giỏ</text></box>`
-	component["/site/cart.work"] = cartLogic
-	if got := contrastCompile(t, nil, component); !strings.HasPrefix(got, `cart.ui:1:12: color="ink-30" trên nền ink chỉ 2.36:1`) {
+	component := content(`<content><section background="ink"><shop-cart /></section></content>`)
+	component["/site/shop-cart.ui"] = `<box><text color="ink-30">Giỏ</text></box>`
+	component["/site/shop-cart.work"] = cartLogic
+	if got := contrastCompile(t, nil, component); !strings.HasPrefix(got, `shop-cart.ui:1:12: color="ink-30" trên nền ink chỉ 2.36:1`) {
 		t.Errorf("a component inside an ink section: %q", got)
 	}
-	component["/site/content.ui"] = `<content><section><box component="cart" /></section></content>`
+	component["/site/content.ui"] = `<content><section><shop-cart /></section></content>`
 	contrastPasses(t, nil, component)
 
 	region := map[string]string{
@@ -551,7 +551,7 @@ func TestContrastTernaryArmsPairTogether(t *testing.T) {
 // An icon placed over its parent's content (beside a photo) is over what the page cannot know, like
 // text placed there: skipped. CONTROL: the same icon in the flow is on the canvas and falls short.
 func TestContrastPlacedIcon(t *testing.T) {
-	contrastPasses(t, nil, content(`<content><box><image value="/a.png" alt="a" /><icon value="heart" alt="Yêu thích" color="white" place="top-end" /></box></content>`))
+	contrastPasses(t, nil, content(`<content><box><image value="/a.png" alt="a" /><icon value="heart" alt="Yêu thích" color="white" place="top-right" /></box></content>`))
 	if got := contrastCompile(t, nil, content(`<content><box><image value="/a.png" alt="a" /><icon value="heart" alt="Yêu thích" color="white" /></box></content>`)); !strings.Contains(got, `icon màu color="white" trên nền canvas chỉ 1.06:1`) {
 		t.Errorf("CONTROL: an icon in the flow is measured, got %q", got)
 	}

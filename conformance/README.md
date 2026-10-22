@@ -47,9 +47,12 @@ go test ./conformance -run TestLanguageConformanceCorpus -count=1
 - a case with its own `files` (paths from the site root, `../.components/…` for
   the identity) and an `error` must not compile: the error points at
   `error.at` (`file:line:col`) and its message holds `error.says`. `forms`
-  holds the errors an author meets with the three forms of markup: a tag, a
-  layout called by its tag (a region, or a piece with only a `.ui`:
-  `<product-card />`) and `component=` for a piece with logic. A case with its
+  holds the errors an author meets now that markup is only tags (18/10/2026):
+  a name without a dash is Kitwork's (an element, a region, or one of its
+  components: `<tabs as="$files">`), a name with one is the site's, a layout
+  (only a `.ui`: `<product-card />`) or a component (it has
+  `component.define`: `<shop-cart as="$cart" />`), and `component=` is an
+  error that says which tag to write. A case with its
   own `files` and an `expect` renders them. `code` holds `<code language="…">`
   coloured on the server: one `<span class="code-<kind>">` per token that is not
   plain text, every text escaped, a language from `{{ }}` the engine does not

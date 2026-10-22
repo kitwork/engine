@@ -41,14 +41,14 @@ func transitionClassCount(html string) int {
 // the fade and none rows red (run 17/10/2026).
 func TestTransitionClassesOfTheToast(t *testing.T) {
 	for _, c := range []struct{ name, words, class string }{
-		{"not written: slide", ``, "flex-column toast toast-bottom-end"},
-		{"slide", ` transition="slide"`, "flex-column toast toast-bottom-end"},
-		{"fade", ` transition="fade"`, "flex-column toast toast-bottom-end transition-fade"},
-		{"none", ` transition="none"`, "flex-column toast toast-bottom-end transition-none"},
-		{"spaces around", ` transition=" fade "`, "flex-column toast toast-bottom-end transition-fade"},
+		{"not written: slide", ``, "flex-column toast toast-bottom-right"},
+		{"slide", ` transition="slide"`, "flex-column toast toast-bottom-right"},
+		{"fade", ` transition="fade"`, "flex-column toast toast-bottom-right transition-fade"},
+		{"none", ` transition="none"`, "flex-column toast toast-bottom-right transition-none"},
+		{"spaces around", ` transition=" fade "`, "flex-column toast toast-bottom-right transition-fade"},
 		{"fade at the top", ` place="top" transition="fade"`, "flex-column toast toast-top transition-fade"},
-		{"before its place", ` transition="none" place="top-start"`, "flex-column toast toast-top-start transition-none"},
-		{"beside the author's own", ` gap="2" transition="fade" padding="4"`, "flex-column gap-2 padding-4 toast toast-bottom-end transition-fade"},
+		{"before its place", ` transition="none" place="top-left"`, "flex-column toast toast-top-left transition-none"},
+		{"beside the author's own", ` gap="2" transition="fade" padding="4"`, "flex-column gap-2 padding-4 toast toast-bottom-right transition-fade"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			html := compileQuiet(t, toastSite(toastStack(` as="$toast"`+c.words), `<content><text>x</text></content>`))
@@ -76,8 +76,8 @@ func TestTransitionClassesOfTheNetwork(t *testing.T) {
 		{"placed, not written: slide", ` place="top"`, "flex-column network network-top"},
 		{"placed, slide", ` place="top" transition="slide"`, "flex-column network network-top"},
 		{"placed, slide before its place", ` transition="slide" place="bottom"`, "flex-column network network-bottom"},
-		{"placed, fade", ` place="bottom-start" transition="fade"`, "flex-column network network-bottom-start transition-fade"},
-		{"placed, none", ` place="top-end" transition="none"`, "flex-column network network-top-end transition-none"},
+		{"placed, fade", ` place="bottom-left" transition="fade"`, "flex-column network network-bottom-left transition-fade"},
+		{"placed, none", ` place="top-right" transition="none"`, "flex-column network network-top-right transition-none"},
 		{"in the flow, not written: none", ``, "flex-column"},
 		{"in the flow, fade", ` transition="fade"`, "flex-column transition-fade"},
 		{"in the flow, none", ` transition="none"`, "flex-column"},
@@ -190,12 +190,12 @@ func TestTransitionWrittenWrongIsAnError(t *testing.T) {
 // CONTROL: slide with a place compiles quietly, in either order (TestTransitionClassesOfTheNetwork); the
 // check disabled, slide in the flow compiled and this test went red (run 17/10/2026).
 func TestTransitionSlideNeedsAPlace(t *testing.T) {
-	const slide = `transition="slide" trượt vào từ mép màn hình mà network không có place: viết place (bottom-end, bottom, bottom-start, top-end, top, top-start), hay transition="fade" cho khung nằm trong trang`
+	const slide = `transition="slide" trượt vào từ mép màn hình mà network không có place: viết place (bottom-right, bottom, bottom-left, top-right, top, top-left), hay transition="fade" cho khung nằm trong trang`
 	for _, words := range []string{"\n  transition=\"slide\"", ` as="$network" gap="2" transition="slide"`} {
 		source := `<content><box gap="2">` + networkWithNotice(words) + `</box></content>`
 		mustFailExactly(t, content(source), where("content.ui", source, `transition=`)+slide)
 	}
-	source := `<content><box component="network" transition="0.2s" offline="close()" /></content>`
+	source := `<content><network transition="0.2s" offline="close()" /></content>`
 	mustFailExactly(t, content(source), where("content.ui", source, `transition=`)+
 		`transition="0.2s" là cách viết của CSS; transition của .ui là kiểu hiệu ứng: slide (trượt từ mép), fade (hiện dần, mờ dần) hay none (ngay); nhanh chậm là việc của engine`)
 }
@@ -211,8 +211,8 @@ func TestTransitionSlideNeedsAPlace(t *testing.T) {
 // warning disabled, every row went red; the empty host written transition-fade (before 17/10/2026's fix)
 // turned the fade rows red (run 17/10/2026).
 func TestTransitionOnAnEmptyNetworkIsAWarning(t *testing.T) {
-	const empty = ` trên network rỗng: thẻ chủ rỗng không hiện gì, transition không làm gì; vẽ thông báo bên trong (<card show="open">…</card>) hay bỏ transition`
-	const place = `place="top" trên network rỗng: thẻ chủ rỗng chỉ nghe sự kiện và không hiện, place không đặt gì; vẽ thông báo bên trong (<card show="open">…</card>) hay bỏ place`
+	const empty = ` trên <network /> rỗng: nó không hiện gì, transition không làm gì; vẽ thông báo bên trong (<card show="open">…</card>) hay bỏ transition`
+	const place = `place="top" trên <network /> rỗng: nó chỉ nghe sự kiện và không hiện, place không đặt gì; vẽ thông báo bên trong (<card show="open">…</card>) hay bỏ place`
 	for _, c := range []struct {
 		name, words string
 		said        []string // needle, message: one warning each, in this order
@@ -227,7 +227,7 @@ func TestTransitionOnAnEmptyNetworkIsAWarning(t *testing.T) {
 		{"with an alias", ` as="$network" transition="fade"`, []string{`transition=`, `transition="fade"` + empty}, "flex-column show-false"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			source := `<content><box component="network"` + c.words + ` offline="close()" /></content>`
+			source := `<content><network` + c.words + ` offline="close()" /></content>`
 			host, html, warned := networkCompile(t, source)
 			var want []string
 			for i := 0; i < len(c.said); i += 2 {
@@ -290,10 +290,10 @@ func TestTransitionRebootRulesLetFadeAndNoneWin(t *testing.T) {
 	const (
 		moves      = `:where(.toast>*,.network>*,.transition-fade>*){transition:opacity 0.2s ease-out,translate 0.2s ease-out,display 0.2s allow-discrete}`
 		slideStart = `:where(.toast>*,.network>*){opacity:0;translate:0 0.5rem}`
-		topStart   = `:where(.toast-top-end>*,.toast-top>*,.toast-top-start>*,.network-top-end>*,.network-top>*,.network-top-start>*){translate:0 -0.5rem}`
+		topStart   = `:where(.toast-top-right>*,.toast-top>*,.toast-top-left>*,.network-top-right>*,.network-top>*,.network-top-left>*){translate:0 -0.5rem}`
 		fadeStart  = `:where(.transition-fade>*){opacity:0;translate:none}`
 		slideOut   = `:where(.toast>[data-leaving],.network>[hidden],.transition-fade>[hidden]){opacity:0;translate:0 0.5rem;transition-duration:0.15s}`
-		topOut     = `:where(.toast-top-end,.toast-top,.toast-top-start,.network-top-end,.network-top,.network-top-start)>:where([data-leaving],[hidden]){translate:0 -0.5rem}`
+		topOut     = `:where(.toast-top-right,.toast-top,.toast-top-left,.network-top-right,.network-top,.network-top-left)>:where([data-leaving],[hidden]){translate:0 -0.5rem}`
 		fadeOut    = `:where(.transition-fade>[data-leaving],.transition-fade>[hidden]){translate:none}`
 		none       = `:where(.transition-none>*){transition:none}`
 		lessMotion = `@media (prefers-reduced-motion:reduce){*,::before,::after{`

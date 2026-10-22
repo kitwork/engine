@@ -30,21 +30,21 @@ router.language("vi");
 `,
 		"localhost/page.ui": `<page><content /><overlay /></page>`,
 		"localhost/overlay.ui": `<overlay>
-  <box component="toast" as="$toast" place="` + toastPlace + `" transition="` + transition + `" gap="2">
+  <toast as="$toast" place="` + toastPlace + `" transition="` + transition + `" gap="2">
     <card for="notice of notices; key: notice.id" flex="row" gap="3" padding="3" shadow="large">
       <text>{{ notice.message }}</text>
       <button click="dismiss(notice.id)"><icon value="x" alt="Đóng thông báo" /></button>
     </card>
-  </box>
-  <box component="network" as="$network" place="` + networkPlace + `" transition="` + transition + `" delay="0">
-` + notice("placed", "Bạn đang ngoại tuyến") + `  </box>
+  </toast>
+  <network as="$network" place="` + networkPlace + `" transition="` + transition + `" delay="0">
+` + notice("placed", "Bạn đang ngoại tuyến") + `  </network>
 </overlay>`,
 		"localhost/content.ui": `<content padding="4" gap="2">
   <text>Trang</text>
-  <box component="network" as="$faded" transition="fade" delay="0">
-` + notice("faded", "Ngoại tuyến, hiện dần") + `  </box>
-  <box component="network" as="$plain" delay="0">
-` + notice("plain", "Ngoại tuyến, hiện ngay") + `  </box>
+  <network as="$faded" transition="fade" delay="0">
+` + notice("faded", "Ngoại tuyến, hiện dần") + `  </network>
+  <network as="$plain" delay="0">
+` + notice("plain", "Ngoại tuyến, hiện ngay") + `  </network>
 </content>`,
 	}
 }
@@ -408,29 +408,29 @@ func TestBrowserTransition(t *testing.T) {
 		hosts                                      string
 		wants                                      map[string][2]transitionWant // notice: in, out
 	}{
-		{"slide, toast below, network above", "slide", "bottom-end", "top-start",
-			"toast toast-bottom-end ; network network-top-start ; transition-fade ; -",
+		{"slide, toast below, network above", "slide", "bottom-right", "top-left",
+			"toast toast-bottom-right ; network network-top-left ; transition-fade ; -",
 			map[string][2]transitionWant{
 				"toast":  {transitionSlideInBelow, transitionToastSlideOutDown},
 				"placed": {transitionSlideInAbove, transitionNetworkSlideOutUp},
 				"faded":  faded, "plain": plain,
 			}},
-		{"slide, toast above, network below", "slide", "top-end", "bottom-start",
-			"toast toast-top-end ; network network-bottom-start ; transition-fade ; -",
+		{"slide, toast above, network below", "slide", "top-right", "bottom-left",
+			"toast toast-top-right ; network network-bottom-left ; transition-fade ; -",
 			map[string][2]transitionWant{
 				"toast":  {transitionSlideInAbove, transitionToastSlideOutUp},
 				"placed": {transitionSlideInBelow, transitionNetworkSlideOutDown},
 				"faded":  faded, "plain": plain,
 			}},
-		{"fade", "fade", "top-end", "bottom-start",
-			"toast toast-top-end transition-fade ; network network-bottom-start transition-fade ; transition-fade ; -",
+		{"fade", "fade", "top-right", "bottom-left",
+			"toast toast-top-right transition-fade ; network network-bottom-left transition-fade ; transition-fade ; -",
 			map[string][2]transitionWant{
 				"toast":  {transitionFadeIn, transitionToastFadeOut},
 				"placed": {transitionFadeIn, transitionNetworkFadeOut},
 				"faded":  faded, "plain": plain,
 			}},
-		{"none", "none", "bottom-end", "top-start",
-			"toast toast-bottom-end transition-none ; network network-top-start transition-none ; transition-fade ; -",
+		{"none", "none", "bottom-right", "top-left",
+			"toast toast-bottom-right transition-none ; network network-top-left transition-none ; transition-fade ; -",
 			map[string][2]transitionWant{
 				"toast":  {transitionNoneIn, transitionToastNoneOut},
 				"placed": {transitionNoneIn, transitionNetworkNoneOut},

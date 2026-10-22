@@ -1,21 +1,21 @@
 /* network component — whether the page can reach the network, and the moment that changes
- * (KITWORK_UI §13, Kitwork UI's component="network"). The author draws the notice, once, as the
- * toast's (overlay.ui):
+ * (KITWORK_UI §13, Kitwork UI's <network>). The author draws the notice, once, as the toast's
+ * (overlay.ui):
  *
- *   <box component="network" as="$network" place="bottom-start">
+ *   <network as="$network" place="bottom-left">
  *     <card show="open" flex="row" gap="3" padding="3">
  *       <icon show="!connected" value="wifi-off" color="warning+5" alt="Offline" />
  *       <icon show="connected" value="wifi" color="success" alt="Online" />
  *       <text weight="bold">{{ connected ? 'Back online' : 'You are offline' }}</text>
  *       <button click="close()"><icon value="x" alt="Dismiss" /></button>
  *     </card>
- *   </box>
+ *   </network>
  *
- * The engine writes the host as data-kitwork-component="network: $network", fixed at the place named
- * (classes network network-bottom-start) and a status region a screen reader hears (role="status").
- * Written empty, with only its events, the host is heard and never seen:
+ * The engine writes the host, the box the tag builds, as data-kitwork-component="network: $network",
+ * fixed at the place named (classes network network-bottom-left) and a status region a screen
+ * reader hears (role="status"). Written empty, with only its events, the host is heard and never seen:
  *
- *   <box component="network" offline="$toast.warning('Mất kết nối mạng.')" online="…" />
+ *   <network offline="$toast.warning('Mất kết nối mạng.')" online="…" />
  *
  *   connected  false while the browser says the device has no network; true on the server's first
  *              paint, corrected as the kernel starts
@@ -23,11 +23,11 @@
  *              closes it, and for duration after it comes back; false on the server's first paint
  *   close()    close the notice until the next change
  *   delay      how long the network must stay gone before it counts as gone, in milliseconds (1000;
- *              the host's delay="1s", read when the page compiles): a shorter break, a change of Wi-Fi,
+ *              <network delay="1s">, read when the page compiles): a shorter break, a change of Wi-Fi,
  *              changes nothing, opens nothing and sends no event. Drive's stay (kitwork:offline) does
  *              not wait: the visitor just tried something and must hear why it did not go
  *   duration   how long "back online" stays before it closes by itself, in milliseconds (4000, as long
- *              as a toast's success; the host's duration="6s"); 0 stays until closed
+ *              as a toast's success; <network duration="6s">); 0 stays until closed
  *   offline    (event) the connection went; also as the page starts without one (a page brought back
  *              from the history cache), and when Drive could not move to a page because of it
  *              (kitwork:offline): a click that did nothing is told why, and a closed notice opens again

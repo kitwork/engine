@@ -8,11 +8,11 @@ import (
 )
 
 // The toast (decisions of 17/10/2026, docs/components/toast.md) is one of Kitwork's components, written
-// on a <box>: a stack of short notices at an edge of the screen. The author draws the stack and ONE
+// as its tag, <toast>: a stack of short notices at an edge of the screen. The author draws the stack and ONE
 // notice, in markup, the way terminal's bar is drawn; the component gives the behaviour (the list, the
 // time, the keyboard, what a screen reader hears); the engine writes the wiring:
 //
-//	<box component="toast" as="$toast" place="bottom-end" gap="2">
+//	<toast as="$toast" place="bottom-right" gap="2">
 //	  <card for="notice of notices; key: notice.id" flex="row" gap="3" padding="3">
 //	    <icon show="notice.tone == 'danger'" value="alert-circle" color="danger" />
 //	    <box gap="1">
@@ -22,10 +22,11 @@ import (
 //	    </box>
 //	    <button click="dismiss(notice.id)"><icon value="x" alt="Đóng thông báo" /></button>
 //	  </card>
-//	</box>
+//	</toast>
 //
-//   - The host is the stack: fixed at the edge or corner place names (six, bottom-end when not written;
-//     the classes toast and toast-<place>, reboot.css), role="region" named "Thông báo (F8)" (the page's
+//   - The host is the stack: fixed at the edge or corner place names (six, bottom-right when not
+//     written; left and right are the design's and turn around on a page written right to left; the
+//     classes toast and toast-<place>, reboot.css), role="region" named "Thông báo (F8)" (the page's
 //     language; alt changes the first words), tabindex="-1" so F8 can bring the focus in. place and limit
 //     (how many show at once, 1 to 10, 3 when not written) go to the instance in data-kitwork-scope.
 //   - The notice is the host's one direct child written for="<name> of notices; key: <name>.id": the
@@ -47,8 +48,26 @@ import (
 // the toast's own), and a call whose notice the blueprint cannot draw (a button or a link, a title, a
 // tone).
 
-// toastPlaces are where a stack stands on the screen, the first when place is not written.
-var toastPlaces = []string{"bottom-end", "bottom", "bottom-start", "top-end", "top", "top-start"}
+// toastPlaces are where a stack stands on the screen, the first when place is not written. Left and
+// right are the design's: on a page written right to left (dir="rtl") a stack at the bottom right
+// stands at the bottom left (reboot.css places it with inset-inline).
+var toastPlaces = []string{"bottom-right", "bottom", "bottom-left", "top-right", "top", "top-left"}
+
+// toastRenamedPlaces are the places of before 19/10/2026, each with the word written now: start and
+// end became left and right. The network's place takes the same words and is told the same.
+var toastRenamedPlaces = map[string]string{
+	"bottom-end": "bottom-right", "bottom-start": "bottom-left", "top-end": "top-right", "top-start": "top-left",
+}
+
+// toastRenamedPlace is the error for a place written the way of before 19/10/2026, nil for any other
+// value.
+func toastRenamedPlace(n *Node, a *Attr, value string) error {
+	word, ok := toastRenamedPlaces[value]
+	if !ok {
+		return nil
+	}
+	return errAttr(n, a, `place="%s": start và end nay là left và right, viết place="%s" (tự lật khi trang viết từ phải sang trái)`, value, word)
+}
 
 // toastFields are what a notice has, as the blueprint reads it: notice.<field>.
 var toastFields = []string{"id", "message", "title", "tone", "loading", "action", "count", "leaving"}
@@ -131,9 +150,6 @@ func (t *toastScope) inputs() []input {
 // toastHost reads the toast's own words off its host — place, limit, alt — and finds the blueprint of
 // a notice inside it; the host then goes on as the host of a component without a UI.
 func (c *compiler) toastHost(n *Node, component *Attr) (*Node, *toastScope, error) {
-	if n.Tag != "box" {
-		return nil, nil, errAttr(n, component, "toast đặt trên <box>: chồng thông báo là một khung; viết <box component=\"toast\" as=\"$toast\">…</box>")
-	}
 	if c.toast != nil {
 		at := attrNamed(c.toast.node, "component")
 		return nil, nil, errAttr(n, component, "trang đã có một toast ở %s:%d:%d: mỗi trang một chồng thông báo (một phím F8, một chỗ cho thông báo)", c.toast.node.File, at.Line, at.Column)
@@ -160,7 +176,7 @@ func (c *compiler) toastHost(n *Node, component *Attr) (*Node, *toastScope, erro
 		}
 		switch base {
 		case "if", "for", "show":
-			return nil, nil, errAttr(n, a, "toast luôn có mặt và có một trên mỗi trang: bỏ %s trên thẻ chủ (ẩn hiện từng thông báo là việc của toast)", base)
+			return nil, nil, errAttr(n, a, "toast luôn có mặt và có một trên mỗi trang: bỏ %s trên <toast> (ẩn hiện từng thông báo là việc của toast)", base)
 		case "persist", "remember":
 			return nil, nil, errAttr(n, a, "toast không giữ gì qua các lần ghé: thông báo là chuyện của lúc này; bỏ %s", base)
 		case "role", "aria-live", "aria-label", "aria-atomic":
@@ -181,6 +197,9 @@ func (c *compiler) toastHost(n *Node, component *Attr) (*Node, *toastScope, erro
 		}
 		switch base {
 		case "place":
+			if err := toastRenamedPlace(n, a, value); err != nil {
+				return nil, nil, err
+			}
 			if !containsName(toastPlaces, value) {
 				return nil, nil, errAttr(n, a, "place của toast là một mép hay góc màn hình: %s; không phải %q", strings.Join(toastPlaces, ", "), value)
 			}
@@ -230,19 +249,19 @@ func (c *compiler) toastBlueprint(n *Node, scope *toastScope) error {
 		if each.key == nil || strings.TrimSpace(each.key.source) != each.item+".id" {
 			return errAttr(ch, a, "mẫu thông báo cần key: %s.id: mỗi thông báo giữ chỗ của nó khi chồng đổi (focus không mất); viết for=\"%s of notices; key: %s.id\"", each.item, each.item, each.item)
 		}
-		if attrNamed(ch, "component").Name == "component" {
-			return errAttr(ch, attrNamed(ch, "component"), "mẫu thông báo không mang component: một phần tử, một component")
+		if c.callsComponent(ch) {
+			return errAt(ch, "mẫu thông báo không là component (<%s>): một phần tử, một component; đặt <%s> bên trong một <card>", ch.Tag, ch.Tag)
 		}
-		if !containerHosts[ch.Tag] || ch.Tag == "item" {
+		if ch.Tag != "box" && ch.Tag != "card" && ch.Tag != "section" {
 			return errAt(ch, "mẫu thông báo là một khung: <card for=\"%s of notices; key: %s.id\">, hay <box>, <section>; không phải <%s>", each.item, each.item, ch.Tag)
 		}
 		scope.template, scope.item = ch, each.item
 	}
 	if scope.template == nil {
 		if deep := toastDeepTemplate(n.Children); deep != nil {
-			return errAttr(deep, attrNamed(deep, "for"), "mẫu thông báo là con trực tiếp của thẻ chủ toast: đưa phần tử có for=\"… of notices\" lên ngay dưới <box component=\"toast\">")
+			return errAttr(deep, attrNamed(deep, "for"), "mẫu thông báo là con trực tiếp của <toast>: đưa phần tử có for=\"… of notices\" lên ngay dưới <toast>")
 		}
-		return errAt(n, "toast cần một mẫu thông báo bên trong thẻ chủ: %s; từ 17/10/2026 người viết vẽ thông báo, toast không còn giao diện dựng sẵn", toastBlueprintHint)
+		return errAt(n, "toast cần một mẫu thông báo bên trong <toast>: %s; từ 17/10/2026 người viết vẽ thông báo, toast không còn giao diện dựng sẵn", toastBlueprintHint)
 	}
 	if deep := toastDeepTemplate(scope.template.Children); deep != nil {
 		return errAttr(deep, attrNamed(deep, "for"), "mẫu thông báo không lồng một mẫu thông báo khác")
@@ -258,8 +277,8 @@ func (c *compiler) toastBlueprint(n *Node, scope *toastScope) error {
 				}
 				continue
 			}
-			if a := attrNamed(ch, "component"); a.Name == "component" {
-				return errAttr(ch, a, "mẫu thông báo không chứa component: một phần tử, một component; đặt nó ngoài toast")
+			if c.callsComponent(ch) {
+				return errAt(ch, "mẫu thông báo không chứa component (<%s>): một phần tử, một component; đặt nó ngoài toast", ch.Tag)
 			}
 			for i := range ch.Attrs {
 				if err := c.toastReads(ch, &ch.Attrs[i], scope); err != nil {
@@ -805,7 +824,8 @@ func toastLiteral(ir any) (any, bool) {
 }
 
 // toastDuration reads a duration written out: 0 stays, "4s" and "800ms" are times; it returns nil for a
-// value from data.
+// value from data. The string goes to the browser as written and the toast reads it there, in s or ms
+// only (jit/js/components/toast): a duration in m or h (duration.go) is told its seconds.
 func toastDuration(use aliasExpr, ir any) (*float64, error) {
 	literal, ok := toastLiteral(ir)
 	if !ok {
@@ -818,35 +838,45 @@ func toastDuration(use aliasExpr, ir any) (*float64, error) {
 			return &zero, nil
 		}
 		if v < 0 {
-			return nil, toastError(use, "duration không âm: viết một thời lượng như duration: '%s', hay 0 để thông báo ở lại tới khi đóng", durationSuggestion(strconv.FormatFloat(-v, 'f', -1, 64)))
+			return nil, toastError(use, "duration không âm: viết một thời lượng như duration: '%s', hay 0 để thông báo ở lại tới khi đóng", readDuration(strconv.FormatFloat(-v, 'f', -1, 64)).suggestion(durationMilliseconds))
 		}
-		return nil, toastError(use, "duration: %s thiếu đơn vị: viết duration: '%s' (0 là ở lại tới khi đóng)", strconv.FormatFloat(v, 'f', -1, 64), durationSuggestion(strconv.FormatFloat(v, 'f', -1, 64)))
+		return nil, toastError(use, "duration: %s thiếu đơn vị: viết duration: '%s' (0 là ở lại tới khi đóng)", strconv.FormatFloat(v, 'f', -1, 64), readDuration(strconv.FormatFloat(v, 'f', -1, 64)).suggestion(durationMilliseconds))
 	case string:
 		value := strings.TrimSpace(v)
-		m := durationRe.FindStringSubmatch(value)
-		if m == nil {
-			if strings.HasPrefix(value, "-") {
-				return nil, toastError(use, "duration không âm: viết một thời lượng như duration: '4s', hay 0 để thông báo ở lại tới khi đóng")
+		if strings.HasPrefix(value, "-") {
+			return nil, toastError(use, "duration không âm: viết một thời lượng như duration: '4s', hay 0 để thông báo ở lại tới khi đóng")
+		}
+		d := readDuration(value)
+		switch d.problem {
+		case durationZero:
+			if d.unit == "" {
+				return nil, toastError(use, "duration: '%s': thông báo ở lại tới khi đóng thì viết duration: 0", v)
 			}
-			if unitlessRe.MatchString(value) {
-				if number, _ := strconv.ParseFloat(value, 64); number == 0 {
-					return nil, toastError(use, "duration: '%s': thông báo ở lại tới khi đóng thì viết duration: 0", v)
-				}
-				return nil, toastError(use, "duration: '%s' thiếu đơn vị: viết duration: '%s'", v, durationSuggestion(value))
-			}
+		case durationNoUnit:
+			return nil, toastError(use, "duration: '%s' thiếu đơn vị: viết duration: '%s'", v, d.suggestion(durationMilliseconds))
+		case durationTwoUnits, durationForeign:
+			return nil, toastError(use, "duration: '%s' %s: viết duration: '%s'", v, d.reason(), toastSeconds(d))
+		case durationNotOne:
 			return nil, toastError(use, "duration: '%s' không phải một thời lượng: viết duration: '4s' hay '800ms' (0 là ở lại tới khi đóng)", v)
 		}
-		number, _ := strconv.ParseFloat(m[1], 64)
-		ms := number
-		if m[2] == "s" {
-			ms = number * 1000
-		}
-		if ms > toastLongest {
+		if d.ms > toastLongest {
 			return nil, toastError(use, "duration: '%s' dài hơn 60 giây: thông báo ở lại tới khi đóng thì viết duration: 0", v)
 		}
-		return &ms, nil
+		if d.unit == "m" || d.unit == "h" {
+			return nil, toastError(use, "duration: '%s': thông báo đọc thời lượng bằng s hay ms: viết duration: '%s'", v, toastSeconds(d))
+		}
+		return &d.ms, nil
 	}
 	return nil, toastError(use, "duration là một thời lượng có đơn vị ('4s', '800ms') hay 0 (ở lại tới khi đóng)")
+}
+
+// toastSeconds is the duration to write for the toast: in seconds when it would be in m or h, which the
+// toast does not read.
+func toastSeconds(d duration) string {
+	if d.unit == "m" || d.unit == "h" {
+		return strconv.FormatFloat(d.ms/1000, 'f', -1, 64) + "s"
+	}
+	return d.suggestion(durationMilliseconds)
 }
 
 // toastAction checks an action written out: a label, and a click that is an arrow function of nothing

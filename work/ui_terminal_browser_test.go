@@ -29,7 +29,7 @@ router.colors({ brand: "#c8742c" });
 	"localhost/page.ui": `<page><content /></page>`,
 	"localhost/content.ui": `<content padding="4" gap="4">
   <box id="near">
-    <box component="terminal" as="$install" typing="800ms" background="panel" radius="medium">
+    <terminal as="$install" typing="800ms" background="panel" radius="medium">
       <box flex="row" align="center" gap="3" padding-x="4" padding-y="2">
         <text size="small" font="code">bash</text>
         <button id="copy-near" click="copy()">{{ copied ? 'Đã chép' : 'Chép' }}</button>
@@ -38,16 +38,16 @@ router.colors({ brand: "#c8742c" });
       <box padding="4">
         <code language="bash">npm i kitwork</code>
         <text>added 1 package</text>
-        <box component="dropdown">
+        <dropdown>
           <button click="toggle()">Mở</button>
           <popover><code>not a command</code></popover>
-        </box>
+        </dropdown>
         <code language="powershell">kitwork dev</code>
       </box>
-    </box>
+    </terminal>
   </box>
   <box id="long" max-width="320px">
-    <box component="terminal" typing="3s" background="panel">
+    <terminal typing="3s" background="panel">
       <box flex="row" padding-x="4" padding-y="2">
         <button id="copy-long" click="copy()">{{ copied ? 'Đã chép' : 'Chép' }}</button>
       </box>
@@ -59,18 +59,18 @@ router.colors({ brand: "#c8742c" });
         <code language="bash">go run .</code>
         <code language="bash">curl -fsS http://localhost:8080/ -H 'Host: kitwork.localhost'</code>
       </box>
-    </box>
+    </terminal>
   </box>
   <box height="2400px"></box>
   <box id="far">
-    <box component="terminal" typing="1s" background="panel">
+    <terminal typing="1s" background="panel">
       <box padding="4">
         <code language="powershell">Get-ChildItem</code>
         <text>content.ui</text>
         <code language="powershell">kitwork dev</code>
         <button id="copy-far" click="copy()">{{ copied ? 'Đã chép' : 'Chép' }}</button>
       </box>
-    </box>
+    </terminal>
   </box>
   <box height="2400px"></box>
 </content>`,

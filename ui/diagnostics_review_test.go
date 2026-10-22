@@ -11,21 +11,23 @@ import (
 
 // The progressbar is a call of Kitwork's component whose host is drawn — it holds the line — so
 // presentation written there would do something the engine does not attach yet (question 5): an error,
-// never "trang hiện như không viết nó". The toast was one until 17/10/2026; its stack is now the author's
-// <box>, which takes what any box takes, the stack's own words read first (toast.go). The value is read
-// first. CONTROL: a word that does nothing on the reader stays a warning, and the toast draws what is
-// written on its host.
+// never "trang hiện như không viết nó". The toast was one until 17/10/2026; its stack is now a box the
+// author draws (<toast> builds a <box>, 18/10/2026), which takes what any box takes, the stack's own
+// words read first (toast.go). The value is read first. CONTROL: a word that does nothing on the reader
+// stays a warning, and the toast draws what is written on its host.
 func TestReviewToastAndProgressbarHostsAreDrawn(t *testing.T) {
-	bar := map[string]string{"/site/page.ui": `<page><box component="progressbar" opacity="50" /><content /></page>`, "/site/content.ui": `<content><text>x</text></content>`}
-	mustFail(t, bar, "page.ui:1:36", "progressbar chỉ nhận color (màu của vạch), thickness (độ dày), delay (chờ bao lâu mới hiện) và alt (tên đọc được), không nhận opacity")
-	// the value is read first: a typo is the table's error, on the toast's host as on any box
-	mustFail(t, content(`<content>`+toastStack(` padding="bigg"`)+`</content>`), "content.ui:1:33", `padding theo thang khoảng cách, không có "bigg"`)
-	mustFail(t, content(`<content>`+toastStack(` click="x(("`)+`</content>`), "content.ui:1:33", "biểu thức không hợp lệ: x((")
+	bar := map[string]string{"/site/page.ui": `<page><progressbar opacity="50" /><content /></page>`, "/site/content.ui": `<content><text>x</text></content>`}
+	mustFail(t, bar, "page.ui:1:20", "progressbar chỉ nhận color (màu của vạch), thickness (độ dày), delay (chờ bao lâu mới hiện) và alt (tên đọc được), không nhận opacity")
+	// the value is read first: a typo is the table's error, on the toast's host as on any box; the words
+	// stand after `<content><toast `, column 17
+	mustFail(t, content(`<content>`+toastStack(` padding="bigg"`)+`</content>`), "content.ui:1:17", `padding theo thang khoảng cách, không có "bigg"`)
+	mustFail(t, content(`<content>`+toastStack(` click="x(("`)+`</content>`), "content.ui:1:17", "biểu thức không hợp lệ: x((")
 	// place is the stack's own word: an edge or a corner of the screen, not a place beside a parent
-	mustFail(t, content(`<content>`+toastStack(` place="top-end-x"`)+`</content>`), "content.ui:1:33", "place của toast là một mép hay góc màn hình")
+	mustFail(t, content(`<content>`+toastStack(` place="top-right-x"`)+`</content>`), "content.ui:1:17", "place của toast là một mép hay góc màn hình")
 
-	// CONTROL: the toast draws its host as written; the reader's clipped region draws nothing
-	html := compileWarns(t, content(`<content>`+toastStack(` gap="8" padding="4" background="brand" medium:gap="2" place="top"`)+`</content>`), "content.ui:1:15", "toast không có as")
+	// CONTROL: the toast draws its host as written (the warning stands at the tag); the reader's clipped
+	// region draws nothing
+	html := compileWarns(t, content(`<content>`+toastStack(` gap="8" padding="4" background="brand" medium:gap="2" place="top"`)+`</content>`), "content.ui:1:10", "toast không có as")
 	mustContain(t, html, `<div class="flex-column gap-8 padding-4 background-brand medium:gap-2 toast toast-top" data-kitwork-component="toast" role="region"`)
 	reader := map[string]string{"/site/page.ui": `<page><content /><reader padding="4" /></page>`, "/site/content.ui": `<content><text>x</text></content>`}
 	compileWarns(t, reader, "page.ui:1:26", "padding không có tác dụng trên reader")
@@ -37,17 +39,17 @@ func TestReviewToastAndProgressbarHostsAreDrawn(t *testing.T) {
 // warns and renders the popover as one with no show.
 func TestReviewPopoverShowThatWouldHide(t *testing.T) {
 	popover := func(show string) string {
-		return `<content><box component="dropdown"><button click="toggle()">m</button><popover ` + show + `><text>x</text></popover></box></content>`
+		return `<content><dropdown><button click="toggle()">m</button><popover ` + show + `><text>x</text></popover></dropdown></content>`
 	}
 	for _, show := range []string{`show="false"`, `show="ready"`, `show="!open"`} {
 		source := popover(show)
 		mustFail(t, content(source), where("content.ui", source, "show="),
 			"popover hiện khi component chứa nó mở; "+show+" trên popover chưa được hỗ trợ (bỏ nó thì popover vẫn hiện khi mở)")
 	}
-	mustFail(t, content(popover(`show="x(("`)), "content.ui:1:80", "biểu thức không hợp lệ: x((")
+	mustFail(t, content(popover(`show="x(("`)), where("content.ui", popover(`show="x(("`), "show="), "biểu thức không hợp lệ: x((")
 
 	// CONTROL
-	written := compileWarns(t, content(popover(`show="true"`)), "content.ui:1:80", "popover hiện khi component chứa nó mở; không viết show")
+	written := compileWarns(t, content(popover(`show="true"`)), where("content.ui", popover(`show="true"`), "show="), "popover hiện khi component chứa nó mở; không viết show")
 	if plain := compileQuiet(t, content(popover(""))); written != plain {
 		t.Errorf("show=\"true\" renders the popover as one with no show:\n got  %s\n want %s", written, plain)
 	}
@@ -131,21 +133,21 @@ func TestReviewBareInputAtACallNeedsAValue(t *testing.T) {
 	layout := func(call string) map[string]string {
 		return map[string]string{"/site/content.ui": `<content>` + call + `</content>`, "/site/product-card.ui": `<card><text>{{ open }}</text><text if="selected">s</text></card>`}
 	}
-	cart := map[string]string{"/site/content.ui": `<content><box component="cart" open /></content>`, "/site/cart.ui": `<box><text>{{ open }}</text></box>`,
-		"/site/cart.work": `import { component } from "kitwork"; component.define("cart", () => { var open = false; });`}
+	cart := map[string]string{"/site/content.ui": `<content><shop-cart open /></content>`, "/site/shop-cart.ui": `<box><text>{{ open }}</text></box>`,
+		"/site/shop-cart.work": `import { component } from "kitwork"; component.define("shop-cart", () => { var open = false; });`}
 	for _, c := range []struct {
 		files    map[string]string
 		at, says string
 	}{
-		{content(`<content><box component="dropdown" open><text>x</text></box></content>`), "content.ui:1:36", "open cần một giá trị"},
+		{content(`<content><dropdown open><text>x</text></dropdown></content>`), "content.ui:1:20", "open cần một giá trị"},
 		{layout(`<product-card open />`), "content.ui:1:24", "open cần một giá trị"},
 		{layout(`<product-card selected />`), "content.ui:1:24", "selected cần một giá trị"},
-		{cart, "content.ui:1:32", "open cần một giá trị"},
+		{cart, "content.ui:1:21", "open cần một giá trị"},
 	} {
 		mustFail(t, c.files, c.at, c.says)
 	}
-	// CONTROL
-	html := compileWarns(t, content(`<content><button component="appearance" click="toggle()" disabled>x</button></content>`), "content.ui:1:58", `viết disabled="true"`)
+	// CONTROL: appearance builds a <button>, which reads disabled
+	html := compileWarns(t, content(`<content><appearance click="toggle()" disabled>x</appearance></content>`), "content.ui:1:39", `viết disabled="true"`)
 	mustContain(t, html, `type="button" disabled data-kitwork-event="click: toggle()">x</button>`)
 	html = compileWarns(t, content(`<content><text strikethrough>x</text></content>`), "content.ui:1:16", `viết strikethrough="true"`)
 	mustContain(t, html, `<s>x</s>`)
@@ -182,12 +184,13 @@ func TestReviewCallsReadTheirWordsFirst(t *testing.T) {
 		return map[string]string{"/site/page.ui": `<page>` + call + `<content /></page>`, "/site/header.ui": `<header><text>H</text></header>`, "/site/content.ui": text}
 	}
 	cart := func(call string) map[string]string {
-		return map[string]string{"/site/content.ui": `<content>` + call + `</content>`, "/site/cart.ui": `<box><text>{{ count }}</text></box>`,
-			"/site/cart.work": `import { component } from "kitwork"; component.define("cart", () => { var count = 0; });`}
+		return map[string]string{"/site/content.ui": `<content>` + call + `</content>`, "/site/shop-cart.ui": `<box><text>{{ count }}</text></box>`,
+			"/site/shop-cart.work": `import { component } from "kitwork"; component.define("shop-cart", () => { var count = 0; });`}
 	}
 	promo := func(call string) map[string]string {
-		return map[string]string{"/site/content.ui": `<content>` + call + `</content>`, "/site/promo.ui": `<card><text>x</text></card>`}
+		return map[string]string{"/site/content.ui": `<content>` + call + `</content>`, "/site/shop-promo.ui": `<card><text>x</text></card>`}
 	}
+	// a word at <shop-cart …> stands at column 21, at <shop-promo …> at column 22
 	for _, c := range []struct {
 		files    map[string]string
 		at, says string
@@ -195,11 +198,11 @@ func TestReviewCallsReadTheirWordsFirst(t *testing.T) {
 		{region(`<header gpa="4" />`), "page.ui:1:15", "thuộc tính gpa không có trong .ui; thẻ vùng <header /> ở chỗ gọi chỉ nhận source, if, show"},
 		{region(`<header class="x" />`), "page.ui:1:15", "class là chữ của web"},
 		{region(`<header background="papr" />`), "page.ui:1:15", `background="papr": "papr" không có trong bảng màu của trang`},
-		{cart(`<box component="cart" background="papr" />`), "content.ui:1:32", `background="papr": "papr" không có trong bảng màu của trang`},
-		{cart(`<box component="cart" click="x((" />`), "content.ui:1:32", "biểu thức không hợp lệ: x(("},
-		{cart(`<box component="cart" alt="x" />`), "content.ui:1:32", "alt là thuộc tính của <box>, gốc của cart: viết nó trong cart.ui"},
-		{promo(`<promo background="papr" />`), "content.ui:1:17", `background="papr": "papr" không có trong bảng màu của trang`},
-		{promo(`<promo alt="x" />`), "content.ui:1:17", "alt là thuộc tính của <card>, gốc của promo: viết nó trong promo.ui"},
+		{cart(`<shop-cart background="papr" />`), "content.ui:1:21", `background="papr": "papr" không có trong bảng màu của trang`},
+		{cart(`<shop-cart click="x((" />`), "content.ui:1:21", "biểu thức không hợp lệ: x(("},
+		{cart(`<shop-cart alt="x" />`), "content.ui:1:21", "alt là thuộc tính của <box>, gốc của shop-cart: viết nó trong shop-cart.ui"},
+		{promo(`<shop-promo background="papr" />`), "content.ui:1:22", `background="papr": "papr" không có trong bảng màu của trang`},
+		{promo(`<shop-promo alt="x" />`), "content.ui:1:22", "alt là thuộc tính của <card>, gốc của shop-promo: viết nó trong shop-promo.ui"},
 	} {
 		mustFail(t, c.files, c.at, c.says)
 	}
@@ -210,9 +213,9 @@ func TestReviewCallsReadTheirWordsFirst(t *testing.T) {
 	}{
 		{region(`<header background="paper" />`), "page.ui:1:15", "thẻ vùng <header /> ở chỗ gọi chỉ nhận source, if, show; background đặt trên gốc của file header.ui"},
 		{region(`<header id="top" />`), "page.ui:1:15", "id đặt trên gốc của file header.ui"},
-		{cart(`<box component="cart" background="paper" />`), "content.ui:1:32", "trình bày của cart nằm trong cart.ui"},
-		{cart(`<box component="cart" click="add()" />`), "content.ui:1:32", "sự kiện click đặt trong cart.ui"},
-		{promo(`<promo background="paper" />`), "content.ui:1:17", "trình bày của promo nằm trong promo.ui"},
+		{cart(`<shop-cart background="paper" />`), "content.ui:1:21", "trình bày của shop-cart nằm trong shop-cart.ui"},
+		{cart(`<shop-cart click="add()" />`), "content.ui:1:21", "sự kiện click đặt trong shop-cart.ui"},
+		{promo(`<shop-promo background="paper" />`), "content.ui:1:22", "trình bày của shop-promo nằm trong shop-promo.ui"},
 	} {
 		mustFail(t, c.files, c.at, c.says)
 	}
@@ -238,18 +241,19 @@ func TestReviewInputWordsCopiedAsWritten(t *testing.T) {
 }
 
 // A tag written with capitals that names nothing read lowercase is named as written, and when its
-// capitals stand for dashes and a layout has that name, the message says how to call it (the React
-// habit <ProductCard />). CONTROL: capitals that name a layout read lowercase render with a warning.
+// capitals stand for dashes and a layout or a component has that name, the message says how to call it
+// (the React habit <ProductCard />): a component is called by its tag too (18/10/2026). CONTROL:
+// capitals that name a layout read lowercase render with a warning.
 func TestReviewCapitalTagThatNamesNothing(t *testing.T) {
 	card := map[string]string{"/site/content.ui": `<content><ProductCard /></content>`, "/site/product-card.ui": `<card><text>x</text></card>`}
-	if got := compileError(t, card); got != "content.ui:1:10: không biết thẻ <ProductCard>: tên viết thường, các chữ nối bằng gạch ngang; layout product-card.ui gọi bằng <product-card />" {
+	if got := compileError(t, card); got != "content.ui:1:10: không biết thẻ <ProductCard>: tên viết thường, các chữ nối bằng gạch ngang; layout product-card.ui gọi bằng <product-card>" {
 		t.Errorf("<ProductCard> beside product-card.ui:\n got %s", got)
 	}
 	cart := map[string]string{"/site/content.ui": `<content><ShopCart /></content>`, "/site/shop-cart.ui": `<box><text>{{ count }}</text></box>`,
 		"/site/shop-cart.work": `import { component } from "kitwork"; component.define("shop-cart", () => { var count = 0; });`}
-	mustFail(t, cart, "content.ui:1:10", `không biết thẻ <ShopCart>: tên viết thường, các chữ nối bằng gạch ngang; shop-cart có logic (shop-cart.work): viết <box component="shop-cart" />`)
+	mustFail(t, cart, "content.ui:1:10", `không biết thẻ <ShopCart>: tên viết thường, các chữ nối bằng gạch ngang; component shop-cart (shop-cart.work) gọi bằng <shop-cart>`)
 	mustFail(t, content(`<content><ProductCard /></content>`), "content.ui:1:10", "không biết thẻ <ProductCard> (đọc là <productcard>): không có trong từ vựng của Kitwork, không có layout productcard.ui")
 	// CONTROL
-	promo := map[string]string{"/site/content.ui": `<content><Promo /></content>`, "/site/promo.ui": `<card><text>x</text></card>`}
-	mustContain(t, compileWarns(t, promo, "content.ui:1:10", "tên thẻ <Promo> viết thường: <promo>"), `<div class="card flex-column"><p>x</p></div>`)
+	promo := map[string]string{"/site/content.ui": `<content><Shop-Promo /></content>`, "/site/shop-promo.ui": `<card><text>x</text></card>`}
+	mustContain(t, compileWarns(t, promo, "content.ui:1:10", "tên thẻ <Shop-Promo> viết thường: <shop-promo>"), `<div class="card flex-column"><p>x</p></div>`)
 }

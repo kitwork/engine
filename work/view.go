@@ -2,29 +2,85 @@ package work
 
 import "github.com/kitwork/engine/value"
 
-// View / Bind / Data / Meta / Notfound all return the DEFERRED ViewBuilder a filesystem-routed
-// handler accumulates binding + meta on; the tree lifecycle renders it once at the end of the
-// request (see viewbuilder.go), so .title()/.meta() set anywhere still reach <head>.
+// Bind / Data / Meta / Notfound return the DEFERRED ViewBuilder a filesystem-routed handler
+// accumulates binding + meta on; the tree lifecycle renders it once at the end of the request (see
+// viewbuilder.go), so .title()/.meta() set anywhere still reach <head>.
 //
 //	ctx.view()                       → render this folder's page.kitwork.html
 //	ctx.view({ user })               → bind `user` into it
 //	ctx.bind({ note }).title("…")    → bind + set meta
-func (c *Context) View(args ...value.Value) *ViewBuilder   { return c.viewBuilder().apply(args...) }
-func (c *Context) Bind(v value.Value) *ViewBuilder         { return c.viewBuilder().Bind(v) }
-func (c *Context) Data(v value.Value) *ViewBuilder         { return c.viewBuilder().Data(v) }
-func (c *Context) Meta(v value.Value) *ViewBuilder         { return c.viewBuilder().Meta(v) }
-func (c *Context) Jsonld(args ...value.Value) *ViewBuilder { return c.viewBuilder().Jsonld(args...) }
+//
+// View fills the same deferred view and returns the request's response, as response.view does: the
+// answer of a page, after its edits (20/10/2026): context.title("Quán Cà Phê").view({ menu }).
+func (c *Context) View(args ...value.Value) (*Response, error) {
+	response := c.Response()
+	if response.inUISite() {
+		// router.work: the answer of the folder's .ui page, drawn with the names of the object
+		// (serveUIAnswer); no page name, no deferred template view
+		data := value.New(map[string]value.Value{})
+		for _, arg := range args {
+			if arg.IsMap() {
+				data = arg
+			}
+		}
+		return response.View(data)
+	}
+	if err := response.answering("view"); err != nil {
+		return response, err
+	}
+	c.viewBuilder().apply(args...)
+	return response, nil
+}
+func (c *Context) Bind(v value.Value) *ViewBuilder { return c.viewBuilder().Bind(v) }
+func (c *Context) Data(v value.Value) *ViewBuilder { return c.viewBuilder().Data(v) }
 
-// Title, Description and Image set the page's head from inside a handler or a Kitwork UI view:
-// ctx.title(product.name + " — Quán Cà Phê").
-func (c *Context) Title(v value.Value) *ViewBuilder       { return c.viewBuilder().Title(v) }
-func (c *Context) Description(v value.Value) *ViewBuilder { return c.viewBuilder().Description(v) }
-func (c *Context) Image(v value.Value) *ViewBuilder       { return c.viewBuilder().Image(v) }
+// The page's text from the context. In router.work each is the response's edit, before the answer:
+// context.title("x").description("y").view({ … }) (response_order.go). A template site keeps the
+// deferred builder they give there, chain and all: ctx.bind({ note }).title(note.title).type("article").
+func (c *Context) Meta(v value.Value) (any, error) {
+	if response := c.Response(); response.inUISite() {
+		return response.Meta(v)
+	}
+	return c.viewBuilder().Meta(v), nil
+}
+func (c *Context) Jsonld(args ...value.Value) (any, error) {
+	if response := c.Response(); response.inUISite() {
+		return response.Jsonld(args...)
+	}
+	return c.viewBuilder().Jsonld(args...), nil
+}
+func (c *Context) Title(v value.Value) (any, error) {
+	if response := c.Response(); response.inUISite() {
+		return response.Title(v)
+	}
+	return c.viewBuilder().Title(v), nil
+}
+func (c *Context) Description(v value.Value) (any, error) {
+	if response := c.Response(); response.inUISite() {
+		return response.Description(v)
+	}
+	return c.viewBuilder().Description(v), nil
+}
+func (c *Context) Image(v value.Value) (any, error) {
+	if response := c.Response(); response.inUISite() {
+		return response.Image(v)
+	}
+	return c.viewBuilder().Image(v), nil
+}
 
-// Notfound marks a 404 and renders the nearest notfound.kitwork.html, bubbling up the folder
-// chain. Variadic so the reflection layer does not auto-invoke it as a 0-arg getter — it must stay
-// callable as ctx.notfound().
-func (c *Context) Notfound(args ...value.Value) *ViewBuilder {
+// Notfound marks a 404 and renders the nearest notfound.kitwork.html (notfound.ui in router.work,
+// answerUIPage), bubbling up the folder chain. In router.work it is an answer and gives the response.
+// Variadic so the reflection layer does not auto-invoke it as a 0-arg getter — it must stay callable as
+// ctx.notfound().
+func (c *Context) Notfound(args ...value.Value) (any, error) {
+	if response := c.Response(); response.inUISite() {
+		if err := response.answering("notFound"); err != nil {
+			return response, err
+		}
+		c.request.router.isNotfound = true
+		c.viewBuilder()
+		return response, nil
+	}
 	c.request.router.isNotfound = true
-	return c.viewBuilder()
+	return c.viewBuilder(), nil
 }

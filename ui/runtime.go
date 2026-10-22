@@ -33,6 +33,12 @@ type frame struct {
 	file string
 	// client: the kernel runs the component, so its names are live in the browser
 	client bool
+	// countdown is the countdown this frame is the instance of, nil for any other: what its names are
+	// called and written with is checked wherever they reach (countdownEvents)
+	countdown *countdownScope
+	// editor is the editor this frame is the instance of, nil for any other: its commands are its
+	// buttons' alone, checked wherever its names reach (editorEvents)
+	editor *editorScope
 	parent *frame
 }
 
@@ -738,8 +744,16 @@ func (c *compiler) runtimeAttributes(n *Node, p *attrPlan, o *elemOp, scope *fra
 	if n.Tag == "popover" {
 		owner := scope.declaring("open")
 		if owner == nil || owner.component == nil || !owner.client || !owner.names["close"] {
-			return pairs, errAt(n, "popover hiện khi component chứa nó mở: đặt nó trong thẻ chủ của một component có open và close (<box component=\"dropdown\">…<popover>…</popover></box>)")
+			return pairs, errAt(n, "popover hiện khi component chứa nó mở: đặt nó trong một component có open và close (<dropdown>…<popover>…</popover></dropdown>)")
 		}
+	}
+	// a countdown's names called and written, on its host, inside it and in what is nested there
+	if err := c.countdownEvents(n, o, p.events, scope); err != nil {
+		return pairs, err
+	}
+	// an editor's commands called anywhere but by its own buttons, and its state written (editor.go)
+	if err := c.editorEvents(n, p.events, scope); err != nil {
+		return pairs, err
 	}
 	var err error
 	if pairs.events, err = scope.wireEvents(n, p.events); err != nil {
@@ -835,8 +849,8 @@ func (c *compiler) strayNames() error {
 			if _, declared := c.called[component].state[use.name]; !declared {
 				continue
 			}
-			message := fmt.Sprintf(`%s là tên của %s, mà ở đây nằm ngoài thẻ chủ của nó nên không đọc hay gọi được gì: đặt chỗ này bên trong thẻ chủ của %s, hoặc đặt as="$tên" trên thẻ chủ rồi viết $tên.%s`,
-				use.name, component, component, use.name)
+			message := fmt.Sprintf(`%s là tên của %s, mà ở đây nằm ngoài <%s> nên không đọc hay gọi được gì: đặt chỗ này bên trong <%s>, hoặc viết <%s as="$tên"> rồi viết $tên.%s`,
+				use.name, component, component, component, component, use.name)
 			if use.attr != nil {
 				return errAttr(use.node, use.attr, "%s", message)
 			}

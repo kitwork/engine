@@ -56,7 +56,7 @@
         '[data-kitwork-component="progressbar"],[data-kitwork-component^="progressbar@"],[data-kitwork-component^="progressbar:"]');
     }
     // How long a move may take before it counts as slow and the bar shows: 120ms, or what the page's
-    // progressbar says (<box component="progressbar" delay="0" /> → data-kitwork-delay). Read at each move, since
+    // progressbar says (<progressbar delay="0" /> → data-kitwork-delay). Read at each move, since
     // the progressbar lives in the page and the page may change.
     function progressDelay() {
       var host = progressHost();
@@ -135,6 +135,7 @@
       if (a.getAttribute("data-kit-reload") === "true") return false;
       if (a.closest && a.closest('[data-kit-reload="true"]')) return false;
       if (a.getAttribute("data-kit-click") || clicks(a)) return false; // an expression link does not navigate
+      if (a.isContentEditable) return false; // a link in words being written (an editor's area) is text, never a move
       if (!sameOrigin(a.href)) return false;
       if (inPage(a)) return false; // in-page #anchor
       return true;
@@ -589,7 +590,7 @@
     // history has already moved the address, so it goes back to the entry of the page on screen, by as
     // many steps as it went (two quick Backs are two); returning is where that return lands, and its
     // popstate only sets the index. Online, a move that fails loads the page whole, as before.
-    var returning = null;
+    var returning = null, leaving = "";
     function stayOffline(url) {
       if (navigator.onLine !== false) return false;
       var back = shownAt - position();
@@ -616,6 +617,7 @@
         if (inPage(a)) history.replaceState({ kitwork: true, y: window.scrollY, i: historyIndex }, "", location.href);
         return;
       }
+      if (holds.size) return; // held: the browser's own move, which asks first
       var dest; try { dest = new URL(a.href, location.href); } catch (x) { return; }
       e.preventDefault();
       if (dest.pathname === location.pathname && dest.search === location.search && !dest.hash) {
@@ -628,13 +630,16 @@
 
     // GET form submits — POST and other methods fall through (the kernel's validate gate, which
     // runs in the capture phase, has already stopped invalid forms: defaultPrevented is respected).
+    // A form's own properties give way to its fields (a field named action or method is f.action,
+    // f.method), so the form is read through the prototype's getters, which no field shadows.
+    var formMethod = Object.getOwnPropertyDescriptor(HTMLFormElement.prototype, "method").get;
+    var formAction = Object.getOwnPropertyDescriptor(HTMLFormElement.prototype, "action").get;
     listen(document, "submit", function (e) {
       if (e.defaultPrevented) return;
       var f = e.target;
-      if (!f || f.tagName !== "FORM" || (f.method || "get").toLowerCase() !== "get") return;
-      if (f.getAttribute("data-kit-reload") === "true") return;
-      if (f.closest && f.closest('[data-kit-reload="true"]')) return;
-      var u; try { u = new URL(f.action || location.href, location.href); } catch (x) { return; }
+      if (!(f instanceof HTMLFormElement) || formMethod.call(f) !== "get") return;
+      if (Element.prototype.closest.call(f, '[data-kit-reload="true"]') || holds.size) return;
+      var u; try { u = new URL(formAction.call(f) || location.href, location.href); } catch (x) { return; }
       if (!sameOrigin(u.href)) return;
       try { u.search = new URLSearchParams(new FormData(f)).toString(); } catch (x) { return; }
       e.preventDefault();
@@ -671,7 +676,11 @@
       if (returning !== null) {
         var arrived = position() === returning;
         returning = null;
-        if (arrived) return;
+        if (arrived) {
+          if (leaving) location.assign(leaving);
+          leaving = "";
+          return;
+        }
       }
       if (documentKey() === shownKey) {
         // the page on screen under another #fragment, or none: the browser has already moved there, as
@@ -694,6 +703,14 @@
         });
         return;
       }
+      if (holds.size && position() !== shownAt) {
+        // held: the address goes back to the page on screen (its form posts there), then the browser
+        // loads the one asked for whole, asking first
+        leaving = location.href;
+        returning = shownAt;
+        history.go(shownAt - position());
+        return;
+      }
       visit(location.href, false, (e.state && e.state.y) || 0, forward);
     });
 
@@ -712,7 +729,10 @@
     history.replaceState({ kitwork: true, i: historyIndex }, "", location.href);
   }
 
-  var drive = { start: start };
+  // hold(key, on): while any key is held (an editor's unsaved words), Drive moves no page itself: a
+  // link, a GET form, Back and Forward are the browser's, which asks before the page goes.
+  var holds = new Set();
+  var drive = { start: start, hold: function (key, on) { if (on) holds.add(key); else holds.delete(key); } };
   kit.drive = drive;
   kit.module("drive", drive);
   kit.onStart(start);

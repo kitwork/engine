@@ -139,17 +139,17 @@ const gateProbe = `<script>
       " color=" + (style(badge, "color") === style(tint, "color") ? "tint" : style(badge, "color"));
 
     // a popover holding a placed child (the engine writes place-anchor on it): it floats below its
-    // opener, at the start of the box that holds both, not beside the opener in their row; the child
-    // sits at its top-end corner
+    // opener, at the left of the box that holds both, not beside the opener in their row; the child
+    // sits at its top-right corner
     var popover = byId("popover");
     popover.hidden = false; // as the dropdown shows it when open
     var dropdown = popover.parentElement, opener = box(dropdown.querySelector("button"));
     var surface = box(popover), corner = box(popover.firstElementChild);
     var edge = parseFloat(style(popover, "border-top-width"));
     report.popover = style(popover, "position") +
-      " at=" + (near(surface.left, box(dropdown).left) ? "start" : surface.left >= opener.right - 0.5 ? "beside" : "elsewhere") +
+      " at=" + (near(surface.left, box(dropdown).left) ? "left" : surface.left >= opener.right - 0.5 ? "beside" : "elsewhere") +
       " below=" + (surface.top > opener.bottom ? "yes" : "no") +
-      " corner=" + (near(corner.top, surface.top + edge) && near(corner.right, surface.right - edge) ? "top-end" : "elsewhere");
+      " corner=" + (near(corner.top, surface.top + edge) && near(corner.right, surface.right - edge) ? "top-right" : "elsewhere");
     popover.hidden = true;
 
     // forced colours: each icon (a mask over its background colour) in the system colour of where it
@@ -416,7 +416,7 @@ var gateCases = []gateCase{
 	// popover fell into its row, beside its opener. Now place-anchor weighs nothing in the elements
 	// layer, under the popover's own place in the page layer.
 	{`a <popover> holding a placed child`, "wide", "popover",
-		"absolute at=start below=yes corner=top-end", "relative at=beside below=no corner=top-end"},
+		"absolute at=left below=yes corner=top-right", "relative at=beside below=no corner=top-right"},
 	// hover: was a bare :hover: a touch screen kept the hover look after a tap. Now it is inside
 	// @media (hover: hover).
 	{`hover:background="brand" on a device that cannot hover`, "hover none", "gated hovered",

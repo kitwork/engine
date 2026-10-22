@@ -84,13 +84,14 @@ var stateWords = []string{"open", "active", "selected", "scrolled", "hover", "fo
 
 // stateSelector is how each state reaches CSS. It sits inside :where(), so every page rule weighs
 // exactly one class and only the order decides. pressed is CSS :active; Kitwork's active: is the link
-// of the page being viewed (aria-current); selected is the tab chosen (aria-selected, which the engine
+// of the page being viewed (aria-current), and a button that is on (aria-pressed, an editor's format
+// at the caret: 20/10/2026); selected is the tab chosen (aria-selected, which the engine
 // binds and the tabs pre-paint sets, 16/10/2026); open follows the nearest element that opens, so the
 // chevron of a closed accordion nested in an open one stays closed; scrolled is the page scrolled away
 // from its top, one flag on <html> (data-kitwork-scrolled) that scrolled.<hash>.js keeps (ScrolledScript).
 var stateSelector = map[string]string{
 	"open":     ":where(:is(details[open],[aria-expanded=true]) *):not(:where(details:not([open]),[aria-expanded=false]) *)",
-	"active":   ":where([aria-current]:not([aria-current=false]))",
+	"active":   ":where([aria-current]:not([aria-current=false]),[aria-pressed=true])",
 	"selected": ":where([aria-selected=true])",
 	"scrolled": ":where(:root[data-kitwork-scrolled] *)",
 	"hover":    ":where(:hover)",
@@ -181,49 +182,80 @@ var shadowReplaced = map[string]string{
 	"sm": "small", "md": "medium", "lg": "large", "xl": "large", "2xl": "large",
 }
 
-// positionWords are the nine positions as (vertical, horizontal), the SwiftUI/Compose way: start is
-// the middle of the leading edge, top the middle of the top edge. align reads them for the children of
-// a container; place inside the parent reads the same words for the element itself.
-var positionWords = []string{"top-start", "top", "top-end", "start", "center", "end", "bottom-start", "bottom", "bottom-end"}
+// positionWords are the nine positions as (vertical, horizontal), the SwiftUI/Compose way: left is the
+// middle of the left edge, top the middle of the top edge. left and right are the design's left and
+// right and mirror on a page written right to left. align reads them for the children of a container;
+// place inside the parent reads the same words for the element itself.
+var positionWords = []string{"top-left", "top", "top-right", "left", "center", "right", "bottom-left", "bottom", "bottom-right"}
 
 var positions = map[string][2]string{
-	"top-start": {"top", "start"}, "top": {"top", "center"}, "top-end": {"top", "end"},
-	"start": {"center", "start"}, "center": {"center", "center"}, "end": {"center", "end"},
-	"bottom-start": {"bottom", "start"}, "bottom": {"bottom", "center"}, "bottom-end": {"bottom", "end"},
+	"top-left": {"top", "left"}, "top": {"top", "center"}, "top-right": {"top", "right"},
+	"left": {"center", "left"}, "center": {"center", "center"}, "right": {"center", "right"},
+	"bottom-left": {"bottom", "left"}, "bottom": {"bottom", "center"}, "bottom-right": {"bottom", "right"},
 }
 
-// flexValue is a screen direction as a flex alignment value: top and start are the beginning of
-// their axis, which follows the writing direction, so start is right in Arabic.
+// flexValue is a screen direction as a flex alignment value: top and left are the beginning of their
+// axis. The horizontal axis follows the writing direction, so left is flex-start and mirrors: it is the
+// right of the screen in Arabic.
 var flexValue = map[string]string{
-	"top": "flex-start", "start": "flex-start", "center": "center", "bottom": "flex-end", "end": "flex-end",
+	"top": "flex-start", "left": "flex-start", "center": "center", "bottom": "flex-end", "right": "flex-end",
 }
 
 // placeWords are place's values: inside the parent (the nine positions and fill) and outside it,
 // floating over what follows (below, above). Every place sets all insets, margins and translate, so
 // a written place replaces popover's default whole. Centred places use physical left:50% with
-// translate, where direction does not matter; the start/end ones are logical, so right-to-left works.
+// translate, where direction does not matter; the left and right ones are logical (inset-inline), so
+// they mirror on a page written right to left.
 var placeWords = []string{
-	"top-start", "top", "top-end", "start", "center", "end", "bottom-start", "bottom", "bottom-end", "fill",
-	"below-start", "below", "below-end", "above-start", "above", "above-end",
+	"top-left", "top", "top-right", "left", "center", "right", "bottom-left", "bottom", "bottom-right", "fill",
+	"below-left", "below", "below-right", "above-left", "above", "above-right",
 }
 
 var places = map[string]string{
 	"fill":         "position:absolute;inset:0;margin:0;translate:none",
-	"top-start":    "position:absolute;inset-block:0 auto;inset-inline:0 auto;margin:0;translate:none",
+	"top-left":     "position:absolute;inset-block:0 auto;inset-inline:0 auto;margin:0;translate:none",
 	"top":          "position:absolute;inset:0 auto auto 50%;margin:0;translate:-50% 0",
-	"top-end":      "position:absolute;inset-block:0 auto;inset-inline:auto 0;margin:0;translate:none",
-	"start":        "position:absolute;inset-block:50% auto;inset-inline:0 auto;margin:0;translate:0 -50%",
+	"top-right":    "position:absolute;inset-block:0 auto;inset-inline:auto 0;margin:0;translate:none",
+	"left":         "position:absolute;inset-block:50% auto;inset-inline:0 auto;margin:0;translate:0 -50%",
 	"center":       "position:absolute;inset:50% auto auto 50%;margin:0;translate:-50% -50%",
-	"end":          "position:absolute;inset-block:50% auto;inset-inline:auto 0;margin:0;translate:0 -50%",
-	"bottom-start": "position:absolute;inset-block:auto 0;inset-inline:0 auto;margin:0;translate:none",
+	"right":        "position:absolute;inset-block:50% auto;inset-inline:auto 0;margin:0;translate:0 -50%",
+	"bottom-left":  "position:absolute;inset-block:auto 0;inset-inline:0 auto;margin:0;translate:none",
 	"bottom":       "position:absolute;inset:auto auto 0 50%;margin:0;translate:-50% 0",
-	"bottom-end":   "position:absolute;inset-block:auto 0;inset-inline:auto 0;margin:0;translate:none",
-	"below-start":  "position:absolute;inset-block:100% auto;inset-inline:0 auto;margin:.5rem 0 0;translate:none;z-index:50",
+	"bottom-right": "position:absolute;inset-block:auto 0;inset-inline:auto 0;margin:0;translate:none",
+	"below-left":   "position:absolute;inset-block:100% auto;inset-inline:0 auto;margin:.5rem 0 0;translate:none;z-index:50",
 	"below":        "position:absolute;inset:100% auto auto 50%;margin:.5rem 0 0;translate:-50% 0;z-index:50",
-	"below-end":    "position:absolute;inset-block:100% auto;inset-inline:auto 0;margin:.5rem 0 0;translate:none;z-index:50",
-	"above-start":  "position:absolute;inset-block:auto 100%;inset-inline:0 auto;margin:0 0 .5rem;translate:none;z-index:50",
+	"below-right":  "position:absolute;inset-block:100% auto;inset-inline:auto 0;margin:.5rem 0 0;translate:none;z-index:50",
+	"above-left":   "position:absolute;inset-block:auto 100%;inset-inline:0 auto;margin:0 0 .5rem;translate:none;z-index:50",
 	"above":        "position:absolute;inset:auto auto 100% 50%;margin:0 0 .5rem;translate:-50% 0;z-index:50",
-	"above-end":    "position:absolute;inset-block:auto 100%;inset-inline:auto 0;margin:0 0 .5rem;translate:none;z-index:50",
+	"above-right":  "position:absolute;inset-block:auto 100%;inset-inline:auto 0;margin:0 0 .5rem;translate:none;z-index:50",
+}
+
+// startEndRenamed is the word that replaced a value written with start or end, the words of the line
+// that left and right replaced (19/10/2026): top-start is top-left, end is right, below-end is
+// below-right. "" for a word with neither.
+func startEndRenamed(v string) string {
+	parts := strings.Split(v, "-")
+	renamed := false
+	for i, part := range parts {
+		switch part {
+		case "start":
+			parts[i], renamed = "left", true
+		case "end":
+			parts[i], renamed = "right", true
+		}
+	}
+	if !renamed {
+		return ""
+	}
+	return strings.Join(parts, "-")
+}
+
+// startEndValue refuses a value written with start or end and names the left or right word that
+// replaced it, the value an editor's fix writes.
+func startEndValue(in Intent, old, renamed string) *Problem {
+	p := problem(in, in.Name+"=\""+old+"\": start và end nay là left và right, viết "+in.Name+"=\""+renamed+"\" (tự lật khi trang viết từ phải sang trái)")
+	p.Suggestion = renamed
+	return p
 }
 
 // unitSize is a length written with its unit: a number and one unit of a closed set. No calc(), no

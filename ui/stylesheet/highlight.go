@@ -117,7 +117,7 @@ var kindLetters = func() map[string]string {
 }()
 
 // plainKey is what router.highlight says of plain, the one kind it does not take.
-const plainKey = "plain là chữ thường của khối mã, không có màu riêng: nó theo màu chữ của <code>; viết color= trên <code> (hay trên thẻ chủ của terminal)"
+const plainKey = "plain là chữ thường của khối mã, không có màu riêng: nó theo màu chữ của <code>; viết color= trên <code> (hay trên <terminal>)"
 
 // CheckHighlightKey reads a key of router.highlight. problem is "" for a kind it takes; otherwise what is
 // wrong, in the author's words, without the call's opener: plain (and Plain), a kind in other letters

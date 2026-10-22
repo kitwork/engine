@@ -11,47 +11,47 @@ package stylesheet
 // and what leads the layer in the stylesheet; above the four drawn short of it, what is lost.
 var webGradientSet = []standardGradient{
 	// 001 Warm Flame: 45deg
-	{"warm-flame", linear("to-top-end", fixedStop("#ff9a9e", 0), fixedStop("#fad0c4", 99), fixedStop("#fad0c4", 100))},
+	{"warm-flame", linear("to-top-right", fixedStop("#ff9a9e", 0), fixedStop("#fad0c4", 99), fixedStop("#fad0c4", 100))},
 	// 002 Night Fade: to top
 	{"night-fade", linear("to-top", fixedStop("#a18cd1", 0), fixedStop("#fbc2eb", 100))},
 	// 003 Spring Warmth: to top
 	{"spring-warmth", linear("to-top", fixedStop("#fad0c4", 0), fixedStop("#fad0c4", 1), fixedStop("#ffd1ff", 100))},
 	// 004 Juicy Peach: to right
-	{"juicy-peach", linear("to-end", fixedStop("#ffecd2", 0), fixedStop("#fcb69f", 100))},
+	{"juicy-peach", linear("to-right", fixedStop("#ffecd2", 0), fixedStop("#fcb69f", 100))},
 	// 005 Young Passion: to right
-	{"coral-berry", linear("to-end", fixedStop("#ff8177", 0), fixedStop("#ff867a", 0), fixedStop("#ff8c7f", 21), fixedStop("#f99185", 52), fixedStop("#cf556c", 78), fixedStop("#b12a5b", 100))},
+	{"coral-berry", linear("to-right", fixedStop("#ff8177", 0), fixedStop("#ff867a", 0), fixedStop("#ff8c7f", 21), fixedStop("#f99185", 52), fixedStop("#cf556c", 78), fixedStop("#b12a5b", 100))},
 	// 006 Lady Lips: to top
 	{"pink-blush", linear("to-top", fixedStop("#ff9a9e", 0), fixedStop("#fecfef", 99), fixedStop("#fecfef", 100))},
 	// 007 Sunny Morning: 120deg
-	{"sunny-morning", linear("to-bottom-end", fixedStop("#f6d365", 0), fixedStop("#fda085", 100))},
+	{"sunny-morning", linear("to-bottom-right", fixedStop("#f6d365", 0), fixedStop("#fda085", 100))},
 	// 008 Rainy Ashville: to top
 	{"rainy-ashville", linear("to-top", fixedStop("#fbc2eb", 0), fixedStop("#a6c1ee", 100))},
 	// 009 Frozen Dreams: to top
 	{"frozen-dreams", linear("to-top", fixedStop("#fdcbf1", 0), fixedStop("#fdcbf1", 1), fixedStop("#e6dee9", 100))},
 	// 010 Winter Neva: 120deg
-	{"winter-neva", linear("to-bottom-end", fixedStop("#a1c4fd", 0), fixedStop("#c2e9fb", 100))},
+	{"winter-neva", linear("to-bottom-right", fixedStop("#a1c4fd", 0), fixedStop("#c2e9fb", 100))},
 	// 011 Dusty Grass: 120deg
-	{"dusty-grass", linear("to-bottom-end", fixedStop("#d4fc79", 0), fixedStop("#96e6a1", 100))},
+	{"dusty-grass", linear("to-bottom-right", fixedStop("#d4fc79", 0), fixedStop("#96e6a1", 100))},
 	// 012 Tempting Azure: 120deg
-	{"tempting-azure", linear("to-bottom-end", fixedStop("#84fab0", 0), fixedStop("#8fd3f4", 100))},
+	{"tempting-azure", linear("to-bottom-right", fixedStop("#84fab0", 0), fixedStop("#8fd3f4", 100))},
 	// 013 Heavy Rain: to top
 	{"heavy-rain", linear("to-top", fixedStop("#cfd9df", 0), fixedStop("#e2ebf0", 100))},
 	// 014 Amy Crisp: 120deg
-	{"amy-crisp", linear("to-bottom-end", fixedStop("#a6c0fe", 0), fixedStop("#f68084", 100))},
+	{"amy-crisp", linear("to-bottom-right", fixedStop("#a6c0fe", 0), fixedStop("#f68084", 100))},
 	// 015 Mean Fruit: 120deg
-	{"mean-fruit", linear("to-bottom-end", fixedStop("#fccb90", 0), fixedStop("#d57eeb", 100))},
+	{"mean-fruit", linear("to-bottom-right", fixedStop("#fccb90", 0), fixedStop("#d57eeb", 100))},
 	// 016 Lilac Sky: 120deg
-	{"lilac-sky", linear("to-bottom-end", fixedStop("#e0c3fc", 0), fixedStop("#8ec5fc", 100))},
+	{"lilac-sky", linear("to-bottom-right", fixedStop("#e0c3fc", 0), fixedStop("#8ec5fc", 100))},
 	// 017 Ripe Malinka: 120deg
-	{"ripe-malinka", linear("to-bottom-end", fixedStop("#f093fb", 0), fixedStop("#f5576c", 100))},
+	{"ripe-malinka", linear("to-bottom-right", fixedStop("#f093fb", 0), fixedStop("#f5576c", 100))},
 	// 018 Cloudy Knoxville: 120deg
-	{"cloudy-knoxville", linear("to-bottom-end", fixedStop("#fdfbfb", 0), fixedStop("#ebedee", 100))},
+	{"cloudy-knoxville", linear("to-bottom-right", fixedStop("#fdfbfb", 0), fixedStop("#ebedee", 100))},
 	// 019 Malibu Beach: to right
-	{"malibu-beach", linear("to-end", fixedStop("#4facfe", 0), fixedStop("#00f2fe", 100))},
+	{"malibu-beach", linear("to-right", fixedStop("#4facfe", 0), fixedStop("#00f2fe", 100))},
 	// 020 New Life: to right
-	{"new-life", linear("to-end", fixedStop("#43e97b", 0), fixedStop("#38f9d7", 100))},
+	{"new-life", linear("to-right", fixedStop("#43e97b", 0), fixedStop("#38f9d7", 100))},
 	// 021 True Sunset: to right
-	{"true-sunset", linear("to-end", fixedStop("#fa709a", 0), fixedStop("#fee140", 100))},
+	{"true-sunset", linear("to-right", fixedStop("#fa709a", 0), fixedStop("#fee140", 100))},
 	// 022 Morpheus Den: to top
 	{"morpheus-den", linear("to-top", fixedStop("#30cfd0", 0), fixedStop("#330867", 100))},
 	// 023 Rare Wind: to top
@@ -61,15 +61,15 @@ var webGradientSet = []standardGradient{
 	// 025 Wild Apple: to top
 	{"wild-apple", linear("to-top", fixedStop("#d299c2", 0), fixedStop("#fef9d7", 100))},
 	// 026 Saint Petersburg: 135deg
-	{"saint-petersburg", linear("to-bottom-end", fixedStop("#f5f7fa", 0), fixedStop("#c3cfe2", 100))},
+	{"saint-petersburg", linear("to-bottom-right", fixedStop("#f5f7fa", 0), fixedStop("#c3cfe2", 100))},
 	// 027 Arielle's Smile: circle 248px at center; here it reaches the box's farthest corner, not 248px
 	{"arielles-smile", Gradient{Type: "radial", Position: "center", Stops: []Stop{fixedStop("#16d9e3", 0), fixedStop("#30c7ec", 47), fixedStop("#46aef7", 100)}}},
 	// 028 Plum Plate: 135deg
-	{"plum-plate", linear("to-bottom-end", fixedStop("#667eea", 0), fixedStop("#764ba2", 100))},
+	{"plum-plate", linear("to-bottom-right", fixedStop("#667eea", 0), fixedStop("#764ba2", 100))},
 	// 029 Everlasting Sky: 135deg
-	{"everlasting-sky", linear("to-bottom-end", fixedStop("#fdfcfb", 0), fixedStop("#e2d1c3", 100))},
+	{"everlasting-sky", linear("to-bottom-right", fixedStop("#fdfcfb", 0), fixedStop("#e2d1c3", 100))},
 	// 030 Happy Fisher: 120deg
-	{"happy-fisher", linear("to-bottom-end", fixedStop("#89f7fe", 0), fixedStop("#66a6ff", 100))},
+	{"happy-fisher", linear("to-bottom-right", fixedStop("#89f7fe", 0), fixedStop("#66a6ff", 100))},
 	// 031 Blessing: to top
 	{"blessing", linear("to-top", fixedStop("#fddb92", 0), fixedStop("#d1fdff", 100))},
 	// 032 Sharpeye Eagle: to top
@@ -83,11 +83,11 @@ var webGradientSet = []standardGradient{
 	// 036 Zeus Miracle: to top
 	{"zeus-miracle", linear("to-top", fixedStop("#cd9cf2", 0), fixedStop("#f6f3ff", 100))},
 	// 037 Old Hat: to right
-	{"old-hat", linear("to-end", fixedStop("#e4afcb", 0), fixedStop("#b8cbb8", 0), fixedStop("#b8cbb8", 0), fixedStop("#e2c58b", 30), fixedStop("#c2ce9c", 64), fixedStop("#7edbdc", 100))},
+	{"old-hat", linear("to-right", fixedStop("#e4afcb", 0), fixedStop("#b8cbb8", 0), fixedStop("#b8cbb8", 0), fixedStop("#e2c58b", 30), fixedStop("#c2ce9c", 64), fixedStop("#7edbdc", 100))},
 	// 038 Star Wine: to right
-	{"star-wine", linear("to-end", fixedStop("#b8cbb8", 0), fixedStop("#b8cbb8", 0), fixedStop("#b465da", 0), fixedStop("#cf6cc9", 33), fixedStop("#ee609c", 66), fixedStop("#ee609c", 100))},
+	{"star-wine", linear("to-right", fixedStop("#b8cbb8", 0), fixedStop("#b8cbb8", 0), fixedStop("#b465da", 0), fixedStop("#cf6cc9", 33), fixedStop("#ee609c", 66), fixedStop("#ee609c", 100))},
 	// 039 Deep Blue: to right
-	{"deep-blue", linear("to-end", fixedStop("#6a11cb", 0), fixedStop("#2575fc", 100))},
+	{"deep-blue", linear("to-right", fixedStop("#6a11cb", 0), fixedStop("#2575fc", 100))},
 	// 041 Happy Acid: to top
 	{"happy-acid", linear("to-top", fixedStop("#37ecba", 0), fixedStop("#72afd3", 100))},
 	// 042 Awesome Pine: to top
@@ -95,13 +95,13 @@ var webGradientSet = []standardGradient{
 	// 043 New York: to top
 	{"new-york", linear("to-top", fixedStop("#fff1eb", 0), fixedStop("#ace0f9", 100))},
 	// 044 Shy Rainbow: to right
-	{"shy-rainbow", linear("to-end", fixedStop("#eea2a2", 0), fixedStop("#bbc1bf", 19), fixedStop("#57c6e1", 42), fixedStop("#b49fda", 79), fixedStop("#7ac5d8", 100))},
+	{"shy-rainbow", linear("to-right", fixedStop("#eea2a2", 0), fixedStop("#bbc1bf", 19), fixedStop("#57c6e1", 42), fixedStop("#b49fda", 79), fixedStop("#7ac5d8", 100))},
 	// 046 Mixed Hopes: to top
 	{"mixed-hopes", linear("to-top", fixedStop("#c471f5", 0), fixedStop("#fa71cd", 100))},
 	// 047 Fly High: to top
 	{"fly-high", linear("to-top", fixedStop("#48c6ef", 0), fixedStop("#6f86d6", 100))},
 	// 048 Strong Bliss: to right
-	{"strong-bliss", linear("to-end", fixedStop("#f78ca0", 0), fixedStop("#f9748f", 19), fixedStop("#fd868c", 60), fixedStop("#fe9a8b", 100))},
+	{"strong-bliss", linear("to-right", fixedStop("#f78ca0", 0), fixedStop("#f9748f", 19), fixedStop("#fd868c", 60), fixedStop("#fe9a8b", 100))},
 	// 049 Fresh Milk: to top
 	{"fresh-milk", linear("to-top", fixedStop("#feada6", 0), fixedStop("#f5efef", 100))},
 	// 050 Snow Again: to top
@@ -117,7 +117,7 @@ var webGradientSet = []standardGradient{
 	// 055 Sharp Blues: to top
 	{"sharp-blues", linear("to-top", fixedStop("#00c6fb", 0), fixedStop("#005bea", 100))},
 	// 056 Shady Water: to right
-	{"shady-water", linear("to-end", fixedStop("#74ebd5", 0), fixedStop("#9face6", 100))},
+	{"shady-water", linear("to-right", fixedStop("#74ebd5", 0), fixedStop("#9face6", 100))},
 	// 057 Dirty Beauty: to top
 	{"dusty-blue", linear("to-top", fixedStop("#6a85b6", 0), fixedStop("#bac8e0", 100))},
 	// 058 Great Whale: to top
@@ -147,31 +147,31 @@ var webGradientSet = []standardGradient{
 	// 070 Aqua Splash: 15deg
 	{"aqua-splash", linear("to-top", fixedStop("#13547a", 0), fixedStop("#80d0c7", 100))},
 	// 071 Above Clouds: to left
-	{"above-clouds", linear("to-start", fixedStop("#bdbbbe", 0), fixedStop("#9d9ea3", 100))},
+	{"above-clouds", linear("to-left", fixedStop("#bdbbbe", 0), fixedStop("#9d9ea3", 100))},
 	// 072 Spiky Naga: to top
 	{"spiky-naga", linear("to-top", fixedStop("#505285", 0), fixedStop("#585e92", 12), fixedStop("#65689f", 25), fixedStop("#7474b0", 37), fixedStop("#7e7ebb", 50), fixedStop("#8389c7", 62), fixedStop("#9795d4", 75), fixedStop("#a2a1dc", 87), fixedStop("#b5aee4", 100))},
 	// 073 Love Kiss: to top
 	{"red-peach", linear("to-top", fixedStop("#ff0844", 0), fixedStop("#ffb199", 100))},
 	// 075 Clean Mirror: 45deg
-	{"clean-mirror", linear("to-top-end", fixedStop("#93a5cf", 0), fixedStop("#e4efe9", 100))},
+	{"clean-mirror", linear("to-top-right", fixedStop("#93a5cf", 0), fixedStop("#e4efe9", 100))},
 	// 076 Premium Dark: to right
-	{"premium-dark", linear("to-end", fixedStop("#434343", 0), fixedStop("#000000", 100))},
+	{"premium-dark", linear("to-right", fixedStop("#434343", 0), fixedStop("#000000", 100))},
 	// 077 Cold Evening: to top
 	{"cold-evening", linear("to-top", fixedStop("#0c3483", 0), fixedStop("#a2b6df", 100), fixedStop("#6b8cce", 100), fixedStop("#a2b6df", 100))},
 	// 078 Cochiti Lake: 45deg
-	{"cochiti-lake", linear("to-top-end", fixedStop("#93a5cf", 0), fixedStop("#e4efe9", 100))},
+	{"cochiti-lake", linear("to-top-right", fixedStop("#93a5cf", 0), fixedStop("#e4efe9", 100))},
 	// 079 Summer Games: to right
-	{"summer-games", linear("to-end", fixedStop("#92fe9d", 0), fixedStop("#00c9ff", 100))},
+	{"summer-games", linear("to-right", fixedStop("#92fe9d", 0), fixedStop("#00c9ff", 100))},
 	// 080 Passionate Bed: to right
-	{"salmon-rose", linear("to-end", fixedStop("#ff758c", 0), fixedStop("#ff7eb3", 100))},
+	{"salmon-rose", linear("to-right", fixedStop("#ff758c", 0), fixedStop("#ff7eb3", 100))},
 	// 081 Mountain Rock: to right
-	{"mountain-rock", linear("to-end", fixedStop("#868f96", 0), fixedStop("#596164", 100))},
+	{"mountain-rock", linear("to-right", fixedStop("#868f96", 0), fixedStop("#596164", 100))},
 	// 082 Desert Hump: to top
 	{"desert-hump", linear("to-top", fixedStop("#c79081", 0), fixedStop("#dfa579", 100))},
 	// 083 Jungle Day: 45deg
-	{"jungle-day", linear("to-top-end", fixedStop("#8baaaa", 0), fixedStop("#ae8b9c", 100))},
+	{"jungle-day", linear("to-top-right", fixedStop("#8baaaa", 0), fixedStop("#ae8b9c", 100))},
 	// 084 Phoenix Start: to right
-	{"phoenix-start", linear("to-end", fixedStop("#f83600", 0), fixedStop("#f9d423", 100))},
+	{"phoenix-start", linear("to-right", fixedStop("#f83600", 0), fixedStop("#f9d423", 100))},
 	// 085 October Silence: -20deg
 	{"october-silence", linear("to-top", fixedStop("#b721ff", 0), fixedStop("#21d4fd", 100))},
 	// 086 Faraway River: -20deg
@@ -179,7 +179,7 @@ var webGradientSet = []standardGradient{
 	// 087 Alchemist Lab: -20deg
 	{"alchemist-lab", linear("to-top", fixedStop("#d558c8", 0), fixedStop("#24d292", 100))},
 	// 088 Over Sun: 60deg
-	{"over-sun", linear("to-top-end", fixedStop("#abecd6", 0), fixedStop("#fbed96", 100))},
+	{"over-sun", linear("to-top-right", fixedStop("#abecd6", 0), fixedStop("#fbed96", 100))},
 	// 089 Premium White: to top
 	{"premium-white", linear("to-top", fixedStop("#d5d4d0", 0), fixedStop("#d5d4d0", 1), fixedStop("#eeeeec", 31), fixedStop("#efeeec", 75), fixedStop("#e9e9e7", 100))},
 	// 090 Mars Party: to top
@@ -195,19 +195,19 @@ var webGradientSet = []standardGradient{
 	// 095 Big Mango: to top
 	{"big-mango", linear("to-top", fixedStop("#c71d6f", 0), fixedStop("#d09693", 100))},
 	// 096 Healthy Water: 60deg
-	{"healthy-water", linear("to-top-end", fixedStop("#96deda", 0), fixedStop("#50c9c3", 100))},
+	{"healthy-water", linear("to-top-right", fixedStop("#96deda", 0), fixedStop("#50c9c3", 100))},
 	// 097 Amour Amour: to top
 	{"amour-amour", linear("to-top", fixedStop("#f77062", 0), fixedStop("#fe5196", 100))},
 	// 098 Risky Concrete: to top
 	{"risky-concrete", linear("to-top", fixedStop("#c4c5c7", 0), fixedStop("#dcdddf", 52), fixedStop("#ebebeb", 100))},
 	// 099 Strong Stick: to right
-	{"strong-stick", linear("to-end", fixedStop("#a8caba", 0), fixedStop("#5d4157", 100))},
+	{"strong-stick", linear("to-right", fixedStop("#a8caba", 0), fixedStop("#5d4157", 100))},
 	// 100 Vicious Stance: 60deg
-	{"deep-slate", linear("to-top-end", fixedStop("#29323c", 0), fixedStop("#485563", 100))},
+	{"deep-slate", linear("to-top-right", fixedStop("#29323c", 0), fixedStop("#485563", 100))},
 	// 101 Palo Alto: -60deg
-	{"palo-alto", linear("to-top-start", fixedStop("#16a085", 0), fixedStop("#f4d03f", 100))},
+	{"palo-alto", linear("to-top-left", fixedStop("#16a085", 0), fixedStop("#f4d03f", 100))},
 	// 102 Happy Memories: -60deg
-	{"happy-memories", linear("to-top-start", fixedStop("#ff5858", 0), fixedStop("#f09819", 100))},
+	{"happy-memories", linear("to-top-left", fixedStop("#ff5858", 0), fixedStop("#f09819", 100))},
 	// 103 Midnight Bloom: -20deg
 	{"midnight-bloom", linear("to-top", fixedStop("#2b5876", 0), fixedStop("#4e4376", 100))},
 	// 104 Crystalline: -20deg
@@ -219,7 +219,7 @@ var webGradientSet = []standardGradient{
 	// 107 Confident Cloud: to top
 	{"confident-cloud", linear("to-top", fixedStop("#dad4ec", 0), fixedStop("#dad4ec", 1), fixedStop("#f3e7e9", 100))},
 	// 108 Le Cocktail: 45deg
-	{"le-cocktail", linear("to-top-end", fixedStop("#874da2", 0), fixedStop("#c43a30", 100))},
+	{"le-cocktail", linear("to-top-right", fixedStop("#874da2", 0), fixedStop("#c43a30", 100))},
 	// 109 River City: to top
 	{"river-city", linear("to-top", fixedStop("#4481eb", 0), fixedStop("#04befe", 100))},
 	// 110 Frozen Berry: to top
@@ -229,7 +229,7 @@ var webGradientSet = []standardGradient{
 	// 112 Child Care: -20deg
 	{"child-care", linear("to-top", fixedStop("#f794a4", 0), fixedStop("#fdd6bd", 100))},
 	// 113 Flying Lemon: 60deg
-	{"flying-lemon", linear("to-top-end", fixedStop("#64b3f4", 0), fixedStop("#c2e59c", 100))},
+	{"flying-lemon", linear("to-top-right", fixedStop("#64b3f4", 0), fixedStop("#c2e59c", 100))},
 	// 114 New Retrowave: to top
 	{"new-retrowave", linear("to-top", fixedStop("#3b41c5", 0), fixedStop("#a981bb", 49), fixedStop("#ffc8a9", 100))},
 	// 115 Hidden Jaguar: to top
@@ -237,9 +237,9 @@ var webGradientSet = []standardGradient{
 	// 116 Above The Sky: to top
 	{"above-the-sky", linear("to-top", fixedStop("#d3d3d3", 0), fixedStop("#d3d3d3", 1), fixedStop("#e0e0e0", 26), fixedStop("#efefef", 48), fixedStop("#d9d9d9", 75), fixedStop("#bcbcbc", 100))},
 	// 117 Nega: 45deg
-	{"nega", linear("to-top-end", fixedStop("#ee9ca7", 0), fixedStop("#ffdde1", 100))},
+	{"nega", linear("to-top-right", fixedStop("#ee9ca7", 0), fixedStop("#ffdde1", 100))},
 	// 118 Dense Water: to right
-	{"dense-water", linear("to-end", fixedStop("#3ab5b0", 0), fixedStop("#3d99be", 31), fixedStop("#56317a", 100))},
+	{"dense-water", linear("to-right", fixedStop("#3ab5b0", 0), fixedStop("#3d99be", 31), fixedStop("#56317a", 100))},
 	// 120 Seashore: to top
 	{"seashore", linear("to-top", fixedStop("#209cff", 0), fixedStop("#68e0cf", 100))},
 	// 121 Marble Wall: to top
@@ -253,9 +253,9 @@ var webGradientSet = []standardGradient{
 	// 125 Young Grass: to top
 	{"young-grass", linear("to-top", fixedStop("#9be15d", 0), fixedStop("#00e3ae", 100))},
 	// 126 Colorful Peach: to right
-	{"colorful-peach", linear("to-end", fixedStop("#ed6ea0", 0), fixedStop("#ec8c69", 100))},
+	{"colorful-peach", linear("to-right", fixedStop("#ed6ea0", 0), fixedStop("#ec8c69", 100))},
 	// 127 Gentle Care: to right
-	{"gentle-care", linear("to-end", fixedStop("#ffc3a0", 0), fixedStop("#ffafbd", 100))},
+	{"gentle-care", linear("to-right", fixedStop("#ffc3a0", 0), fixedStop("#ffafbd", 100))},
 	// 128 Plum Bath: to top
 	{"plum-bath", linear("to-top", fixedStop("#cc208e", 0), fixedStop("#6713d2", 100))},
 	// 129 Happy Unicorn: to top
@@ -265,7 +265,7 @@ var webGradientSet = []standardGradient{
 	// 131 African Field: to top
 	{"african-field", linear("to-top", fixedStop("#65bd60", 0), fixedStop("#5ac1a8", 25), fixedStop("#3ec6ed", 50), fixedStop("#b7ddb7", 75), fixedStop("#fef381", 100))},
 	// 132 Solid Stone: to right
-	{"solid-stone", linear("to-end", fixedStop("#243949", 0), fixedStop("#517fa4", 100))},
+	{"solid-stone", linear("to-right", fixedStop("#243949", 0), fixedStop("#517fa4", 100))},
 	// 133 Orange Juice: -20deg
 	{"orange-juice", linear("to-top", fixedStop("#fc6076", 0), fixedStop("#ff9a44", 100))},
 	// 134 Glass Water: to top
@@ -273,93 +273,93 @@ var webGradientSet = []standardGradient{
 	// 135 Slick Carbon: to bottom; the top of two layers; the translucent linear under it, mixed by multiply, is not drawn
 	{"slick-carbon", linear("to-bottom", fixedStop("#323232", 0), fixedStop("#3f3f3f", 40), fixedStop("#1c1c1c", 150))},
 	// 136 North Miracle: to right
-	{"north-miracle", linear("to-end", fixedStop("#00dbde", 0), fixedStop("#fc00ff", 100))},
+	{"north-miracle", linear("to-right", fixedStop("#00dbde", 0), fixedStop("#fc00ff", 100))},
 	// 137 Fruit Blend: to right
-	{"fruit-blend", linear("to-end", fixedStop("#f9d423", 0), fixedStop("#ff4e50", 100))},
+	{"fruit-blend", linear("to-right", fixedStop("#f9d423", 0), fixedStop("#ff4e50", 100))},
 	// 138 Millennium Pine: to top
 	{"millennium-pine", linear("to-top", fixedStop("#50cc7f", 0), fixedStop("#f5d100", 100))},
 	// 139 High Flight: to right
-	{"high-flight", linear("to-end", fixedStop("#0acffe", 0), fixedStop("#495aff", 100))},
+	{"high-flight", linear("to-right", fixedStop("#0acffe", 0), fixedStop("#495aff", 100))},
 	// 140 Mole Hall: -20deg
 	{"mole-hall", linear("to-top", fixedStop("#616161", 0), fixedStop("#9bc5c3", 100))},
 	// 142 Space Shift: 60deg
-	{"space-shift", linear("to-top-end", fixedStop("#3d3393", 0), fixedStop("#2b76b9", 37), fixedStop("#2cacd1", 65), fixedStop("#35eb93", 100))},
+	{"space-shift", linear("to-top-right", fixedStop("#3d3393", 0), fixedStop("#2b76b9", 37), fixedStop("#2cacd1", 65), fixedStop("#35eb93", 100))},
 	// 143 Forest Inei: to top
 	{"forest-inei", linear("to-top", fixedStop("#df89b5", 0), fixedStop("#bfd9fe", 100))},
 	// 144 Royal Garden: to right
-	{"royal-garden", linear("to-end", fixedStop("#ed6ea0", 0), fixedStop("#ec8c69", 100))},
+	{"royal-garden", linear("to-right", fixedStop("#ed6ea0", 0), fixedStop("#ec8c69", 100))},
 	// 145 Rich Metal: to right
-	{"rich-metal", linear("to-end", fixedStop("#d7d2cc", 0), fixedStop("#304352", 100))},
+	{"rich-metal", linear("to-right", fixedStop("#d7d2cc", 0), fixedStop("#304352", 100))},
 	// 146 Juicy Cake: to top
 	{"juicy-cake", linear("to-top", fixedStop("#e14fad", 0), fixedStop("#f9d423", 100))},
 	// 147 Smart Indigo: to top
 	{"smart-indigo", linear("to-top", fixedStop("#b224ef", 0), fixedStop("#7579ff", 100))},
 	// 148 Sand Strike: to right
-	{"sand-strike", linear("to-end", fixedStop("#c1c161", 0), fixedStop("#c1c161", 0), fixedStop("#d4d4b1", 100))},
+	{"sand-strike", linear("to-right", fixedStop("#c1c161", 0), fixedStop("#c1c161", 0), fixedStop("#d4d4b1", 100))},
 	// 149 Norse Beauty: to right
-	{"norse-beauty", linear("to-end", fixedStop("#ec77ab", 0), fixedStop("#7873f5", 100))},
+	{"norse-beauty", linear("to-right", fixedStop("#ec77ab", 0), fixedStop("#7873f5", 100))},
 	// 150 Aqua Guidance: to top
 	{"aqua-guidance", linear("to-top", fixedStop("#007adf", 0), fixedStop("#00ecbc", 100))},
 	// 151 Sun Veggie: -225deg
-	{"sun-veggie", linear("to-bottom-end", fixedStop("#20e2d7", 0), fixedStop("#f9fea5", 100))},
+	{"sun-veggie", linear("to-bottom-right", fixedStop("#20e2d7", 0), fixedStop("#f9fea5", 100))},
 	// 152 Sea Lord: -225deg
-	{"sea-lord", linear("to-bottom-end", fixedStop("#2cd8d5", 0), fixedStop("#c5c1ff", 56), fixedStop("#ffbac3", 100))},
+	{"sea-lord", linear("to-bottom-right", fixedStop("#2cd8d5", 0), fixedStop("#c5c1ff", 56), fixedStop("#ffbac3", 100))},
 	// 153 Black Sea: -225deg
-	{"black-sea", linear("to-bottom-end", fixedStop("#2cd8d5", 0), fixedStop("#6b8dd6", 48), fixedStop("#8e37d7", 100))},
+	{"black-sea", linear("to-bottom-right", fixedStop("#2cd8d5", 0), fixedStop("#6b8dd6", 48), fixedStop("#8e37d7", 100))},
 	// 154 Grass Shampoo: -225deg
-	{"grass-shampoo", linear("to-bottom-end", fixedStop("#dfffcd", 0), fixedStop("#90f9c4", 48), fixedStop("#39f3bb", 100))},
+	{"grass-shampoo", linear("to-bottom-right", fixedStop("#dfffcd", 0), fixedStop("#90f9c4", 48), fixedStop("#39f3bb", 100))},
 	// 155 Landing Aircraft: -225deg
-	{"landing-aircraft", linear("to-bottom-end", fixedStop("#5d9fff", 0), fixedStop("#b8dcff", 48), fixedStop("#6bbbff", 100))},
+	{"landing-aircraft", linear("to-bottom-right", fixedStop("#5d9fff", 0), fixedStop("#b8dcff", 48), fixedStop("#6bbbff", 100))},
 	// 156 Witch Dance: -225deg
-	{"witch-dance", linear("to-bottom-end", fixedStop("#a8bfff", 0), fixedStop("#884d80", 100))},
+	{"witch-dance", linear("to-bottom-right", fixedStop("#a8bfff", 0), fixedStop("#884d80", 100))},
 	// 157 Sleepless Night: -225deg
-	{"sleepless-night", linear("to-bottom-end", fixedStop("#5271c4", 0), fixedStop("#b19fff", 48), fixedStop("#eca1fe", 100))},
+	{"sleepless-night", linear("to-bottom-right", fixedStop("#5271c4", 0), fixedStop("#b19fff", 48), fixedStop("#eca1fe", 100))},
 	// 158 Angel Care: -225deg
-	{"angel-care", linear("to-bottom-end", fixedStop("#ffe29f", 0), fixedStop("#ffa99f", 48), fixedStop("#ff719a", 100))},
+	{"angel-care", linear("to-bottom-right", fixedStop("#ffe29f", 0), fixedStop("#ffa99f", 48), fixedStop("#ff719a", 100))},
 	// 159 Crystal River: -225deg
-	{"crystal-river", linear("to-bottom-end", fixedStop("#22e1ff", 0), fixedStop("#1d8fe1", 48), fixedStop("#625eb1", 100))},
+	{"crystal-river", linear("to-bottom-right", fixedStop("#22e1ff", 0), fixedStop("#1d8fe1", 48), fixedStop("#625eb1", 100))},
 	// 160 Soft Lipstick: -225deg
-	{"soft-lipstick", linear("to-bottom-end", fixedStop("#b6cee8", 0), fixedStop("#f578dc", 100))},
+	{"soft-lipstick", linear("to-bottom-right", fixedStop("#b6cee8", 0), fixedStop("#f578dc", 100))},
 	// 161 Salt Mountain: -225deg
-	{"salt-mountain", linear("to-bottom-end", fixedStop("#fffeff", 0), fixedStop("#d7fffe", 100))},
+	{"salt-mountain", linear("to-bottom-right", fixedStop("#fffeff", 0), fixedStop("#d7fffe", 100))},
 	// 162 Perfect White: -225deg
-	{"perfect-white", linear("to-bottom-end", fixedStop("#e3fdf5", 0), fixedStop("#ffe6fa", 100))},
+	{"perfect-white", linear("to-bottom-right", fixedStop("#e3fdf5", 0), fixedStop("#ffe6fa", 100))},
 	// 163 Fresh Oasis: -225deg
-	{"fresh-oasis", linear("to-bottom-end", fixedStop("#7de2fc", 0), fixedStop("#b9b6e5", 100))},
+	{"fresh-oasis", linear("to-bottom-right", fixedStop("#7de2fc", 0), fixedStop("#b9b6e5", 100))},
 	// 164 Strict November: -225deg
-	{"strict-november", linear("to-bottom-end", fixedStop("#cbbacc", 0), fixedStop("#2580b3", 100))},
+	{"strict-november", linear("to-bottom-right", fixedStop("#cbbacc", 0), fixedStop("#2580b3", 100))},
 	// 165 Morning Salad: -225deg
-	{"morning-salad", linear("to-bottom-end", fixedStop("#b7f8db", 0), fixedStop("#50a7c2", 100))},
+	{"morning-salad", linear("to-bottom-right", fixedStop("#b7f8db", 0), fixedStop("#50a7c2", 100))},
 	// 166 Deep Relief: -225deg
-	{"deep-relief", linear("to-bottom-end", fixedStop("#7085b6", 0), fixedStop("#87a7d9", 50), fixedStop("#def3f8", 100))},
+	{"deep-relief", linear("to-bottom-right", fixedStop("#7085b6", 0), fixedStop("#87a7d9", 50), fixedStop("#def3f8", 100))},
 	// 167 Sea Strike: -225deg
-	{"sea-strike", linear("to-bottom-end", fixedStop("#77ffd2", 0), fixedStop("#6297db", 48), fixedStop("#1eecff", 100))},
+	{"sea-strike", linear("to-bottom-right", fixedStop("#77ffd2", 0), fixedStop("#6297db", 48), fixedStop("#1eecff", 100))},
 	// 168 Night Call: -225deg
-	{"night-call", linear("to-bottom-end", fixedStop("#ac32e4", 0), fixedStop("#7918f2", 48), fixedStop("#4801ff", 100))},
+	{"night-call", linear("to-bottom-right", fixedStop("#ac32e4", 0), fixedStop("#7918f2", 48), fixedStop("#4801ff", 100))},
 	// 169 Supreme Sky: -225deg
-	{"supreme-sky", linear("to-bottom-end", fixedStop("#d4ffec", 0), fixedStop("#57f2cc", 48), fixedStop("#4596fb", 100))},
+	{"supreme-sky", linear("to-bottom-right", fixedStop("#d4ffec", 0), fixedStop("#57f2cc", 48), fixedStop("#4596fb", 100))},
 	// 170 Light Blue: -225deg
-	{"aqua-sky", linear("to-bottom-end", fixedStop("#9efbd3", 0), fixedStop("#57e9f2", 48), fixedStop("#45d4fb", 100))},
+	{"aqua-sky", linear("to-bottom-right", fixedStop("#9efbd3", 0), fixedStop("#57e9f2", 48), fixedStop("#45d4fb", 100))},
 	// 171 Mind Crawl: -225deg
-	{"mind-crawl", linear("to-bottom-end", fixedStop("#473b7b", 0), fixedStop("#3584a7", 51), fixedStop("#30d2be", 100))},
+	{"mind-crawl", linear("to-bottom-right", fixedStop("#473b7b", 0), fixedStop("#3584a7", 51), fixedStop("#30d2be", 100))},
 	// 172 Lily Meadow: -225deg
-	{"lily-meadow", linear("to-bottom-end", fixedStop("#65379b", 0), fixedStop("#886aea", 53), fixedStop("#6457c6", 100))},
+	{"lily-meadow", linear("to-bottom-right", fixedStop("#65379b", 0), fixedStop("#886aea", 53), fixedStop("#6457c6", 100))},
 	// 173 Sugar Lollipop: -225deg
-	{"sugar-lollipop", linear("to-bottom-end", fixedStop("#a445b2", 0), fixedStop("#d41872", 52), fixedStop("#ff0066", 100))},
+	{"sugar-lollipop", linear("to-bottom-right", fixedStop("#a445b2", 0), fixedStop("#d41872", 52), fixedStop("#ff0066", 100))},
 	// 174 Sweet Dessert: -225deg
-	{"sweet-dessert", linear("to-bottom-end", fixedStop("#7742b2", 0), fixedStop("#f180ff", 52), fixedStop("#fd8bd9", 100))},
+	{"sweet-dessert", linear("to-bottom-right", fixedStop("#7742b2", 0), fixedStop("#f180ff", 52), fixedStop("#fd8bd9", 100))},
 	// 175 Magic Ray: -225deg
-	{"magic-ray", linear("to-bottom-end", fixedStop("#ff3cac", 0), fixedStop("#562b7c", 52), fixedStop("#2b86c5", 100))},
+	{"magic-ray", linear("to-bottom-right", fixedStop("#ff3cac", 0), fixedStop("#562b7c", 52), fixedStop("#2b86c5", 100))},
 	// 176 Teen Party: -225deg
-	{"magenta-indigo", linear("to-bottom-end", fixedStop("#ff057c", 0), fixedStop("#8d0b93", 50), fixedStop("#321575", 100))},
+	{"magenta-indigo", linear("to-bottom-right", fixedStop("#ff057c", 0), fixedStop("#8d0b93", 50), fixedStop("#321575", 100))},
 	// 177 Frozen Heat: -225deg
-	{"frozen-heat", linear("to-bottom-end", fixedStop("#ff057c", 0), fixedStop("#7c64d5", 48), fixedStop("#4cc3ff", 100))},
+	{"frozen-heat", linear("to-bottom-right", fixedStop("#ff057c", 0), fixedStop("#7c64d5", 48), fixedStop("#4cc3ff", 100))},
 	// 178 Gagarin View: -225deg
-	{"gagarin-view", linear("to-bottom-end", fixedStop("#69eacb", 0), fixedStop("#eaccf8", 48), fixedStop("#6654f1", 100))},
+	{"gagarin-view", linear("to-bottom-right", fixedStop("#69eacb", 0), fixedStop("#eaccf8", 48), fixedStop("#6654f1", 100))},
 	// 179 Fabled Sunset: -225deg
-	{"fabled-sunset", linear("to-bottom-end", fixedStop("#231557", 0), fixedStop("#44107a", 29), fixedStop("#ff1361", 67), fixedStop("#fff800", 100))},
+	{"fabled-sunset", linear("to-bottom-right", fixedStop("#231557", 0), fixedStop("#44107a", 29), fixedStop("#ff1361", 67), fixedStop("#fff800", 100))},
 	// 180 Perfect Blue: -225deg
-	{"perfect-blue", linear("to-bottom-end", fixedStop("#3d4e81", 0), fixedStop("#5753c9", 48), fixedStop("#6e7ff3", 100))},
+	{"perfect-blue", linear("to-bottom-right", fixedStop("#3d4e81", 0), fixedStop("#5753c9", 48), fixedStop("#6e7ff3", 100))},
 }
 
 // webGradientRenames are the twelve gradients whose .ui name is not the collection's (decision W2 of

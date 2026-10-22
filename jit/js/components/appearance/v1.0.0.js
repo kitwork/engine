@@ -1,12 +1,13 @@
 /* appearance component — the page's view of the light/dark choice (KITWORK_UI §7, Kitwork UI's
- * component="appearance"). The engine writes it from:
+ * <appearance>). The engine writes it from:
  *
- *   <button component="appearance" click="toggle()">
+ *   <appearance click="toggle()">
  *     <icon value="{{ dark ? 'sun' : 'moon' }}" alt="Đổi giao diện sáng/tối"></icon>
- *   </button>
+ *   </appearance>
  *
- * as data-kitwork-component="appearance" and data-kitwork-event="click: toggle()" on the button, and
- * a data-kitwork-class on the icon that turns icon-sun or icon-moon on while its condition holds.
+ * as data-kitwork-component="appearance" and data-kitwork-event="click: toggle()" on the button
+ * the tag builds, and a data-kitwork-class on the icon that turns icon-sun or icon-moon on while its
+ * condition holds.
  *
  * Markup never calls kit: kit.appearance owns the choice (stored, applied before paint by the
  * pre-paint script); this component is how markup sees it. mode and dark are getters that read the

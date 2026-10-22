@@ -1082,6 +1082,8 @@
         return globalOrZero(k);
       },
       set: function (t, k, v) {
+        // a Symbol is a component's private slot: its instance's own, never one around it of the same kind
+        if (typeof k === "symbol") { t[k] = v; return true; }
         var objs = chainFor(b);
         for (var i = 0; i < objs.length; i++) {
           if (k in objs[i]) {
@@ -1848,6 +1850,9 @@
       else if (name === "ready") mods.push("once");
       else if (name === "double-click") type = "dblclick";
       else if (/^(context-menu|focus-(in|out)|pointer-(down|up|enter|leave))$/.test(name)) type = name.replace("-", "");
+      // a component's event (finish, offline) is its host's, written on that tag alone: one nested inside
+      // a host of its kind bubbles past it unheard
+      else if (!DOM_EVENT_NAMES[name]) mods.push("self");
       var h = parseHandler("data-kitwork-event " + p[0] + ": " + p[2], type, mods);
       h.program = p[1];
       return h;

@@ -18,14 +18,14 @@ router.colors({ brand: "#c8742c" });
 `,
 	"localhost/page.ui": `<page><content /></page>`,
 	"localhost/content.ui": `<content padding="4" gap="4">
-  <box id="one"><box component="code-window" /></box>
-  <box id="two"><box component="code-window" /></box>
+  <box id="one"><code-window /></box>
+  <box id="two"><code-window /></box>
 </content>`,
 	"localhost/code-window.ui": `<box gap="2">
-  <box component="tabs" as="$files" persist="true" alt="Files" flex="row" gap="1">
+  <tabs as="$files" persist="true" alt="Files" flex="row" gap="1">
     <button click="select('router')" selected:underline="true">router.work</button>
     <button click="select('page')" selected:underline="true">page.ui</button>
-  </box>
+  </tabs>
   <box show="$files.selected == 'router'"><text>router</text></box>
   <box show="$files.selected == 'page'"><text>page</text></box>
 </box>`,
