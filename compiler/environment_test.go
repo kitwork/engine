@@ -126,12 +126,6 @@ func TestEnvironmentRequiresAreOnTheBytecode(t *testing.T) {
 		if got := sorted(cached.EnvironmentRequires); !reflect.DeepEqual(got, want) {
 			t.Fatalf("%s: %+v, want %+v", pass, got, want)
 		}
-		// the file's consts of a key not named PUBLIC_ stay out of the page after a restart too, when the
-		// artifact is read off the disk (CONTROL 23/10/2026: without the hit reading them again, "from the
-		// cache: server only [], want [stripe port]")
-		if !reflect.DeepEqual(cached.EnvironmentServerOnly, []string{"stripe", "port"}) {
-			t.Fatalf("%s: server only %v, want [stripe port]", pass, cached.EnvironmentServerOnly)
-		}
 	}
 }
 
@@ -161,53 +155,41 @@ func TestEnvImportIsRefusedInAnApp(t *testing.T) {
 }
 
 // A key not named PUBLIC_… never goes straight to a page (mục 6): an entry of the object .view({ … }) is
-// given, or a variable of the function router.view runs (every one of which the page reads), is a compile
-// error naming the key. PUBLIC_ keys, a yes/no made of a secret, and a secret used in a handler pass; a const
-// of the file that holds one is named on the bytecode, for the page to leave out (work/router_ui.go).
+// given is a compile error naming the key. PUBLIC_ keys, a yes/no made of a secret, and a secret used in a
+// handler pass; a const of the file that holds one never reaches a page by itself, since the page reads only
+// the names of the object (KITWORK_ROUTER.md, 23/10/2026).
 //
 // CONTROL (22/10/2026): with environmentView refusing nothing, "context.view({ stripe: environment.STRIPE_SECRET })
-// compiled, want khoá `STRIPE_SECRET` sẽ đi xuống trình duyệt"; with environmentServerOnly giving nothing,
-// "server only: [], want [stripe]".
+// compiled, want khoá `STRIPE_SECRET` sẽ đi xuống trình duyệt".
 func TestEnvironmentSecretNeverGoesToThePage(t *testing.T) {
 	const header = "import * as router from \"kitwork/router\";\n" + importEnvironment
 	for source, want := range map[string]string{
 		"router.get((context) => context.view({ stripe: environment.STRIPE_SECRET }));":                 "router.work:3:48: khoá `STRIPE_SECRET` sẽ đi xuống trình duyệt; khoá công khai đặt tên `PUBLIC_…`",
 		"router.get((context) => context.view({ key: environment.require(\"API_KEY\") || \"\" }));":     "router.work:3:45: khoá `API_KEY` sẽ đi xuống trình duyệt",
 		"const stripe = environment.STRIPE_SECRET;\nrouter.get((context) => context.view({ stripe }));": "router.work:4:40: khoá `STRIPE_SECRET` sẽ đi xuống trình duyệt",
-		"router.view((context) => {\n  const token = environment.TOKEN ?? \"\";\n});":                   "router.work:4:9: khoá `TOKEN` sẽ đi xuống trình duyệt",
 	} {
 		_, err := compileAppRoute(t, header+source)
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%q: %v, want %q", source, err, want)
 		}
 	}
-	compiled, err := compileAppRoute(t, header+`const stripe = environment.require("STRIPE_SECRET");
+	if _, err := compileAppRoute(t, header+`const stripe = environment.require("STRIPE_SECRET");
 const greeting = environment.PUBLIC_GREETING || "Xin chào";
-router.view((context) => {
-  const name = environment.PUBLIC_NAME || "";
-  const secretSet = environment.DEMO_SECRET != null;
-});
+router.get((context) => context.view({ greeting, name: environment.PUBLIC_NAME || "", secretSet: environment.DEMO_SECRET != null }));
 router.post((context) => context.json({ charged: stripe.length > 0 }));
-`)
-	if err != nil {
+`); err != nil {
 		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(compiled.EnvironmentServerOnly, []string{"stripe"}) {
-		t.Errorf("server only: %v, want [stripe]", compiled.EnvironmentServerOnly)
 	}
 }
 
 // What a .view(…) hands its page is checked however the key is written into it (mục 6, 22/10/2026): a member
 // of a member of the object, an item of an array, a spread, an object passed by its name, text made with the
-// key (a template, +), a variable of the view's function that holds an object or is a let, and a view's
-// function passed by its name. A member of an object read by its name holds only what that member holds:
-// config.host of an object whose key member is a secret goes to the page.
+// key (a template, +). A member of an object read by its name holds only what that member holds: config.host
+// of an object whose key member is a secret goes to the page.
 //
 // CONTROL (23/10/2026, on 22/10's rule): with environmentHolds reading no object, array, template, + or
-// let (the 22/10 environmentSecret) and environmentView reading only a function written in the call, the
-// ten rows compiled: "router.get((context) => context.view({ config: { stripe: environment.STRIPE_SECRET }
-// }));: <nil>, want …"; the precise member and the server-only list went with it (server only: [], want
-// [config token]).
+// let (the 22/10 environmentSecret), the rows compiled: "router.get((context) => context.view({ config: {
+// stripe: environment.STRIPE_SECRET } }));: <nil>, want …"; the precise member went with it.
 func TestEnvironmentSecretNeverGoesToThePageHoweverDeep(t *testing.T) {
 	const header = "import * as router from \"kitwork/router\";\n" + importEnvironment
 	for source, want := range map[string]string{
@@ -217,9 +199,6 @@ func TestEnvironmentSecretNeverGoesToThePageHoweverDeep(t *testing.T) {
 		"const data = { stripe: environment.STRIPE_SECRET };\nrouter.get((context) => context.view(data));":                        "router.work:4:38: khoá `STRIPE_SECRET` sẽ đi xuống trình duyệt",
 		"router.get((context) => context.view({ header: `Bearer ${environment.TOKEN}` }));":                                        "router.work:3:48: khoá `TOKEN` sẽ đi xuống trình duyệt",
 		"router.get((context) => context.view({ header: \"Bearer \" + environment.TOKEN }));":                                      "router.work:3:48: khoá `TOKEN` sẽ đi xuống trình duyệt",
-		"router.view((context) => {\n  if (true) { }\n  const data = { token: environment.TOKEN };\n});":                           "router.work:5:9: khoá `TOKEN` sẽ đi xuống trình duyệt",
-		"router.view((context) => {\n  let token = environment.TOKEN;\n});":                                                        "router.work:4:7: khoá `TOKEN` sẽ đi xuống trình duyệt",
-		"const page = (context) => {\n  const secret = environment.STRIPE_SECRET;\n};\nrouter.view(page);":                         "router.work:4:9: khoá `STRIPE_SECRET` sẽ đi xuống trình duyệt",
 		"const config = { db: { password: environment.DB_PASSWORD } };\nrouter.get((context) => context.view({ db: config.db }));": "router.work:4:44: khoá `DB_PASSWORD` sẽ đi xuống trình duyệt",
 	} {
 		_, err := compileAppRoute(t, header+source)
@@ -227,47 +206,34 @@ func TestEnvironmentSecretNeverGoesToThePageHoweverDeep(t *testing.T) {
 			t.Errorf("%q: %v, want %q", source, err, want)
 		}
 	}
-	compiled, err := compileAppRoute(t, header+`const config = { host: environment.PUBLIC_HOST, key: environment.STRIPE_SECRET };
+	if _, err := compileAppRoute(t, header+`const config = { host: environment.PUBLIC_HOST, key: environment.STRIPE_SECRET };
 let token = environment.TOKEN;
-const page = (context) => {
-  const host = config.host;
-  const set = token != null;
-};
-router.view(page);
-router.get((context) => context.view({ host: config.host, port: environment.PUBLIC_PORT || 8080 }));
-`)
-	if err != nil {
+router.get((context) => context.view({ host: config.host, set: token != null, port: environment.PUBLIC_PORT || 8080 }));
+`); err != nil {
 		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(compiled.EnvironmentServerOnly, []string{"config", "token"}) {
-		t.Errorf("server only: %v, want [config token]", compiled.EnvironmentServerOnly)
 	}
 }
 
 // A const a module of the app exports that holds a key not named PUBLIC_… is the server's in the file that
-// imports it as in its own (mục 6): router.view's page never reads it, and handing it to a .view(…) is the
-// compile error. A PUBLIC_ key exported beside it goes to the page.
+// imports it as in its own (mục 6): handing it to a .view(…) is the compile error. A PUBLIC_ key exported
+// beside it goes to the page.
 //
 // CONTROL (23/10/2026): with holdEnvironment reading nothing once a declaration is resolved, the import held
-// nothing: "server only: [], want [stripe]", and context.view({ stripe }) compiled.
+// nothing, and context.view({ stripe }) compiled.
 func TestEnvironmentSecretOfAModuleIsServerOnly(t *testing.T) {
 	keys := importEnvironment + "export const stripe = environment.STRIPE_SECRET;\nexport const greeting = environment.PUBLIC_GREETING || \"Xin chào\";\n"
 	root := writeApps(t, map[string]string{
 		"apps/acme/.shared/keys.work": keys,
 		"apps/acme/shop.com/router.work": "import * as router from \"kitwork/router\";\nimport { stripe, greeting } from \"app/.shared/keys.work\";\n" +
-			"router.view((context) => { });\n",
+			"router.get((context) => context.view({ greeting, charged: stripe.length > 0 }));\n",
 		"apps/acme/blog.com/router.work": "import * as router from \"kitwork/router\";\nimport { stripe } from \"app/.shared/keys.work\";\n" +
 			"router.get((context) => context.view({ stripe }));\n",
 	})
 	appRoot := filepath.Join(root, "apps", "acme")
-	compiled, err := CompileFileInApp(appRoot, filepath.Join(appRoot, "shop.com", "router.work"))
-	if err != nil {
+	if _, err := CompileFileInApp(appRoot, filepath.Join(appRoot, "shop.com", "router.work")); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(compiled.EnvironmentServerOnly, []string{"stripe"}) {
-		t.Errorf("server only: %v, want [stripe]", compiled.EnvironmentServerOnly)
-	}
-	_, err = CompileFileInApp(appRoot, filepath.Join(appRoot, "blog.com", "router.work"))
+	_, err := CompileFileInApp(appRoot, filepath.Join(appRoot, "blog.com", "router.work"))
 	if want := "router.work:3:40: khoá `STRIPE_SECRET` sẽ đi xuống trình duyệt"; err == nil || !strings.Contains(err.Error(), want) {
 		t.Errorf("context.view({ stripe }) of an import: %v, want %q", err, want)
 	}

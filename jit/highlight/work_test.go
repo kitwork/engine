@@ -141,10 +141,10 @@ func TestWork(t *testing.T) {
 			Plain, " continue",
 			Punctuation, ";",
 		)},
-		{"router.view((ctx) => {\n  var quantity = 1;\n  const fee = 15000;\n});", tokensOf(
+		{"router.get((ctx) => {\n  var quantity = 1;\n  const fee = 15000;\n});", tokensOf(
 			Variable, "router",
 			Punctuation, ".",
-			Function, "view",
+			Function, "get",
 			Punctuation, "((",
 			Variable, "ctx",
 			Punctuation, ")",

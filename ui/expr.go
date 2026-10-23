@@ -66,8 +66,9 @@ var refusedCalls = []struct{ name, message string }{
 // of .ui has nothing to catch: it never fails as it runs, on either end (a name that is not there reads
 // empty, a call of what is not a function gives empty, past its budget it is empty), safe would have to
 // ship in the browser's kernel for a function that never has work, and logic belongs in .work. The
-// view reads the failure (const { value, error } = safe(() => …)) and the page shows that data.
-const safeInExpression = "biểu thức .ui không có lỗi để bắt: gọi safe(() => …) trong router.view rồi đọc kết quả"
+// handler reads the failure (const { value, error } = safe(() => …)), hands it to context.view({ … }) and
+// the page shows that data.
+const safeInExpression = "biểu thức .ui không có lỗi để bắt: gọi safe(() => …) trong handler của router.get rồi đưa kết quả vào context.view({ … })"
 
 // callsName reports whether an expression's IR calls a bare name (safe, raw): ["call", ["$", name], …],
 // outside a lambda that names a parameter so.

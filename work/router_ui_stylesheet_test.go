@@ -66,8 +66,9 @@ router.fonts({ code: "Fira Code" });`,
 			"localhost/cung-lop/content.ui": words("Cùng lớp", "hai"),
 			"localhost/khac/content.ui":     strings.Replace(words("Khác", "ba"), `<card gap="3"`, `<card gap="3" border="line"`, 1),
 			"localhost/du-lieu/router.work": `import { router } from "kitwork";
-router.view((ctx) => {
+router.get((ctx) => {
   const tone = "danger";
+  return ctx.view({ tone });
 });`,
 			"localhost/du-lieu/content.ui": `<content><badge color="{{ tone }}"><text>Hết món</text></badge></content>`,
 		})
@@ -331,8 +332,9 @@ func TestUIPageRunsNoPassPerRequest(t *testing.T) {
 	const note = "font-family: Fira Code — toggleTheme"
 	tenant := buildFilesSite(t, withFiles(map[string]string{
 		"localhost/du-lieu/router.work": `import { router } from "kitwork";
-router.view((ctx) => {
+router.get((ctx) => {
   const note = "` + note + `";
+  return ctx.view({ note });
 });`,
 		"localhost/du-lieu/content.ui": `<content><text>{{ note }}</text></content>`,
 	}))
@@ -372,8 +374,9 @@ func TestUIPageDataClassKeepsItsPlaceInTheCascade(t *testing.T) {
 		`router.colors({ brand: "#c8742c", canvas: "#f6f3ee", paper: "#ffffff", danger: "#e5484d" });`,
 		map[string]string{
 			"localhost/muon/router.work": `import { router } from "kitwork";
-router.view((ctx) => {
+router.get((ctx) => {
   const tone = "danger";
+  return ctx.view({ tone });
 });`,
 			"localhost/muon/content.ui": `<content background="canvas"><box background="{{ tone }}" large:background="paper"><text>Hết món</text></box></content>`,
 		}))
@@ -398,8 +401,9 @@ func TestBranchSendsNoInlineColourCSS(t *testing.T) {
 	tenant := buildFilesSite(t, withFiles(map[string]string{
 		"localhost/quan-ly/router.work": `import { router } from "kitwork";
 router.colors({ brand: "#2563eb" });
-router.view((ctx) => {
+router.get((ctx) => {
   const orders = [{ tone: "warning" }, { tone: "success" }, { tone: "danger" }];
+  return ctx.view({ orders });
 });`,
 		"localhost/quan-ly/content.ui": `<content><list><item for="order of orders"><badge color="{{ order.tone }}"><text>{{ order.tone }}</text></badge></item></list></content>`,
 	}))
@@ -429,8 +433,9 @@ router.view((ctx) => {
 func TestIconsFromDataAreOneFilePerSet(t *testing.T) {
 	tenant := buildFilesSite(t, withFiles(map[string]string{
 		"localhost/bieu-tuong/router.work": `import { router } from "kitwork";
-router.view((ctx) => {
+router.get((ctx) => {
   const glyph = ctx.query("glyph") || "coffee";
+  return ctx.view({ glyph });
 });`,
 		"localhost/bieu-tuong/content.ui": `<content><icon value="coffee" alt=""></icon><icon value="{{ glyph }}" alt=""></icon></content>`,
 	}))
@@ -504,8 +509,9 @@ func TestIconsFromDataKeepTheRecentlyUsedSets(t *testing.T) {
 	// through the tenant: an evicted name is the engine's 404
 	tenant := buildFilesSite(t, withFiles(map[string]string{
 		"localhost/bieu-tuong/router.work": `import { router } from "kitwork";
-router.view((ctx) => {
+router.get((ctx) => {
   const glyph = ctx.query("glyph");
+  return ctx.view({ glyph });
 });`,
 		"localhost/bieu-tuong/content.ui": `<content><icon value="{{ glyph }}" alt=""></icon></content>`,
 	}))

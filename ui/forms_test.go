@@ -202,9 +202,10 @@ func TestNameReadInsideTheHostIsNotShadowed(t *testing.T) {
 		"toggle ở đây là của dropdown, mà dropdown bao ngoài cũng khai toggle: một tên một nghĩa")
 
 	view := `import { router } from "kitwork";
-router.view((ctx) => {
-  var open = true;
+router.get((ctx) => {
+  const open = true;
   const user = { name: "Quốc" };
+  return ctx.view({ open, user });
 });`
 	header := `<content><dropdown><text show="open">menu</text></dropdown></content>`
 	partsWarns(t, map[string]string{"/site/content.ui": header, "/site/router.work": view}, where("content.ui", header, `show=`),
@@ -215,10 +216,7 @@ router.view((ctx) => {
 	html := mustCompile(t, map[string]string{
 		"/site/content.ui": `<content><dropdown><text>{{ user.name }}</text><button click="toggle()">x</button></dropdown><shop-cart /></content>`,
 		"/site/router.work": `import { router } from "kitwork";
-router.view((ctx) => {
-  const user = { name: "Quốc" };
-  function total() { return 1; }
-});`,
+router.get((ctx) => ctx.view({ user: { name: "Quốc" }, total: () => 1 }));`,
 		"/site/shop-cart.ui":   `<box><text>{{ total() }}</text></box>`,
 		"/site/shop-cart.work": cartLogic,
 	})

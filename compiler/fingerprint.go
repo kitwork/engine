@@ -136,7 +136,15 @@ import (
 // compile errors (environment.go). A cached artifact of schema 18 that writes one of them would run until
 // the word fails where it is read, or hand a page a secret: the bump retires it. A program that writes none
 // of them compiles as before, byte for byte. No opcode or operand changed.
-const CompilerSchemaVersion uint16 = 19
+//
+// 20 (23/10/2026, KITWORK_ROUTER.md, router.view removed): router.view read off the router in a router.work
+// (router.view(…), const { view } = router, import { view } from "kitwork/router") is a compile error
+// (router.go), and a .view(…) handed a function is no longer read for the page, nor are the file's consts
+// listed for it (EnvironmentServerOnly is gone with router.view). A cached artifact of schema 19 that writes
+// router.view would run until the router refused it where it runs, instead of the file failing where it is
+// written: the bump retires it. A program that writes none of them compiles as before, byte for byte. No
+// opcode or operand changed.
+const CompilerSchemaVersion uint16 = 20
 
 var currentCompilerFingerprint = compilerFingerprintFor(CompilerSchemaVersion)
 

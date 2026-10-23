@@ -61,7 +61,7 @@ func TestRouterHighlightReachesThePageStylesheet(t *testing.T) {
 // key in quotes, the author's and the nearest kind's —, the template's keys, the three window dots in one
 // sentence); a value that is a string or a pair of light and dark, both strings, not empty, no lone #hex
 // (a # that is no colour said so), a side that is a colour, no pair and no #hex for inserted. A call made
-// while a page is served (in router.view) is refused: the colours are the router's, set once. CONTROL: a
+// while a page is served (in a handler) is refused: the colours are the router's, set once. CONTROL: a
 // call that reads boots.
 func TestRouterHighlightRefusesWhatItDoesNotRead(t *testing.T) {
 	for written, want := range map[string]string{
@@ -105,14 +105,14 @@ func TestRouterHighlightRefusesWhatItDoesNotRead(t *testing.T) {
 	if _, err := bootUISite(t, dots, true); err == nil || strings.Count(err.Error(), "là ba chấm cửa sổ") != 1 {
 		t.Errorf("red, yellow, green: one sentence, got %v", err)
 	}
-	// at request time, in a view: the page answers it, and the colours stay as the router set them
+	// at request time, in a handler: the page answers it, and the colours stay as the router set them
 	view := withFiles(map[string]string{"localhost/content.ui": highlightCode})
-	view["localhost/router.work"] = strings.Replace(view["localhost/router.work"], `ctx.title("Thực đơn");`, `ctx.title("Thực đơn");
-  router.highlight({ keyword: "violet" });`, 1)
+	view["localhost/router.work"] = strings.Replace(view["localhost/router.work"], `  return ctx.title("Thực đơn")`, `  router.highlight({ keyword: "violet" });
+  return ctx.title("Thực đơn")`, 1)
 	tenant := buildUISite(t, view)
 	if rec := serveUI(t, tenant, "http://localhost/"); rec.Code != http.StatusInternalServerError ||
 		!strings.Contains(rec.Body.String(), "router.highlight viết ở cấp đầu của router.work, chạy một lần khi site khởi động") {
-		t.Errorf("router.highlight in a view: %d %.600s", rec.Code, rec.Body.String())
+		t.Errorf("router.highlight in a handler: %d %.600s", rec.Code, rec.Body.String())
 	}
 	if css := pageWithStylesheet(t, tenant, "http://localhost/tinh"); strings.Contains(css, "#ee82ee") {
 		t.Errorf("a call refused at request time changes nothing:\n%s", linesWith(css, "code-"))
@@ -133,9 +133,9 @@ func TestRouterHighlightBranchesPerKind(t *testing.T) {
 		"localhost/content.ui": highlightCode,
 		"localhost/mon/{slug}/router.work": `import { router } from "kitwork";
 router.highlight({ keyword: "brand" });
-router.view((ctx) => {
+router.get((ctx) => {
   if (ctx.params("slug") != "ca-phe") return ctx.notFound();
-  const name = "Cà phê sữa";
+  return ctx.view({ name: "Cà phê sữa" });
 });
 `,
 		"localhost/mon/{slug}/content.ui": highlightCode,

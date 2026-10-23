@@ -45,6 +45,8 @@ type Program struct {
 	Schedule *ScheduleBundle
 	// App: a file of an app, compiled with the app's folder; false for a file of no app, as a manifest.
 	App bool
+	// Router: the program is a router.work, where router.view is refused (router.go).
+	Router bool
 }
 
 // ExportAlias is `export { local as exported }`: Token is where exported is written.

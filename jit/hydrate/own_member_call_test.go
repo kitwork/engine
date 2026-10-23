@@ -3,8 +3,8 @@ package hydrate
 import "testing"
 
 // A call through the dot reaches an object's own key when the key holds a function, as in the VM
-// (value.CallsOwn, 13/10/2026): a helper the host put in an object (a Func, the shape a router.view
-// lambda takes in a .ui scope) is called, and so is a lambda value. An own key holding data never
+// (value.CallsOwn, 13/10/2026): a helper the host put in an object (a Func, the shape a function of the
+// object context.view({ … }) is given takes in a .ui scope) is called, and so is a lambda value. An own key holding data never
 // answers a call: an object has no methods in this evaluator, so the call is nil, as without the key.
 func TestOwnFunctionMemberIsCalledThroughTheDot(t *testing.T) {
 	scope := map[string]any{

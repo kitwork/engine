@@ -102,20 +102,20 @@ router.get((ctx) => {
 	}
 }
 
-// In a Kitwork UI site the same read fails in router.view: the view does not render data it cannot have.
+// In a Kitwork UI site the same read fails in the handler of a page: the page does not render data it
+// cannot have.
 func TestUIViewContextDatabaseIsAnError(t *testing.T) {
 	files := withFiles(map[string]string{
 		"localhost/router.work": `import { router, safe } from "kitwork";
-router.view((ctx) => {
+router.get((ctx) => {
   const { error } = safe(() => ctx.database.table("items").count());
-  const message = error.message;
-  ctx.title("Kho");
+  return ctx.title("Kho").view({ message: error.message });
 });`,
 		"localhost/content.ui": `<content><text>{{ message }}</text></content>`,
 	})
 	tenant := buildUISite(t, files)
 	page := serveUI(t, tenant, "http://localhost/")
 	if page.Code != 200 || !strings.Contains(page.Body.String(), "context.database đã bỏ") {
-		t.Fatalf("a .work view reads ctx.database: code=%d body=%s", page.Code, page.Body.String())
+		t.Fatalf("a .work handler reads ctx.database: code=%d body=%s", page.Code, page.Body.String())
 	}
 }

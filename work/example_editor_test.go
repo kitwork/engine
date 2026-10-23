@@ -21,7 +21,7 @@ var (
 	exampleEditorScopeRe = regexp.MustCompile(`data-kitwork-component="editor: \$body" data-kitwork-scope="([^"]*)"`)
 )
 
-// exampleEditorSample is the post the editor of /components/editor starts with (its router.view): a
+// exampleEditorSample is the post the editor of /components/editor starts with (its router.get): a
 // centred heading, an underline, a code block of three lines.
 const exampleEditorSample = "<h2 class=\"align-center\">Opening hours</h2>\n" +
 	"<p>Open <strong>every day</strong> from 7 am to 10 pm, <u>the kitchen until 9</u>. Select a few words and try the buttons.</p>\n" +

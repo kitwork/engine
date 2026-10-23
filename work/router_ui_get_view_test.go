@@ -12,7 +12,7 @@ import (
 )
 
 // uiGetSite is a router.work site whose routes answer with router.get and context.view({ … }), beside
-// one written with router.view and one API route (20/10/2026).
+// one API route (20/10/2026).
 func uiGetSite(t *testing.T) *Tenant {
 	t.Helper()
 	tn := NewTenant(writeSite(t, map[string]string{
@@ -24,7 +24,7 @@ func uiGetSite(t *testing.T) *Tenant {
 		"menu/router.work": "import * as router from \"kitwork/router\";\nlet runs = 0;\n" +
 			"router.get((context) => { runs = runs + 1; return context.title(\"Thực đơn\").description(\"Cà phê\").view({ note: \"sữa\", money: (n) => n * 1000, runs }); }).cache(\"1h\");\n",
 		"old/content.ui":   `<content><text id="old">CU {{ note }}</text></content>`,
-		"old/router.work":  "import * as router from \"kitwork/router\";\nrouter.view((context) => { context.title(\"Cũ\"); const note = \"view\"; });\n",
+		"old/router.work":  "import * as router from \"kitwork/router\";\nrouter.get((context) => context.title(\"Cũ\").view({ note: \"view\" }));\n",
 		"api/router.work":  "import * as router from \"kitwork/router\";\nrouter.get((context) => context.json({ api: true }));\n",
 		"bare/router.work": "import * as router from \"kitwork/router\";\nrouter.get((context) => context.view({ note: 1 }));\n",
 		"gone/router.work": "import * as router from \"kitwork/router\";\nrouter.get((context) => context.title(\"Không tìm thấy\").notFound());\n",
@@ -37,8 +37,8 @@ func uiGetSite(t *testing.T) *Tenant {
 }
 
 // In router.work, router.get answering context.title(…).description(…).view({ … }) draws the folder's
-// .ui page as router.view does: the page's text in its head, the object's names in the page (a function
-// of it the page calls); router.view still draws its page; context.json in a folder is still an API.
+// .ui page: the page's text in its head, the object's names in the page (a function of it the page
+// calls); context.json in a folder is still an API.
 func TestUIGetViewDrawsThePage(t *testing.T) {
 	tn := uiGetSite(t)
 	menu := serveGet(tn, "/menu", nil)
@@ -52,7 +52,7 @@ func TestUIGetViewDrawsThePage(t *testing.T) {
 		t.Errorf("/menu: %d %q", menu.Code, menu.Header().Get("Content-Type"))
 	}
 	if r := serveGet(tn, "/old", nil); r.Code != http.StatusOK || !strings.Contains(r.Body.String(), "CU view") || !strings.Contains(r.Body.String(), "<title>Cũ</title>") {
-		t.Errorf("router.view: %d %.300q", r.Code, r.Body.String())
+		t.Errorf("/old: %d %.300q", r.Code, r.Body.String())
 	}
 	if r := serveGet(tn, "/api", nil); r.Body.String() != `{"api":true}` {
 		t.Errorf("/api: %d %q", r.Code, r.Body.String())
@@ -111,7 +111,7 @@ func TestUIGetViewIsKeptForLoadAndDrive(t *testing.T) {
 	}
 }
 
-// A real browser loads the page router.get drew, and Drive moves from it to a router.view page without a
+// A real browser loads the page router.get drew, and Drive moves from it to another such page without a
 // reload.
 func TestBrowserUIGetView(t *testing.T) {
 	if testing.Short() {

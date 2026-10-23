@@ -29,15 +29,16 @@ func TestCheckAndProfileFindAKitworkUISite(t *testing.T) {
 	}
 	write("router.work", `import { router } from "kitwork";
 router.colors({ brand: "#c8742c" });
-router.view((ctx) => {
+router.get((ctx) => {
   const title = "Thực đơn";
-  ctx.title(title);
+  return ctx.title(title).view({ title });
 });`)
 	write("view.ui", `<view><content /></view>`)
 	write("content.ui", `<content><text heading="1">{{ title }}</text></content>`)
 	write("mon/{slug}/router.work", `import { router } from "kitwork";
-router.view((ctx) => {
+router.get((ctx) => {
   const name = ctx.params("slug");
+  return ctx.view({ name });
 });`)
 	write("mon/{slug}/content.ui", `<content><text>{{ name }}</text></content>`)
 

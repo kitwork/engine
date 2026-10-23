@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/utilities/publishing"
 	"github.com/kitwork/engine/value"
@@ -12,13 +11,13 @@ import (
 
 func (t *Tenant) outputData(
 	vm *runtime.VM,
-	bytecode *compiler.Bytecode,
+	folder *FolderRouter,
 	method *FolderMethod,
 	ctx *Context,
 ) (value.Value, error) {
 	data := method.outputData
 	if method.handle != nil {
-		data = t.execTree(vm, bytecode, method.handle, ctx)
+		data = t.execTree(vm, folder, method.handle, ctx)
 		if data.K == value.Invalid {
 			return data, &stageFailure{text: fmt.Sprintf("generated %s provider failed: %v", method.outputKind, data.V), failure: data, run: true}
 		}
@@ -37,7 +36,7 @@ func (t *Tenant) outputData(
 		if !ok || item.K != value.Func {
 			continue
 		}
-		result := t.execTree(vm, bytecode, lambdaOf(item), ctx)
+		result := t.execTree(vm, folder, lambdaOf(item), ctx)
 		if result.K == value.Invalid {
 			return result, &stageFailure{text: fmt.Sprintf("generated %s %s provider failed: %v", method.outputKind, key, result.V), failure: result, run: true}
 		}
@@ -48,11 +47,11 @@ func (t *Tenant) outputData(
 
 func (t *Tenant) executeGeneratedOutput(
 	vm *runtime.VM,
-	bytecode *compiler.Bytecode,
+	folder *FolderRouter,
 	method *FolderMethod,
 	ctx *Context,
 ) error {
-	data, err := t.outputData(vm, bytecode, method, ctx)
+	data, err := t.outputData(vm, folder, method, ctx)
 	if err != nil {
 		return err
 	}

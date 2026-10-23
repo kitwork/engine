@@ -616,7 +616,7 @@ func defineBody(statement logic.Statement, name string) *logic.BlockStatement {
 }
 
 // callArguments returns the arguments of <object>.<method>(…) when e is that call; object "" takes
-// any receiver (router.view, router.reload(false).view).
+// any receiver (context.view, context.title(…).view).
 func callArguments(e logic.Expression, object, method string) []logic.Expression {
 	switch call := e.(type) {
 	case *logic.MethodCallExpression:
@@ -639,11 +639,15 @@ func isIdentifier(e logic.Expression, name string) bool {
 	return ok && id.Value == name
 }
 
-// viewNames are the names the route's view gives the page: what its router.work declares at the top
-// (its imports among them) and what router.view's function declares. The compiler reads them to
-// warn of a name that a component and the view both declare where markup cannot tell which one it
-// reads (the component's wins). A router.work it cannot read gives none (the engine reports it where
-// the route runs).
+// viewNames are the names the route's view gives the page: the keys of every object its router.work hands
+// a .view({ … }), in any handler (23/10/2026: the page reads exactly those; router.view, whose function's
+// and file's names the page read, is gone). The compiler reads them to warn of a name that a component and
+// the view both declare where markup cannot tell which one it reads (the component's wins), and to tell a
+// name read outside the component that declares it (strayNames). A router.work it cannot read gives none
+// (the engine reports it where the route runs), and so does a .view(…) handed anything but an object
+// written there (.view(data), .view({ ...data })), and a router.work that hands something to code of another
+// file of the app — a name it imports from there called with an argument (page(context)) or handed as one
+// (router.get(page)) — which may call .view itself: what the page is given is not known here.
 func (s *Site) viewNames(routeDir string) (map[string]bool, string) {
 	file := filepath.Join(routeDir, "router.work")
 	if !s.exists(file) {
@@ -658,24 +662,185 @@ func (s *Site) viewNames(routeDir string) (map[string]bool, string) {
 	if len(parser.Errors()) > 0 {
 		return nil, file
 	}
-	names := map[string]bool{}
-	for name := range declaredNames(program.Statements) {
-		names[name] = true
-	}
+	// imported are the names bound to code of another file of the app (an import of "kitwork" is no such
+	// statement: the parser lowers it to a const)
+	imported := map[string]bool{}
 	for _, statement := range program.Statements {
-		expression, ok := statement.(*logic.ExpressionStatement)
-		if !ok {
-			continue
-		}
-		for _, argument := range callArguments(expression.Expression, "", "view") {
-			if function, ok := argument.(*logic.FunctionLiteral); ok && function.Body != nil {
-				for name := range declaredNames(function.Body.Statements) {
-					names[name] = true
-				}
+		if module, ok := statement.(*logic.ImportStatement); ok {
+			for _, spec := range module.Names {
+				imported[spec.Local] = true
+			}
+			if module.Default != nil {
+				imported[module.Default.Value] = true
 			}
 		}
 	}
+	names, known := map[string]bool{}, true
+	handsImported := func(callee logic.Expression, arguments []logic.Expression) {
+		if len(arguments) > 0 && imported[rootName(callee)] {
+			known = false
+		}
+		for _, argument := range arguments {
+			if imported[rootName(argument)] {
+				known = false
+			}
+		}
+	}
+	eachExpression(program.Statements, func(e logic.Expression) {
+		if call, ok := e.(*logic.CallExpression); ok {
+			handsImported(call.Function, call.Arguments)
+			return
+		}
+		call, ok := e.(*logic.MethodCallExpression)
+		if !ok {
+			return
+		}
+		handsImported(call.Object, call.Arguments)
+		if call.Method == nil || call.Method.Value != "view" || len(call.Arguments) == 0 {
+			return
+		}
+		object, ok := call.Arguments[0].(*logic.ObjectLiteral)
+		if !ok {
+			known = false
+			return
+		}
+		for _, entry := range object.Entries {
+			switch key := entry.Key.(type) {
+			case *logic.Identifier:
+				if !entry.IsSpread {
+					names[key.Value] = true
+					continue
+				}
+			case *logic.Literal:
+				if !entry.IsSpread && key.Value.IsString() {
+					names[key.Value.Text()] = true
+					continue
+				}
+			}
+			known = false
+		}
+	})
+	if !known {
+		return nil, file
+	}
 	return names, file
+}
+
+// rootName is the name an expression is read off: page of page, pages.home and pages[i]; "" for anything
+// else (a call's result, a literal).
+func rootName(e logic.Expression) string {
+	switch node := e.(type) {
+	case *logic.Identifier:
+		return node.Value
+	case *logic.MemberExpression:
+		return rootName(node.Object)
+	case *logic.IndexExpression:
+		return rootName(node.Left)
+	case *logic.ChainExpression:
+		return rootName(node.Expression)
+	}
+	return ""
+}
+
+// eachExpression visits every expression of the statements, outer first, functions' bodies included.
+func eachExpression(statements []logic.Statement, visit func(logic.Expression)) {
+	for _, statement := range statements {
+		eachStatementExpression(statement, visit)
+	}
+}
+
+func eachStatementExpression(statement logic.Statement, visit func(logic.Expression)) {
+	switch node := statement.(type) {
+	case *logic.VarStatement:
+		eachInExpression(node.Value, visit)
+	case *logic.ExpressionStatement:
+		eachInExpression(node.Expression, visit)
+	case *logic.ReturnStatement:
+		eachInExpression(node.ReturnValue, visit)
+	case *logic.BlockStatement:
+		if node != nil {
+			eachExpression(node.Statements, visit)
+		}
+	case *logic.GroupStatement:
+		eachExpression(node.Statements, visit)
+	case *logic.SwitchStatement:
+		eachInExpression(node.Discriminant, visit)
+		for _, each := range node.Cases {
+			eachInExpression(each.Test, visit)
+			eachExpression(each.Statements, visit)
+		}
+	case *logic.ForStatement:
+		eachInExpression(node.Iterable, visit)
+		eachStatementExpression(node.Body, visit)
+	case *logic.ForRangeStatement:
+		eachStatementExpression(node.Init, visit)
+		eachInExpression(node.Cond, visit)
+		eachInExpression(node.Update, visit)
+		eachStatementExpression(node.Body, visit)
+	case *logic.DeferStatement:
+		eachInExpression(node.Fn, visit)
+	case *logic.SpawnStatement:
+		eachInExpression(node.Fn, visit)
+	case logic.Expression:
+		eachInExpression(node, visit)
+	}
+}
+
+func eachInExpression(e logic.Expression, visit func(logic.Expression)) {
+	if e == nil {
+		return
+	}
+	visit(e)
+	switch node := e.(type) {
+	case *logic.PrefixExpression:
+		eachInExpression(node.Right, visit)
+	case *logic.InfixExpression:
+		eachInExpression(node.Left, visit)
+		eachInExpression(node.Right, visit)
+	case *logic.IfExpression:
+		eachInExpression(node.Condition, visit)
+		eachStatementExpression(node.Consequence, visit)
+		eachStatementExpression(node.Alternative, visit)
+	case *logic.TernaryExpression:
+		eachInExpression(node.Condition, visit)
+		eachInExpression(node.Consequence, visit)
+		eachInExpression(node.Alternative, visit)
+	case *logic.CallExpression:
+		eachInExpression(node.Function, visit)
+		for _, argument := range node.Arguments {
+			eachInExpression(argument, visit)
+		}
+	case *logic.MethodCallExpression:
+		eachInExpression(node.Object, visit)
+		for _, argument := range node.Arguments {
+			eachInExpression(argument, visit)
+		}
+	case *logic.MemberExpression:
+		eachInExpression(node.Object, visit)
+	case *logic.IndexExpression:
+		eachInExpression(node.Left, visit)
+		eachInExpression(node.Index, visit)
+	case *logic.ChainExpression:
+		eachInExpression(node.Expression, visit)
+	case *logic.AssignmentExpression:
+		eachInExpression(node.Value, visit)
+	case *logic.ArrayLiteral:
+		for _, element := range node.Elements {
+			eachInExpression(element, visit)
+		}
+	case *logic.ObjectLiteral:
+		for _, entry := range node.Entries {
+			eachInExpression(entry.Value, visit)
+		}
+	case *logic.SpreadExpression:
+		eachInExpression(node.Value, visit)
+	case *logic.TemplateLiteral:
+		for _, part := range node.Parts {
+			eachInExpression(part, visit)
+		}
+	case *logic.FunctionLiteral:
+		eachStatementExpression(node.Body, visit)
+	}
 }
 
 // writtenValue is the value an expression spells out: a literal, or an array or object of them.

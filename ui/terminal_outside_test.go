@@ -64,9 +64,19 @@ func TestUsedNamesReadEveryItem(t *testing.T) {
 
 // Outside every component, a name a component on the page declares names nothing (decision T2: copy()
 // and copied outside a component that gives them are a compile error): said where it is written, with
-// the two ways to reach it. The route's view may declare the same name, and then it is the view's.
-// CONTROLS: inside the host it is the terminal's; declared by the view it is the view's; a name no
-// component has stays the page's.
+// the two ways to reach it. The route's view may give the same name, and then it is the view's: a key of
+// the object its context.view({ … }) is given (23/10/2026: a const of router.work's top level is no name
+// of the page). CONTROLS: inside the host it is the terminal's; given by the view it is the view's; a name
+// no component has stays the page's. CONTROL (23/10/2026, go test -overlay): with viewNames reading the
+// file's top-level names as when router.view handed them, copied of the object was told as the terminal's
+// ("content.ui:1:79: copied là tên của terminal …"), and the warnings of TestNameReadInsideTheHostIsNotShadowed
+// and TestPartsShadowedNameIsAWarning, whose view hands open in its object, were not given ("got []").
+// When the view's object is not known here — .view(data), .view({ ...base }), a router.work handing its
+// context or its handler to code it imports — copied may be the view's and compiles. CONTROLS (23/10/2026,
+// go test -overlay): with viewNames returning the names it found even when not known, the four rows failed
+// "content.ui:1:79: copied là tên của terminal …"; with viewNames not looking at what a router.work hands an
+// imported name, the two imported rows alone failed so; with any import making the names unknown, the row whose router.work calls
+// listNavigation() with no argument compiled ("expected a compile error").
 func TestTerminalNamesOutsideItsHost(t *testing.T) {
 	terminal := `<terminal><code language="bash">npm i kitwork</code></terminal>`
 	view := map[string]string{"/site/router.work": `const title = "Kitwork";`}
@@ -87,7 +97,35 @@ func TestTerminalNamesOutsideItsHost(t *testing.T) {
 	}
 	// controls
 	mustCompile(t, site(`<content><terminal><code>ls</code><button click="copy()">{{ copied ? 'Copied' : 'Copy' }}</button></terminal></content>`, view))
-	mustCompile(t, site(`<content>`+terminal+`<text>{{ copied ? 'Copied' : 'Copy' }}</text></content>`, map[string]string{"/site/router.work": `const copied = false;`}))
+	mustCompile(t, site(`<content>`+terminal+`<text>{{ copied ? 'Copied' : 'Copy' }}</text></content>`,
+		map[string]string{"/site/router.work": `router.get((context) => context.view({ copied: false }));`}))
+	// a const of the file is not the view's: the page cannot read it, so copied there is still the terminal's
+	mustFail(t, site(`<content>`+terminal+`<text>{{ copied ? 'Copied' : 'Copy' }}</text></content>`,
+		map[string]string{"/site/router.work": `const copied = false;`}), "content.ui:1:", `copied là tên của terminal`)
+	// what the view hands is not known here, so copied may be the view's: a .view(…) of a name or of a spread,
+	// and a router.work that hands its context or its handler to code of another file, which may call .view
+	stray := `<content>` + terminal + `<text>{{ copied ? 'Copied' : 'Copy' }}</text></content>`
+	helper := map[string]string{"/site/page.work": "export const page = (context) => context.view({ copied: false });"}
+	for name, router := range map[string]string{
+		"a name":               "router.get((context) => {\n  const data = { copied: false };\n  return context.view(data);\n});",
+		"a spread":             "const base = { copied: false };\nrouter.get((context) => context.view({ ...base }));",
+		"the context imported": "import { page } from \"./page.work\";\nrouter.get((context) => page(context));",
+		"the handler imported": "import { page as answer } from \"./page.work\";\nrouter.get(answer);",
+	} {
+		t.Run(name, func(t *testing.T) {
+			files := map[string]string{"/site/router.work": router}
+			for file, source := range helper {
+				files[file] = source
+			}
+			mustCompile(t, site(stray, files))
+		})
+	}
+	// CONTROL: a name of another file called with no argument hands it nothing (navigation: listNavigation()),
+	// so the names stay the object's and copied is still the terminal's
+	mustFail(t, site(stray, map[string]string{
+		"/site/router.work": "import { listNavigation } from \"./page.work\";\nrouter.get((context) => context.view({ navigation: listNavigation() }));",
+		"/site/page.work":   "export const listNavigation = () => [];",
+	}), "content.ui:1:", `copied là tên của terminal`)
 	mustCompile(t, site(`<content>`+terminal+`<text>{{ title }}</text><button click="track()">x</button></content>`, view))
 	// an accordion's header writes click="toggle()", the accordion's own word (the browser opens
 	// <details>), beside a dropdown that declares toggle: no name of the dropdown's

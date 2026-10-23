@@ -19,7 +19,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kitwork/engine/compiler"
 	requestscope "github.com/kitwork/engine/request"
 	"github.com/kitwork/engine/runtime"
 	httputil "github.com/kitwork/engine/utilities/http"
@@ -204,7 +203,7 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 			continue
 		}
 		for _, g := range fr.guards {
-			if !t.runStage(vm, fr.bytecode, g, ctxObj, reqRouter, true) {
+			if !t.runStage(vm, fr, g, ctxObj, reqRouter, true) {
 				finalize()
 				return
 			}
@@ -248,7 +247,7 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 			ctxObj.View()
 			finalize()
 		} else if asGet && t.folderHasUIPage(match.Node) {
-			t.respondUI(reqRouter, match.Node, nil) // a content.ui with no router.view: a page with no data
+			t.respondUI(reqRouter, match.Node, nil) // a content.ui with no router.get: a page with no data
 			finalize()
 		} else {
 			notFound()
@@ -270,7 +269,7 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 	// hit replays the bytes a request the guard let through got, so reading it first let any request
 	// past the guard (19/10/2026). A guard that answers or blocks is not cached (savMethod unset yet).
 	for _, g := range method.guards {
-		if !t.runStage(vm, leaf.bytecode, g, ctxObj, reqRouter, true) {
+		if !t.runStage(vm, leaf, g, ctxObj, reqRouter, true) {
 			finalize()
 			return
 		}
@@ -305,20 +304,18 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 			// Reverse proxy (router.proxy): a .cache()/.persist() hit already replayed above with no
 			// VM — reaching here means a miss, so fetch the upstream now. A failure is the UPSTREAM's
 			// fault, not ours: 502.
-			if err := t.serveProxy(vm, leaf.bytecode, method, ctxObj); err != nil {
+			if err := t.serveProxy(vm, leaf, method, ctxObj); err != nil {
 				t.recordStageFailure(reqRouter, leaf.bytecode, "proxy", err)
 				reqRouter.fail(err, http.StatusBadGateway)
 			}
 		case method.outputKind != "":
-			if err := t.executeGeneratedOutput(vm, leaf.bytecode, method, ctxObj); err != nil {
+			if err := t.executeGeneratedOutput(vm, leaf, method, ctxObj); err != nil {
 				t.recordStageFailure(reqRouter, leaf.bytecode, "output", err)
 				reqRouter.fail(err, http.StatusInternalServerError)
 			}
-		case method.uiView:
-			t.serveUIView(vm, leaf, method, ctxObj, reqRouter, match.Node)
 		case method.handle != nil:
 			reqRouter.method, reqRouter.handling = method, true
-			res := t.execTree(vm, leaf.bytecode, method.handle, ctxObj)
+			res := t.execTree(vm, leaf, method.handle, ctxObj)
 			reqRouter.handling = false
 			if stream := reqRouter.openedStream(); stream != nil && res.K != value.Invalid && !stream.is(res) {
 				// context.sse chose the answer: the handler returns the stream (KITWORK_SSE.md mục 1)
@@ -360,16 +357,16 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 	// answers its failure; without one the nearest folder's router.error() does, leaf to root, as the
 	// docs say (14/10/2026: a folder's was kept and never run).
 	if reqRouter.err != nil {
-		errorH, errorBytecode := method.errorH, leaf.bytecode
+		errorH, errorFolder := method.errorH, leaf
 		for index := len(match.Chain) - 1; errorH == nil && index >= 0; index-- {
 			if folder := match.Chain[index].folder; folder != nil && folder.errorH != nil && folder.bytecode != nil {
-				errorH, errorBytecode = folder.errorH, folder.bytecode
+				errorH, errorFolder = folder.errorH, folder
 			}
 		}
 		if errorH != nil {
-			res := t.execTree(vm, errorBytecode, errorH, ctxObj)
+			res := t.execTree(vm, errorFolder, errorH, ctxObj)
 			if res.K == value.Invalid {
-				t.recordRuntimeFailure(reqRouter, errorBytecode, "error", res)
+				t.recordRuntimeFailure(reqRouter, errorFolder.bytecode, "error", res)
 			}
 			if res.K != value.Invalid && !reqRouter.response.IsSend() && res.Truthy() {
 				if reqRouter.response.Code() == 0 {
@@ -383,14 +380,14 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 			}
 		}
 	} else if method.success != nil {
-		res := t.execTree(vm, leaf.bytecode, method.success, ctxObj)
+		res := t.execTree(vm, leaf, method.success, ctxObj)
 		if res.K == value.Invalid {
 			t.recordRuntimeFailure(reqRouter, leaf.bytecode, "success", res)
 			reqRouter.err = uncaught(res.Text())
 		}
 	}
 	if method.final != nil {
-		res := t.execTree(vm, leaf.bytecode, method.final, ctxObj)
+		res := t.execTree(vm, leaf, method.final, ctxObj)
 		if res.K == value.Invalid {
 			t.recordRuntimeFailure(reqRouter, leaf.bytecode, "finally", res)
 			if reqRouter.err == nil {
@@ -428,16 +425,19 @@ func limitKey(lim methodLimit, scope string, r *http.Request) string {
 }
 
 // execTree loads the folder's bytecode into the VM (its lambdas index THAT bytecode), then runs
-// one lambda with the usual (ctx/request/response) argument binding.
-func (t *Tenant) execTree(vm *runtime.VM, bc *compiler.Bytecode, l *value.Lambda, ctxObj *Context) value.Value {
-	if l == nil || bc == nil {
+// one lambda of it with the arguments its folder's router file hands: by position for a router.work's,
+// by name for a router.kitwork.js's — the folder that wrote the function, not the request's leaf, so a
+// guard of a router.work over a template folder still takes its context (23/10/2026).
+func (t *Tenant) execTree(vm *runtime.VM, folder *FolderRouter, l *value.Lambda, ctxObj *Context) value.Value {
+	if l == nil || folder == nil || folder.bytecode == nil {
 		return value.Value{K: value.Nil}
 	}
+	bc := folder.bytecode
 	vm.FastResetPrepared(bc.Program)
 	started := time.Now()
 	var result value.Value
 	// the site's program runs: in router.work the order of its response is checked (response_order.go)
-	ctxObj.Response().runProgram(func() { result = vm.ExecuteLambda(l, ctxObj.arguments(l)) })
+	ctxObj.Response().runProgram(func() { result = vm.ExecuteLambda(l, ctxObj.arguments(l, folder.ui)) })
 	t.recordVMExecution(bc.Program, vm, result, time.Since(started))
 	if response, ok := result.V.(*Response); ok && response == ctxObj.Response() {
 		// `return response.json(data)`: the answer is already on the request's response; returning it
@@ -454,8 +454,9 @@ func (t *Tenant) execTree(vm *runtime.VM, bc *compiler.Bytecode, l *value.Lambda
 
 // runStage runs one guard/middleware lambda and reports whether the pipeline may continue.
 // A guard that returns data auto-sends it (like the flat lifecycle); middleware does not.
-func (t *Tenant) runStage(vm *runtime.VM, bc *compiler.Bytecode, l *value.Lambda, ctxObj *Context, r *Router, isGuard bool) bool {
-	res := t.execTree(vm, bc, l, ctxObj)
+func (t *Tenant) runStage(vm *runtime.VM, folder *FolderRouter, l *value.Lambda, ctxObj *Context, r *Router, isGuard bool) bool {
+	bc := folder.bytecode
+	res := t.execTree(vm, folder, l, ctxObj)
 	if res.K == value.Invalid {
 		stage := "middleware"
 		if isGuard {

@@ -25,9 +25,10 @@ var richtextBrowserFiles = map[string]string{
 router.language("en");
 router.reload(false);
 
-router.view((ctx) => {
+router.get((ctx) => {
   const source = "";
   const post = richtext(source);
+  return ctx.view({ source, post });
 });
 
 router.post((ctx) => {

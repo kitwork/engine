@@ -133,32 +133,35 @@ router.get((ctx) => {
 	}
 }
 
-// router.view keeps the status it set with ctx.status() (14/10/2026; the page always answered 200), so
-// a view that read a failure with safe(() => …) can say so, and the page shows the error as data.
-// A function of the view the page calls that hits what nothing catches ends the request as a failed
-// view does. CONTROL: a view that sets no status answers 200.
+// A page keeps the status its handler set with ctx.status() (14/10/2026; the page always answered 200),
+// so a handler that read a failure with safe(() => …) can say so, and the page shows the error as data.
+// A function of the object the page calls that hits what nothing catches ends the request as a failed
+// handler does. CONTROL: a handler that sets no status answers 200.
 func TestViewKeepsItsStatusAndAFatalHelperEndsIt(t *testing.T) {
 	tenant := buildUISite(t, map[string]string{
 		"localhost/router.work": `
 import { router } from "kitwork";
-router.view((ctx) => {
+router.get((ctx) => {
   const { value: product, error: productError } = safe(() => fail("chưa đọc được sản phẩm"));
   if (productError) ctx.status(503);
+  return ctx.view({ product, productError });
 });
 `,
 		"localhost/view.ui":    `<view><content /></view>`,
 		"localhost/content.ui": `<content><error>{{ productError.message }}</error><text>{{ productError.code }}</text></content>`,
 		"localhost/ok/router.work": `
 import { router } from "kitwork";
-router.view((ctx) => {
+router.get((ctx) => {
   const greeting = "chào";
+  return ctx.view({ greeting });
 });
 `,
 		"localhost/ok/content.ui": `<content><text>{{ greeting }}</text></content>`,
 		"localhost/spin/router.work": `
 import { router } from "kitwork";
-router.view((ctx) => {
+router.get((ctx) => {
   const spin = () => { let n = 0; for (let i = 0; i < 100000000; i++) { n = n + 1; } return n; };
+  return ctx.view({ spin });
 });
 `,
 		"localhost/spin/content.ui": `<content><text>{{ spin() }}</text></content>`,

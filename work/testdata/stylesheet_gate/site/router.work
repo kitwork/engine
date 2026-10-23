@@ -12,6 +12,4 @@ router.colors({
   danger: "#e5484d"
 });
 router.reload(true);
-router.view((ctx) => {
-  ctx.title("Cổng CSS");
-});
+router.get((context) => context.title("Cổng CSS").view({}));

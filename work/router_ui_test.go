@@ -193,11 +193,11 @@ import { greet } from "../.shared/words.work";
 router.colors({ brand: "#c8742c" });
 router.fonts({ body: "Outfit" });
 router.meta({ site: "Quán" });
-router.view((ctx) => {
+router.get((ctx) => {
   const items = [{ name: "Cà phê" }, { name: "Trà <đào>" }];
-  var count = 2;
-  function twice(n) { return n * 2; }
-  ctx.title("Thực đơn");
+  const count = 2;
+  const twice = (n) => n * 2;
+  return ctx.title("Thực đơn").view({ greet, items, count, twice });
 });
 `,
 	"localhost/view.ui":     `<view><content /></view>`,
@@ -205,18 +205,18 @@ router.view((ctx) => {
 	"localhost/notfound.ui": `<content><text>Không thấy trang</text></content>`,
 	"localhost/mon/{slug}/router.work": `
 import { router } from "kitwork";
-router.view((ctx) => {
+router.get((ctx) => {
   if (ctx.params("slug") != "ca-phe") return ctx.notFound();
-  const name = "Cà phê sữa";
+  return ctx.view({ name: "Cà phê sữa" });
 });
 `,
 	"localhost/mon/{slug}/content.ui": `<content><text>{{ name }}</text></content>`,
 	"localhost/tinh/content.ui":       `<content><text>Trang tĩnh</text></content>`,
 }
 
-// A router.work site serves its .ui pages: the view's const/var, its functions and the file's
-// imports are what the page reads; ctx.title reaches <head>; router.colors and router.fonts reach the
-// CSS.
+// A router.work site serves its .ui pages: the names of the object context.view({ … }) is given are what
+// the page reads, a function of the handler and an import of the file among them; ctx.title reaches
+// <head>; router.colors and router.fonts reach the CSS.
 func TestUISiteServesViewNames(t *testing.T) {
 	tenant := buildUISite(t, uiSiteFiles)
 	rec := serveUI(t, tenant, "http://localhost/")
@@ -227,9 +227,9 @@ func TestUISiteServesViewNames(t *testing.T) {
 	for _, want := range []string{
 		"<title>Thực đơn</title>",
 		"<h1>Chào bạn</h1>",       // an import of router.work, called from the page; a heading is sized by its level (reboot.css)
-		"Cà phê</p>",              // a const of the view
+		"Cà phê</p>",              // a value of the object
 		"Trà &lt;đào&gt;",         // escaped
-		"<p>2 món, gấp đôi 4</p>", // a var and a function of the view
+		"<p>2 món, gấp đôi 4</p>", // a number and a function of the object
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("GET / is missing %q\n%s", want, body)
@@ -254,7 +254,7 @@ func TestUISiteNotFound(t *testing.T) {
 	if ok.Code != http.StatusOK || !strings.Contains(ok.Body.String(), "<p>Cà phê sữa</p>") {
 		t.Fatalf("GET /mon/ca-phe = %d\n%s", ok.Code, ok.Body.String())
 	}
-	// ctx.notFound() in a view, and a path with no folder, both show the nearest notfound.ui at 404
+	// ctx.notFound() in a handler, and a path with no folder, both show the nearest notfound.ui at 404
 	for _, target := range []string{"http://localhost/mon/tra", "http://localhost/khong-co"} {
 		rec := serveUI(t, tenant, target)
 		if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "<p>Không thấy trang</p>") {
@@ -266,7 +266,7 @@ func TestUISiteNotFound(t *testing.T) {
 	}
 }
 
-// A folder with content.ui and no router.view is a page with no data.
+// A folder with content.ui and no router.get is a page with no data.
 func TestUISiteFolderWithoutView(t *testing.T) {
 	tenant := buildUISite(t, uiSiteFiles)
 	rec := serveUI(t, tenant, "http://localhost/tinh")
@@ -327,7 +327,7 @@ func TestUISiteCompileErrorNamesThePlace(t *testing.T) {
 // included, gets the kernel and Drive. router.reload(true) loads every page whole instead.
 func TestUISiteDoesNotReloadByDefault(t *testing.T) {
 	tenant := buildUISite(t, uiSiteFiles)
-	body := serveUI(t, tenant, "http://localhost/tinh").Body.String() // a static page, no router.view
+	body := serveUI(t, tenant, "http://localhost/tinh").Body.String() // a static page, no router.get
 	if !strings.Contains(body, `data-kitwork-generated="runtime"`) || !driveFile.MatchString(body) {
 		t.Errorf("page is missing the kernel or Drive\n%s", body)
 	}
@@ -362,8 +362,8 @@ func TestUISiteTransitionFollowsTheFolders(t *testing.T) {
 
 	files["localhost/router.work"] = strings.Replace(files["localhost/router.work"], `router.meta(`, `router.reload(false).transition("fade");
 router.meta(`, 1)
-	files["localhost/mon/{slug}/router.work"] = strings.Replace(files["localhost/mon/{slug}/router.work"], `router.view(`, `router.transition("slide");
-router.view(`, 1)
+	files["localhost/mon/{slug}/router.work"] = strings.Replace(files["localhost/mon/{slug}/router.work"], `router.get(`, `router.transition("slide");
+router.get(`, 1)
 	files["localhost/tinh/router.work"] = `import { router } from "kitwork";
 router.transition("none");`
 	tenant := buildUISite(t, files)

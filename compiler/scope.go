@@ -111,18 +111,18 @@ type binding struct {
 	storageModule bool
 	// fileModule: a name bound to the module kitwork/file itself (compiler/file.go).
 	fileModule bool
+	// routerModule: a name bound to the module kitwork/router itself (compiler/router.go).
+	routerModule bool
 	// parameterPart: a name a destructured parameter gives (({ request }) => …), which routineRequest
 	// reads as the parameter it is.
 	parameterPart bool
 	// kitworkEnvironment: a name bound to environment of "kitwork", read only by name (environment.go);
 	// kitworkRoot: a name bound to the module "kitwork" itself (import * as kitwork from "kitwork", or a
 	// const of it); environmentHeld: what a const or a let holds of keys not named PUBLIC_… (environmentHolds),
-	// nothing for any other variable; function: the function a const is declared with (const page =
-	// (context) => …), which a .view(page) runs.
+	// nothing for any other variable.
 	kitworkEnvironment bool
 	kitworkRoot        bool
 	environmentHeld    environmentHeld
-	function           *FunctionLiteral
 }
 
 type lexicalScope struct {
@@ -233,8 +233,10 @@ type resolver struct {
 	// a manifest has none. environmentUse lets the next reference of environment through: a read by name.
 	inApp          bool
 	environmentUse bool
-	// functionScopes gives each function literal read so far its scope: a .view(…) reads the variables of
-	// the function it runs, and an import what its module returns (environment.go).
+	// inRouterFile: the program is a router.work, where router.view is refused (router.go).
+	inRouterFile bool
+	// functionScopes gives each function literal read so far its scope: an import reads what its module
+	// returns (environment.go).
 	functionScopes map[*FunctionLiteral]*functionScope
 }
 
@@ -265,6 +267,7 @@ func (c *Compiler) resolveObserved(
 		schedule:       program.Schedule,
 		scheduleChains: map[*MethodCallExpression]bool{},
 		inApp:          program.App,
+		inRouterFile:   program.Router,
 		functionScopes: map[*FunctionLiteral]*functionScope{},
 	}
 	r.databases = r.bundle != nil && len(r.bundle.Imports) > 0
@@ -370,6 +373,7 @@ func (r *resolver) hoist(statements []Statement) {
 			r.routineDeclaration(node)
 			r.storageDeclaration(node)
 			r.fileDeclaration(node)
+			r.routerDeclaration(node)
 			r.environmentDeclaration(node)
 			alias := r.databaseAlias(node)
 			for _, name := range node.Names {
@@ -380,6 +384,7 @@ func (r *resolver) hoist(statements []Statement) {
 				r.markRoutine(node, name, declared)
 				r.markStorage(node, name, declared)
 				r.markFile(node, name, declared)
+				r.markRouter(node, name, declared)
 				r.markEnvironment(node, name, declared)
 				if declared != nil && node.Function {
 					declared.constant = false
@@ -740,6 +745,9 @@ func (r *resolver) expression(expression Expression) {
 		if r.fileMember(node.Object, node.Property) {
 			return
 		}
+		if r.routerMember(node.Object, node.Property) {
+			return
+		}
 		r.expression(node.Object)
 	case *IndexExpression:
 		if r.environmentIndex(node) {
@@ -815,6 +823,9 @@ func (r *resolver) expression(expression Expression) {
 			return
 		}
 		if r.fileMember(node.Object, node.Method) {
+			return
+		}
+		if r.routerMember(node.Object, node.Method) {
 			return
 		}
 		r.expression(node.Object)

@@ -65,13 +65,14 @@ func carouselBrowserFiles() map[string]string {
 
 router.colors({ brand: "#c8742c" });
 router.language("vi");
-router.view(() => {
+router.get((context) => {
   const slides = [
     { title: "Một" },
     { title: "Hai" },
     { title: "Ba" },
     { title: "Bốn" }
   ];
+  return context.view({ slides });
 });
 `,
 		"localhost/view.ui": `<view><content /></view>`,
@@ -127,8 +128,9 @@ router.view(() => {
 </content>`,
 		"localhost/empty/router.work": `import { router } from "kitwork";
 
-router.view(() => {
+router.get((context) => {
   const none = [];
+  return context.view({ none });
 });
 `,
 		"localhost/empty/content.ui": `<content padding="4" gap="4">
@@ -145,11 +147,12 @@ router.view(() => {
 </content>`,
 		"localhost/named/router.work": `import { router } from "kitwork";
 
-router.view(() => {
+router.get((context) => {
   const drinks = [
     { name: "Trà đào" },
     { name: "Cacao" }
   ];
+  return context.view({ drinks });
 });
 `,
 		"localhost/named/content.ui": `<content padding="4" gap="4">

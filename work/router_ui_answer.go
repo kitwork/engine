@@ -92,11 +92,11 @@ func (t *Tenant) answerUIPage(reqRouter *Router, node *RouteNode) {
 }
 
 // serveUIAnswer draws the folder's .ui page for a handler that answered with context.view({ … }) or
-// response.view({ … }) in router.work (20/10/2026): the page router.view draws (content.ui inside the
-// nearest view.ui), with the names of the object the view was given — only
-// those — and the page's text written before it in its head. The folder with no page of its own is an
-// error that says so. Called right after the handler, on the VM it ran on: the functions in the object
-// run there when the page calls them.
+// response.view({ … }) in router.work (20/10/2026): content.ui inside the nearest view.ui, the frame and
+// its regions with it, all reading the names of the object the view was given — only those (23/10/2026:
+// router.view, which fed the page every name of its function and its file, is gone) — and the page's text
+// written before it in its head. The folder with no page of its own is an error that says so. Called right
+// after the handler, on the VM it ran on: the functions in the object run there when the page calls them.
 func (t *Tenant) serveUIAnswer(vm *runtime.VM, ctxObj *Context, reqRouter *Router, node *RouteNode, handler *value.Lambda) {
 	response := reqRouter.response
 	data := response.Data()
@@ -109,28 +109,41 @@ func (t *Tenant) serveUIAnswer(vm *runtime.VM, ctxObj *Context, reqRouter *Route
 		reqRouter.fail(err, http.StatusInternalServerError)
 		return
 	}
-	converter := &uiConverter{vm: vm}
-	scope := map[string]any{}
-	if data.IsMap() {
-		for name, v := range data.Map() {
-			if !visibleName(name) {
-				continue
-			}
-			if x, ok := converter.convert(v, 0); ok {
-				scope[name] = x
-			}
-			if converter.cycle != nil {
-				err := cycleFailure(handler, name, converter.cycle)
-				t.recordFailure(reqRouter, "view", err)
-				reqRouter.fail(err, http.StatusInternalServerError)
-				return
-			}
-		}
+	scope, converter, err := viewData(vm, handler, data)
+	if err != nil {
+		t.recordFailure(reqRouter, "view", err)
+		reqRouter.fail(err, http.StatusInternalServerError)
+		return
 	}
 	t.respondUI(reqRouter, node, scope)
 	if failure := converter.fatal; failure.K == value.Invalid && failure.IsError {
-		// a function of the page that hit what nothing catches ends the request, as in serveUIView
+		// a function of the page that hit what nothing catches (energy, cancellation) ends the request,
+		// whatever the page wrote
 		t.recordRuntimeFailure(reqRouter, nearestFolder(node).bytecode, "view", failure)
 		reqRouter.fail(uncaught(failure.Text()), http.StatusInternalServerError)
 	}
+}
+
+// viewData is what the page reads: the names of the object context.view({ … }) was given, each turned into
+// the plain value the ui package evaluates, with the converter that made them (its functions run on vm when
+// the page calls them, and its fatal is what ended one of them that nothing may catch). A value that holds
+// itself is the handler's error, naming where the handler is written.
+func viewData(vm *runtime.VM, handler *value.Lambda, data value.Value) (map[string]any, *uiConverter, error) {
+	converter := &uiConverter{vm: vm}
+	scope := map[string]any{}
+	if !data.IsMap() {
+		return scope, converter, nil
+	}
+	for name, v := range data.Map() {
+		if !visibleName(name) {
+			continue
+		}
+		if x, ok := converter.convert(v, 0); ok {
+			scope[name] = x
+		}
+		if converter.cycle != nil {
+			return nil, nil, cycleFailure(handler, name, converter.cycle)
+		}
+	}
+	return scope, converter, nil
 }

@@ -1,12 +1,13 @@
 package work
 
-// Kitwork UI pages: a site whose router is router.work describes its interface in *.ui files.
-// router.view declares a folder's page; router.colors and router.fonts the site's design tokens, and
-// router.appearance the light/dark mode its pages show first. Each page is compiled once per
-// generation by the ui package, its head with it: its stylesheets are files of their own, one per role
-// (/_kitwork/reboot.<hash>.css, colors.<hash>.css, fonts.<hash>.css, icons.<hash>.css, logo.<hash>.css,
-// page.<hash>.css, engine/ui/stylesheet); a request only runs the view (its const and var become the
-// names the page reads) and fills the prepared page with them.
+// Kitwork UI pages: a site whose router is router.work describes its interface in *.ui files. A folder's
+// page is the answer of its router.get, context.view({ … }) (serveUIAnswer); router.colors and
+// router.fonts declare the site's design tokens, and router.appearance the light/dark mode its pages show
+// first. Each page is compiled once per generation by the ui package, its head with it: its stylesheets
+// are files of their own, one per role (/_kitwork/reboot.<hash>.css, colors.<hash>.css, fonts.<hash>.css,
+// icons.<hash>.css, logo.<hash>.css, page.<hash>.css, engine/ui/stylesheet); a request only runs the
+// handler (the names of the object its view is given are what the page reads) and fills the prepared page
+// with them.
 
 import (
 	"container/list"
@@ -16,12 +17,12 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/kitwork/engine/compiler"
 	jitcss "github.com/kitwork/engine/jit/css"
 	"github.com/kitwork/engine/jit/fonts"
 	"github.com/kitwork/engine/jit/hydrate"
@@ -35,21 +36,17 @@ import (
 	"github.com/kitwork/engine/value"
 )
 
-// View declares the page of this folder in Kitwork UI: its content.ui, inside the nearest view.ui,
-// filled with the names the view declares.
+// View is router.view, the page of a folder fed by every name its function and its file declared, gone
+// since 23/10/2026: a page is the answer of a method, and it reads exactly the names of the object its view
+// is given (KITWORK_ROUTER.md mục 1, 6),
 //
-//	router.view((ctx) => {
-//	  const product = findProduct(ctx.params("slug"));
-//	  if (!product) return ctx.notFound();
-//	  ctx.title(product.name);
-//	});
-func (f *FolderRouter) View(args ...value.Value) *FolderMethod {
-	m := f.declare("router.view", "GET")
-	m.uiView = true
-	if len(args) > 0 && args[0].K == value.Func {
-		m.handle = lambdaOf(args[0])
-	}
-	return m
+//	router.get((context) => context.title(product.name).view({ product }));
+//
+// The compiler refuses router.view where it is written in a router.work (compiler.RouterViewRemoved); a
+// name it cannot follow (const r = router; r.view(…)) and a template site's router.kitwork.js fail here,
+// at the call, when the router runs at boot.
+func (f *FolderRouter) View(args ...value.Value) (*FolderMethod, error) {
+	return nil, fmt.Errorf("%s", compiler.RouterViewRemoved)
 }
 
 // Transition says how <content /> changes when a link moves to a page of this folder (and its
@@ -1190,53 +1187,6 @@ func (t *Tenant) hasUIPage(n *RouteNode, kind string) bool {
 	return compiled.page != nil || err != nil
 }
 
-// serveUIView runs a router.view and answers with the folder's page, or with the not-found page when
-// the view called ctx.notFound().
-func (t *Tenant) serveUIView(vm *runtime.VM, leaf *FolderRouter, method *FolderMethod, ctxObj *Context, reqRouter *Router, node *RouteNode) {
-	var scope map[string]any
-	var converter *uiConverter
-	var failed func() value.Value
-	if method.handle != nil && leaf.bytecode != nil {
-		bc := leaf.bytecode
-		vm.FastResetPrepared(bc.Program)
-		started := time.Now()
-		var result value.Value
-		var locals map[string]value.Value
-		ctxObj.Response().runProgram(func() {
-			result, locals = vm.ExecuteLambdaScope(method.handle, ctxObj.arguments(method.handle))
-		})
-		t.recordVMExecution(bc.Program, vm, result, time.Since(started))
-		if result.K == value.Invalid {
-			// the view failed: the page answers that, as it answers a compile error (respondUI), and never
-			// falls through to another way of serving the folder
-			t.recordRuntimeFailure(reqRouter, bc, "view", result)
-			// what failed in the view while developing; in production the status and the request id
-			reqRouter.fail(uncaught(result.Text()), http.StatusInternalServerError)
-			return
-		}
-		if reqRouter.response.IsSend() {
-			return // the view answered by itself (redirect, json…)
-		}
-		var err error
-		if scope, converter, err = convertViewScope(vm, method.handle, locals, bc.EnvironmentServerOnly...); err != nil {
-			// a value the page would read holds itself (uiConverter): the view's error, as above
-			t.recordFailure(reqRouter, "view", err)
-			reqRouter.fail(err, http.StatusInternalServerError)
-			return
-		}
-		failed = func() value.Value { return converter.fatal }
-	}
-	t.respondUI(reqRouter, node, scope)
-	if failed != nil {
-		if failure := failed(); failure.K == value.Invalid && failure.IsError {
-			// a function of the view the page called hit what nothing catches (energy, cancellation):
-			// the request ends as a failed view does, whatever the page wrote
-			t.recordRuntimeFailure(reqRouter, leaf.bytecode, "view", failure)
-			reqRouter.fail(uncaught(failure.Text()), http.StatusInternalServerError)
-		}
-	}
-}
-
 // respondUI renders the Kitwork UI page of a folder (or its not-found page) into the response.
 func (t *Tenant) respondUI(reqRouter *Router, node *RouteNode, scope map[string]any) {
 	plan := t.renderPlan()
@@ -1256,8 +1206,8 @@ func (t *Tenant) respondUI(reqRouter *Router, node *RouteNode, scope map[string]
 		status = http.StatusInternalServerError
 		scope = map[string]any{"message": reqRouter.response.uiMessage}
 	} else if code := reqRouter.response.Code(); code >= 100 && code <= 999 {
-		// the status the view set with ctx.status(503) (14/10/2026: until then the page always
-		// answered 200), so a view that read a failure with safe(() => …) can say so
+		// the status the handler set with context.status(503) (14/10/2026: until then the page always
+		// answered 200), so a handler that read a failure with safe(() => …) can say so
 		status = code
 	}
 
@@ -1343,60 +1293,12 @@ func requestOrigin(r *http.Request) string {
 	return requestScheme(r) + "://" + r.Host
 }
 
-// viewScope is what the page reads: the names the view declared, over the names its file declared or
-// imported at the top (router.work's imports are visible to the interface).
-func viewScope(vm *runtime.VM, view *value.Lambda, locals map[string]value.Value) (map[string]any, error) {
-	scope, _, err := convertViewScope(vm, view, locals)
-	return scope, err
-}
-
-// convertViewScope is viewScope with the converter that made it: the functions of the view it hands
-// the page run through it, and its fatal is what ended one of them that nothing may catch.
-//
-// serverOnly names the consts and lets of the file's top level that hold a key of the environment not named
-// PUBLIC_…, imports of one from a module of the app included (compiler.Bytecode.EnvironmentServerOnly): the
-// page never reads them, so a secret a handler of the file uses never becomes page data
-// (KITWORK_ENVIRONMENT.md mục 6, 22/10/2026). A view's own variable that holds one is a compile error already.
-func convertViewScope(vm *runtime.VM, view *value.Lambda, locals map[string]value.Value, serverOnly ...string) (map[string]any, *uiConverter, error) {
-	c := &uiConverter{vm: vm}
-	scope := make(map[string]any, len(locals)+8)
-	for name, v := range locals {
-		if visibleName(name) {
-			if x, ok := c.convert(v, 0); ok {
-				scope[name] = x
-			}
-			if c.cycle != nil {
-				return nil, nil, cycleFailure(view, name, c.cycle)
-			}
-		}
-	}
-	for l := view; l != nil; l = l.Parent {
-		// a file's variable of a block (x#3) or a loop's iteration object (#4) is not one of its names
-		// (14/10/2026, block scope): the map is read as the source wrote it
-		for name, v := range runtime.DeclaredNames(l.Scope) {
-			if _, taken := scope[name]; taken || !visibleName(name) {
-				continue
-			}
-			if l.Parent == nil && slices.Contains(serverOnly, name) {
-				continue // the file's const of a secret: the server's, never the page's
-			}
-			if x, ok := c.convert(v, 0); ok {
-				scope[name] = x
-			}
-			if c.cycle != nil {
-				return nil, nil, cycleFailure(view, name, c.cycle)
-			}
-		}
-	}
-	return scope, c, nil
-}
-
-// cycleFailure is the error of a page value that holds itself, at the view that gave it:
-// "router.kitwork.js:4:22: dữ liệu trang cart: object tự tham chiếu (vòng ở self, quay về gốc)".
-func cycleFailure(view *value.Lambda, name string, cycle *value.WalkError) error {
-	place := "router.view"
-	if view != nil && view.SourceFile != "" {
-		place = fmt.Sprintf("%s:%d:%d", view.SourceFile, view.SourceLine, view.SourceColumn)
+// cycleFailure is the error of a page value that holds itself, at the handler that gave it:
+// "router.work:4:12: dữ liệu trang cart: object tự tham chiếu (vòng ở self, quay về gốc)".
+func cycleFailure(handler *value.Lambda, name string, cycle *value.WalkError) error {
+	place := "context.view"
+	if handler != nil && handler.SourceFile != "" {
+		place = fmt.Sprintf("%s:%d:%d", handler.SourceFile, handler.SourceLine, handler.SourceColumn)
 	}
 	return fmt.Errorf("%s: dữ liệu trang %s: %s", place, name, cycle.Error())
 }
@@ -1414,7 +1316,7 @@ func visibleName(name string) bool { return name != "" && !strings.HasPrefix(nam
 //
 // A function of the view the page calls ({{ money(x) }}) that fails gives the page nothing: a runtime
 // error is not the page's to show. A failure nothing may catch (ENERGY_LIMIT, EXECUTION_CANCELLED…)
-// is kept as fatal, and ends the request as a failed view does (serveUIView).
+// is kept as fatal, and ends the request as a failed handler does (serveUIAnswer).
 type uiConverter struct {
 	vm    *runtime.VM
 	path  value.Path

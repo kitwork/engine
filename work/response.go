@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	filehelper "github.com/kitwork/engine/utilities/file"
 	"github.com/kitwork/engine/value"
 )
 
@@ -119,25 +120,49 @@ func (r *Response) String(data string, code ...int) *Response {
 	return r
 }
 
-// File answers with a handle of kitwork/file, served from the disk when the answer is written (mục 9:
-// Range, ETag, Last-Modified, the media type by the extension unless .type() came first), or with bytes
-// the handler made, in the media type .type() set, else application/octet-stream:
-// context.type("image/png").file(bytes). A path written as a string, which a template site gave until
-// 22/10/2026, is refused with the handle's spelling.
+// File answers with a file of kitwork/file, served from the disk when the answer is written (mục 9: Range,
+// ETag, Last-Modified, the media type by the extension unless .type() came first): its path, written as
+// the module's reads write it (context.file("exports/a.csv"), context.file("app/shop.com/assets/a.pdf")),
+// or a handle of it (context.file(file.open("uploads/").segment(id))). Or it answers with bytes the
+// handler holds, in the media type .type() set, else application/octet-stream:
+// context.type("image/png").file(bytes). A string is always a path (23/10/2026: until then a string was
+// refused, naming the handle); text goes through .text() or .html(). Every site, a template's too.
+//
+// What it is given is read before it answers: a path the module refuses, or anything but a path, a handle
+// or bytes, fails without answering, so the handler may still answer otherwise (safe(() => …)).
 func (r *Response) File(data value.Value, options ...any) (*Response, error) {
+	kind := "file"
+	switch _, isHandle := data.V.(*fileHandle); {
+	case data.K == value.Bytes:
+		kind = "bytes"
+	case isHandle && data.K == value.Proxy:
+	case data.K == value.String:
+		// a path of kitwork/file, read as file.open reads it: no app/ is the data zone, app/… the code zone; a
+		// path the module refuses fails here in its words, a file out of reach answers 404 when it is served
+		handle, err := r.fileHandle(data.Text())
+		if err != nil {
+			return r, err
+		}
+		data = value.Value{K: value.Proxy, V: handle}
+	default:
+		return r, fmt.Errorf("`.file()` nhận đường dẫn của kitwork/file, handle của nó, hay bytes: `context.file(\"exports/bao-cao.csv\")`, `context.file(file.open(\"uploads/\").segment(id))`, `context.type(\"image/png\").file(bytes)`; trả lời bằng chữ thì `.text(…)` (KITWORK_FILE.md mục 9)")
+	}
 	if err := r.answering("file"); err != nil {
 		return r, err
 	}
-	if data.K == value.Bytes {
-		return r.answer(data, "bytes", options), nil
+	return r.answer(data, kind, options), nil
+}
+
+// fileHandle is the handle of kitwork/file a path written in .file() names, in the app of the request.
+func (r *Response) fileHandle(written string) (*fileHandle, error) {
+	if r.ctx == nil || r.ctx.request == nil || r.ctx.request.router == nil || r.ctx.request.router.tenant == nil {
+		return nil, fmt.Errorf("`.file(%q)`: không có app của request để tìm file", written)
 	}
-	if _, ok := data.V.(*fileHandle); ok && data.K == value.Proxy {
-		return r.answer(data, "file", options), nil
+	path, failed := filehelper.Parse(written)
+	if failed != nil {
+		return nil, failed
 	}
-	if data.K == value.String {
-		return r, fmt.Errorf("`.file()` nhận một handle của kitwork/file hay bytes, không nhận chuỗi đường dẫn: `context.file(file.open(%q))`, `context.type(\"image/png\").file(bytes)` (KITWORK_FILE.md mục 9)", data.Text())
-	}
-	return r, fmt.Errorf("`.file()` nhận một handle của kitwork/file hay bytes: `context.file(file.open(\"exports/bao-cao.csv\"))`, `context.type(\"image/png\").file(bytes)`; trả lời bằng chữ thì `.text(…)`")
+	return &fileHandle{tenant: r.ctx.request.router.tenant, path: path}, nil
 }
 
 func (r *Response) Directory(path string, code ...int) *Response {

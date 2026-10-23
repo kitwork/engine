@@ -59,7 +59,6 @@ func (c *FileCache) CompileFileInApp(appRoot string, paths ...string) (*Bytecode
 				return nil, err
 			}
 			cached.EnvironmentRequires = scopes.requires
-			cached.EnvironmentServerOnly = environmentServerOnly(scopes)
 			return cached, nil
 		}
 	}

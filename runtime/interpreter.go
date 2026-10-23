@@ -43,32 +43,6 @@ func (vm *VM) ExecuteLambda(lambda *value.Lambda, args []value.Value) (result va
 	return vm.executePreparedLambda(callerFrame, stackBase, floor)
 }
 
-// ExecuteLambdaScope runs a lambda like ExecuteLambda and also returns the names its body declared
-// (parameters included), as they stand when it returns. Kitwork UI reads a view this way: the
-// const and var of router.view are what the interface sees. A const or let of a block inside the
-// view lives in that block (14/10/2026) and is not one of them. The map is handed over, so the frame
-// slot never reuses it.
-func (vm *VM) ExecuteLambdaScope(lambda *value.Lambda, args []value.Value) (value.Value, map[string]value.Value) {
-	if lambda == nil {
-		return value.Value{K: value.Nil}, nil
-	}
-	if vm == nil || vm.program == nil {
-		return vm.diagnosticValue(DiagnosticNoProgram, "VM has no verified program", -1), nil
-	}
-
-	callerFrame := vm.FrameIdx
-	stackBase := len(vm.Stack)
-	if fault := vm.pushLambdaFrame(lambda, args); fault != nil {
-		return vm.diagnosticValue(fault.code, fault.message, vm.Frames[vm.FrameIdx].LastIP), nil
-	}
-	floor := vm.FrameIdx
-	result := vm.executePreparedLambda(callerFrame, stackBase, floor)
-	frame := &vm.Frames[floor]
-	locals := frame.Vars
-	frame.captured = true // handed out: the next call into this slot allocates a fresh map
-	return result, DeclaredNames(locals)
-}
-
 func (vm *VM) executePreparedLambda(callerFrame, stackBase, floor int) (result value.Value) {
 	defer func() {
 		if len(vm.Stack) > stackBase {

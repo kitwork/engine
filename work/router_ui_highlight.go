@@ -34,7 +34,7 @@ import (
 // colour short of contrast on the page's grounds is told at the call (stylesheet.Palette.HighlightWarning).
 func (f *FolderRouter) uiHighlight(args ...value.Value) (*FolderRouter, error) {
 	if f.callSite == nil {
-		return f, fmt.Errorf("router.highlight viết ở cấp đầu của router.work, chạy một lần khi site khởi động: trong một hàm chạy lúc phục vụ (router.view) nó không đổi được màu của trang")
+		return f, fmt.Errorf("router.highlight viết ở cấp đầu của router.work, chạy một lần khi site khởi động: trong một hàm chạy lúc phục vụ (handler của router.get) nó không đổi được màu của trang")
 	}
 	example := `router.highlight({ keyword: "brand", string: "success", comment: "ink-30" })`
 	if len(args) == 1 && args[0].IsString() {

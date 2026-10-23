@@ -197,7 +197,7 @@ func TestUICodeValues(t *testing.T) {
 func TestUISamples(t *testing.T) {
 	checkSamples(t, "ui", map[string][]Token{
 		"order.ui": tokensOf(
-			Comment, "<!-- Trang quản lý đơn: dữ liệu từ router.view, trạng thái var trong orders.work -->",
+			Comment, "<!-- Trang quản lý đơn: dữ liệu từ context.view của router.get, trạng thái var trong orders.work -->",
 			Tag, "page",
 			Attribute, "keydown", Punctuation, ":", Keyword, "ctrl", Operator, "+", Keyword, "k",
 			Keyword, "scrolled", Punctuation, ":", Attribute, "material",

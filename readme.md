@@ -77,10 +77,7 @@ import { router } from "kitwork";
 
 router.language("en");
 
-router.view((ctx) => {
-  const greeting = "Hello from a folder";
-  ctx.title("Example");
-});
+router.get((context) => context.title("Example").view({ greeting: "Hello from a folder" }));
 ```
 
 ```html
@@ -114,8 +111,8 @@ router.get((ctx) => {
 });
 ```
 
-A view declares the data a page reads; a `const` is printed into the HTML and never shipped as
-script. The `.ui` file names elements by what they are (`content`, `text`, `button`, `card`) and
+The object a handler hands `context.view({ … })` is the data the page reads, and nothing else is; it is
+printed into the HTML and never shipped as script. The `.ui` file names elements by what they are (`content`, `text`, `button`, `card`) and
 describes them by intent (`padding`, `gap`, `heading`, `color`); the engine chooses the HTML tag,
 writes the CSS those attributes need and nothing else, and checks at compile time that every text
 reads against its background. A `page.ui` with `<content />` in it is the frame every page is

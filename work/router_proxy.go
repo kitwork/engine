@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/runtime"
 	httphelper "github.com/kitwork/engine/utilities/http"
 	"github.com/kitwork/engine/value"
@@ -35,12 +34,12 @@ import (
 var proxyMaxBytes = httphelper.HostMaxBytes
 
 // serveProxy answers one proxy request. Errors are returned so the caller can map them to 502.
-func (t *Tenant) serveProxy(vm *runtime.VM, bc *compiler.Bytecode, method *FolderMethod, ctxObj *Context) error {
+func (t *Tenant) serveProxy(vm *runtime.VM, folder *FolderRouter, method *FolderMethod, ctxObj *Context) error {
 	// 1. Resolve the upstream. A handler computes it per request (params/path); otherwise it is a
 	//    fixed URL declared in the router — either way the TENANT owns it, never the visitor.
 	target := method.proxyTarget
 	if target.K == value.Func {
-		target = t.execTree(vm, bc, lambdaOf(target), ctxObj)
+		target = t.execTree(vm, folder, lambdaOf(target), ctxObj)
 		if target.K == value.Invalid {
 			return &stageFailure{text: fmt.Sprintf("proxy target handler failed: %v", target.V), failure: target, run: true}
 		}

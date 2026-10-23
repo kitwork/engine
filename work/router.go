@@ -217,7 +217,7 @@ func (r *Router) responder(w http.ResponseWriter) {
 		w.WriteHeader(r.response.Code())
 		w.Write(r.response.toBytes())
 	case "file":
-		// a handle of kitwork/file (context.file(file.open(…))), checked where it is used: its zone, the
+		// a file of kitwork/file (context.file("exports/a.csv"), or a handle of it), checked where it is used: its zone, the
 		// names the code zone never reaches, a link out of it. 404, not 403: a denial must not reveal
 		// whether the file exists (KITWORK_FILE.md mục 9)
 		handle, ok := data.V.(*fileHandle)
@@ -346,7 +346,7 @@ func (r *Router) fail(err error, status int) {
 }
 
 // writeFailure writes the answer of an error nothing caught. While developing (AllowLocal) it is the
-// error's whole text, as router.view and a .ui page answered theirs; in production a visitor reads
+// error's whole text, as a handler of a .ui page and the page answered theirs; in production a visitor reads
 // only the status and the request id the log record carries (X-Request-ID): a page for a browser,
 // JSON for a client that asked for JSON, text for any other.
 func (r *Router) writeFailure(w http.ResponseWriter, status int) {

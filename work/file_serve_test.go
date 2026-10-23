@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -52,7 +53,7 @@ func TestFileFailuresKeepTheirCodes(t *testing.T) {
 	if got.Hinted.Code != "NOT_FOUND" || got.Hinted.Message != `không có file "data/menu.json"; file đi kèm code của site đọc qua tiền tố app/: file.json("app/localhost/data/menu.json") (KITWORK_FILE.md mục 1)` {
 		t.Errorf("the hint toward app/ = %+v", got.Hinted)
 	}
-	if got.Large.Code != "TOO_LARGE" || got.Large.Message != `đọc "app/localhost/large.txt" vào bộ nhớ tối đa 16 byte, file dài 40 byte; trả file cho trình duyệt thì dùng context.file(file.open("app/localhost/large.txt"))` {
+	if got.Large.Code != "TOO_LARGE" || got.Large.Message != `đọc "app/localhost/large.txt" vào bộ nhớ tối đa 16 byte, file dài 40 byte; trả file cho trình duyệt thì dùng context.file("app/localhost/large.txt")` {
 		t.Errorf("large = %+v", got.Large)
 	}
 	if got.CopyMissing.Code != "NOT_FOUND" || got.MoveMissing.Code != "NOT_FOUND" {
@@ -199,7 +200,7 @@ func TestFileOldSpellingsNameTheNew(t *testing.T) {
 	for source, want := range map[string]string{
 		"router.get((context) => context.json(file.write(\"a.txt\", \"x\")));": `router.work:3:43: file.write(path, data) đã bỏ: đổi thì open() trước, file.open(path).write(data) (KITWORK_FILE.md mục 3, 17)`,
 		"router.get((context) => context.json(file.save(\"a.txt\", \"x\")));":  `file.save(path, data) đã bỏ: file.open(path).write(data)`,
-		"router.get((context) => context.json(file.base64(\"a.png\")));":       `file.base64(path) đã bỏ: ảnh trả cho trình duyệt bằng context.file(file.open(path))`,
+		"router.get((context) => context.json(file.base64(\"a.png\")));":       `file.base64(path) đã bỏ: ảnh trả cho trình duyệt bằng context.file(path)`,
 		"router.get((context) => context.json(file.delete(\"a.txt\")));":       `file.delete(path) không có: đổi thì open() trước, file.open(path).delete()`,
 		"router.get((context) => context.json(file.directory(\"a/\")));":       `file.directory() không có: thư mục là đường dẫn có "/" cuối`,
 		"import { json } from \"kitwork/file\";":                               `kitwork/file import một cách: import * as file from "kitwork/file"`,
@@ -231,33 +232,91 @@ func TestFileOldSpellingsNameTheNew(t *testing.T) {
 	}
 }
 
-// context.file(handle) answers from the disk (mục 9, mục 13.14): the media type by the extension unless
-// .type() came first, an ETag, Range; a handle of the code zone works for a file that comes with the code,
-// and one the zone never reaches (.env), a file that is not there, a folder, answer 404 alike; a string
-// path is refused with the handle's spelling. A file of no extension, or of one no type is known for, is
-// bytes, application/octet-stream, and every file answer says nosniff: an upload that looks like HTML is
-// never served as a page of the site.
+// context.file(path) and context.file(handle) answer from the disk (mục 9, mục 13.14), alike: the path is
+// written as the module's reads write it (23/10/2026), the handle is file.open's. The media type by the
+// extension unless .type() came first, an ETag, Range; app/… works for a file that comes with the code, and
+// what the zone never reaches (.env), a file that is not there, a folder, answer 404 alike. A file of no
+// extension, or of one no type is known for, is bytes, application/octet-stream, and every file answer says
+// nosniff: an upload that looks like HTML is never served as a page of the site. Bytes the handler holds
+// are sent as they are, in .type()'s media type else application/octet-stream; a path the module refuses
+// fails in its words, INVALID_ARGUMENT.
 //
 // CONTROL: with Zone.Open not asking denied() (the code zone's deny removed for serving), app/.env and
 // app/.ENV answered 200 "SECRET=1", and app/.database/… its data; with serveFile setting no type when
 // the extension gives none (as before 23/10/2026), uploads/7/original answered "text/html; charset=utf-8"
-// sniffed from its content, and no answer said nosniff.
+// sniffed from its content, and no answer said nosniff. CONTROL (23/10/2026, go test -overlay): with
+// Response.File refusing a string as on 22/10, "path: context.file = 500 … không nhận chuỗi đường dẫn"; with
+// .file() taking the answer before it read what it was given, every refused path then answered "call json:
+// `.json()` sau `.file()`", not INVALID_ARGUMENT.
 func TestFileContextFileServesFromTheDisk(t *testing.T) {
 	tn, _ := fileSite(t, map[string]string{
 		"get":    `router.get((context) => context.file(file.open(context.query("p"))));`,
-		"typed":  `router.get((context) => context.type("text/plain; charset=utf-8").file(file.open("exports/a.csv")));`,
-		"string": `router.get((context) => context.file("exports/a.csv"));`,
+		"path":   `router.get((context) => context.file(context.query("p")));`,
+		"typed":  `router.get((context) => context.type("text/plain; charset=utf-8").file("exports/a.csv"));`,
+		"bytes":  `router.get((context) => context.file(file.bytes("exports/a.csv")));`,
+		"csv":    `router.get((context) => context.type("text/csv").file(file.bytes("exports/a.csv")));`,
+		"reason": `router.get((context) => context.json(safe(() => context.file(context.query("p"))).error));`,
 	}, map[string]string{
 		".database/files/exports/a.csv": "id,name\n1,Kitwork\n", ".env": "SECRET=1", "localhost/logo.svg": "<svg/>",
 		".database/files/uploads/7/original":             "<html><script>alert(1)</script></html>",
 		".database/files/uploads/7/page.kitwork-unknown": "<!doctype html><title>x</title>",
 	})
+	for _, route := range []string{"get", "path"} {
+		get := func(target string, header map[string]string) *httptest.ResponseRecorder {
+			return serveGet(tn, "/"+route+strings.TrimPrefix(target, "/get"), header)
+		}
+		fileServesFromTheDisk(t, route, get)
+	}
 	get := func(target string, header map[string]string) *httptest.ResponseRecorder {
 		return serveGet(tn, target, header)
 	}
+	if typed := get("/typed", nil); typed.Header().Get("Content-Type") != "text/plain; charset=utf-8" || typed.Body.String() != "id,name\n1,Kitwork\n" {
+		t.Errorf(".type() before .file(path) = %v %q", typed.Header(), typed.Body.String())
+	}
+	if held := get("/bytes", nil); held.Code != http.StatusOK || held.Body.String() != "id,name\n1,Kitwork\n" ||
+		held.Header().Get("Content-Type") != "application/octet-stream" || held.Header().Get("ETag") != "" {
+		t.Errorf("context.file(bytes) = %d %v %q, want the bytes as they are, application/octet-stream", held.Code, held.Header(), held.Body.String())
+	}
+	if csv := get("/csv", nil); csv.Header().Get("Content-Type") != "text/csv" || csv.Body.String() != "id,name\n1,Kitwork\n" {
+		t.Errorf(".type() before .file(bytes) = %v %q", csv.Header(), csv.Body.String())
+	}
+	for _, p := range []string{"../a.csv", "/a.csv", "App/a.csv", "exports/../a.csv"} {
+		rec := get("/reason?p="+url.QueryEscape(p), nil)
+		if !strings.Contains(rec.Body.String(), `"code":"INVALID_ARGUMENT"`) || strings.Contains(rec.Body.String(), "không nhận chuỗi") {
+			t.Errorf("context.file(%q) failed with %d %.300q, want INVALID_ARGUMENT in the words of kitwork/file", p, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+// A template site's router.kitwork.js gives .file() a path too (23/10/2026), read as kitwork/file reads it:
+// the 22/10 refusal of a string held at both kinds of site, and its reversal does as well. A file out of
+// reach is 404 there as in router.work.
+//
+// CONTROL (23/10/2026, go test -overlay): with Response.File refusing a string as on 22/10, "?p=exports/a.csv
+// = 500 \"router.kitwork.js:2:24: call file: `.file()` nhận một handle … không nhận chuỗi đường dẫn\"", and app/.env
+// answered that 500 too, not 404.
+func TestFileTemplateSiteFileTakesAPath(t *testing.T) {
+	tenant := buildUISite(t, map[string]string{
+		"localhost/router.kitwork.js":   "import { router } from \"kitwork\";\nrouter.get((ctx) => ctx.file(ctx.query(\"p\")));\n",
+		".database/files/exports/a.csv": "id,name\n1,Kitwork\n",
+		"localhost/logo.svg":            "<svg/>",
+	})
+	for p, want := range map[string]string{"exports/a.csv": "id,name\n1,Kitwork\n", "app/localhost/logo.svg": "<svg/>"} {
+		if rec := serveUI(t, tenant, "http://localhost/?p="+url.QueryEscape(p)); rec.Code != http.StatusOK || rec.Body.String() != want {
+			t.Errorf("?p=%s = %d %.300q, want 200 %q", p, rec.Code, rec.Body.String(), want)
+		}
+	}
+	if rec := serveUI(t, tenant, "http://localhost/?p=app/.env"); rec.Code != http.StatusNotFound {
+		t.Errorf("?p=app/.env = %d, want 404", rec.Code)
+	}
+}
+
+// fileServesFromTheDisk is what context.file of a path, and of a handle, answers for the same files.
+func fileServesFromTheDisk(t *testing.T, route string, get func(target string, header map[string]string) *httptest.ResponseRecorder) {
+	t.Helper()
 	whole := get("/get?p=exports/a.csv", nil)
 	if whole.Code != http.StatusOK || whole.Body.String() != "id,name\n1,Kitwork\n" || !strings.HasPrefix(whole.Header().Get("Content-Type"), "text/csv") {
-		t.Fatalf("context.file = %d %q %v", whole.Code, whole.Body.String(), whole.Header())
+		t.Fatalf("%s: context.file = %d %q %v", route, whole.Code, whole.Body.String(), whole.Header())
 	}
 	etag := whole.Header().Get("ETag")
 	if etag == "" || whole.Header().Get("Last-Modified") == "" {
@@ -274,7 +333,7 @@ func TestFileContextFileServesFromTheDisk(t *testing.T) {
 	}
 	for _, p := range []string{"app/.env", "app/.ENV", "none.csv", "exports/", "app/.database/files/exports/a.csv"} {
 		if rec := get("/get?p="+p, nil); rec.Code != http.StatusNotFound || strings.Contains(rec.Body.String(), "SECRET") {
-			t.Errorf("context.file(%q) = %d %.200q, want 404", p, rec.Code, rec.Body.String())
+			t.Errorf("%s: context.file(%q) = %d %.200q, want 404", route, p, rec.Code, rec.Body.String())
 		}
 	}
 	// an upload that looks like HTML, kept without an extension or with one no type is known for, is bytes
@@ -286,14 +345,7 @@ func TestFileContextFileServesFromTheDisk(t *testing.T) {
 		}
 	}
 	if whole.Header().Get("X-Content-Type-Options") != "nosniff" {
-		t.Errorf("a file answer without nosniff: %v", whole.Header())
-	}
-	if typed := get("/typed", nil); typed.Header().Get("Content-Type") != "text/plain; charset=utf-8" || typed.Body.String() != "id,name\n1,Kitwork\n" {
-		t.Errorf(".type() before .file() = %v %q", typed.Header(), typed.Body.String())
-	}
-	if rec := get("/string", nil); rec.Code != http.StatusInternalServerError ||
-		!strings.Contains(rec.Body.String(), "không nhận chuỗi đường dẫn: `context.file(file.open(\"exports/a.csv\"))`") {
-		t.Errorf("context.file(string) = %d %.300q", rec.Code, rec.Body.String())
+		t.Errorf("%s: a file answer without nosniff: %v", route, whole.Header())
 	}
 }
 

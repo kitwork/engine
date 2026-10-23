@@ -53,7 +53,7 @@ type FolderMethod struct {
 	method     string
 	handle     *value.Lambda
 	folder     *FolderRouter   // the folder whose router file declared it
-	declaredBy string          // the call that declared it: router.get, router.view, router.proxy…
+	declaredBy string          // the call that declared it: router.get, router.proxy…
 	declaredAt int             // its line in the router file, 0 when not known (declared outside the boot run)
 	guards     []*value.Lambda // the before-chain: runs in order; each may block / respond / prepare
 	success    *value.Lambda   // runs after a clean handler (canonical name for the old `then`)
@@ -61,7 +61,6 @@ type FolderMethod struct {
 	final      *value.Lambda
 	isView     bool
 	viewArgs   []value.Value
-	uiView     bool // router.view(): the page is the folder's content.ui, fed by the view's names
 	outputKind string
 	outputData value.Value
 	outputPath string
@@ -400,7 +399,7 @@ func (f *FolderRouter) removedMethodWarnings() []string {
 }
 
 // declare adds the HTTP method name to the folder, by the call the router file wrote (router.get,
-// router.view, router.proxy…). A method is declared once in a router file: a second declaration is a
+// router.proxy…). A method is declared once in a router file: a second declaration is a
 // boot error naming the line of the first, not a silent replacement of it (19/10/2026). The second
 // gets a method of its own, kept nowhere, so the rest of its chain still reads.
 func (f *FolderRouter) declare(call, name string, args ...value.Value) *FolderMethod {

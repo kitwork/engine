@@ -67,7 +67,7 @@ func TestServedUIPageAllowsTheTabsPrepaintInItsPolicy(t *testing.T) {
 	site := func(persist string) *httptest.ResponseRecorder {
 		tenant := buildUISite(t, map[string]string{
 			"localhost/router.work": `import { router } from "kitwork";` + "\n" +
-				`router.guard((ctx, response) => { response.header("Content-Security-Policy", "` + policy + `"); });` + "\n",
+				`router.guard((context) => { context.header("Content-Security-Policy", "` + policy + `"); });` + "\n",
 			"localhost/view.ui": `<view><content /></view>`,
 			"localhost/content.ui": `<content>
   <tabs as="$files"` + persist + ` alt="Files" flex="row">

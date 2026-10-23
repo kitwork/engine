@@ -65,10 +65,11 @@ var editorBrowserFiles = map[string]string{
 router.language("vi");
 router.reload(false);
 
-router.view((ctx) => {
+router.get((ctx) => {
   const post = { body: "` + editorBrowserSaved + `" };
   const sent = "";
   const kept = richtext(post.body);
+  return ctx.view({ post, sent, kept });
 });
 
 router.post((ctx) => {
@@ -843,8 +844,9 @@ func editorReviewFiles() map[string]string {
 router.language("vi");
 router.reload(false);
 
-router.view((ctx) => {
+router.get((ctx) => {
   const post = { body: "` + body + `" };
+  return ctx.view({ post });
 });
 `
 	}
@@ -1071,10 +1073,11 @@ var editorV2Files = map[string]string{
 router.language("vi");
 router.reload(false);
 
-router.view((ctx) => {
+router.get((ctx) => {
   const post = { body: "` + editorV2Saved + `" };
   const sent = "";
   const kept = richtext(post.body);
+  return ctx.view({ post, sent, kept });
 });
 
 router.post((ctx) => {

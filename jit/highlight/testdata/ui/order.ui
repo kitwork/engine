@@ -1,4 +1,4 @@
-<!-- Trang quản lý đơn: dữ liệu từ router.view, trạng thái var trong orders.work -->
+<!-- Trang quản lý đơn: dữ liệu từ context.view của router.get, trạng thái var trong orders.work -->
 <page title="Đơn hàng — {{ site.name }}" container="large" background="canvas"
       keydown:ctrl+k.prevent="$search.open()">
   <header pin="top" scrolled:material="glass" scrolled:shadow="small"

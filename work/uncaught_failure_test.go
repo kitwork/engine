@@ -171,8 +171,8 @@ func TestUncaughtErrorShowsVisitorsOnlyTheRequestIDInProduction(t *testing.T) {
 	}
 }
 
-// While developing (AllowLocal) the same requests answer their whole diagnostic, the way router.view
-// and a .ui page answer theirs. CONTROL: the route that works.
+// While developing (AllowLocal) the same requests answer their whole diagnostic, the way a handler of a
+// .ui page and a .ui page answer theirs. CONTROL: the route that works.
 func TestUncaughtErrorShowsItsDiagnosticWhileDeveloping(t *testing.T) {
 	ask, _ := failureSite(t, true, failureRouters)
 	for name, route := range failingRouters {
@@ -191,20 +191,21 @@ func TestUncaughtErrorShowsItsDiagnosticWhileDeveloping(t *testing.T) {
 	}
 }
 
-// A Kitwork UI site answers the same way: a router.view that fails and a .ui page that does not
+// A Kitwork UI site answers the same way: a handler of a page that fails and a .ui page that does not
 // compile answer 500 with the status and the request id in production, and their whole text while
 // developing; the log record keeps it in both. Until now production answered "Internal Server Error"
 // with no request id, and the page that did not compile left no record at all. CONTROL: a page that
-// compiles, with a view that runs, answers 200.
+// compiles, with a handler that runs, answers 200.
 func TestUIPageFailureShowsVisitorsOnlyTheRequestID(t *testing.T) {
 	files := withFiles(map[string]string{
 		"localhost/tinh/content.ui": `<content><text>{{ name </text></content>`,
 		"localhost/mon/{slug}/router.work": `
 import { router } from "kitwork";
-router.view((ctx) => {
+router.get((ctx) => {
   const name = "Cà phê sữa";
   const order = { total: 3 };
   order.total("vnd");
+  return ctx.view({ name });
 });
 `,
 	})

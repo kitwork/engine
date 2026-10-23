@@ -19,13 +19,9 @@ type Bytecode struct {
 	// Hot reload stats these to catch edits — including edits to an imported ./_core module.
 	Files []string
 	// EnvironmentRequires lists every environment.require("KEY") of the program, where it is written: the
-	// boot checks each against the app's environment (KITWORK_ENVIRONMENT.md mục 3). EnvironmentServerOnly
-	// names the consts and lets of the program's top level that hold a key not named PUBLIC_… (imports of one
-	// from a module of the app included), which the page of a router.view never reads (mục 6). Neither is
-	// stored in an artifact: a cache hit reads them off the
-	// program again (FileCache), as it finds Files.
-	EnvironmentRequires   []NameUse
-	EnvironmentServerOnly []string
+	// boot checks each against the app's environment (KITWORK_ENVIRONMENT.md mục 3). It is not stored in an
+	// artifact: a cache hit reads it off the program again (FileCache), as it finds Files.
+	EnvironmentRequires []NameUse
 
 	compilerFingerprint string
 	sourceFingerprint   string
@@ -1741,7 +1737,6 @@ func (c *Compiler) ByteCodeResult() (*Bytecode, error) {
 	}
 	if c.scopes != nil {
 		bytecode.EnvironmentRequires = append([]NameUse(nil), c.scopes.requires...)
-		bytecode.EnvironmentServerOnly = environmentServerOnly(c.scopes)
 	}
 	return bytecode, nil
 }

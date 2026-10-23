@@ -360,7 +360,7 @@ func TestRouterBundleIsValidated(t *testing.T) {
 // file, linked (TestIconsFromDataAreOneFilePerSet).
 func TestRouterBundleIconsFromDataAreInlineToo(t *testing.T) {
 	changes := map[string]string{
-		"localhost/bieu-tuong/router.work": "import { router } from \"kitwork\";\nrouter.view((ctx) => {\n  const name = \"mug\";\n});\n",
+		"localhost/bieu-tuong/router.work": "import { router } from \"kitwork\";\nrouter.get((ctx) => ctx.view({ name: \"mug\" }));\n",
 		"localhost/bieu-tuong/content.ui":  `<content><icon value="coffee" alt="" /><icon value="{{ name }}" alt="" /></content>`,
 	}
 	for _, written := range []string{"", "false"} {

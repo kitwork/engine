@@ -4,11 +4,11 @@ import "testing"
 
 // An expression of .ui that calls safe is a compile error at its place (14/10/2026): an expression has
 // nothing to catch (it never fails as it runs, on either end), safe would have to ship in the browser's
-// kernel for a function that never has work, and logic belongs in .work. The view reads the failure
+// kernel for a function that never has work, and logic belongs in .work. The handler reads the failure
 // with safe(() => …) and the page shows that data. Until then {{ safe(() => x) }} compiled and printed
-// nothing. CONTROL: the data a view read with safe, and a lambda whose parameter is named safe, compile.
+// nothing. CONTROL: the data a handler read with safe, and a lambda whose parameter is named safe, compile.
 func TestAnExpressionThatCallsSafeIsACompileError(t *testing.T) {
-	const says = "biểu thức .ui không có lỗi để bắt: gọi safe(() => …) trong router.view rồi đọc kết quả"
+	const says = "biểu thức .ui không có lỗi để bắt: gọi safe(() => …) trong handler của router.get rồi đưa kết quả vào context.view({ … })"
 	mustFail(t, content(`<content><text>{{ safe(() => total) }}</text></content>`), "content.ui:1:", says)
 	mustFail(t, content(`<content><box show="safe(() => ready).value"><text>x</text></box></content>`), "content.ui:1:15", says)
 	mustFail(t, content(`<content><button click="count = safe(() => count + 1).value">+</button></content>`), "content.ui:1:18", says)

@@ -226,7 +226,7 @@ func (z *Zone) Stat(p Path) (*Info, *Error) {
 
 // TooLarge is the failure of a read past the ceiling of what a read brings into the VM's memory (mục 4).
 func TooLarge(p Path, size, limit int64) *Error {
-	return failf(value.TooLargeCode, "đọc %q vào bộ nhớ tối đa %d byte, file dài %d byte; trả file cho trình duyệt thì dùng context.file(file.open(%q))", p.String(), limit, size, p.String())
+	return failf(value.TooLargeCode, "đọc %q vào bộ nhớ tối đa %d byte, file dài %d byte; trả file cho trình duyệt thì dùng context.file(%q)", p.String(), limit, size, p.String())
 }
 
 // Read is the content of the file at p, at most limit bytes: TOO_LARGE past it, without reading further.

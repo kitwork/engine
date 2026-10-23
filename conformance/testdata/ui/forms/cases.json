@@ -154,7 +154,7 @@
       "name": "a-name-the-component-and-the-view-both-declare",
       "route": ".",
       "files": {
-        "router.work": "import { router } from \"kitwork\";\nrouter.view((ctx) => {\n  var open = true;\n});\n",
+        "router.work": "import { router } from \"kitwork\";\nrouter.get((ctx) => ctx.view({ open: true }));\n",
         "content.ui": "<content><dropdown><text show=\"open\">menu</text></dropdown></content>"
       },
       "warnings": [

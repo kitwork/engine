@@ -21,14 +21,13 @@ import (
 //   - environment.require of a name not written as a string;
 //   - env, its name until 22/10/2026, in a file of an app (import { env } from "kitwork", kitwork().env); a
 //     manifest compiles with no app and keeps its import { env } (mục 9.8);
-//   - a key not named PUBLIC_… that goes to the page: anywhere in the object a .view({ … }) hands it, however
-//     deep, or held by a variable of a function a .view(…) runs, written there or passed by its name, whose
-//     every variable is the page's (mục 6).
+//   - a key not named PUBLIC_… that goes to the page: anywhere in what a .view(…) hands it, however deep
+//     (mục 6).
 //
 // A const or a let of the program's top level that holds such a key, an import of one from a module of the
-// app included, is not the page's either: the engine leaves it out of what a router.view hands its page
-// (Bytecode.EnvironmentServerOnly). Every check only ever fails: a program that writes none of them resolves
-// and compiles byte for byte as before.
+// app included, never reaches a page by itself: a page reads exactly the names of the object its
+// context.view({ … }) is given (KITWORK_ROUTER.md, 23/10/2026). Every check only ever fails: a program that
+// writes none of them resolves and compiles byte for byte as before.
 
 // EnvironmentRenamed is the error of env read off "kitwork" in a file of an app.
 const EnvironmentRenamed = "`env` đã đổi tên: import { environment } from \"kitwork\", rồi environment.KEY, environment.require(\"KEY\") (KITWORK_ENVIRONMENT.md mục 11)"
@@ -106,9 +105,6 @@ func (r *resolver) markEnvironment(node *VarStatement, name *Identifier, declare
 				if found := r.lookup(source.Value); found != nil && found.kitworkRoot {
 					declared.kitworkRoot = true
 				}
-			}
-			if function, isFunction := node.Value.(*FunctionLiteral); isFunction {
-				declared.function = function
 			}
 		}
 		return
@@ -460,23 +456,12 @@ func (r *resolver) resolvedBinding(name *Identifier) *binding {
 
 // environmentView refuses a key not named PUBLIC_… that a .view(…) hands its page (mục 6), once the call is
 // resolved: anything in what it is given, however deep (.view({ config: { stripe: environment.STRIPE_SECRET } }),
-// .view(data) with data such an object), or what a variable of the function it runs holds (router.view((context)
-// => { const stripe = environment.STRIPE_SECRET; }), or router.view(page) with page a const of such a
-// function), every variable of which the page reads.
+// .view(data) with data such an object).
 func (r *resolver) environmentView(node *MethodCallExpression) {
 	if r.err != nil || node.Method == nil || node.Method.Value != "view" {
 		return
 	}
 	for _, argument := range node.Arguments {
-		if function := r.viewFunction(argument); function != nil {
-			for _, declared := range function.scope.order {
-				if key := declared.environmentHeld.key; key != "" && declared.kind != bindingParameter {
-					r.fail(fmt.Errorf("%s: %s", r.where(declared.token), EnvironmentToBrowser(key)))
-					return
-				}
-			}
-			continue
-		}
 		if given, isObject := argument.(*ObjectLiteral); isObject {
 			for _, entry := range given.Entries {
 				if key := r.environmentHolds(entry.Value).key; key != "" {
@@ -491,20 +476,6 @@ func (r *resolver) environmentView(node *MethodCallExpression) {
 			return
 		}
 	}
-}
-
-// viewFunction is the scope of the function a .view(…) runs: written there, or a const declared with it and
-// passed by its name. nil for anything else, or a function not resolved yet.
-func (r *resolver) viewFunction(argument Expression) *functionScope {
-	switch given := argument.(type) {
-	case *FunctionLiteral:
-		return r.functionScopes[given]
-	case *Identifier:
-		if declared := r.resolvedBinding(given); declared != nil && declared.function != nil {
-			return r.functionScopes[declared.function]
-		}
-	}
-	return nil
 }
 
 // environmentIndex refuses a word of the module "kitwork" read by [ ] (kitwork()[name], k[name] with k the
@@ -529,19 +500,4 @@ func (r *resolver) environmentIndex(node *IndexExpression) bool {
 		return false
 	}
 	return true
-}
-
-// environmentServerOnly lists the consts and lets of the program's top level that hold a key not named
-// PUBLIC_…, imports of one from a module of the app included: the page of a router.view does not read them
-// (Bytecode.EnvironmentServerOnly).
-func environmentServerOnly(result *resolution) []string {
-	var names []string
-	for _, declared := range result.bindings {
-		// the bundler's own names (__kw_mod_1, a module of the app) are never the page's anyway
-		if declared.environmentHeld.key != "" && declared.scope.function.literal == nil && !declared.scope.block &&
-			!strings.HasPrefix(declared.name, "__") {
-			names = append(names, declared.name)
-		}
-	}
-	return names
 }

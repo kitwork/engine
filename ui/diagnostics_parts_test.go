@@ -159,8 +159,9 @@ func TestPartsReaderRootOfALayoutIsAWarning(t *testing.T) {
 // written — here the dropdown's open (false), not the view's (true).
 func TestPartsShadowedNameIsAWarning(t *testing.T) {
 	view := `import { router } from "kitwork";
-router.view((ctx) => {
-  var open = true;
+router.get((ctx) => {
+  const open = true;
+  return ctx.view({ open });
 });`
 	content := `<content><dropdown><text show="open">menu</text></dropdown></content>`
 	files := map[string]string{"/site/content.ui": content, "/site/router.work": view}

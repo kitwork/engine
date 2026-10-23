@@ -2,7 +2,4 @@ import { router } from "kitwork";
 
 router.language("en");
 
-router.view((ctx) => {
-  const greeting = "Hello from a folder";
-  ctx.title("Example");
-});
+router.get((context) => context.title("Example").view({ greeting: "Hello from a folder" }));

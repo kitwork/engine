@@ -46,7 +46,7 @@ const exampleWindow = `(function () {
 // exampleFind is what find-in-page reaches: a word only router.work holds, then one only view.ui holds.
 const exampleFind = `(function () {
   var found = function (word) { getSelection().removeAllRanges(); return window.find(word, true, false, true); };
-  var out = [found("ctx.title"), found("drink.price")].join(" ");
+  var out = [found("context.title"), found("drink.price")].join(" ");
   getSelection().removeAllRanges();
   return out;
 })()`
@@ -251,7 +251,7 @@ func TestBrowserExampleTabsWindowShots(t *testing.T) {
 					t.Errorf("%s: %s\n want %s, dark %v", name, found, screen.want, scheme == "dark")
 				}
 				if got := d.evaluate(exampleFind); got != screen.found {
-					t.Errorf("%s: find-in-page reaches ctx.title, drink.price: %s, want %s", name, got, screen.found)
+					t.Errorf("%s: find-in-page reaches context.title, drink.price: %s, want %s", name, got, screen.found)
 				}
 				d.evaluate(exampleWindow) // back to the window: find-in-page may have scrolled
 				raw, picture := clipShot(t, d, where.X, where.Y, where.Width, where.Height)

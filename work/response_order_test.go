@@ -20,7 +20,7 @@ func TestUIResponseOrderErrors(t *testing.T) {
 		"text-title":  `context.title("x").json({ a: 1 })`,
 		"type-view":   `context.type("text/plain").view({ note: 1 })`,
 		"type-json":   `context.type("text/csv").json({ a: 1 })`,
-		"file-path":   `context.file("a.txt")`,
+		"file-number": `context.file(42)`,
 		"after-file":  `context.type("image/png").file(qrcode.data("x").png()).header("X-A", "1")`,
 	}
 	want := map[string]string{
@@ -30,7 +30,7 @@ func TestUIResponseOrderErrors(t *testing.T) {
 		"text-title":  "`.title()` là chữ của trang, chỉ đi với hàm trả lời vẽ trang (`.view()`, `.notFound()`, `.error()`)",
 		"type-view":   "`.type()` không hợp với `.view()`",
 		"type-json":   "`.type()` không hợp với `.json()`",
-		"file-path":   "`.file()` nhận một handle của kitwork/file hay bytes, không nhận chuỗi đường dẫn: `context.file(file.open(\"a.txt\"))`",
+		"file-number": "`.file()` nhận đường dẫn của kitwork/file, handle của nó, hay bytes: `context.file(\"exports/bao-cao.csv\")`",
 		"after-file":  "`.header()` nối sau `.file()`",
 	}
 	files := map[string]string{"router.work": `import * as router from "kitwork/router";`}

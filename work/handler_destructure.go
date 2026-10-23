@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"path"
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/kitwork/engine/compiler"
@@ -110,11 +111,57 @@ func removedParameterError(lambda *value.Lambda) error {
 	return nil
 }
 
+// byNameParameters are the names a handler's parameters were read by in router.work until 23/10/2026, as
+// they still are in a template site's router.kitwork.js: the context, the request, the response.
+var byNameParameters = []string{"ctx", "context", "req", "request", "res", "response"}
+
+// failureParameters are the names a hook's parameter was handed the request's failure by until 23/10/2026.
+var failureParameters = []string{"err", "error", "e"}
+
+// positionalParameterError is the error of a function of a router.work whose parameters, read by name until
+// 23/10/2026, mean something else now they are read by position (KITWORK_ROUTER.md mục 5): a parameter after
+// the first named for the context, the request or the response ((request, response) => …, (ctx, res) => …)
+// is the request's failure or null, and the first parameter of a failure's hook named for the failure
+// ((err, ctx) => …) is the context. Each would run and answer otherwise without a word; it stops the boot
+// where it is written, naming the spelling to write. hook is a function of .error() or router.error().
+func positionalParameterError(lambda *value.Lambda, hook bool) error {
+	if lambda == nil {
+		return nil
+	}
+	for index, name := range lambda.Params {
+		if compiler.DestructuredEntries(name) != nil {
+			continue
+		}
+		lower := strings.ToLower(name)
+		switch {
+		case index == 0 && hook && slices.Contains(failureParameters, lower):
+			return fmt.Errorf("%s: tham số đầu `%s` của móc lỗi là context: trong router.work tham số nhận theo vị trí (23/10/2026), lỗi của request là tham số thứ hai; viết (context, failure) => context.status(503).json({ code: failure.code, message: failure.message }) (KITWORK_ROUTER.md mục 5)",
+				lambdaPlace(lambda), name)
+		case index > 0 && slices.Contains(byNameParameters, lower):
+			return fmt.Errorf("%s: tham số `%s` đứng sau tham số đầu nên không phải %s: trong router.work tham số nhận theo vị trí (23/10/2026), tham số đầu là context dù tên gì, tham số thứ hai là lỗi của request (null khi không có), tham số khác là null; viết (context) => context.json(…), hay tách ({ request, response }) => response.json(…) (KITWORK_ROUTER.md mục 5)",
+				lambdaPlace(lambda), name, byNameMeaning(lower))
+		}
+	}
+	return nil
+}
+
+// byNameMeaning is what a parameter of that name was handed when parameters were read by name.
+func byNameMeaning(name string) string {
+	switch name {
+	case "req", "request":
+		return "request"
+	case "res", "response":
+		return "response"
+	}
+	return "context"
+}
+
 // handlerDestructureError checks every function the folder's router file gave the router — each
 // method's handler, guards and hooks, the folder's guards and its notFound/error — and is the first
 // error by place in the file.
 func (f *FolderRouter) handlerDestructureError() error {
 	var lambdas []*value.Lambda
+	hooks := map[*value.Lambda]bool{}
 	add := func(ls ...*value.Lambda) {
 		for _, l := range ls {
 			if l != nil {
@@ -125,17 +172,23 @@ func (f *FolderRouter) handlerDestructureError() error {
 	for _, m := range f.methods {
 		add(m.handle, m.success, m.errorH, m.final)
 		add(m.guards...)
+		hooks[m.errorH] = true
 	}
 	for _, m := range f.outputs {
 		add(m.handle, m.success, m.errorH, m.final)
 		add(m.guards...)
+		hooks[m.errorH] = true
 	}
 	add(f.guards...)
 	add(f.notFound, f.errorH)
+	hooks[f.errorH] = true
 	var first error
 	var at *value.Lambda
 	for _, l := range lambdas {
 		err := removedParameterError(l)
+		if err == nil && f.ui {
+			err = positionalParameterError(l, hooks[l])
+		}
 		if err == nil {
 			err = destructureError(l, routeDestructurable, routeSide)
 		}

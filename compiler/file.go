@@ -34,7 +34,7 @@ func FileRemovedWord(word string) string {
 	case "save":
 		return `file.save(path, data) đã bỏ: file.open(path).write(data) (KITWORK_FILE.md mục 17)`
 	case "base64":
-		return `file.base64(path) đã bỏ: ảnh trả cho trình duyệt bằng context.file(file.open(path)), byte đọc bằng file.bytes(path) (KITWORK_FILE.md mục 17)`
+		return `file.base64(path) đã bỏ: ảnh trả cho trình duyệt bằng context.file(path), byte đọc bằng file.bytes(path) (KITWORK_FILE.md mục 17)`
 	case "create":
 		return `file.create(path) không có: đổi thì open() trước, file.open(path).create() (KITWORK_FILE.md mục 3)`
 	case "copy":

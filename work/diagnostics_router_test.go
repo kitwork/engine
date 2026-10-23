@@ -36,24 +36,24 @@ func TestRouterFontsAndColorsRefuseWhatTheyDoNotRead(t *testing.T) {
 	}
 }
 
-// A router.view that fails answers the page with its error, the way a compile error does (respondUI):
-// 500, and while developing what failed in the view; in production nothing of it. It used to fall
-// through to the template path and answer 200 with "[Error reading index …]". CONTROL: the same view
-// without the failing call serves the page.
+// A handler of a page that fails answers the page with its error, the way a compile error does
+// (respondUI): 500, and while developing what failed in the handler; in production nothing of it. It used
+// to fall through to the template path and answer 200 with "[Error reading index …]". CONTROL: the same
+// handler without the failing call serves the page.
 func TestUIViewThatFailsAnswersItsError(t *testing.T) {
 	files := withFiles(nil)
-	files["localhost/router.work"] = strings.Replace(files["localhost/router.work"], `ctx.title("Thực đơn");`, `ctx.title("Thực đơn");
-  twice();`, 1)
+	files["localhost/router.work"] = strings.Replace(files["localhost/router.work"], `  return ctx.title("Thực đơn")`, `  twice();
+  return ctx.title("Thực đơn")`, 1)
 	rec := serveUI(t, buildUISite(t, files), "http://localhost/")
 	if body := rec.Body.String(); rec.Code != http.StatusInternalServerError || !strings.Contains(body, "at twice (router.work:11:") || strings.Contains(body, "Error reading index") {
-		t.Errorf("while developing: want 500 with what failed in the view, got %d:\n%s", rec.Code, body)
+		t.Errorf("while developing: want 500 with what failed in the handler, got %d:\n%s", rec.Code, body)
 	}
 	rec = serveUI(t, buildUISiteMode(t, files, false), "http://localhost/")
 	if body := rec.Body.String(); rec.Code != http.StatusInternalServerError || body != "Internal Server Error\nRequest ID: "+rec.Header().Get("X-Request-ID")+"\n" {
-		t.Errorf("in production: want 500 saying nothing of the view but its request id, got %d:\n%s", rec.Code, body)
+		t.Errorf("in production: want 500 saying nothing of the handler but its request id, got %d:\n%s", rec.Code, body)
 	}
 	// CONTROL
 	if rec := serveUI(t, buildUISite(t, uiSiteFiles), "http://localhost/"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "<p>2 món, gấp đôi 4</p>") {
-		t.Errorf("CONTROL: the view that runs serves the page, got %d", rec.Code)
+		t.Errorf("CONTROL: the handler that runs serves the page, got %d", rec.Code)
 	}
 }

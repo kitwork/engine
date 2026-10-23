@@ -87,6 +87,7 @@ func prepareFile(appRoot string, paths ...string) (*Program, []string, map[strin
 		}
 	}
 	prog.App = appRoot != ""
+	prog.Router = sourceName == RouterFile
 	return prog, files, sources, nil
 }
 

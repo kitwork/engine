@@ -287,12 +287,14 @@ func TestEnvironmentFileLinkedOutOfTheAppIsRefused(t *testing.T) {
 	})
 }
 
-// A const of a router.work's top level that holds a key not named PUBLIC_… is the server's: the page of a
-// router.view in the file never reads it, while a PUBLIC_ key, and a yes/no made of the secret, are the
+// A const of a router.work's top level that holds a key not named PUBLIC_… is the server's: a page reads
+// only the names of the object its context.view({ … }) is given (KITWORK_ROUTER.md, 23/10/2026), so the
+// page never reads it, while a PUBLIC_ key, and a yes/no made of the secret, handed in the object, are the
 // page's (mục 6). A handler of the file still uses the secret.
 //
-// CONTROL (22/10/2026): with convertViewScope not leaving out EnvironmentServerOnly, the page printed the
-// secret: "the page shows the secret: …sk-live-123…".
+// CONTROL (22/10/2026, when router.view handed its page every name of the file): with convertViewScope not
+// leaving out EnvironmentServerOnly, the page printed the secret: "the page shows the secret: …sk-live-123…".
+// Since 23/10/2026 no code hands a page a name of the file.
 func TestEnvironmentSecretOfTheFileIsNotPageData(t *testing.T) {
 	root := environmentApp(t, map[string]string{
 		"acme/.env":                 "STRIPE_SECRET=sk-live-123\nPUBLIC_GREETING=Xin chào\n",
@@ -300,7 +302,7 @@ func TestEnvironmentSecretOfTheFileIsNotPageData(t *testing.T) {
 		"acme/localhost/content.ui": "<content><text id=\"page\">[{{ greeting }}] [{{ stripe }}] [{{ apiKeyUnknown }}] [{{ secretSet }}]</text></content>",
 		"acme/localhost/router.work": "import * as router from \"kitwork/router\";\nimport { environment } from \"kitwork\";\n" +
 			"const stripe = environment.require(\"STRIPE_SECRET\");\nconst greeting = environment.PUBLIC_GREETING || \"\";\n" +
-			"router.view((context) => {\n  const secretSet = stripe.length > 0;\n});\n",
+			"router.get((context) => context.view({ greeting, secretSet: stripe.length > 0 }));\n",
 		"acme/localhost/charge/router.work": "import * as router from \"kitwork/router\";\nimport { environment } from \"kitwork\";\n" +
 			"const stripe = environment.require(\"STRIPE_SECRET\");\nrouter.get((context) => context.json({ prefix: stripe.slice(0, 7) }));\n",
 	})
@@ -329,21 +331,23 @@ func TestEnvironmentSecretOfTheFileIsNotPageData(t *testing.T) {
 	}
 }
 
-// A secret reaches a router.view's page by no other way of writing it (mục 6, 22/10/2026): a const imported
-// from a module of the app that holds one, and a let of the file's top level, are the server's as a const of
-// the file is, while the PUBLIC_ key the module exports beside it is the page's; a view's function passed by
-// its name with a variable that holds a secret inside an object stops the boot, naming the key.
+// A secret reaches a page by no other way of writing it (mục 6, 22/10/2026): a const imported from a module
+// of the app that holds one, and a let of the file's top level, are the server's as a const of the file is,
+// while the PUBLIC_ key the module exports beside it is the page's when the object of context.view hands it;
+// an object of the file that holds a secret, handed to context.view by its name, stops the boot, naming the
+// key.
 //
 // CONTROL (23/10/2026): with holdEnvironment reading nothing once a declaration is resolved and a let held as
-// nothing, the page was handed them: "the page shows a secret: <!doctype html>…"; with viewFunction not
-// following a name, the site booted: "run = <nil>, want \"router.work:4:9: khoá `TOKEN` sẽ đi xuống trình duyệt\"".
+// nothing, the page was handed them (when router.view handed its page every name of the file): "the page
+// shows a secret: <!doctype html>…"; with environmentView not following a name, the site booted: "run =
+// <nil>, want \"router.work:4:38: khoá `TOKEN` sẽ đi xuống trình duyệt\"".
 func TestEnvironmentSecretOfAModuleOrALetIsNotPageData(t *testing.T) {
 	root := environmentApp(t, map[string]string{
 		"acme/.env":                  "STRIPE_SECRET=sk-live-123\nTOKEN=tok-456\nPUBLIC_GREETING=Xin chào\n",
 		"acme/.shared/keys.work":     "import { environment } from \"kitwork\";\nexport const stripe = environment.STRIPE_SECRET;\nexport const greeting = environment.PUBLIC_GREETING || \"\";\n",
 		"acme/localhost/view.ui":     "<view><content /></view>",
 		"acme/localhost/content.ui":  "<content><text id=\"page\">[{{ greeting }}] [{{ stripe }}] [{{ token }}] [{{ apiKeyUnknown }}]</text></content>",
-		"acme/localhost/router.work": "import * as router from \"kitwork/router\";\nimport { environment } from \"kitwork\";\nimport { stripe, greeting } from \"app/.shared/keys.work\";\nlet token = environment.TOKEN;\nrouter.view((context) => { });\n",
+		"acme/localhost/router.work": "import * as router from \"kitwork/router\";\nimport { environment } from \"kitwork\";\nimport { stripe, greeting } from \"app/.shared/keys.work\";\nlet token = environment.TOKEN;\nrouter.get((context) => context.view({ greeting }));\n",
 	})
 	tenant := NewTenant(root, "localhost")
 	if err := tenant.Run(); err != nil {
@@ -371,12 +375,12 @@ func TestEnvironmentSecretOfAModuleOrALetIsNotPageData(t *testing.T) {
 		"acme/localhost/view.ui":    "<view><content /></view>",
 		"acme/localhost/content.ui": "<content><text>{{ data }}</text></content>",
 		"acme/localhost/router.work": "import * as router from \"kitwork/router\";\nimport { environment } from \"kitwork\";\n" +
-			"const page = (context) => {\n  const data = { token: environment.TOKEN };\n};\nrouter.view(page);\n",
+			"const data = { token: environment.TOKEN };\nrouter.get((context) => context.view(data));\n",
 	})
 	tenant = NewTenant(byName, "localhost")
 	err := tenant.Run()
 	tenant.Close()
-	if want := "router.work:4:9: khoá `TOKEN` sẽ đi xuống trình duyệt"; err == nil || !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), "tok-456") {
+	if want := "router.work:4:38: khoá `TOKEN` sẽ đi xuống trình duyệt"; err == nil || !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), "tok-456") {
 		t.Fatalf("run = %v, want %q", err, want)
 	}
 }

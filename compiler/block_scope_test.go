@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/kitwork/engine/runtime"
-	"github.com/kitwork/engine/value"
 )
 
 // Block scope (14/10/2026): const and let live in the block that declares them, as in JavaScript. The
@@ -226,42 +225,6 @@ func TestNotAFunctionNamesTheVariableAsWritten(t *testing.T) {
 		if !strings.Contains(failure.Message, tc.says) || strings.ContainsAny(failure.Message, "@#") {
 			t.Fatalf("%s: %q, want it to say %q and no slot", tc.source, failure.Message, tc.says)
 		}
-	}
-}
-
-// Kitwork UI reads a view's names by name: a declaration of the view renamed because the file has the
-// same name is read back under its own, and a block's is not the view's.
-func TestViewScopeReadsTheViewsOwnNames(t *testing.T) {
-	bytecode, err := CompileSource(`
-const title = "file";
-const view = (ctx) => {
-  const title = "view";
-  let count = 1;
-  if (ctx) { const inner = 1; count = count + inner; }
-  for (const item of [1]) { const doubled = item * 2; }
-};`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	vm := runtime.New(bytecode.Program)
-	vm.MaxEnergy = 10_000_000
-	if returned := vm.Run(); returned.IsInvalid() {
-		t.Fatal(returned.Text())
-	}
-	result, names := vm.ExecuteLambdaScope(vm.Vars["view"].V.(*value.Lambda), []value.Value{value.New(true)})
-	if result.IsInvalid() {
-		t.Fatal(result.Text())
-	}
-	if names["title"].Text() != "view" || names["count"].N != 2 || names["ctx"].K != value.Bool {
-		t.Fatalf("view names: %v", names)
-	}
-	for name := range names {
-		if strings.ContainsAny(name, "@#") || name == "inner" || name == "doubled" || name == "item" {
-			t.Fatalf("view names hold %q: %v", name, names)
-		}
-	}
-	if vm.Vars["title"].Text() != "file" {
-		t.Fatalf("the file's title is %q", vm.Vars["title"].Text())
 	}
 }
 

@@ -13,7 +13,7 @@ import (
 
 // tabsRouterCode and tabsPageCode are the two files the window shows, given by the view.
 const (
-	tabsRouterCode = "import { router } from \"kitwork\";\n\nrouter.view(() => {\n  const title = \"Menu\";\n});"
+	tabsRouterCode = "import * as router from \"kitwork/router\";\n\nrouter.get((context) => context.view({ title: \"Menu\" }));"
 	tabsPageCode   = "<view padding=\"6\">\n  <text heading=\"1\">{{ title }}</text>\n</view>"
 )
 
@@ -28,9 +28,10 @@ var tabsBrowserFiles = map[string]string{
 
 router.colors({ brand: "#c8742c" });
 router.language("vi");
-router.view(() => {
+router.get((context) => {
   const routerCode = ` + jsString(tabsRouterCode) + `;
   const pageCode = ` + jsString(tabsPageCode) + `;
+  return context.view({ routerCode, pageCode });
 });
 `,
 	"localhost/view.ui": `<view><content /></view>`,

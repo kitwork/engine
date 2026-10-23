@@ -54,8 +54,9 @@ func (c *Context) Redirect(url string, options ...any) (*Response, error) {
 	return c.Response().Redirect(value.New(url), options...)
 }
 
-// File answers with a file of kitwork/file, served from the disk (context.file(file.open("exports/a.csv")),
-// KITWORK_FILE.md mục 9), or with bytes the handler made (context.type("image/png").file(bytes)).
+// File answers with a file of kitwork/file, served from the disk, by its path (context.file("exports/a.csv"),
+// KITWORK_FILE.md mục 9) or a handle of it, or with bytes the handler holds
+// (context.type("image/png").file(bytes)).
 func (c *Context) File(data value.Value, options ...any) (*Response, error) {
 	return c.Response().File(data, options...)
 }
@@ -151,12 +152,33 @@ func (c *Context) URI() value.Value         { return c.request.URI() }
 func (c *Context) Pattern() value.Value     { return c.request.Pattern() }
 func (c *Context) Route() value.Value       { return c.request.Route() }
 
-func (c *Context) arguments(lambda *value.Lambda) []value.Value {
+// arguments are what a handler of the route is handed. byPosition is a function of a router.work
+// (KITWORK_ROUTER.md mục 5, 23/10/2026): the first parameter is the context whatever its name ((context),
+// (ctx), (c), or taken apart, ({ request, response })), the second is what failed the request when one did
+// (an .error() hook, (context, failure) => …, null otherwise), any other is null; the names that meant
+// something else by name stop the boot (handler_destructure.go, positionalParameterError). A function of a
+// template site (router.kitwork.js) keeps its way, by name: ctx and context are the context, req and request
+// the request, res and response the response, err, error and e what failed. The router file that wrote the
+// function decides, not the request's (execTree).
+func (c *Context) arguments(lambda *value.Lambda, byPosition bool) []value.Value {
 	if lambda == nil {
 		return nil
 	}
 	ctxVal := value.New(c)
 	args := make([]value.Value, 0, len(lambda.Params))
+	if byPosition {
+		for index := range lambda.Params {
+			switch index {
+			case 0:
+				args = append(args, ctxVal)
+			case 1:
+				args = append(args, c.router().errorObject())
+			default:
+				args = append(args, value.Value{K: value.Nil})
+			}
+		}
+		return args
+	}
 
 	for _, name := range lambda.Params {
 		if compiler.DestructuredEntries(name) != nil {

@@ -18,7 +18,7 @@ import "fmt"
 
 // responseOrder is where a router.work response stands in its chain.
 type responseOrder struct {
-	inProgram  bool   // the site's program is running (execTree, serveUIView)
+	inProgram  bool   // the site's program is running (execTree)
 	answeredBy string // the answer that ended the chain, "" before it
 	pageText   string // the first of the page's text written (title, description…), "" when none
 	typed      bool   // .type() was written
