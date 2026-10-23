@@ -87,7 +87,14 @@ func ProfileWithLayout(root string, layout work.RootLayout) ProfileReport {
 	var opcodeEnergy [256]uint64
 	var opcodeNames [256]string
 	for _, file := range files {
-		bytecode, compileErr := compiler.CompileFileInApp(profileAppRoot(root, layout, file), file)
+		compile := compiler.CompileFileInApp
+		if isQueueJobFile(file) {
+			// a job file runs as the module its importers and the loader see (work/queue_load.go)
+			compile = func(appRoot string, paths ...string) (*compiler.Bytecode, error) {
+				return compiler.CompileModuleFileInApp(appRoot, filepath.Join(paths...))
+			}
+		}
+		bytecode, compileErr := compile(profileAppRoot(root, layout, file), file)
 		relative := profileRelativePath(root, file)
 		if compileErr != nil {
 			report.Issues = append(report.Issues, ProfileIssue{
@@ -272,8 +279,11 @@ func isRouterMarker(path, name string) bool {
 
 func profileAppEntrypoints(root string) ([]string, error) {
 	var files []string
-	for _, folder := range []string{"_cron", "_queue"} {
-		directory := filepath.Join(root, folder)
+	for _, folder := range []struct{ path, suffix string }{
+		{"_cron", ".kitwork.js"},
+		{filepath.Join(".shared", "queue"), ".work"},
+	} {
+		directory := filepath.Join(root, folder.path)
 		entries, err := os.ReadDir(directory)
 		if os.IsNotExist(err) {
 			continue
@@ -282,8 +292,8 @@ func profileAppEntrypoints(root string) ([]string, error) {
 			return nil, err
 		}
 		for _, entry := range entries {
-			if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 ||
-				!strings.HasSuffix(strings.ToLower(entry.Name()), ".kitwork.js") {
+			if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 || entry.Name() == "config.work" ||
+				!strings.HasSuffix(strings.ToLower(entry.Name()), folder.suffix) {
 				continue
 			}
 			files = append(files, filepath.Join(directory, entry.Name()))
@@ -291,6 +301,13 @@ func profileAppEntrypoints(root string) ([]string, error) {
 	}
 	sort.Strings(files)
 	return files, nil
+}
+
+// isQueueJobFile reports a job file of an app's .shared/queue/ (KITWORK_QUEUE.md mục 2).
+func isQueueJobFile(file string) bool {
+	return filepath.Base(filepath.Dir(file)) == "queue" &&
+		filepath.Base(filepath.Dir(filepath.Dir(file))) == ".shared" &&
+		strings.HasSuffix(file, ".work") && filepath.Base(file) != "config.work"
 }
 
 func compactProfileEntrypoints(files []string) []string {
@@ -319,6 +336,19 @@ func profileLegacyEntrypoints(root string) ([]string, error) {
 				return nil
 			}
 			name := entry.Name()
+			if name == ".shared" {
+				// the app's jobs, .shared/queue/*.work, are entrypoints; the rest of .shared/ is imported
+				jobs, err := profileAppEntrypoints(filepath.Dir(path))
+				if err != nil {
+					return err
+				}
+				for _, job := range jobs {
+					if isQueueJobFile(job) {
+						files = append(files, job)
+					}
+				}
+				return filepath.SkipDir
+			}
 			if strings.HasPrefix(name, ".") || name == "node_modules" {
 				return filepath.SkipDir
 			}
@@ -344,7 +374,7 @@ func profileLegacyEntrypoints(root string) ([]string, error) {
 			return nil
 		}
 		parent := filepath.Base(filepath.Dir(path))
-		if parent == "_cron" || parent == "_queue" {
+		if parent == "_cron" {
 			files = append(files, path)
 		}
 		return nil

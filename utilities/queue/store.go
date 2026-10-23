@@ -1,686 +1,818 @@
-// Package queue provides the durable job-queue store: definitions, messages, claiming and history.
+// Package queue keeps the runs of an app's background work in kitwork_runs, the engine's table in the app's
+// own database (KITWORK_QUEUE.md mục 2, 11): one row per run, written before send() answers, claimed with a
+// lease and a token, settled only by the holder of the token (fencing), kept for `keep` after it ends.
+// Beside it, kitwork_definitions holds what each job was declared with, so list() reads the definitions
+// whether anything was sent or not.
 //
-// It is deliberately a SIBLING of utilities/cron rather than a generalisation of it. The two share a
-// shape — a definitions table, a work table, lease-based claiming, retry with backoff — but they do
-// not share a QUESTION. Cron asks "is this slot due yet?", and its arbiter is time:
-// UNIQUE(identity, name, scheduled_for). A queue asks "did someone ask for this?", and its arbiter is
-// the caller's own key: UNIQUE(identity, name, dedupe_key). Merging them would force one schema to
-// carry both a schedule and a payload, and every reader would then have to know which half is dead.
+// Both tables carry a kind ('queue' today, 'schedule' when KITWORK_SCHEDULE.md moves onto the same store),
+// so the two share the runs, the lease and the retry without sharing a namespace.
 //
-// What IS shared is the hard part, and it is shared by copying the technique, not the code: the
-// database clock is the only clock on Postgres, the UNIQUE constraint is the arbiter rather than an
-// application check, and a claim is an UPDATE that either wins or does not.
+// The statements are KitDB's SQL (the app's database is a KitDB file in .database/application/): ON
+// CONFLICT, LIMIT/OFFSET written as numbers, no MAX(), no CASE, no SKIP LOCKED. Columns are TEXT and
+// INTEGER alone, so the app's own ORM, which reads every table of the file's catalogue, reads these two as
+// well. Times are text of one width (2026-10-22T08:30:00.000Z), so text order is time order. A write is
+// one writer at a time (Database.Write), which makes a read and the write after it one step: a claim, a
+// settle, a cancel and a replay check the row and change it with nothing in between.
 package queue
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/base32"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
 
-func RFC(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }
+// Database is where the runs are kept: the app's database through SQL. Write runs one write at a time,
+// with every other write of the database (the app's own included) held back while it runs.
+type Database interface {
+	Read(fn func(db *sql.DB) error) error
+	Write(fn func(db *sql.DB) error) error
+}
 
-// ClaimedJob is one message this node has won the right to run.
-type ClaimedJob struct {
-	ID          int64
+// Sequencer is a Database that numbers new runs itself, inside Write: the number after the highest seq
+// of the table, read once and counted on from there, rather than read from the table at every send. A
+// Database that is not one is read each time.
+type Sequencer interface {
+	NextSeq(db *sql.DB) (int64, error)
+}
+
+// HighestSeq reads the highest seq of kitwork_runs, 0 for an empty table: where a Sequencer starts.
+func HighestSeq(db *sql.DB) (int64, error) {
+	var last sql.NullInt64
+	err := db.QueryRow(`SELECT seq FROM kitwork_runs ORDER BY seq DESC LIMIT 1`).Scan(&last)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return 0, err
+	}
+	return last.Int64, nil
+}
+
+// The statuses of a run (mục 7).
+const (
+	Pending    = "pending"
+	Running    = "running"
+	Completed  = "completed"
+	Failed     = "failed"
+	Cancelling = "cancelling"
+	Cancelled  = "cancelled"
+)
+
+// Statuses is every status a run can have, in the order of its life.
+var Statuses = []string{Pending, Running, Completed, Failed, Cancelling, Cancelled}
+
+// ErrNotFound is a run this kind has no row of: never sent, pruned by keep, or another job's.
+var ErrNotFound = errors.New("queue: run not found")
+
+// StateError is an operation the run's status refuses: cancel of a run that ended, replay of one that
+// has not.
+type StateError struct {
+	Run Run
+}
+
+func (e *StateError) Error() string {
+	return fmt.Sprintf("queue: run %s is %s", e.Run.ID, e.Run.Status)
+}
+
+// Run is one row of kitwork_runs. Times are the stored text ("" when not set).
+type Run struct {
+	ID           string
+	Name         string
+	Key          string
+	Status       string
+	Attempt      int
+	MaxAttempts  int
+	TimeoutMS    int
+	Data         string // JSON, as sent
+	Log          string
+	ErrorCode    string
+	ErrorMessage string
+	CreatedAt    string
+	StartedAt    string
+	FinishedAt   string
+	AvailableAt  string
+	ReplayOf     string
+}
+
+// Claim is a run this worker won the right to run: Token is the lease it holds, which every settle names.
+type Claim struct {
+	Run
+	Token string
+}
+
+// NewRun is what send() and replay() store.
+type NewRun struct {
 	Name        string
-	Payload     string // JSON as dispatched; the runtime decodes it
-	Attempt     int
+	Data        string
+	Key         string
 	MaxAttempts int
+	Timeout     time.Duration
+	Available   time.Time
+	ReplayOf    string
 }
 
-// QueueRecord is a handler definition — a projection of one _queue/*.kitwork.js file.
-type QueueRecord struct {
-	Name          string
-	MaxAttempts   int
-	RetentionDays int
-	ContentHash   string
+// Definition is one job as declared: its name, the file, the extra attempts and the time limit written.
+type Definition struct {
+	Name        string
+	Source      string
+	Retry       int
+	Timeout     string // as written ("30s"), "" when none
+	TimeoutMS   int
+	ContentHash string
 }
 
-// Store is the durable backend. Two implementations: per-app SQLite for a single node, shared
-// Postgres for many. The authoring model is identical either way; presence of a system database is
-// the switch, never a flag.
-type Store interface {
-	Label() string
-	InitSchema() error
-	Sync(identity string, queues []QueueRecord) error
-	// Enqueue records one message. Reports whether a row was actually created: a repeat of a
-	// dispatch that carried the same dedupe key is DROPPED, and the caller is told so rather than
-	// left to assume.
-	Enqueue(identity, name, payload, dedupeKey string, maxAttempts int, availableAt time.Time) (int64, bool, error)
-	Claim(identity, nodeID string, leaseTTL time.Duration, limit int) []ClaimedJob
-	Complete(jobID int64, output string, gas int64)
-	Fail(jobID int64, attempt int, retry bool, availableAt time.Time, errMsg, output string, gas int64)
-	RecordSummary(identity, name, status string)
-	Heartbeat(nodeID string, leaseTTL time.Duration)
-	Reclaim(identity string, bootWipe bool) int64
-	Retention(identity, name string, completedBefore, failedBefore time.Time)
-	ListQueues(identity string) []map[string]any
-	ListJobs(identity, name, status string, limit int) []map[string]any
-	RetryFailed(identity, name string, jobID int64) int64
+// Store is the runs of one kind in one database.
+type Store struct {
+	database Database
+	kind     string
 }
 
-// ── SQLite: one node, zero external infrastructure ───────────────────────────────────────────────
-
-type SqliteStore struct {
-	DB   *sql.DB
-	Node string
+// New is the store of kind's runs in database.
+func New(database Database, kind string) *Store {
+	return &Store{database: database, kind: kind}
 }
 
-func NewSqliteStore(db *sql.DB, nodeID string) *SqliteStore {
-	return &SqliteStore{DB: db, Node: nodeID}
+// stampLayout is how the tables write a time.
+const stampLayout = "2006-01-02T15:04:05.000Z"
+
+// Stamp is a time as the tables keep it: UTC to the millisecond, one width.
+func Stamp(t time.Time) string { return t.UTC().Format(stampLayout) }
+
+// Schema is the statements that make both tables, each a no-op when its table is there.
+var Schema = []string{
+	`CREATE TABLE IF NOT EXISTS kitwork_runs (
+		id TEXT PRIMARY KEY,
+		seq INTEGER NOT NULL,
+		kind TEXT NOT NULL,
+		name TEXT NOT NULL,
+		dedupe_key TEXT,
+		status TEXT NOT NULL,
+		attempt INTEGER NOT NULL,
+		max_attempts INTEGER NOT NULL,
+		timeout_ms INTEGER NOT NULL,
+		data TEXT,
+		log TEXT,
+		error_code TEXT,
+		error_message TEXT,
+		available_at TEXT NOT NULL,
+		lease_token TEXT,
+		lease_until TEXT,
+		created_at TEXT NOT NULL,
+		started_at TEXT,
+		finished_at TEXT,
+		replay_of TEXT,
+		UNIQUE (kind, name, dedupe_key))`,
+	`CREATE INDEX IF NOT EXISTS kitwork_runs_due ON kitwork_runs (kind, status, available_at)`,
+	`CREATE INDEX IF NOT EXISTS kitwork_runs_seq ON kitwork_runs (seq)`,
+	`CREATE TABLE IF NOT EXISTS kitwork_definitions (
+		kind TEXT NOT NULL,
+		name TEXT NOT NULL,
+		source TEXT NOT NULL,
+		retry INTEGER NOT NULL,
+		timeout TEXT,
+		timeout_ms INTEGER NOT NULL,
+		content_hash TEXT NOT NULL,
+		updated_at TEXT NOT NULL,
+		PRIMARY KEY (kind, name))`,
 }
 
-func (s *SqliteStore) Label() string { return "sqlite" }
-
-func (s *SqliteStore) InitSchema() error {
-	stmts := []string{
-		`CREATE TABLE IF NOT EXISTS queues (
-			identity TEXT NOT NULL, node TEXT, name TEXT NOT NULL,
-			origin TEXT NOT NULL DEFAULT 'file', source TEXT, content_hash TEXT,
-			max_attempts INTEGER NOT NULL DEFAULT 1, retention INTEGER NOT NULL DEFAULT 30,
-			status TEXT NOT NULL DEFAULT 'active',
-			last_run TEXT, last_status TEXT,
-			processed_count INTEGER NOT NULL DEFAULT 0, failed_count INTEGER NOT NULL DEFAULT 0,
-			created_at TEXT NOT NULL DEFAULT (datetime('now')),
-			updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-			PRIMARY KEY (identity, name))`,
-		// dedupe_key is NULLABLE and the UNIQUE index treats NULLs as distinct — which is exactly the
-		// intended semantics: a dispatch WITHOUT a key is a new message every time, and a dispatch
-		// WITH one can be repeated safely. The constraint does the deduplication, not a prior SELECT,
-		// so two nodes racing on the same key still produce one row.
-		`CREATE TABLE IF NOT EXISTS queue_jobs (
-			id INTEGER PRIMARY KEY AUTOINCREMENT, identity TEXT NOT NULL, name TEXT NOT NULL,
-			payload TEXT, dedupe_key TEXT,
-			status TEXT NOT NULL DEFAULT 'pending',
-			attempt INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 1,
-			available_at TEXT, node TEXT, lease_until TEXT, started_at TEXT, finished_at TEXT,
-			error_message TEXT, output TEXT, gas_used INTEGER,
-			created_at TEXT NOT NULL DEFAULT (datetime('now')))`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS uniq_queue_dedupe ON queue_jobs(identity, name, dedupe_key)`,
-		`CREATE INDEX IF NOT EXISTS idx_queue_claim   ON queue_jobs(identity, status, available_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_queue_history ON queue_jobs(identity, name, id DESC)`,
-	}
-	for _, q := range stmts {
-		if _, err := s.DB.Exec(q); err != nil {
-			return fmt.Errorf("sqlite queue schema: %w", err)
+// InitSchema makes both tables in db.
+func InitSchema(db *sql.DB) error {
+	for _, statement := range Schema {
+		if _, err := db.Exec(statement); err != nil {
+			return fmt.Errorf("kitwork_runs: %w", err)
 		}
 	}
 	return nil
 }
 
-func (s *SqliteStore) Sync(identity string, queues []QueueRecord) error {
-	now := RFC(time.Now())
-	keep := make([]string, 0, len(queues))
-	for _, q := range queues {
-		keep = append(keep, q.Name)
-		_, err := s.DB.Exec(`
-			INSERT INTO queues (identity, name, node, origin, source, content_hash,
-				max_attempts, retention, status, created_at, updated_at)
-			VALUES (?,?,?, 'file', ?, ?, ?, ?, 'active', ?, ?)
-			ON CONFLICT(identity, name) DO UPDATE SET node=excluded.node, source=excluded.source,
-				content_hash=excluded.content_hash, max_attempts=excluded.max_attempts,
-				retention=excluded.retention, updated_at=excluded.updated_at
-			WHERE queues.content_hash IS NOT excluded.content_hash`,
-			identity, q.Name, s.Node, "_queue/"+q.Name+".kitwork.js", q.ContentHash,
-			q.MaxAttempts, q.RetentionDays, now, now)
+const runColumns = `id, name, dedupe_key, status, attempt, max_attempts, timeout_ms, data, log, error_code,
+	error_message, created_at, started_at, finished_at, available_at, replay_of`
+
+type scanner interface {
+	Scan(dest ...any) error
+}
+
+func scanRun(row scanner) (Run, error) {
+	var run Run
+	var key, data, log, code, message, started, finished, replayOf sql.NullString
+	err := row.Scan(&run.ID, &run.Name, &key, &run.Status, &run.Attempt, &run.MaxAttempts, &run.TimeoutMS,
+		&data, &log, &code, &message, &run.CreatedAt, &started, &finished, &run.AvailableAt, &replayOf)
+	if err != nil {
+		return Run{}, err
+	}
+	run.Key, run.Data, run.Log = key.String, data.String, log.String
+	run.ErrorCode, run.ErrorMessage = code.String, message.String
+	run.StartedAt, run.FinishedAt, run.ReplayOf = started.String, finished.String, replayOf.String
+	return run, nil
+}
+
+// nullable is s, or NULL for "".
+func nullable(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+// RunID is a new run's id: r_ and 16 letters and digits.
+func RunID() string { return "r_" + randomText(10) }
+
+func randomText(bytes int) string {
+	buffer := make([]byte, bytes)
+	if _, err := rand.Read(buffer); err != nil {
+		panic(err)
+	}
+	return strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(buffer))
+}
+
+func newToken() string {
+	buffer := make([]byte, 16)
+	if _, err := rand.Read(buffer); err != nil {
+		panic(err)
+	}
+	return hex.EncodeToString(buffer)
+}
+
+// get reads one run of this kind by id, under whatever the caller holds.
+func (s *Store) get(db *sql.DB, id string) (Run, error) {
+	run, err := scanRun(db.QueryRow(`SELECT `+runColumns+` FROM kitwork_runs WHERE id = $1 AND kind = $2`, id, s.kind))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Run{}, ErrNotFound
+	}
+	return run, err
+}
+
+// Get reads one run by id.
+func (s *Store) Get(id string) (Run, error) {
+	var run Run
+	err := s.database.Read(func(db *sql.DB) error {
+		var err error
+		run, err = s.get(db, id)
+		return err
+	})
+	return run, err
+}
+
+// insert stores a run as pending. A key another run of the same job holds stores nothing: the run holding
+// it is given back with duplicate true. The UNIQUE (kind, name, dedupe_key) of the table decides, not a read
+// before; a run without a key never collides (NULL keys are distinct).
+func (s *Store) insert(db *sql.DB, run NewRun, now time.Time) (Run, bool, error) {
+	var seq int64
+	var err error
+	if sequencer, ok := s.database.(Sequencer); ok {
+		seq, err = sequencer.NextSeq(db)
+	} else {
+		seq, err = HighestSeq(db)
+		seq++
+	}
+	if err != nil {
+		return Run{}, false, err
+	}
+	var key, replayOf any
+	if run.Key != "" {
+		key = run.Key
+	}
+	if run.ReplayOf != "" {
+		replayOf = run.ReplayOf
+	}
+	available := run.Available
+	if available.IsZero() || available.Before(now) {
+		available = now
+	}
+	id := RunID()
+	var inserted string
+	err = db.QueryRow(`INSERT INTO kitwork_runs (id, seq, kind, name, dedupe_key, status, attempt, max_attempts,
+		timeout_ms, data, available_at, created_at, replay_of)
+		VALUES ($1, $2, $3, $4, $5, 'pending', 0, $6, $7, $8, $9, $10, $11)
+		ON CONFLICT (kind, name, dedupe_key) DO NOTHING RETURNING id`,
+		id, seq, s.kind, run.Name, key, run.MaxAttempts, int(run.Timeout/time.Millisecond), run.Data,
+		Stamp(available), Stamp(now), replayOf).Scan(&inserted)
+	if errors.Is(err, sql.ErrNoRows) {
+		held, err := scanRun(db.QueryRow(`SELECT `+runColumns+` FROM kitwork_runs
+			WHERE kind = $1 AND name = $2 AND dedupe_key = $3`, s.kind, run.Name, run.Key))
 		if err != nil {
-			fmt.Printf("[Queue] sqlite sync %s: %v\n", q.Name, err)
+			return Run{}, false, fmt.Errorf("kitwork_runs: key %q is held, its run not read: %w", run.Key, err)
 		}
-	}
-	s.deleteMissing(identity, keep)
-	return nil
-}
-
-// deleteMissing drops handler DEFINITIONS whose file is gone. It never touches queue_jobs: a pending
-// message for a deleted handler must stay visible as a failure ("no registered handler"), because
-// silently vanishing work is the failure mode a durable queue exists to prevent.
-func (s *SqliteStore) deleteMissing(identity string, keep []string) {
-	if len(keep) == 0 {
-		s.DB.Exec(`DELETE FROM queues WHERE identity=? AND origin='file'`, identity)
-		return
-	}
-	args := make([]any, 0, len(keep)+1)
-	args = append(args, identity)
-	marks := make([]string, len(keep))
-	for i, name := range keep {
-		marks[i] = "?"
-		args = append(args, name)
-	}
-	s.DB.Exec(`DELETE FROM queues WHERE identity=? AND origin='file' AND name NOT IN (`+
-		strings.Join(marks, ",")+`)`, args...)
-}
-
-func (s *SqliteStore) Enqueue(identity, name, payload, dedupeKey string, maxAttempts int, availableAt time.Time) (int64, bool, error) {
-	now := RFC(time.Now())
-	var key any
-	if dedupeKey != "" {
-		key = dedupeKey
-	}
-	// max_attempts is PINNED onto the row at dispatch, read from the handler definition — so editing
-	// a handler's .retry() changes the next dispatch, never the messages already waiting. The
-	// caller's value is the fallback for a dispatch that arrives before the definition is synced.
-	res, err := s.DB.Exec(`INSERT OR IGNORE INTO queue_jobs
-		(identity, name, payload, dedupe_key, status, attempt, max_attempts, available_at, created_at)
-		VALUES (?,?,?,?, 'pending', 0,
-			COALESCE((SELECT max_attempts FROM queues WHERE identity=? AND name=?), ?), ?, ?)`,
-		identity, name, payload, key, identity, name, maxAttempts, RFC(availableAt), now)
-	if err != nil {
-		return 0, false, err
-	}
-	// OR IGNORE turns a dedupe collision into zero rows rather than an error — the affected count is
-	// how we tell "queued" from "already queued".
-	affected, _ := res.RowsAffected()
-	if affected == 0 {
-		return 0, false, nil
-	}
-	id, _ := res.LastInsertId()
-	return id, true, nil
-}
-
-// Claim materialises candidates OUT of their result set before updating: SQLite holds a read lock on
-// the file while rows are open, so an in-flight UPDATE against the same table would deadlock. The
-// UPDATE then re-checks status='pending', so two dispatchers in one process still cannot both win.
-func (s *SqliteStore) Claim(identity, nodeID string, leaseTTL time.Duration, limit int) []ClaimedJob {
-	rows, err := s.DB.Query(`SELECT id, name, payload, attempt, max_attempts
-		FROM queue_jobs WHERE identity=? AND status='pending' AND available_at <= ?
-		ORDER BY available_at, id LIMIT ?`, identity, RFC(time.Now()), limit)
-	if err != nil {
-		return nil
-	}
-	type candidate struct {
-		id                int64
-		name, payload     string
-		attempt, maxTries int
-	}
-	var cand []candidate
-	for rows.Next() {
-		var c candidate
-		var payload sql.NullString
-		if rows.Scan(&c.id, &c.name, &payload, &c.attempt, &c.maxTries) == nil {
-			c.payload = payload.String
-			cand = append(cand, c)
-		}
-	}
-	rows.Close()
-
-	now := time.Now()
-	leaseUntil := RFC(now.Add(leaseTTL))
-	nowStr := RFC(now)
-	out := make([]ClaimedJob, 0, len(cand))
-	for _, c := range cand {
-		res, err := s.DB.Exec(`UPDATE queue_jobs
-			SET status='running', node=?, lease_until=?, started_at=?, attempt=?
-			WHERE id=? AND status='pending'`, nodeID, leaseUntil, nowStr, c.attempt+1, c.id)
-		if err != nil {
-			continue
-		}
-		if n, _ := res.RowsAffected(); n == 1 {
-			out = append(out, ClaimedJob{
-				ID: c.id, Name: c.name, Payload: c.payload,
-				Attempt: c.attempt + 1, MaxAttempts: c.maxTries,
-			})
-		}
-	}
-	return out
-}
-
-func (s *SqliteStore) Complete(jobID int64, output string, gas int64) {
-	s.DB.Exec(`UPDATE queue_jobs SET status='completed', finished_at=?, output=?, gas_used=?,
-		error_message=NULL, lease_until=NULL WHERE id=? AND status='running'`,
-		RFC(time.Now()), output, gas, jobID)
-}
-
-func (s *SqliteStore) Fail(jobID int64, attempt int, retry bool, availableAt time.Time, errMsg, output string, gas int64) {
-	if retry {
-		s.DB.Exec(`UPDATE queue_jobs
-			SET status='pending', attempt=?, available_at=?, node=NULL, lease_until=NULL,
-				started_at=NULL, error_message=?, output=?, gas_used=?
-			WHERE id=? AND status='running'`,
-			attempt, RFC(availableAt), errMsg, output, gas, jobID)
-		return
-	}
-	// Terminal failure. The row STAYS, with its error and its payload — this table is the dead-letter
-	// queue. A separate DLQ table would be the same rows under another name, and would need its own
-	// retry path back.
-	s.DB.Exec(`UPDATE queue_jobs
-		SET status='failed', attempt=?, finished_at=?, error_message=?, output=?, gas_used=?, lease_until=NULL
-		WHERE id=? AND status='running'`, attempt, RFC(time.Now()), errMsg, output, gas, jobID)
-}
-
-func (s *SqliteStore) RecordSummary(identity, name, status string) {
-	failInc := 0
-	if status == "failed" {
-		failInc = 1
-	}
-	s.DB.Exec(`UPDATE queues SET last_run=?, last_status=?, processed_count=processed_count+1,
-		failed_count=failed_count+? WHERE identity=? AND name=?`,
-		RFC(time.Now()), status, failInc, identity, name)
-}
-
-// Heartbeat is a no-op on SQLite: one node owns the file, so a lease can never be held by a process
-// this one cannot see.
-func (s *SqliteStore) Heartbeat(nodeID string, leaseTTL time.Duration) {}
-
-// Reclaim returns abandoned work to pending. On SQLite only at boot, and unconditionally: a 'running'
-// row can only be from a previous life of this single node, so it is orphaned by definition.
-func (s *SqliteStore) Reclaim(identity string, bootWipe bool) int64 {
-	if !bootWipe {
-		return 0
-	}
-	res, _ := s.DB.Exec(`UPDATE queue_jobs
-		SET status='pending', node=NULL, lease_until=NULL, started_at=NULL
-		WHERE identity=? AND status='running'`, identity)
-	if res == nil {
-		return 0
-	}
-	n, _ := res.RowsAffected()
-	return n
-}
-
-func (s *SqliteStore) Retention(identity, name string, completedBefore, failedBefore time.Time) {
-	s.DB.Exec(`DELETE FROM queue_jobs WHERE identity=? AND name=? AND status='completed' AND finished_at < ?`,
-		identity, name, RFC(completedBefore))
-	s.DB.Exec(`DELETE FROM queue_jobs WHERE identity=? AND name=? AND status='failed' AND finished_at < ?`,
-		identity, name, RFC(failedBefore))
-}
-
-func (s *SqliteStore) ListQueues(identity string) []map[string]any {
-	rows, err := s.DB.Query(`SELECT name, source, max_attempts, retention, status,
-		last_run, last_status, processed_count, failed_count, updated_at
-		FROM queues WHERE identity=? ORDER BY name`, identity)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	return scanQueues(rows)
-}
-
-func (s *SqliteStore) ListJobs(identity, name, status string, limit int) []map[string]any {
-	q, args := listJobsQuery("?", identity, name, status, limit)
-	rows, err := s.DB.Query(q, args...)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	return scanJobs(rows)
-}
-
-// RetryFailed moves dead-lettered rows back to pending. `attempt` resets to 0 so a replayed job gets
-// its full budget again: an operator asking for a retry means "try this properly", not "try it once
-// more before giving up".
-//
-// available_at is bound from Go rather than written as datetime('now'). SQLite compares these columns
-// as TEXT, and datetime() renders "2026-07-29 03:11:37" while every other write here uses RFC 3339
-// ("2026-07-29T03:11:37Z") — the two sort differently at the space/T, so mixing them would make
-// availability depend on which code path wrote the row.
-func (s *SqliteStore) RetryFailed(identity, name string, jobID int64) int64 {
-	args := []any{RFC(time.Now()), identity}
-	where := "identity=? AND status='failed'"
-	if name != "" {
-		where += " AND name=?"
-		args = append(args, name)
-	}
-	if jobID > 0 {
-		where += " AND id=?"
-		args = append(args, jobID)
-	}
-	res, err := s.DB.Exec(`UPDATE queue_jobs SET status='pending', attempt=0, node=NULL,
-		lease_until=NULL, started_at=NULL, finished_at=NULL, available_at=?
-		WHERE `+where, args...)
-	if err != nil || res == nil {
-		return 0
-	}
-	n, _ := res.RowsAffected()
-	return n
-}
-
-// ── Postgres: many nodes, one clock ──────────────────────────────────────────────────────────────
-
-type PgStore struct {
-	DB   *sql.DB
-	Node string
-}
-
-func NewPgStore(db *sql.DB, nodeID string) *PgStore {
-	return &PgStore{DB: db, Node: nodeID}
-}
-
-func (s *PgStore) Label() string { return "postgres" }
-
-func (s *PgStore) InitSchema() error {
-	stmts := []string{
-		`CREATE TABLE IF NOT EXISTS queues (
-			identity TEXT NOT NULL, node TEXT, name TEXT NOT NULL,
-			origin TEXT NOT NULL DEFAULT 'file', source TEXT, content_hash TEXT,
-			max_attempts INTEGER NOT NULL DEFAULT 1, retention INTEGER NOT NULL DEFAULT 30,
-			status TEXT NOT NULL DEFAULT 'active',
-			last_run TIMESTAMPTZ, last_status TEXT,
-			processed_count BIGINT NOT NULL DEFAULT 0, failed_count BIGINT NOT NULL DEFAULT 0,
-			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			PRIMARY KEY (identity, name))`,
-		`CREATE TABLE IF NOT EXISTS queue_jobs (
-			id BIGSERIAL PRIMARY KEY, identity TEXT NOT NULL, name TEXT NOT NULL,
-			payload TEXT, dedupe_key TEXT,
-			status TEXT NOT NULL DEFAULT 'pending',
-			attempt INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 1,
-			available_at TIMESTAMPTZ, node TEXT, lease_until TIMESTAMPTZ,
-			started_at TIMESTAMPTZ, finished_at TIMESTAMPTZ,
-			error_message TEXT, output TEXT, gas_used BIGINT,
-			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS uniq_queue_dedupe ON queue_jobs(identity, name, dedupe_key)`,
-		`CREATE INDEX IF NOT EXISTS idx_queue_claim ON queue_jobs(identity, status, available_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_queue_lease ON queue_jobs(status, lease_until)`,
-	}
-	for _, q := range stmts {
-		if _, err := s.DB.Exec(q); err != nil {
-			return fmt.Errorf("postgres queue schema: %w", err)
-		}
-	}
-	return nil
-}
-
-func (s *PgStore) Sync(identity string, queues []QueueRecord) error {
-	keep := make([]string, 0, len(queues))
-	for _, q := range queues {
-		keep = append(keep, q.Name)
-		_, err := s.DB.Exec(`
-			INSERT INTO queues (identity, name, node, origin, source, content_hash,
-				max_attempts, retention, status)
-			VALUES ($1,$2,$3,'file',$4,$5,$6,$7,'active')
-			ON CONFLICT(identity, name) DO UPDATE SET node=excluded.node, source=excluded.source,
-				content_hash=excluded.content_hash, max_attempts=excluded.max_attempts,
-				retention=excluded.retention, updated_at=NOW()
-			WHERE queues.content_hash IS DISTINCT FROM excluded.content_hash`,
-			identity, q.Name, s.Node, "_queue/"+q.Name+".kitwork.js", q.ContentHash,
-			q.MaxAttempts, q.RetentionDays)
-		if err != nil {
-			fmt.Printf("[Queue] pg sync %s: %v\n", q.Name, err)
-		}
-	}
-	s.deleteMissing(identity, keep)
-	return nil
-}
-
-func (s *PgStore) deleteMissing(identity string, keep []string) {
-	if len(keep) == 0 {
-		s.DB.Exec(`DELETE FROM queues WHERE identity=$1 AND origin='file'`, identity)
-		return
-	}
-	marks := make([]string, len(keep))
-	args := []any{identity}
-	for i, name := range keep {
-		marks[i] = fmt.Sprintf("$%d", i+2)
-		args = append(args, name)
-	}
-	s.DB.Exec(`DELETE FROM queues WHERE identity=$1 AND origin='file' AND name NOT IN (`+
-		strings.Join(marks, ",")+`)`, args...)
-}
-
-func (s *PgStore) Enqueue(identity, name, payload, dedupeKey string, maxAttempts int, availableAt time.Time) (int64, bool, error) {
-	var key any
-	if dedupeKey != "" {
-		key = dedupeKey
-	}
-	var id int64
-	// See the SQLite twin: max_attempts is pinned from the handler definition at dispatch time, with
-	// the caller's value as the fallback before that definition exists.
-	err := s.DB.QueryRow(`INSERT INTO queue_jobs
-		(identity, name, payload, dedupe_key, status, attempt, max_attempts, available_at, created_at)
-		VALUES ($1,$2,$3,$4,'pending',0,
-			COALESCE((SELECT max_attempts FROM queues WHERE identity=$1 AND name=$2), $5), $6, NOW())
-		ON CONFLICT (identity, name, dedupe_key) DO NOTHING
-		RETURNING id`, identity, name, payload, key, maxAttempts, availableAt.UTC()).Scan(&id)
-	// DO NOTHING returns no row on a dedupe collision, which arrives here as ErrNoRows. That is the
-	// success path for an idempotent dispatch, not a failure.
-	if err == sql.ErrNoRows {
-		return 0, false, nil
+		return held, true, nil
 	}
 	if err != nil {
-		return 0, false, err
+		return Run{}, false, err
 	}
-	return id, true, nil
+	stored, err := s.get(db, inserted)
+	return stored, false, err
 }
 
-// Claim is one statement: the UPDATE selects its own targets with FOR UPDATE SKIP LOCKED, so a node
-// takes rows no other node is already taking, without a lock table and without a round trip that
-// another node could interleave with.
-func (s *PgStore) Claim(identity, nodeID string, leaseTTL time.Duration, limit int) []ClaimedJob {
-	secs := int(leaseTTL.Seconds())
-	if secs < 1 {
-		secs = 1
-	}
-	rows, err := s.DB.Query(`
-		UPDATE queue_jobs SET status='running', node=$1,
-			lease_until=NOW() + ($2 * interval '1 second'), started_at=NOW(), attempt=attempt+1
-		WHERE id IN (
-			SELECT id FROM queue_jobs
-			WHERE identity=$3 AND status='pending' AND available_at <= NOW()
-			ORDER BY available_at, id FOR UPDATE SKIP LOCKED LIMIT $4)
-		RETURNING id, name, payload, attempt, max_attempts`, nodeID, secs, identity, limit)
-	if err != nil {
-		fmt.Printf("[Queue] pg claim: %v\n", err)
-		return nil
-	}
-	defer rows.Close()
-	var won []ClaimedJob
-	for rows.Next() {
-		var j ClaimedJob
-		var payload sql.NullString
-		if rows.Scan(&j.ID, &j.Name, &payload, &j.Attempt, &j.MaxAttempts) == nil {
-			j.Payload = payload.String
-			won = append(won, j)
+// Enqueue stores a run, or gives back the run holding its key (duplicate true).
+func (s *Store) Enqueue(run NewRun, now time.Time) (Run, bool, error) {
+	var stored Run
+	var duplicate bool
+	err := s.database.Write(func(db *sql.DB) error {
+		var err error
+		stored, duplicate, err = s.insert(db, run, now)
+		return err
+	})
+	return stored, duplicate, err
+}
+
+// except is the condition that leaves out the runs of the jobs in names, its arguments numbered from
+// first: " AND name <> $3 AND name <> $4", in the names' order.
+func except(names map[string]bool, first int) (string, []any) {
+	sorted := make([]string, 0, len(names))
+	for name, out := range names {
+		if out {
+			sorted = append(sorted, name)
 		}
 	}
-	return won
-}
-
-func (s *PgStore) Complete(jobID int64, output string, gas int64) {
-	s.DB.Exec(`UPDATE queue_jobs SET status='completed', finished_at=NOW(), output=$1, gas_used=$2,
-		error_message=NULL, lease_until=NULL WHERE id=$3`, output, gas, jobID)
-}
-
-func (s *PgStore) Fail(jobID int64, attempt int, retry bool, availableAt time.Time, errMsg, output string, gas int64) {
-	if retry {
-		s.DB.Exec(`UPDATE queue_jobs SET status='pending', attempt=$1, available_at=$2,
-			error_message=$3, output=$4, gas_used=$5, node=NULL, lease_until=NULL, started_at=NULL
-			WHERE id=$6`, attempt, availableAt.UTC(), errMsg, output, gas, jobID)
-		return
+	sort.Strings(sorted)
+	var condition strings.Builder
+	arguments := make([]any, 0, len(sorted))
+	for index, name := range sorted {
+		fmt.Fprintf(&condition, " AND name <> $%d", first+index)
+		arguments = append(arguments, name)
 	}
-	s.DB.Exec(`UPDATE queue_jobs SET status='failed', attempt=$1, finished_at=NOW(),
-		error_message=$2, output=$3, gas_used=$4, lease_until=NULL WHERE id=$5`,
-		attempt, errMsg, output, gas, jobID)
+	return condition.String(), arguments
 }
 
-func (s *PgStore) RecordSummary(identity, name, status string) {
-	failInc := 0
-	if status == "failed" {
-		failInc = 1
-	}
-	s.DB.Exec(`UPDATE queues SET last_run=NOW(), last_status=$3, processed_count=processed_count+1,
-		failed_count=failed_count+$4 WHERE identity=$1 AND name=$2`, identity, name, status, failInc)
-}
-
-func (s *PgStore) Heartbeat(nodeID string, leaseTTL time.Duration) {
-	secs := int(leaseTTL.Seconds())
-	if secs < 1 {
-		secs = 1
-	}
-	s.DB.Exec(`UPDATE queue_jobs SET lease_until=NOW() + ($1 * interval '1 second')
-		WHERE node=$2 AND status='running'`, secs, nodeID)
-}
-
-// Reclaim frees only EXPIRED leases. A running job on a live node is not orphaned merely because
-// another node is looking at it — the heartbeat is what distinguishes busy from dead, so the
-// condition here is lease expiry and never boot.
-func (s *PgStore) Reclaim(identity string, bootWipe bool) int64 {
-	res, _ := s.DB.Exec(`UPDATE queue_jobs
-		SET status='pending', node=NULL, lease_until=NULL, started_at=NULL
-		WHERE identity=$1 AND status='running' AND lease_until < NOW()`, identity)
-	if res == nil {
-		return 0
-	}
-	n, _ := res.RowsAffected()
-	return n
-}
-
-func (s *PgStore) Retention(identity, name string, completedBefore, failedBefore time.Time) {
-	s.DB.Exec(`DELETE FROM queue_jobs WHERE identity=$1 AND name=$2 AND status='completed' AND created_at < $3`,
-		identity, name, completedBefore.UTC())
-	s.DB.Exec(`DELETE FROM queue_jobs WHERE identity=$1 AND name=$2 AND status='failed' AND created_at < $3`,
-		identity, name, failedBefore.UTC())
-}
-
-func (s *PgStore) ListQueues(identity string) []map[string]any {
-	rows, err := s.DB.Query(`SELECT name, source, max_attempts, retention, status,
-		last_run, last_status, processed_count, failed_count, updated_at
-		FROM queues WHERE identity=$1 ORDER BY name`, identity)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	return scanQueues(rows)
-}
-
-func (s *PgStore) ListJobs(identity, name, status string, limit int) []map[string]any {
-	q, args := listJobsQuery("$", identity, name, status, limit)
-	rows, err := s.DB.Query(q, args...)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	return scanJobs(rows)
-}
-
-// RetryFailed is the Postgres twin of the SQLite one, except availability comes from NOW(): on the
-// shared store the database clock is the only clock, so a replay scheduled by a node with a skewed
-// clock must not become available at a time the other nodes disagree with.
-func (s *PgStore) RetryFailed(identity, name string, jobID int64) int64 {
-	args := []any{identity}
-	where := "identity=$1 AND status='failed'"
-	if name != "" {
-		args = append(args, name)
-		where += fmt.Sprintf(" AND name=$%d", len(args))
-	}
-	if jobID > 0 {
-		args = append(args, jobID)
-		where += fmt.Sprintf(" AND id=$%d", len(args))
-	}
-	res, err := s.DB.Exec(`UPDATE queue_jobs SET status='pending', attempt=0, node=NULL,
-		lease_until=NULL, started_at=NULL, finished_at=NULL, available_at=NOW()
-		WHERE `+where, args...)
-	if err != nil || res == nil {
-		return 0
-	}
-	n, _ := res.RowsAffected()
-	return n
-}
-
-// ── shared SQL shaping ───────────────────────────────────────────────────────────────────────────
-
-// placeholders builds the driver's parameter marks. SQLite wants "?" every time; Postgres wants
-// $1, $2, … in order. One helper rather than two copies of every query, because the only difference
-// between the two dialects HERE is the mark.
-func placeholders(style string, n int) []string {
-	out := make([]string, n)
-	for i := range out {
-		if style == "$" {
-			out[i] = fmt.Sprintf("$%d", i+1)
-		} else {
-			out[i] = "?"
-		}
-	}
-	return out
-}
-
-func listJobsQuery(style, identity, name, status string, limit int) (string, []any) {
+// Claim takes up to limit runs that are due, oldest due first, each with a new lease token held until
+// leaseUntil, and leaves the runs of the jobs in withheld pending (a job whose file did not load: its runs
+// wait for the fix). It also gives when the first pending run it left is due, the zero time when it left
+// none: the worker does not look again before then, unless a send, a replay or a retry tells it of an
+// earlier one. The reads and the updates are one step (Database.Write), and every update checks the run
+// is still pending.
+func (s *Store) Claim(now time.Time, lease time.Duration, limit int, withheld map[string]bool) ([]Claim, time.Time, error) {
 	if limit < 1 {
-		limit = 50
+		return nil, now, nil
 	}
-	args := []any{identity}
-	where := []string{"identity=%s"}
-	if name != "" {
-		args = append(args, name)
-		where = append(where, "name=%s")
-	}
-	if status != "" {
-		args = append(args, status)
-		where = append(where, "status=%s")
-	}
-	args = append(args, limit)
-
-	marks := placeholders(style, len(args))
-	clauses := make([]string, len(where))
-	for i, w := range where {
-		clauses[i] = fmt.Sprintf(w, marks[i])
-	}
-	q := `SELECT id, name, status, attempt, max_attempts, payload, error_message, output,
-			gas_used, created_at, finished_at
-		FROM queue_jobs WHERE ` + strings.Join(clauses, " AND ") +
-		` ORDER BY id DESC LIMIT ` + marks[len(marks)-1]
-	return q, args
+	var claims []Claim
+	var next time.Time
+	err := s.database.Write(func(db *sql.DB) error {
+		condition, names := except(withheld, 3)
+		rows, err := db.Query(fmt.Sprintf(`SELECT `+runColumns+` FROM kitwork_runs
+			WHERE kind = $1 AND status = 'pending' AND available_at <= $2%s
+			ORDER BY available_at, seq LIMIT %d`, condition, limit), append([]any{s.kind, Stamp(now)}, names...)...)
+		if err != nil {
+			return err
+		}
+		var due []Run
+		for rows.Next() {
+			run, err := scanRun(rows)
+			if err != nil {
+				rows.Close()
+				return err
+			}
+			due = append(due, run)
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		for _, run := range due {
+			token := newToken()
+			result, err := db.Exec(`UPDATE kitwork_runs SET status = 'running', attempt = $1, lease_token = $2,
+				lease_until = $3, started_at = $4 WHERE id = $5 AND status = 'pending'`,
+				run.Attempt+1, token, Stamp(now.Add(lease)), Stamp(now), run.ID)
+			if err != nil {
+				return err
+			}
+			if affected, _ := result.RowsAffected(); affected != 1 {
+				continue
+			}
+			run.Status, run.Attempt, run.StartedAt = Running, run.Attempt+1, Stamp(now)
+			claims = append(claims, Claim{Run: run, Token: token})
+		}
+		condition, names = except(withheld, 2)
+		var first string
+		err = db.QueryRow(fmt.Sprintf(`SELECT available_at FROM kitwork_runs WHERE kind = $1 AND status = 'pending'%s
+			ORDER BY available_at LIMIT 1`, condition), append([]any{s.kind}, names...)...).Scan(&first)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil
+		case err != nil:
+			return err
+		}
+		next, err = time.Parse(stampLayout, first)
+		return err
+	})
+	return claims, next, err
 }
 
-func scanQueues(rows *sql.Rows) []map[string]any {
-	var out []map[string]any
-	for rows.Next() {
-		var name, source, status, updated string
-		var lastRun, lastStatus sql.NullString
-		var maxAttempts, retention int
-		var processed, failed int64
-		if rows.Scan(&name, &source, &maxAttempts, &retention, &status,
-			&lastRun, &lastStatus, &processed, &failed, &updated) != nil {
-			continue
-		}
-		m := map[string]any{
-			"name": name, "source": source, "maxAttempts": maxAttempts, "retention": retention,
-			"status": status, "processed": processed, "failed": failed, "updatedAt": updated,
-		}
-		if lastRun.Valid {
-			m["lastRun"] = lastRun.String
-		}
-		if lastStatus.Valid {
-			m["lastStatus"] = lastStatus.String
-		}
-		out = append(out, m)
+// held reads a run and reports whether token still holds it: the run is running or cancelling under that
+// lease. A run reclaimed, settled or cancelled since is held by no one, or by another token.
+func (s *Store) held(db *sql.DB, id, token string) (Run, bool, error) {
+	run, err := s.get(db, id)
+	if errors.Is(err, ErrNotFound) {
+		return Run{}, false, nil
 	}
-	return out
+	if err != nil {
+		return Run{}, false, err
+	}
+	var current sql.NullString
+	if err := db.QueryRow(`SELECT lease_token FROM kitwork_runs WHERE id = $1`, id).Scan(&current); err != nil {
+		return Run{}, false, err
+	}
+	if !current.Valid || current.String != token || (run.Status != Running && run.Status != Cancelling) {
+		return run, false, nil
+	}
+	return run, true, nil
 }
 
-func scanJobs(rows *sql.Rows) []map[string]any {
-	var out []map[string]any
-	for rows.Next() {
-		var id int64
-		var name, status, created string
-		var attempt, maxAttempts int
-		var payload, errMsg, output, finished sql.NullString
-		var gas sql.NullInt64
-		if rows.Scan(&id, &name, &status, &attempt, &maxAttempts, &payload, &errMsg,
-			&output, &gas, &created, &finished) != nil {
-			continue
+// Complete records a run that ran to its end, as the holder of token; the run's log is replaced by log. It
+// reports whether token still held the run: an attempt whose lease was taken from it (timed out, reclaimed)
+// never reports success. A run being cancelled that finished first is completed (mục 7).
+func (s *Store) Complete(id, token, log string, now time.Time) (bool, error) {
+	won := false
+	err := s.database.Write(func(db *sql.DB) error {
+		_, held, err := s.held(db, id, token)
+		if err != nil || !held {
+			return err
 		}
-		m := map[string]any{
-			"id": id, "name": name, "status": status, "attempt": attempt,
-			"maxAttempts": maxAttempts, "createdAt": created,
+		result, err := db.Exec(`UPDATE kitwork_runs SET status = 'completed', finished_at = $1, log = $2,
+			error_code = NULL, error_message = NULL, lease_token = NULL, lease_until = NULL
+			WHERE id = $3 AND lease_token = $4`, Stamp(now), log, id, token)
+		if err != nil {
+			return err
 		}
-		if payload.Valid {
-			m["payload"] = payload.String
+		affected, _ := result.RowsAffected()
+		won = affected == 1
+		return nil
+	})
+	return won, err
+}
+
+// Fail records an attempt that failed, as the holder of token. A run with attempts left goes back to
+// pending until retryAt; one without, or any when retryAt is the zero time (a failure no attempt mends),
+// ends failed (the dead letter: the row stays, with its data and its error); one being cancelled ends
+// cancelled, never retried. code and message "" store no error. It returns the status the run took, ""
+// when token no longer held it.
+func (s *Store) Fail(id, token, code, message, log string, retryAt, now time.Time) (string, error) {
+	status := ""
+	err := s.database.Write(func(db *sql.DB) error {
+		run, held, err := s.held(db, id, token)
+		if err != nil || !held {
+			return err
 		}
-		if errMsg.Valid {
-			m["error"] = errMsg.String
+		switch {
+		case run.Status == Cancelling:
+			status = Cancelled
+		case run.Attempt < run.MaxAttempts && !retryAt.IsZero():
+			status = Pending
+		default:
+			status = Failed
 		}
-		if output.Valid {
-			m["output"] = output.String
+		var result sql.Result
+		if status == Pending {
+			result, err = db.Exec(`UPDATE kitwork_runs SET status = 'pending', available_at = $1, log = $2,
+				error_code = $3, error_message = $4, lease_token = NULL, lease_until = NULL
+				WHERE id = $5 AND lease_token = $6`, Stamp(retryAt), log, nullable(code), nullable(message), id, token)
+		} else {
+			result, err = db.Exec(`UPDATE kitwork_runs SET status = $1, finished_at = $2, log = $3,
+				error_code = $4, error_message = $5, lease_token = NULL, lease_until = NULL
+				WHERE id = $6 AND lease_token = $7`, status, Stamp(now), log, nullable(code), nullable(message), id, token)
 		}
-		if gas.Valid {
-			m["gas"] = gas.Int64
+		if err != nil {
+			status = ""
+			return err
 		}
-		if finished.Valid {
-			m["finishedAt"] = finished.String
+		if affected, _ := result.RowsAffected(); affected != 1 {
+			status = ""
 		}
-		out = append(out, m)
+		return nil
+	})
+	return status, err
+}
+
+// Extend moves the lease of a run this worker still holds to until. It reports whether token still holds
+// it, and the run's status (cancelling tells the worker to stop the attempt).
+func (s *Store) Extend(id, token string, until time.Time) (string, bool, error) {
+	status, holds := "", false
+	err := s.database.Write(func(db *sql.DB) error {
+		run, held, err := s.held(db, id, token)
+		if err != nil || !held {
+			return err
+		}
+		if _, err := db.Exec(`UPDATE kitwork_runs SET lease_until = $1 WHERE id = $2 AND lease_token = $3`,
+			Stamp(until), id, token); err != nil {
+			return err
+		}
+		status, holds = run.Status, true
+		return nil
+	})
+	return status, holds, err
+}
+
+// Reclaim gives back the runs whose lease ran out, leaving those in skip (the attempts this process still
+// runs and extends). A run with attempts left is due again now; one without ends failed; one being
+// cancelled ends cancelled. The attempt that lost its lease counts: it ran, and a run that stops its
+// process every time must not run for ever. It returns how many runs it gave back, and when the first lease
+// still held by no attempt in skip runs out (the zero time when none is held): a process that stopped
+// while it ran an attempt leaves a lease that has not run out yet when the next one boots.
+func (s *Store) Reclaim(now time.Time, skip map[string]bool) (int, time.Time, error) {
+	count := 0
+	var next time.Time
+	err := s.database.Write(func(db *sql.DB) error {
+		rows, err := db.Query(`SELECT `+runColumns+`, lease_until FROM kitwork_runs
+			WHERE kind = $1 AND status IN ('running', 'cancelling')`, s.kind)
+		if err != nil {
+			return err
+		}
+		var lost []Run
+		for rows.Next() {
+			var until sql.NullString
+			run, err := scanRun(rowWith{rows, &until})
+			if err != nil {
+				rows.Close()
+				return err
+			}
+			if skip[run.ID] {
+				continue
+			}
+			if until.Valid && until.String >= Stamp(now) {
+				if expires, err := time.Parse(stampLayout, until.String); err == nil && (next.IsZero() || expires.Before(next)) {
+					next = expires
+				}
+				continue
+			}
+			lost = append(lost, run)
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		for _, run := range lost {
+			var result sql.Result
+			message := fmt.Sprintf("lần thử %d mất lease (engine dừng hay treo khi đang chạy)", run.Attempt)
+			switch {
+			case run.Status == Cancelling:
+				result, err = db.Exec(`UPDATE kitwork_runs SET status = 'cancelled', finished_at = $1,
+					lease_token = NULL, lease_until = NULL WHERE id = $2 AND status = 'cancelling'`, Stamp(now), run.ID)
+			case run.Attempt < run.MaxAttempts:
+				result, err = db.Exec(`UPDATE kitwork_runs SET status = 'pending', available_at = $1,
+					error_code = 'TIMEOUT', error_message = $2, lease_token = NULL, lease_until = NULL
+					WHERE id = $3 AND status = 'running'`, Stamp(now), message, run.ID)
+			default:
+				result, err = db.Exec(`UPDATE kitwork_runs SET status = 'failed', finished_at = $1,
+					error_code = 'TIMEOUT', error_message = $2, lease_token = NULL, lease_until = NULL
+					WHERE id = $3 AND status = 'running'`, Stamp(now), message, run.ID)
+			}
+			if err != nil {
+				return err
+			}
+			if affected, _ := result.RowsAffected(); affected == 1 {
+				count++
+			}
+		}
+		return nil
+	})
+	return count, next, err
+}
+
+// rowWith scans a row of runColumns followed by more columns: the run, then extra.
+type rowWith struct {
+	row   scanner
+	extra *sql.NullString
+}
+
+func (r rowWith) Scan(dest ...any) error { return r.row.Scan(append(dest, r.extra)...) }
+
+// Cancel cancels a run (mục 9). A pending run ends cancelled at once; a running one becomes cancelling,
+// for its worker to stop; a cancelling or cancelled one is given back as it is. A run that ended
+// (completed, failed) is a *StateError. name, when not "", is the job the run must belong to: another
+// job's run is ErrNotFound, as an id that does not exist.
+func (s *Store) Cancel(id, name string, now time.Time) (Run, error) {
+	var run Run
+	err := s.database.Write(func(db *sql.DB) error {
+		var err error
+		run, err = s.get(db, id)
+		if err != nil {
+			return err
+		}
+		if name != "" && run.Name != name {
+			return ErrNotFound
+		}
+		switch run.Status {
+		case Pending:
+			if _, err := db.Exec(`UPDATE kitwork_runs SET status = 'cancelled', finished_at = $1
+				WHERE id = $2 AND status = 'pending'`, Stamp(now), id); err != nil {
+				return err
+			}
+		case Running:
+			if _, err := db.Exec(`UPDATE kitwork_runs SET status = 'cancelling'
+				WHERE id = $1 AND status = 'running'`, id); err != nil {
+				return err
+			}
+		case Cancelling, Cancelled:
+			return nil
+		default:
+			return &StateError{Run: run}
+		}
+		run, err = s.get(db, id)
+		return err
+	})
+	return run, err
+}
+
+// Replay makes a new run from the data of an ended one (failed, cancelled, completed), keeping the old
+// one: its own id, attempts and retries, from the job's current definition (mục 9). A run not ended is a
+// *StateError; a job no longer declared is ErrNoDefinition: one kitwork_definitions has no row of, or, when
+// declared is not nil, one it says no file of the app declares now. name, when not "", is the job the run
+// must belong to.
+func (s *Store) Replay(id, name string, now time.Time, declared func(name string) bool) (Run, Definition, error) {
+	var replayed Run
+	var definition Definition
+	err := s.database.Write(func(db *sql.DB) error {
+		run, err := s.get(db, id)
+		if err != nil {
+			return err
+		}
+		if name != "" && run.Name != name {
+			return ErrNotFound
+		}
+		if run.Status != Failed && run.Status != Cancelled && run.Status != Completed {
+			return &StateError{Run: run}
+		}
+		var found bool
+		definition, found, err = s.definition(db, run.Name)
+		if err != nil {
+			return err
+		}
+		if !found || (declared != nil && !declared(run.Name)) {
+			definition = Definition{Name: run.Name}
+			return ErrNoDefinition
+		}
+		replayed, _, err = s.insert(db, NewRun{
+			Name: run.Name, Data: run.Data, MaxAttempts: definition.Retry + 1,
+			Timeout: time.Duration(definition.TimeoutMS) * time.Millisecond, ReplayOf: run.ID,
+		}, now)
+		return err
+	})
+	return replayed, definition, err
+}
+
+// ErrNoDefinition is a job no file declares any more: its runs cannot be replayed.
+var ErrNoDefinition = errors.New("queue: job no longer declared")
+
+// Filter chooses runs: of one job, in one status ("" for any).
+type Filter struct {
+	Name   string
+	Status string
+}
+
+// Runs reads runs newest first, limit of them after skipping offset.
+func (s *Store) Runs(filter Filter, limit, offset int) ([]Run, error) {
+	var runs []Run
+	err := s.database.Read(func(db *sql.DB) error {
+		where := []string{"kind = $1"}
+		arguments := []any{s.kind}
+		if filter.Name != "" {
+			arguments = append(arguments, filter.Name)
+			where = append(where, fmt.Sprintf("name = $%d", len(arguments)))
+		}
+		if filter.Status != "" {
+			arguments = append(arguments, filter.Status)
+			where = append(where, fmt.Sprintf("status = $%d", len(arguments)))
+		}
+		rows, err := db.Query(fmt.Sprintf(`SELECT `+runColumns+` FROM kitwork_runs WHERE %s
+			ORDER BY seq DESC LIMIT %d OFFSET %d`, strings.Join(where, " AND "), limit, offset), arguments...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			run, err := scanRun(rows)
+			if err != nil {
+				return err
+			}
+			runs = append(runs, run)
+		}
+		return rows.Err()
+	})
+	return runs, err
+}
+
+// Prune deletes the runs that ended before before (keep): their keys are free again, and replay of them is
+// refused. It returns how many it deleted.
+func (s *Store) Prune(before time.Time) (int, error) {
+	count := 0
+	err := s.database.Write(func(db *sql.DB) error {
+		result, err := db.Exec(`DELETE FROM kitwork_runs WHERE kind = $1
+			AND status IN ('completed', 'failed', 'cancelled') AND finished_at < $2`, s.kind, Stamp(before))
+		if err != nil {
+			return err
+		}
+		affected, _ := result.RowsAffected()
+		count = int(affected)
+		return nil
+	})
+	return count, err
+}
+
+func (s *Store) definition(db *sql.DB, name string) (Definition, bool, error) {
+	var definition Definition
+	var timeout sql.NullString
+	err := db.QueryRow(`SELECT name, source, retry, timeout, timeout_ms, content_hash FROM kitwork_definitions
+		WHERE kind = $1 AND name = $2`, s.kind, name).Scan(&definition.Name, &definition.Source, &definition.Retry,
+		&timeout, &definition.TimeoutMS, &definition.ContentHash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Definition{}, false, nil
 	}
-	return out
+	definition.Timeout = timeout.String
+	return definition, err == nil, err
+}
+
+// Definitions reads the declared jobs by name, limit of them after skipping offset.
+func (s *Store) Definitions(limit, offset int) ([]Definition, error) {
+	var definitions []Definition
+	err := s.database.Read(func(db *sql.DB) error {
+		rows, err := db.Query(fmt.Sprintf(`SELECT name, source, retry, timeout, timeout_ms, content_hash
+			FROM kitwork_definitions WHERE kind = $1 ORDER BY name LIMIT %d OFFSET %d`, limit, offset), s.kind)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var definition Definition
+			var timeout sql.NullString
+			if err := rows.Scan(&definition.Name, &definition.Source, &definition.Retry, &timeout,
+				&definition.TimeoutMS, &definition.ContentHash); err != nil {
+				return err
+			}
+			definition.Timeout = timeout.String
+			definitions = append(definitions, definition)
+		}
+		return rows.Err()
+	})
+	return definitions, err
+}
+
+// Withheld is what a load could not read: the jobs whose declaration has a problem, by name, and the files
+// that did not compile or run, by source (.shared/queue/camOn.work). Their definitions stay as they were
+// stored: a deploy with a mistake in a file is not the removal of its jobs.
+type Withheld struct {
+	Names   map[string]bool
+	Sources map[string]bool
+}
+
+// Sync makes kitwork_definitions what the files declare: a definition whose content hash is unchanged is
+// not written again, one no file declares any more is deleted, unless withheld holds it (its name, or the
+// file it was stored from). It returns the names of the definitions it kept for withheld, whose runs the
+// worker leaves pending until the file loads again. Runs are never touched: a pending run of a job that is
+// gone stays, and fails when claimed, saying so.
+func (s *Store) Sync(definitions []Definition, withheld Withheld, now time.Time) ([]string, error) {
+	var kept []string
+	err := s.database.Write(func(db *sql.DB) error {
+		stored := map[string]string{}
+		sources := map[string]string{}
+		rows, err := db.Query(`SELECT name, source, content_hash FROM kitwork_definitions WHERE kind = $1`, s.kind)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var name, source, hash string
+			if err := rows.Scan(&name, &source, &hash); err != nil {
+				rows.Close()
+				return err
+			}
+			stored[name], sources[name] = hash, source
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		declared := map[string]bool{}
+		for _, definition := range definitions {
+			declared[definition.Name] = true
+			if hash, found := stored[definition.Name]; found && hash == definition.ContentHash {
+				continue
+			}
+			var timeout any
+			if definition.Timeout != "" {
+				timeout = definition.Timeout
+			}
+			if _, err := db.Exec(`INSERT INTO kitwork_definitions (kind, name, source, retry, timeout, timeout_ms,
+				content_hash, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+				ON CONFLICT (kind, name) DO UPDATE SET source = excluded.source, retry = excluded.retry,
+				timeout = excluded.timeout, timeout_ms = excluded.timeout_ms, content_hash = excluded.content_hash,
+				updated_at = excluded.updated_at`,
+				s.kind, definition.Name, definition.Source, definition.Retry, timeout, definition.TimeoutMS,
+				definition.ContentHash, Stamp(now)); err != nil {
+				return fmt.Errorf("kitwork_definitions %s: %w", definition.Name, err)
+			}
+		}
+		for name := range stored {
+			if declared[name] {
+				continue
+			}
+			if withheld.Names[name] || withheld.Sources[sources[name]] {
+				kept = append(kept, name)
+				continue
+			}
+			if _, err := db.Exec(`DELETE FROM kitwork_definitions WHERE kind = $1 AND name = $2`, s.kind, name); err != nil {
+				return err
+			}
+		}
+		sort.Strings(kept)
+		return nil
+	})
+	return kept, err
 }

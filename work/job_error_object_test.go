@@ -60,9 +60,10 @@ func checkJobErr(t *testing.T, posted, file string) {
 	}
 }
 
-// A cron's and a queue's .error((run, err) => …) handler receives the error object a router's .error()
-// handler receives (14/10/2026): { message, code, at }. It was { message } alone, the message led by
-// the place and followed by the stack, with no code and no at.
+// A cron's .error((run, err) => …) handler receives the error object a router's .error() handler
+// receives (14/10/2026): { message, code, at }. It was { message } alone, the message led by the place
+// and followed by the stack, with no code and no at. A queue job has no .error() since 22/10/2026
+// (KITWORK_QUEUE.md): its run keeps the error, read back by runs() as { code, message }.
 func TestCronErrorHandlerReceivesTheErrorObject(t *testing.T) {
 	reachLoopback(t) // handlers call an httptest server on loopback
 	url, received := jobErrorReceiver(t)
@@ -90,22 +91,6 @@ func TestCronErrorHandlerReceivesTheErrorObject(t *testing.T) {
 	posted := ""
 	waitFor(10*time.Second, func() bool { posted = received(); return posted != "" })
 	tenant.StopCronJobs()
-	time.Sleep(200 * time.Millisecond)
-	checkJobErr(t, posted, "boom.kitwork.js")
-}
-
-func TestQueueErrorHandlerReceivesTheErrorObject(t *testing.T) {
-	reachLoopback(t) // handlers call an httptest server on loopback
-	url, received := jobErrorReceiver(t)
-
-	tenant := newQueueTenant(t, "boom", "import { queue, http } from \"kitwork\";\nqueue\n  .handle(() => { fail(\"hỏng\"); })\n  "+postErr(url)+";\n")
-	defer tenant.Close()
-	if result := dispatch(t, tenant, value.New("boom"), value.New(map[string]any{"n": 1})); !result.Get("queued").IsTrue() {
-		t.Fatalf("dispatch refused: %v", result.Get("error").Text())
-	}
-	posted := ""
-	waitFor(10*time.Second, func() bool { posted = received(); return posted != "" })
-	tenant.StopQueueWorker()
 	time.Sleep(200 * time.Millisecond)
 	checkJobErr(t, posted, "boom.kitwork.js")
 }

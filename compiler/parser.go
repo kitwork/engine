@@ -76,11 +76,12 @@ type Parser struct {
 	infixParseFns  map[Kind]infixParseFn
 
 	// Module metadata thu thập khi parse (cho bundler native ở package script).
-	exports    []string // tên export qua `export const/function` / `export { }`
-	hasDefault bool     // có `export default …` (đã hạ về const DefaultExportName)
-	defaultAt  Token    // chữ default của export default đầu tiên: lần thứ hai báo dòng của cả hai
-	breakDepth int      // switch/loop nesting; function bodies reset this boundary
-	loopDepth  int      // loop nesting, what continue needs; function bodies reset it too
+	exports    []string      // tên export qua `export const/function` / `export { }`
+	aliases    []ExportAlias // `export { a as b }` whose names differ
+	hasDefault bool          // có `export default …` (đã hạ về const DefaultExportName)
+	defaultAt  Token         // chữ default của export default đầu tiên: lần thứ hai báo dòng của cả hai
+	breakDepth int           // switch/loop nesting; function bodies reset this boundary
+	loopDepth  int           // loop nesting, what continue needs; function bodies reset it too
 
 	// text là toàn bộ nguồn mà Token.Position đếm vào — để báo lỗi dạng file:dòng:cột. Parser con của
 	// một ${…} trong template nhận text của file chứa nó.
@@ -190,6 +191,7 @@ func (p *Parser) ParseProgram() *Program {
 		p.nextToken()
 	}
 	program.Exports = p.exports
+	program.ExportAliases = p.aliases
 	program.HasDefault = p.hasDefault
 	p.checkNesting(program)
 	return program
@@ -980,12 +982,25 @@ func (p *Parser) parseExportStatement() Statement {
 		return p.parseFunctionStatement()
 	}
 
-	// export { a, b }  — re-export local đã khai báo: ghi nhận tên, không sinh lệnh
+	// export { a, b as c }  — re-export local đã khai báo: ghi nhận tên, không sinh lệnh. `b as c` exports
+	// b under the name c (22/10/2026; until then `as` and c were both recorded as names of their own).
 	if p.peekTokenIs(LeftBrace) {
 		p.nextToken() // cur: {
 		for !p.curTokenIs(RightBrace) && !p.curTokenIs(EOF) {
 			if p.curTokenIs(Ident) {
-				p.exports = append(p.exports, p.curToken.Value.Text())
+				local := p.curToken.Value.Text()
+				exported := local
+				if isContextualToken(p.peekToken, "as") {
+					p.nextToken() // cur: as
+					if !p.expectPeek(Ident) {
+						return nil
+					}
+					exported = p.curToken.Value.Text()
+					if exported != local {
+						p.aliases = append(p.aliases, ExportAlias{Local: local, Exported: exported, Token: p.curToken})
+					}
+				}
+				p.exports = append(p.exports, exported)
 			}
 			p.nextToken()
 		}

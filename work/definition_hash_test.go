@@ -2,13 +2,14 @@ package work
 
 import (
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"os"
 	"path/filepath"
 	"testing"
 )
 
-// A stored _queue or _cron definition (a queue's max_attempts, a cron's schedule) is what running the
+// A stored job or _cron definition (a job's retry, a cron's schedule) is what running the
 // file gives, and the same entry bytes can give another definition under another compiler schema or
 // after a module it imports changed. Sync skips a row whose content_hash is unchanged, so content_hash
 // is the compiled artifact's cache key, which covers every bundled source and the compiler
@@ -22,17 +23,12 @@ func sourceOnlyHash(source string) string {
 }
 
 func TestQueueDefinitionIsStoredUnderTheArtifactCacheKey(t *testing.T) {
-	source := `import { queue } from "kitwork";` + "\n" + `queue.retry(3).handle(() => {});`
-	tenant := newQueueTenant(t, "mail", source)
-	defer tenant.Close()
+	source := `import * as queue from "kitwork/queue";` + "\n" + `export const mail = queue.job((context) => {}).retry(3);`
+	q := newQueueApp(t, map[string]string{".shared/queue/mail.work": source})
 
-	worker := tenant.queueWorker()
-	if worker == nil || worker.db == nil {
-		t.Fatal("queue worker has no database — the worker did not start")
-	}
-	handler := worker.handlerFor("mail")
+	handler := q.app.queueWorker().handlerFor("mail")
 	if handler == nil || handler.Bytecode == nil {
-		t.Fatal("queue mail did not register")
+		t.Fatal("job mail did not register")
 	}
 	cacheKey := handler.Bytecode.CacheKey()
 	if cacheKey == "" || cacheKey == sourceOnlyHash(source) {
@@ -41,15 +37,14 @@ func TestQueueDefinitionIsStoredUnderTheArtifactCacheKey(t *testing.T) {
 
 	stored := func() (string, int) {
 		t.Helper()
-		var hash string
-		var maxAttempts int
-		if err := worker.db.QueryRow(`SELECT content_hash, max_attempts FROM queues WHERE name='mail'`).Scan(&hash, &maxAttempts); err != nil {
-			t.Fatalf("read the queues row: %v", err)
+		definitions, err := q.app.queueStore().Definitions(10, 0)
+		if err != nil || len(definitions) != 1 || definitions[0].Name != "mail" {
+			t.Fatalf("read the definitions: %+v %v", definitions, err)
 		}
-		return hash, maxAttempts
+		return definitions[0].ContentHash, definitions[0].Retry
 	}
-	if hash, maxAttempts := stored(); hash != cacheKey || maxAttempts != 3 {
-		t.Errorf("after boot: content_hash = %q, max_attempts = %d; want %q, 3", hash, maxAttempts, cacheKey)
+	if hash, retry := stored(); hash != cacheKey || retry != 3 {
+		t.Errorf("after boot: content_hash = %q, retry = %d; want %q, 3", hash, retry, cacheKey)
 	}
 
 	for _, row := range []struct {
@@ -57,20 +52,24 @@ func TestQueueDefinitionIsStoredUnderTheArtifactCacheKey(t *testing.T) {
 		want       int
 	}{
 		{"a row stored under the source-only hash is written again", sourceOnlyHash(source), 3},
-		// Control: the same stale max_attempts under the current key stays, so the row above was
-		// written because of its hash, not because every sync writes.
+		// Control: the same stale retry under the current key stays, so the row above was written
+		// because of its hash, not because every sync writes.
 		{"a row stored under the current key is left alone", cacheKey, 1},
 	} {
-		tenant.StopQueueWorker()
-		if _, err := worker.db.Exec(`UPDATE queues SET content_hash=?, max_attempts=1 WHERE name='mail'`, row.hash); err != nil {
+		q.app.StopQueueWorker()
+		err := appRuns{tenant: q.app}.Write(func(db *sql.DB) error {
+			_, err := db.Exec(`UPDATE kitwork_definitions SET content_hash = $1, retry = 1 WHERE name = 'mail'`, row.hash)
+			return err
+		})
+		if err != nil {
 			t.Fatalf("%s: %v", row.name, err)
 		}
-		tenant.StartQueueWorker()
-		if _, maxAttempts := stored(); maxAttempts != row.want {
-			t.Errorf("%s: max_attempts = %d, want %d", row.name, maxAttempts, row.want)
+		q.app.StartQueueWorker()
+		if _, retry := stored(); retry != row.want {
+			t.Errorf("%s: retry = %d, want %d", row.name, retry, row.want)
 		}
 	}
-	tenant.StopQueueWorker()
+	q.app.StopQueueWorker()
 }
 
 func TestCronDefinitionIsStoredUnderTheArtifactCacheKey(t *testing.T) {

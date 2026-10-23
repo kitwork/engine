@@ -1,6 +1,7 @@
 package work
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -91,6 +92,12 @@ func requestVM(scope *requestscope.Scope) *runtime.VM {
 // handlers off the request path through its Scope. (Tenant.Run() is the tenant boot method; this is
 // named Execute to avoid that.)
 func (t *Tenant) Execute(program *runtime.Program, fn *value.Lambda, args []value.Value) (gas uint64, runErr error) {
+	return t.ExecuteContext(nil, program, fn, args)
+}
+
+// ExecuteContext is Execute bounded by ctx (nil for none): once ctx is done, the run stops at the VM's next
+// checkpoint with EXECUTION_CANCELLED. A queue attempt runs under its .timeout() and its cancel this way.
+func (t *Tenant) ExecuteContext(ctx context.Context, program *runtime.Program, fn *value.Lambda, args []value.Value) (gas uint64, runErr error) {
 	if fn == nil {
 		return 0, fmt.Errorf("run: nil lambda")
 	}
@@ -122,6 +129,9 @@ func (t *Tenant) Execute(program *runtime.Program, fn *value.Lambda, args []valu
 	t.prepareExecutionVM(vm, t.vm.Globals, t.vm.Builtins)
 	vm.FastResetPrepared(program)
 	vm.MaxEnergy = t.MaxEnergy
+	if ctx != nil {
+		vm.Context = ctx
+	}
 	for k, v := range t.vm.Vars {
 		vm.Vars[k] = v
 	}

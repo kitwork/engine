@@ -89,6 +89,8 @@ type KitWork struct {
 	tenant       *Tenant
 	vm           *runtime.VM
 	requestScope *requestscope.Scope
+	// queueJobs collects the jobs a file of .shared/queue/ declares while the loader runs it (queue_load.go).
+	queueJobs *queueDeclarations
 }
 
 // MissingMember is a word the module kitwork has not. An older word of it (sqlite, removed on 22/10/2026)

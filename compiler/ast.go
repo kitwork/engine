@@ -33,9 +33,22 @@ type Program struct {
 	Statements []Statement
 	Exports    []string // tên export qua `export const/function` hoặc `export { }`
 	HasDefault bool     // true nếu có `export default …` (đã hạ về const DefaultExportName)
+	// ExportAliases holds every `export { local as exported }` whose two names differ: the module's
+	// export object gives exported the value of local.
+	ExportAliases []ExportAlias
 	// Database is what the bundler found of the app's databases (database.go); nil for a program that
 	// imports no schema file.
 	Database *DatabaseBundle
+	// Queue is what the bundler found of the app's .shared/queue/ (queue.go); nil for a program that
+	// bundles none of it.
+	Queue *QueueBundle
+}
+
+// ExportAlias is `export { local as exported }`: Token is where exported is written.
+type ExportAlias struct {
+	Local    string
+	Exported string
+	Token    Token
 }
 
 // DefaultExportName là biến tổng hợp mà `export default <expr>` được hạ xuống.

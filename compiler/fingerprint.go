@@ -90,7 +90,14 @@ import (
 // cached artifact of schema 12 that uses an older word would still run until the word fails where it is
 // read, instead of the file failing where it is written: the bump retires it. A program that uses none of
 // them compiles as before, byte for byte; the template's format is unchanged. No opcode or operand changed.
-const CompilerSchemaVersion uint16 = 13
+//
+// 14 (22/10/2026, KITWORK_QUEUE.md, a job named by its export): the export object of a file of an app's
+// .shared/queue/ goes out through kitwork().queue.#exports({ … }, "<file>"), which names each job after its
+// key (queue.go), and export { b as c } gives c the value of b (it gave keys "b", "as" and "c", the last two
+// of names nothing declared). A cached artifact of schema 13 that imports a job file holds handles with no
+// name, which send() refuses: the bump retires it. A program that imports no job file and aliases no export
+// compiles as before, byte for byte. No opcode or operand changed.
+const CompilerSchemaVersion uint16 = 14
 
 var currentCompilerFingerprint = compilerFingerprintFor(CompilerSchemaVersion)
 

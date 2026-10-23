@@ -1,18 +1,52 @@
 package work
 
 import (
-	"database/sql"
+	"context"
+	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
+	"time"
 
+	"github.com/kitwork/engine/compiler"
 	queuestore "github.com/kitwork/engine/utilities/queue"
+	"github.com/kitwork/engine/value"
 )
 
 const queueResourceName = "queue"
 
-// queueRuntime is the worker resource owned by app.Runtime — one per identity, shared by every
-// domain of the app, exactly like the scheduler. It lives in work rather than utilities because the
-// handlers it runs are Kitwork bytecode, and only a Tenant can execute that.
+// QueueHandler is a job the worker runs: what a file of .shared/queue/ exported, with the bytecode its
+// handler belongs to (each file compiles to its own; the runner resets a pooled VM onto it).
+type QueueHandler struct {
+	Name string
+	// Source is the file from the app's folder (.shared/queue/camOn.work); Place where queue.job is written.
+	Source   string
+	Place    string
+	Callback *value.Lambda
+	Bytecode *compiler.Bytecode
+	// Retry is the attempts after the first (.retry(n)); Timeout bounds each attempt, 0 for none.
+	Retry       int
+	Timeout     time.Duration
+	TimeoutText string
+	ContentHash string
+}
+
+// queueDefaultParallel and queueDefaultKeep are a queue's when its config.work does not say: how many runs
+// one machine runs at once, and how long an ended run is kept.
+const (
+	queueDefaultParallel = 4
+	queueDefaultKeep     = 30 * 24 * time.Hour
+)
+
+// errQueueCancelled is the cause an attempt is stopped with when its run is cancelled.
+var errQueueCancelled = errors.New("lần chạy bị huỷ")
+
+// queueNever is a time the poller never reaches: nothing to look for.
+var queueNever = time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC)
+
+// queueRuntime is the worker resource owned by app.Runtime — one per app, shared by every site of it. It
+// lives in work rather than utilities because the handlers it runs are Kitwork bytecode, and only a Tenant
+// can execute that.
 type queueRuntime struct {
 	owner *Tenant
 
@@ -20,68 +54,165 @@ type queueRuntime struct {
 	mu        sync.Mutex
 	handlers  []*QueueHandler
 	byName    map[string]*QueueHandler
-	inflight  map[string]int // queue name → messages this node is running right now
-	cancels   []chan struct{}
-	wg        sync.WaitGroup
-	db        *sql.DB
-	store     queuestore.Store
-	node      string
-	running   bool
-	closed    bool
+	parallel  int
+	keep      time.Duration
+	// unloaded is what the last load could not read (a file that did not compile or run, a job whose
+	// declaration has a problem); withheld is the jobs of it, by name: the jobs with a problem, and those
+	// kitwork_definitions holds from a file that did not load. Their runs stay pending, attempts untouched,
+	// until the file loads again: a mistake in a deploy is not the removal of the job, whose runs would
+	// otherwise end failed as runs of no job.
+	unloaded queuestore.Withheld
+	withheld map[string]bool
+	// next is when the poller looks for due runs again: when the first pending run it knows of is due
+	// (queueNever when none). A send, a replay, a retry and a reclaim bring it forward (noteDue), so an
+	// idle app's poll reads nothing, and never takes the database's writer gate.
+	next time.Time
+	// reclaimAt is when the poller gives back lost leases again: when the first lease no attempt here
+	// holds runs out (one a stopped process left), or a lease of a settle that could not be written.
+	reclaimAt time.Time
+	// polls counts the poller's turns.
+	polls atomic.Int64
+	// attempts are the attempts this process runs now, each until its goroutine ends. Two can be of one
+	// run: an attempt past its .timeout() is settled at once but runs on until its VM stops (a host call it
+	// is blocked in returns first), while the retry of the same run already runs. Each is its own entry, so
+	// the one that ends never takes the other's out (its lease, its heartbeat, its room in parallel).
+	attempts map[*queueAttempt]struct{}
+	wake     chan struct{}
+	cancels  []chan struct{}
+	wg       sync.WaitGroup
+	running  bool
+	closed   bool
 }
 
-// handlerFor resolves a claimed message's queue to the code that runs it.
+// queueAttempt is one attempt running here: its run, the lease it holds and how to stop it.
+type queueAttempt struct {
+	id    string
+	token string
+	stop  context.CancelCauseFunc
+}
+
+// handlerFor resolves a claimed run's job to the code that runs it.
 func (q *queueRuntime) handlerFor(name string) *QueueHandler {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return q.byName[name]
 }
 
-// capacity is how many messages this node could start right now: the sum of every queue's unused
-// concurrency. Claiming more than this would hide work from idle nodes behind a lease this node
-// cannot act on yet.
+// declares reports a job the app's .shared/queue/ declares now: loaded, or withheld until its file loads.
+func (q *queueRuntime) declares(name string) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.byName[name] != nil || q.withheld[name]
+}
+
+// withheldJobs is the set of withheld jobs; the map is replaced, never changed, so it is read unlocked.
+func (q *queueRuntime) withheldJobs() map[string]bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.withheld
+}
+
+// noteDue brings the poller's next look forward to at.
+func (q *queueRuntime) noteDue(at time.Time) {
+	q.mu.Lock()
+	if at.Before(q.next) {
+		q.next = at
+	}
+	q.mu.Unlock()
+}
+
+// takeDue reports whether a run may be due at now, and if so takes the look: until the claim says when
+// the next one is due, only a noteDue brings the look forward.
+func (q *queueRuntime) takeDue(now time.Time) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if now.Before(q.next) {
+		return false
+	}
+	q.next = queueNever
+	return true
+}
+
+// noteReclaim brings the poller's next reclaim forward to at.
+func (q *queueRuntime) noteReclaim(at time.Time) {
+	q.mu.Lock()
+	if at.Before(q.reclaimAt) {
+		q.reclaimAt = at
+	}
+	q.mu.Unlock()
+}
+
+// takeReclaim is takeDue for the reclaim of lost leases.
+func (q *queueRuntime) takeReclaim(now time.Time) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if now.Before(q.reclaimAt) {
+		return false
+	}
+	q.reclaimAt = queueNever
+	return true
+}
+
+// capacity is how many runs this machine could start now: parallel less the attempts running, those past
+// their time that have not stopped yet included (each is a VM). Claiming more would hold runs behind a
+// lease this worker cannot act on yet.
 func (q *queueRuntime) capacity() int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if q.closed || !q.running {
 		return 0
 	}
-	total := 0
-	for _, handler := range q.handlers {
-		free := handler.Parallel - q.inflight[handler.Name]
-		if free > 0 {
-			total += free
-		}
-	}
-	return total
+	return q.parallel - len(q.attempts)
 }
 
-// reserve takes one of a queue's concurrency slots, reporting whether it got one. Aggregate capacity
-// is checked before claiming, but the two are not the same check: a claim can return several
-// messages of ONE queue, and only this per-queue reservation keeps that within its bound.
-func (q *queueRuntime) reserve(handler *QueueHandler) bool {
+// startAttempt registers an attempt with the wait group, refusing once the runtime is closing: an attempt
+// accepted after Close began would run while the app tears its resources down.
+func (q *queueRuntime) startAttempt(attempt *queueAttempt) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if q.closed {
+	if q.closed || !q.running {
 		return false
 	}
-	if q.inflight == nil {
-		q.inflight = make(map[string]int)
+	if q.attempts == nil {
+		q.attempts = map[*queueAttempt]struct{}{}
 	}
-	if q.inflight[handler.Name] >= handler.Parallel {
-		return false
-	}
-	q.inflight[handler.Name]++
+	q.attempts[attempt] = struct{}{}
+	q.wg.Add(1)
 	return true
 }
 
-func (q *queueRuntime) release(handler *QueueHandler) {
+// endAttempt takes the attempt out, and only it: another attempt of the same run stays.
+func (q *queueRuntime) endAttempt(attempt *queueAttempt) {
+	q.mu.Lock()
+	delete(q.attempts, attempt)
+	q.mu.Unlock()
+	q.wg.Done()
+}
+
+// held is a copy of the attempts running here.
+func (q *queueRuntime) held() []*queueAttempt {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if q.inflight[handler.Name] > 0 {
-		q.inflight[handler.Name]--
+	out := make([]*queueAttempt, 0, len(q.attempts))
+	for attempt := range q.attempts {
+		out = append(out, attempt)
+	}
+	return out
+}
+
+// stopAttempt stops the attempts of a cancelled run, if this process runs one.
+func (q *queueRuntime) stopAttempt(id string) {
+	for _, attempt := range q.held() {
+		if attempt.id == id {
+			attempt.stop(errQueueCancelled)
+		}
 	}
 }
+
+// Drain stops claiming and waits for the attempts running here. app.Runtime.Close drains a resource
+// before it closes any: an attempt that ends during the wait still writes its outcome, through the app's
+// database and the kitwork:runs resource, both still open then.
+func (q *queueRuntime) Drain() { q.Close() }
 
 func (q *queueRuntime) Close() {
 	if q == nil {
@@ -102,22 +233,6 @@ func (q *queueRuntime) Close() {
 	q.wg.Wait()
 }
 
-// startRun registers one in-flight job with the wait group, refusing once the runtime is closing.
-// Checking and adding under the same lock is the point: a job accepted after Close() began would be
-// running while the app tears its resources down.
-func (q *queueRuntime) startRun() bool {
-	if q == nil {
-		return false
-	}
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	if q.closed || !q.running {
-		return false
-	}
-	q.wg.Add(1)
-	return true
-}
-
 func (t *Tenant) queueWorker() *queueRuntime {
 	if t == nil || t.appRuntime == nil {
 		return nil
@@ -133,7 +248,8 @@ func (t *Tenant) ensureQueueWorker() (*queueRuntime, error) {
 	if current := t.queueWorker(); current != nil {
 		return current, nil
 	}
-	candidate := &queueRuntime{owner: t}
+	candidate := &queueRuntime{owner: t, wake: make(chan struct{}, 1), parallel: queueDefaultParallel, keep: queueDefaultKeep,
+		next: queueNever, reclaimAt: queueNever}
 	resource, installed, err := t.appRuntime.InstallResource(queueResourceName, candidate)
 	if err != nil {
 		return nil, err
@@ -148,17 +264,28 @@ func (t *Tenant) ensureQueueWorker() (*queueRuntime, error) {
 	return candidate, nil
 }
 
-// queueNodeID is this tenant instance's lease owner. It reuses the scheduler's per-process node id:
-// a node is a node, and giving the queue a second identity would make one process look like two in
-// the shared store's lease bookkeeping.
-func (t *Tenant) queueNodeID() string {
-	if worker := t.queueWorker(); worker != nil {
-		worker.mu.Lock()
-		node := worker.node
-		worker.mu.Unlock()
-		if node != "" {
-			return node
+// wakeQueueWorker tells the app's worker a run is due now, so it claims before its next tick.
+func (t *Tenant) wakeQueueWorker() { t.queueRunDue(time.Time{}) }
+
+// queueRunDue tells the app's worker a pending run is due at at (stored by a send, a replay): it looks for
+// it then, at once when it is due now.
+func (t *Tenant) queueRunDue(at time.Time) {
+	worker := t.queueWorker()
+	if worker == nil {
+		return
+	}
+	worker.noteDue(at)
+	if !time.Now().Before(at) {
+		select {
+		case worker.wake <- struct{}{}:
+		default:
 		}
 	}
-	return t.nodeID()
+}
+
+// stopQueueAttempt stops the attempt of a run just marked cancelling, when this process runs it.
+func (t *Tenant) stopQueueAttempt(id string) {
+	if worker := t.queueWorker(); worker != nil {
+		worker.stopAttempt(id)
+	}
 }

@@ -220,7 +220,8 @@ app
   entry is accepted, but no app reaches it in this build. `policy({ tenantConnections: false })` stops
   apps from connecting to a database of their own with `connect({ … })`.
 - The host's own connections, always alias first: `postgresql`, `sqlite`, `connect` (the system
-  database of the queue and the scheduler); no app code reaches them. `mysql` and `redis` are
+  database of the scheduler); no app code reaches them. The queue keeps its runs in the app's own
+  database, never the host's. `mysql` and `redis` are
   accepted by the manifest but have no driver linked in this build.
 - Lifecycle: `prewarm` (the primary hostname by default, named domains, or `"*"` for every site) and
   `run`, the last call, which opens the listener.
@@ -556,10 +557,11 @@ arguments before they start.
   is not yet, and changes with the engine.
 - The tunnel. Server functions called from the page by name, with the checks that make that safe.
   Designed, not implemented. The earlier idea of shipping client logic to the server was dropped.
-- Background work as an author writes it. Today it lives in two folders, `_cron/` and `_queue/`,
-  one `.kitwork.js` file per schedule or handler; that surface is being rethought and will change.
+- Background work as an author writes it. A job is `export const camOn = queue.job(fn)` in the app's
+  `.shared/queue/` (docs/KITWORK_QUEUE.md); schedules still live in `_cron/`, one `.kitwork.js` file
+  per schedule, until KITWORK_SCHEDULE.md moves them.
 - Clustering. `CLUSTER.MD` and `backbone.md` are designs. Nothing coordinates two engine processes
-  today; only the PostgreSQL-backed schedule and queue stores were written with that in mind.
+  today; only the PostgreSQL-backed schedule store was written with that in mind.
 - Desktop and mobile. The manifest declares them; the desktop declaration is validated at boot and
   the mobile one by the native build tooling. A separate shell, not in this repository, opens the
   window.

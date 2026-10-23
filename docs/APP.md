@@ -144,8 +144,8 @@ app
   .run(8080);
 ```
 
-Both domains share one App Runtime and its app-owned `_cron/`, `_queue/`,
-`_core/`, and `.data/` resources while retaining separate Site and Generation
+Both domains share one App Runtime and its app-owned `_cron/`, `.shared/queue/`
+(jobs, their runs in `.database/application/`), `_core/`, and `.data/` resources while retaining separate Site and Generation
 runtimes.
 
 ### Multiple tenant applications

@@ -62,7 +62,7 @@ func nativeBundleWithSources(
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	combined := &Program{Database: b.database}
+	combined := &Program{Database: b.database, Queue: b.queue}
 	combined.Statements = append(combined.Statements, b.defs...) // IIFE const của module (thứ tự phụ thuộc)
 	combined.Statements = append(combined.Statements, body...)   // thân entry (chạy ở top-level)
 
@@ -93,6 +93,8 @@ type bundler struct {
 	exports map[string][]string
 	// database is what the resolver needs of the schema files: nil while no module is one.
 	database *DatabaseBundle
+	// queue is what the resolver needs of the files of .shared/queue/: nil while no module is one.
+	queue *QueueBundle
 }
 
 // schemaModule reports a file of the app's .shared/schema/, and its name from the app's folder. The
@@ -204,6 +206,7 @@ func (b *bundler) rewriteStatements(stmts []Statement, fromDir string) ([]Statem
 		if err := b.databaseImports(imp, absPath, bindings); err != nil {
 			return nil, err
 		}
+		b.queueImports(absPath, bindings)
 		out = append(out, bindings...)
 	}
 	return out, nil
@@ -288,7 +291,15 @@ func (b *bundler) ensureModule(absPath string) (string, error) {
 		Source:   sourceName,
 		Position: int32(len(src)),
 	}
-	body = append(body, exportReturn(prog, origin))
+	if queue, isQueue := b.queueModule(absPath); isQueue {
+		// a job is named by its export, in every bundle the file is in (queue.go)
+		if err := b.queueExportsRule(prog); err != nil {
+			return "", err
+		}
+		body = append(body, queueExportReturn(prog, origin, queue))
+	} else {
+		body = append(body, exportReturn(prog, origin))
+	}
 
 	b.counter++
 	name := fmt.Sprintf("__kw_mod_%d", b.counter)
@@ -297,6 +308,10 @@ func (b *bundler) ensureModule(absPath string) (string, error) {
 	if isSchema {
 		function := definition.(*VarStatement).Value.(*CallExpression).Function.(*FunctionLiteral)
 		b.databaseBundle().SchemaModules[function] = schema
+	}
+	if queue, isQueue := b.queueModule(absPath); isQueue {
+		function := definition.(*VarStatement).Value.(*CallExpression).Function.(*FunctionLiteral)
+		b.queueBundle().Modules[function] = queue
 	}
 	b.defs = append(b.defs, definition) // append SAU các module con → đúng thứ tự
 	return name, nil
@@ -524,13 +539,21 @@ func moduleIIFE(name string, body []Statement) Statement {
 	}
 }
 
-// exportReturn: return { a: a, b: b, default: __kw_default };
+// exportReturn: return { a: a, c: b, default: __kw_default }; (export { b as c } gives c the value of b)
 func exportReturn(prog *Program, origin Token) Statement {
+	locals := make(map[string]string, len(prog.ExportAliases))
+	for _, alias := range prog.ExportAliases {
+		locals[alias.Exported] = alias.Local
+	}
 	entries := make([]ObjectEntry, 0, len(prog.Exports)+1)
 	for _, name := range prog.Exports {
+		local := name
+		if aliased, ok := locals[name]; ok {
+			local = aliased
+		}
 		entries = append(entries, ObjectEntry{
 			Key:   ident(name, origin),
-			Value: ident(name, origin),
+			Value: ident(local, origin),
 		})
 	}
 	if prog.HasDefault {

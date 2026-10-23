@@ -6,13 +6,12 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/kitwork/engine/value"
 )
 
 // developing runs the rest of a test as a site runs while it is being developed (AllowLocal): an error
@@ -245,30 +244,27 @@ router.view((ctx) => {
 	}
 }
 
-// A _cron or _queue handler has no visitor: its error, nothing catching it, goes to its run's record
+// A _cron or queue job's handler has no visitor: its error, nothing catching it, goes to its run's record
 // only, and the record keeps the whole diagnostic (file:line:column of the call) in production too.
-// What a visitor of a site is spared is not taken from the author's own record. CONTROL: the queue's
-// dispatch was taken and the cron ran; each record is one of a failed run.
+// What a visitor of a site is spared is not taken from the author's own record. CONTROL: the job's
+// send was taken and the cron ran; each record is one of a failed run.
 func TestBackgroundFailureKeepsItsWholeDiagnosticInProduction(t *testing.T) {
 	saved := AllowLocal
 	AllowLocal = false
 	t.Cleanup(func() { AllowLocal = saved })
 
-	worker := newQueueTenant(t, "broken", "import { queue } from \"kitwork\";\nqueue.handle((job) => {\n  const order = { total: 3 };\n  order.total(\"vnd\");\n});\n")
-	defer worker.Close()
-	if result := dispatch(t, worker, value.New("broken"), value.New(map[string]any{"n": 1})); !result.Get("queued").IsTrue() {
-		t.Fatalf("CONTROL: the dispatch was refused: %v", result.Get("error").Text())
+	watch := watchQueue(t)
+	q := newQueueApp(t, map[string]string{
+		".shared/queue/broken.work":  "import * as queue from \"kitwork/queue\";\nexport const broken = queue.job((context) => {\n  const order = { total: 3 };\n  order.total(\"vnd\");\n});\n",
+		"localhost/send/router.work": "import * as router from \"kitwork/router\";\nimport { broken } from \"app/.shared/queue/broken.work\";\nrouter.post((context) => context.json(broken.send({ n: 1 })));\n",
+	})
+	id, _ := q.serve(t, http.MethodPost, "/send", url.Values{})["id"].(string)
+	if id == "" {
+		t.Fatal("CONTROL: the send was refused")
 	}
-	if !waitFor(10*time.Second, func() bool {
-		return countQueueRows(t, worker, `SELECT COUNT(*) FROM queue_jobs WHERE status='failed'`) >= 1
-	}) {
-		t.Fatal("CONTROL: the queue job never failed")
-	}
-	worker.StopQueueWorker()
-	var queued string
-	worker.queueWorker().db.QueryRow(`SELECT error_message FROM queue_jobs WHERE status='failed' LIMIT 1`).Scan(&queued)
-	if !strings.Contains(queued, "broken.kitwork.js:4:3: order.total không phải hàm") {
-		t.Errorf("the queue job's record lacks its diagnostic: %q", queued)
+	watch.until(t, id, "failed")
+	if run := q.run(t, id); run.ErrorCode != "NOT_A_FUNCTION" || !strings.Contains(run.ErrorMessage, "broken.work:4:3: order.total không phải hàm") {
+		t.Errorf("the queue job's record lacks its diagnostic: %s %q", run.ErrorCode, run.ErrorMessage)
 	}
 
 	root := t.TempDir()

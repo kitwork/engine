@@ -71,7 +71,7 @@ func TestInspectFileResolvesAppImports(t *testing.T) {
 		"apps/acme/.shared/report.work":    `export const report = () => "acme";`,
 		"apps/acme/_cron/daily.kitwork.js": importing,
 		"app/.shared/report.work":          `export const report = () => "app";`,
-		"app/_queue/mail.kitwork.js":       importing,
+		"app/_cron/mail.kitwork.js":        importing,
 	} {
 		full := filepath.Join(host, filepath.FromSlash(relative))
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
@@ -88,7 +88,7 @@ func TestInspectFileResolvesAppImports(t *testing.T) {
 
 	for _, c := range []struct{ entry, app string }{
 		{"apps/acme/_cron/daily.kitwork.js", "apps/acme"},
-		{"app/_queue/mail.kitwork.js", "app"},
+		{"app/_cron/mail.kitwork.js", "app"},
 	} {
 		entry := filepath.Join(host, filepath.FromSlash(c.entry))
 		appRoot := filepath.Join(host, filepath.FromSlash(c.app))

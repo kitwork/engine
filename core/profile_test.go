@@ -35,7 +35,9 @@ import { router } from "kitwork";
 router.get((ctx) => ctx.text("about"));
 `)
 	write("identity/_cron/pulse.kitwork.js", `const pulse = () => 42;`)
-	write("identity/_queue/mail.kitwork.js", `const send = (message) => message;`)
+	write("identity/.shared/queue/mail.work", `const send = (message) => message;`)
+	write("identity/.shared/queue/config.work", `const parallel = 2;`)
+	write("identity/.shared/lib.work", `export const helper = () => 1;`)
 	write("identity/site/_core/ignored.kitwork.js", `const helper = () => 1;`)
 	write("identity/site/broken/router.kitwork.js", `const broken = ;`)
 	write("test/ignored/router.kitwork.js", `const ignored = 1;`)
@@ -100,7 +102,8 @@ func TestProfileWithLayoutProfilesOnlyExecutableRootShape(t *testing.T) {
 
 	t.Run("multi domain app", func(t *testing.T) {
 		root := t.TempDir()
-		writeProfileSource(t, root, "_queue/mail.kitwork.js", `const mail = () => 1;`)
+		writeProfileSource(t, root, ".shared/queue/mail.work", `const mail = () => 1;`)
+		writeProfileSource(t, root, "_queue/old.kitwork.js", `const old = () => 1;`)
 		writeProfileSource(t, root, "one.example/router.kitwork.js", profileRouterSource("one"))
 		writeProfileSource(t, root, "one.example/about/router.kitwork.js", profileRouterSource("about"))
 		writeProfileSource(t, root, "identity/nested.example/router.kitwork.js", profileRouterSource("nested"))
@@ -108,7 +111,7 @@ func TestProfileWithLayoutProfilesOnlyExecutableRootShape(t *testing.T) {
 
 		report := ProfileWithLayout(root, work.RootLayoutMultiDomain)
 		assertProfileFiles(t, report, []string{
-			"_queue/mail.kitwork.js",
+			".shared/queue/mail.work",
 			"one.example/about/router.kitwork.js",
 			"one.example/router.kitwork.js",
 		})

@@ -1,56 +1,62 @@
 package work
 
 import (
-	"encoding/json"
+	"context"
+	"errors"
 	"fmt"
+	"math/rand/v2"
 	"strings"
+	"sync"
 	"time"
+	"unicode/utf8"
 
-	"github.com/kitwork/engine/database"
 	queuestore "github.com/kitwork/engine/utilities/queue"
 	"github.com/kitwork/engine/value"
 )
 
-// ── Queue worker: claim, run, record ─────────────────────────────────────────────────────────────
+// ── Queue worker: claim, run, settle (KITWORK_QUEUE.md mục 6, 11) ───────────────────────────────────
 //
-// ONE poller goroutine per app drives every queue it owns:
-//
-//	sync     files → `queues` (a projection of _queue/*.kitwork.js; content_hash skips no-op writes)
-//	poll     every 250ms: claim what this node has capacity for and run each in a pooled VM
-//	settle   record completed / retry-with-backoff / dead-letter, plus output, gas and error
-//
-// The poller never runs JavaScript itself; it only coordinates. Handlers run in their own VMs, under
-// the same energy ceiling as a request, so a runaway job stops at its budget like everything else.
+// One poller per app claims what is due, as much as the queue's parallel leaves room for, each claim a
+// lease with a token; the attempt runs in a pooled VM under its .timeout(); the outcome is written by the
+// token's holder only. An attempt past its time is failed (TIMEOUT) the moment its time is up, before it
+// has stopped: its token stops holding the run then, so a late success of it changes nothing (fencing).
+// A heartbeat moves the leases of the attempts running here forward and stops an attempt whose run was
+// cancelled. A lease that ran out with no attempt here behind it (a process that stopped) gives the run
+// back. The poller never runs JavaScript itself.
 
-// queueLeaseTTL bounds how long a claimed message stays leased to a node without a heartbeat before
-// another node may reclaim it. A var so tests can shrink it. Energy is the real per-run fence; this
-// only governs crash recovery.
+// queueLeaseTTL is how long a claim holds its run without a heartbeat. A var so tests can shrink it.
 var queueLeaseTTL = 30 * time.Second
 
-// queuePollInterval is how often a node looks for work. Faster than cron's one second because a
-// queue's latency is user-visible in a way a schedule's is not — a dispatch is something that just
-// happened, not something booked for 08:00.
+// queuePollInterval is how often the worker looks at its clock for a run due or a lease run out; a send
+// wakes it at once.
 var queuePollInterval = 250 * time.Millisecond
 
-// queueBackoff gates a retry: 2^attempt × 5s, capped at 30 minutes. A var so tests can shorten it.
+// queueBackoff is how long a run waits after its attempt-th attempt failed: 1s, 2s, 4s… up to 30 minutes,
+// each give or take a fifth (jitter), so runs that failed together do not come back together. A var so
+// tests can shorten it.
 var queueBackoff = func(attempt int) time.Duration {
-	if attempt > 8 {
-		attempt = 8
+	if attempt < 1 {
+		attempt = 1
 	}
-	d := time.Duration(1<<uint(attempt)) * 5 * time.Second
-	if d > 30*time.Minute {
-		d = 30 * time.Minute
+	if attempt > 12 {
+		attempt = 12
 	}
-	return d
+	wait := time.Second << uint(attempt-1)
+	if wait > 30*time.Minute {
+		wait = 30 * time.Minute
+	}
+	return time.Duration(float64(wait) * (0.8 + 0.4*rand.Float64()))
 }
 
-// queueSuccessRetention is how long a COMPLETED message's row is kept. Successes are transient — the
-// durable record is the counter on `queues`. Failures are kept for the handler's full .retention()
-// window, because a dead letter you cannot read is not a dead letter.
-var queueSuccessRetention = 1 * time.Hour
+// queueLogLimit is the most a run's log keeps; past it the oldest lines go.
+const queueLogLimit = 64 << 10
 
-// StartQueueWorker launches this app's worker. Every registered handler is durable: its definition
-// is synced into `queues` and its messages are dispatched through the database.
+// QueueSettled, when set, hears each attempt the worker settles: the app, the run, and the status the run
+// took ("" when the attempt no longer held it). A test's way to wait for the worker without sleeping.
+var QueueSettled func(identity, id, status string)
+
+// StartQueueWorker writes the app's job definitions into kitwork_definitions and starts the worker when
+// there is a job to run. Called again (hot reload), it stops the running worker first.
 func (t *Tenant) StartQueueWorker() {
 	worker := t.queueWorker()
 	if worker == nil {
@@ -66,7 +72,7 @@ func (t *Tenant) StartQueueWorker() {
 
 	worker.mu.Lock()
 	defer worker.mu.Unlock()
-	if len(worker.handlers) == 0 || worker.closed {
+	if worker.closed {
 		return
 	}
 	if err := t.startQueueRuntime(worker); err != nil {
@@ -74,7 +80,7 @@ func (t *Tenant) StartQueueWorker() {
 	}
 }
 
-// StopQueueWorker halts polling and waits for accepted messages to finish.
+// StopQueueWorker halts claiming and waits for the attempts running here to finish.
 func (t *Tenant) StopQueueWorker() {
 	worker := t.queueWorker()
 	if worker == nil {
@@ -89,9 +95,8 @@ func (t *Tenant) StopQueueWorker() {
 	worker.wg.Wait()
 }
 
-// stopQueueWorkerNoLock cancels the poller and heartbeat. Caller holds worker.mu; the wait for
-// in-flight runs happens OUTSIDE the lock, because a finishing run needs that same lock to
-// decrement its slot and would otherwise wait for the waiter.
+// stopQueueWorkerNoLock cancels the poller and the heartbeat. The caller holds worker.mu; the wait for the
+// attempts happens OUTSIDE the lock, because an ending attempt takes that lock to leave.
 func stopQueueWorkerNoLock(worker *queueRuntime) {
 	worker.running = false
 	for _, cancel := range worker.cancels {
@@ -100,71 +105,47 @@ func stopQueueWorkerNoLock(worker *queueRuntime) {
 	worker.cancels = nil
 }
 
-// startQueueRuntime picks the backend (shared Postgres when a system database is connected, else the
-// app's own SQLite), migrates it, syncs definitions, reclaims orphans and starts the goroutines.
-// Runs under worker.mu, held by the caller, so it must not re-lock.
+// startQueueRuntime syncs the definitions and starts the poller and the heartbeat. Runs under worker.mu.
 func (t *Tenant) startQueueRuntime(worker *queueRuntime) error {
-	appID := t.appID()
-	nodeID := worker.node
-	if nodeID == "" {
-		nodeID = t.nodeID()
-	}
-
-	// No flag: a connected system database is the switch, exactly as it is for the scheduler. It asks
-	// which DIALECT rather than merely whether one is connected — a system database configured as
-	// SQLite would otherwise be handed the Postgres store, whose `$1` placeholders and
-	// `FOR UPDATE SKIP LOCKED` it cannot parse.
-	var store queuestore.Store
-	if database.SystemIsPostgres() {
-		worker.db = database.System
-		store = queuestore.NewPgStore(database.System, nodeID)
-	} else if database.System != nil {
-		worker.db = database.System
-		store = queuestore.NewSqliteStore(database.System, nodeID)
-	} else {
-		db := appSqliteFor(t, "queue.db").db() // apps/<identity>/.data/queue.db — one per app
-		if db == nil {
-			return fmt.Errorf("queue.db connection unavailable")
-		}
-		worker.db = db
-		store = queuestore.NewSqliteStore(db, nodeID)
-	}
-	worker.store = store
-
-	if err := store.InitSchema(); err != nil {
-		return err
-	}
-
-	records := make([]queuestore.QueueRecord, 0, len(worker.handlers))
-	worker.byName = make(map[string]*QueueHandler, len(worker.handlers))
+	definitions := make([]queuestore.Definition, 0, len(worker.handlers))
+	names := make([]string, 0, len(worker.handlers))
 	for _, handler := range worker.handlers {
-		normalizeQueueDefaults(handler)
-		worker.byName[handler.Name] = handler
-		records = append(records, queuestore.QueueRecord{
-			Name:          handler.Name,
-			MaxAttempts:   handler.MaxAttempts,
-			RetentionDays: handler.RetentionDays,
-			ContentHash:   handler.ContentHash,
+		definitions = append(definitions, queuestore.Definition{
+			Name: handler.Name, Source: handler.Source, Retry: handler.Retry, Timeout: handler.TimeoutText,
+			TimeoutMS: int(handler.Timeout / time.Millisecond), ContentHash: handler.ContentHash,
 		})
+		names = append(names, handler.Name)
 	}
-	if len(records) == 0 {
+	store := t.queueStore()
+	kept, err := store.Sync(definitions, worker.unloaded, time.Now())
+	if err != nil {
+		return fmt.Errorf("kitwork_definitions: %w", err)
+	}
+	withheld := make(map[string]bool, len(kept)+len(worker.unloaded.Names))
+	for _, name := range kept {
+		withheld[name] = true
+	}
+	for name := range worker.unloaded.Names {
+		withheld[name] = true
+	}
+	worker.withheld = withheld
+	if len(kept) > 0 {
+		fmt.Printf("[Queue] job %s chưa nạp được (file lỗi): các lần chạy của nó chờ, không thử, tới khi file nạp lại\n", strings.Join(kept, ", "))
+	}
+	if len(worker.handlers) == 0 {
 		return nil
 	}
-
-	if err := store.Sync(appID, records); err != nil {
-		fmt.Printf("[Queue] sync: %v\n", err)
-	}
-	store.Reclaim(appID, true) // boot: SQLite frees all of this app's 'running'; Postgres only expired leases
-
-	worker.inflight = make(map[string]int, len(records))
 	worker.running = true
+	// the first look and the first reclaim are now: what the file holds is not known yet
+	worker.next, worker.reclaimAt = time.Time{}, time.Time{}
+	identity := t.appID()
 
 	poll := make(chan struct{})
 	worker.cancels = append(worker.cancels, poll)
 	worker.wg.Add(1)
 	go func() {
 		defer worker.wg.Done()
-		t.queuePoller(worker, poll, appID, nodeID)
+		t.queuePoller(worker, poll, store)
 	}()
 
 	beat := make(chan struct{})
@@ -172,60 +153,79 @@ func (t *Tenant) startQueueRuntime(worker *queueRuntime) error {
 	worker.wg.Add(1)
 	go func() {
 		defer worker.wg.Done()
-		t.queueHeartbeat(worker, beat, nodeID)
+		t.queueHeartbeat(worker, beat, store)
 	}()
 
-	fmt.Printf("[Queue] worker up (%s, node=%s) — %d queue(s) for %q\n",
-		store.Label(), nodeID, len(records), appID)
+	fmt.Printf("[Queue] worker up (kitwork_runs của .database/application/) — %d job cho %q: %s\n",
+		len(names), identity, strings.Join(names, ", "))
 	return nil
 }
 
-func normalizeQueueDefaults(handler *QueueHandler) {
-	if handler.MaxAttempts < 1 {
-		handler.MaxAttempts = 1
-	}
-	if handler.Parallel < 1 {
-		handler.Parallel = 1
-	}
-	if handler.RetentionDays < 1 {
-		handler.RetentionDays = 30
-	}
-}
-
-func (t *Tenant) queuePoller(
-	worker *queueRuntime,
-	cancel chan struct{},
-	appID,
-	nodeID string,
-) {
+// queuePoller looks at its clock every tick (queuePollInterval) and at every wake, and reads kitwork_runs only
+// when a run it knows of is due (next) or a lease it knows of ran out (reclaimAt).
+func (t *Tenant) queuePoller(worker *queueRuntime, cancel chan struct{}, store *queuestore.Store) {
 	ticker := time.NewTicker(queuePollInterval)
 	defer ticker.Stop()
 	tick := 0
 	for {
+		if t.appRuntime.Closed() {
+			return // the app is closing: its worker closes next, and nothing is claimed in between
+		}
+		now := time.Now()
+		if worker.takeReclaim(now) {
+			t.queueReclaim(worker, store, now)
+		}
+		t.claimAndRunQueue(worker, store, now)
+		if tick%queuePruneTicks == queuePruneTicks-1 {
+			worker.mu.Lock()
+			keep := worker.keep
+			worker.mu.Unlock()
+			if _, err := store.Prune(now.Add(-keep)); err != nil {
+				fmt.Printf("[Queue] keep: %v\n", err)
+			}
+		}
+		tick++
+		worker.polls.Add(1)
 		select {
 		case <-cancel:
 			return
 		case <-ticker.C:
-			t.claimAndRunQueue(worker, appID, nodeID)
-			worker.store.Reclaim(appID, false)
-			tick++
-			if tick%240 == 0 { // ~once a minute at the default interval
-				t.queueRetentionSweep(worker)
-			}
+		case <-worker.wake:
 		}
 	}
 }
 
-// queueHeartbeat pushes this node's leases forward while it lives, so the shared store can tell a
-// live-but-busy node from a dead one. A host goroutine — the VM is occupied during a slow job.
-func (t *Tenant) queueHeartbeat(
-	worker *queueRuntime,
-	cancel chan struct{},
-	nodeID string,
-) {
+// queuePruneTicks is how many ticks of the poller apart the ended runs past keep are deleted: about a
+// minute at the default interval. A var so tests can prune at once.
+var queuePruneTicks = 240
+
+// queueReclaim gives back the runs whose lease ran out with no attempt here behind them, and notes when the
+// next lease no attempt here holds runs out.
+func (t *Tenant) queueReclaim(worker *queueRuntime, store *queuestore.Store, now time.Time) {
+	skip := map[string]bool{}
+	for _, attempt := range worker.held() {
+		skip[attempt.id] = true
+	}
+	count, next, err := store.Reclaim(now, skip)
+	switch {
+	case err != nil:
+		fmt.Printf("[Queue] reclaim: %v\n", err)
+		worker.noteReclaim(now.Add(queueLeaseTTL))
+		return
+	case !next.IsZero():
+		worker.noteReclaim(next)
+	}
+	if count > 0 {
+		worker.noteDue(now)
+	}
+}
+
+// queueHeartbeat moves the leases of the attempts running here forward, and stops an attempt whose run
+// was cancelled from a process that does not run it.
+func (t *Tenant) queueHeartbeat(worker *queueRuntime, cancel chan struct{}, store *queuestore.Store) {
 	interval := queueLeaseTTL / 3
-	if interval < 250*time.Millisecond {
-		interval = 250 * time.Millisecond
+	if interval < 100*time.Millisecond {
+		interval = 100 * time.Millisecond
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -234,151 +234,238 @@ func (t *Tenant) queueHeartbeat(
 		case <-cancel:
 			return
 		case <-ticker.C:
-			worker.store.Heartbeat(nodeID, queueLeaseTTL)
+			for _, attempt := range worker.held() {
+				status, holds, err := store.Extend(attempt.id, attempt.token, time.Now().Add(queueLeaseTTL))
+				if err == nil && holds && status == queuestore.Cancelling {
+					attempt.stop(errQueueCancelled)
+				}
+			}
 		}
 	}
 }
 
-// claimAndRunQueue takes only as much as this node has room for, then runs each claim.
-//
-// Capacity is computed BEFORE claiming so a node does not hold messages it cannot start — a claimed
-// message is invisible to every other node until its lease expires, so over-claiming is how a queue
-// appears stalled while another node sits idle.
-func (t *Tenant) claimAndRunQueue(worker *queueRuntime, appID, nodeID string) {
-	capacity := worker.capacity()
-	if capacity < 1 {
+// claimAndRunQueue claims only what the queue has room for, when a run may be due, then starts each claim.
+func (t *Tenant) claimAndRunQueue(worker *queueRuntime, store *queuestore.Store, now time.Time) {
+	room := worker.capacity()
+	if room < 1 || !worker.takeDue(now) {
 		return
 	}
-	if capacity > 20 {
-		capacity = 20
-	}
-
-	for _, claimed := range worker.store.Claim(appID, nodeID, queueLeaseTTL, capacity) {
-		handler := worker.handlerFor(claimed.Name)
-		if handler == nil {
-			// This node has no code for that queue. Dead-letter it rather than loop: a message no
-			// node can run would otherwise be claimed and released forever, and the failure would
-			// look like silence instead of an error someone can read.
-			worker.store.Fail(claimed.ID, claimed.Attempt, false, time.Time{},
-				"no registered handler for queue "+claimed.Name, "", 0)
-			worker.store.RecordSummary(appID, claimed.Name, "failed")
-			continue
-		}
-		// Capacity was checked in aggregate; this reserves the specific queue's slot. Losing the race
-		// here means putting the message straight back, WITHOUT consuming an attempt — the handler
-		// never ran, so charging it a try would dead-letter work that was merely busy.
-		if !worker.reserve(handler) {
-			worker.store.Fail(claimed.ID, claimed.Attempt-1, true, time.Now(), "", "", 0)
-			continue
-		}
-		if !worker.startRun() {
-			worker.release(handler)
-			worker.store.Fail(claimed.ID, claimed.Attempt-1, true, time.Now(), "", "", 0)
-			continue
-		}
-		go func(job queuestore.ClaimedJob, h *QueueHandler) {
-			defer worker.wg.Done()
-			defer worker.release(h)
-			t.runQueueJob(worker, job, h)
-		}(claimed, handler)
-	}
-}
-
-// runQueueJob executes one message and records the outcome. Attempt counts tries INCLUDING this one
-// (the claim increments it), so this is the final try when attempt >= max_attempts.
-func (t *Tenant) runQueueJob(worker *queueRuntime, claimed queuestore.ClaimedJob, handler *QueueHandler) {
-	var out strings.Builder
-	final := claimed.Attempt >= claimed.MaxAttempts
-	job := t.queueContext(claimed, final, &out)
-
-	gas, runErr := t.runInQueueVM(handler, handler.Callback, []value.Value{job})
-
-	appID := t.appID()
-	if runErr == nil {
-		worker.store.Complete(claimed.ID, out.String(), int64(gas))
-		worker.store.RecordSummary(appID, claimed.Name, "completed")
-		if handler.OnSuccess != nil {
-			_, _ = t.runInQueueVM(handler, handler.OnSuccess, []value.Value{job})
-		}
+	claims, next, err := store.Claim(now, queueLeaseTTL, room, worker.withheldJobs())
+	if err != nil {
+		fmt.Printf("[Queue] claim: %v\n", err)
+		worker.noteDue(now.Add(queuePollInterval))
 		return
 	}
-
-	retry := claimed.Attempt < claimed.MaxAttempts
-	worker.store.Fail(claimed.ID, claimed.Attempt, retry,
-		time.Now().Add(queueBackoff(claimed.Attempt)), runErr.Error(), out.String(), int64(gas))
-	if !retry {
-		worker.store.RecordSummary(appID, claimed.Name, "failed")
+	if next.IsZero() {
+		next = queueNever
 	}
-	if handler.OnError != nil {
-		_, _ = t.runInQueueVM(handler, handler.OnError, []value.Value{job, jobErrorObject(runErr)})
+	worker.noteDue(next)
+	for _, claim := range claims {
+		handler := worker.handlerFor(claim.Name)
+		ctx, stop := context.WithCancelCause(context.Background())
+		attempt := &queueAttempt{id: claim.ID, token: claim.Token, stop: stop}
+		if !worker.startAttempt(attempt) {
+			// closing: the lease runs out and the run comes back to whoever runs next
+			stop(nil)
+			continue
+		}
+		go func(claim queuestore.Claim, handler *QueueHandler) {
+			defer worker.endAttempt(attempt)
+			defer stop(nil)
+			t.runQueueAttempt(ctx, worker, store, claim, handler)
+		}(claim, handler)
 	}
 }
 
-// queueContext is the `job` a handler receives: the payload it was dispatched with, where this try
-// sits in the budget, and a log sink whose output is stored as this message's history.
-func (t *Tenant) queueContext(claimed queuestore.ClaimedJob, final bool, out *strings.Builder) value.Value {
+// runQueueAttempt runs one attempt and settles it.
+func (t *Tenant) runQueueAttempt(ctx context.Context, worker *queueRuntime, store *queuestore.Store, claim queuestore.Claim, handler *QueueHandler) {
+	log := &queueLog{}
+	log.text.WriteString(claim.Log)
+	// fail records a failed attempt; a run with attempts left is pending again until retryAt, which the
+	// worker notes so it looks then. KitDB keeps only valid UTF-8: a message that is not (the text of a
+	// page in another encoding) would make the settle fail, and the run come back after its lease.
+	fail := func(code, message string, retryAt, now time.Time) {
+		code, message = strings.ToValidUTF8(code, string(utf8.RuneError)), strings.ToValidUTF8(message, string(utf8.RuneError))
+		status, err := store.Fail(claim.ID, claim.Token, code, message, log.String(), retryAt, now)
+		if err == nil && status == queuestore.Pending {
+			worker.noteDue(retryAt)
+		}
+		t.settleQueue(worker, claim.ID, status, err)
+	}
+	if handler == nil {
+		// no file declares the job (renamed or removed since the run was sent): no attempt mends that, so
+		// the run ends failed, saying so, rather than coming back for ever. A job whose file did not load
+		// is withheld, never claimed (store.Claim), so it does not end here.
+		message := fmt.Sprintf("không có job %s trong .shared/queue/ của app: job đã đổi tên hay đã xoá sau khi gửi", claim.Name)
+		log.attemptFailed(claim.Attempt, value.NotFoundCode, message)
+		fail(value.NotFoundCode, message, time.Time{}, time.Now())
+		return
+	}
+	if timeout := time.Duration(claim.TimeoutMS) * time.Millisecond; timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := t.ExecuteContext(ctx, handler.Bytecode.Program, handler.Callback, []value.Value{t.queueContext(claim, log)})
+		done <- err
+	}()
+	var runErr error
+	finished := false
+	select {
+	case runErr = <-done:
+		finished = true
+	case <-ctx.Done():
+	}
+	if !finished {
+		// the attempt is past its time or cancelled: it is settled now, and stops at its VM's next
+		// checkpoint; whatever it does after, its lease no longer holds the run
+		defer func() { <-done }()
+	}
+
+	now := time.Now()
+	switch {
+	case finished && runErr == nil:
+		won, err := store.Complete(claim.ID, claim.Token, log.String(), now)
+		status := queuestore.Completed
+		if err == nil && !won {
+			fmt.Printf("[Queue] %s %s: lần thử %d chạy xong sau khi mất lease; kết quả bỏ\n", claim.Name, claim.ID, claim.Attempt)
+			status = ""
+		}
+		t.settleQueue(worker, claim.ID, status, err)
+	case errors.Is(context.Cause(ctx), errQueueCancelled):
+		log.write(fmt.Sprintf("lần thử %d: dừng vì lần chạy bị huỷ", claim.Attempt))
+		fail("", "", now, now)
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+		message := fmt.Sprintf("hết giờ: lần thử %d chạy quá %s", claim.Attempt, time.Duration(claim.TimeoutMS)*time.Millisecond)
+		if handler.TimeoutText != "" {
+			message += fmt.Sprintf(" (.timeout(%q))", handler.TimeoutText)
+		}
+		log.attemptFailed(claim.Attempt, value.TimeoutCode, message)
+		fail(value.TimeoutCode, message, now.Add(queueBackoff(claim.Attempt)), now)
+	default:
+		code, message := queueFailure(runErr)
+		log.attemptFailed(claim.Attempt, code, message)
+		fail(code, message, now.Add(queueBackoff(claim.Attempt)), now)
+	}
+}
+
+// settleQueue reports a settle: an error on the server's output, and the status to QueueSettled. A settle
+// that could not be written leaves the run running under its lease, which no heartbeat moves any more: the
+// worker gives it back when the lease runs out.
+func (t *Tenant) settleQueue(worker *queueRuntime, id, status string, err error) {
+	if err != nil {
+		fmt.Printf("[Queue] %s: không ghi được kết quả: %v\n", id, err)
+		status = ""
+		worker.noteReclaim(time.Now().Add(queueLeaseTTL))
+	}
+	if hook := QueueSettled; hook != nil {
+		hook(t.appID(), id, status)
+	}
+}
+
+// queueFailure is an attempt's failure as a run keeps it: the code of the closed set, and the message with
+// where it happened (the first line; the stack stays on the server).
+func queueFailure(runErr error) (string, string) {
+	message, _, _ := strings.Cut(runErr.Error(), "\n")
+	failure, _ := value.FailureFrom(value.FailureOfError("", runErr))
+	return failure.Code, message
+}
+
+// queueLog is a run's log: what its attempts wrote with context.job.log(…), and a line for each attempt that
+// failed. It keeps the last queueLogLimit bytes.
+type queueLog struct {
+	mu   sync.Mutex
+	text strings.Builder
+}
+
+// write adds a line, cleaned to valid UTF-8 (KitDB stores nothing else: a log it refused would leave the run
+// unsettled).
+func (l *queueLog) write(line string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.text.WriteString(strings.ToValidUTF8(line, string(utf8.RuneError)))
+	l.text.WriteByte('\n')
+	if l.text.Len() > queueLogLimit {
+		kept := l.text.String()
+		kept = kept[len(kept)-queueLogLimit:]
+		if cut := strings.IndexByte(kept, '\n'); cut >= 0 {
+			kept = kept[cut+1:]
+		}
+		l.text.Reset()
+		l.text.WriteString(kept)
+	}
+}
+
+func (l *queueLog) attemptFailed(attempt int, code, message string) {
+	l.write(fmt.Sprintf("lần thử %d: %s %s", attempt, code, message))
+}
+
+func (l *queueLog) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.text.String()
+}
+
+// queueContext is the context a job's handler gets (mục 5): context.data(), the data sent, and context.job,
+// the run and this attempt.
+func (t *Tenant) queueContext(claim queuestore.Claim, log *queueLog) value.Value {
 	logFn := value.NewFunc(func(args ...value.Value) value.Value {
 		parts := make([]string, len(args))
 		for i, a := range args {
 			parts[i] = a.Text()
 		}
-		out.WriteString(strings.Join(parts, " "))
-		out.WriteByte('\n')
+		log.write(strings.Join(parts, " "))
 		return value.Value{K: value.Nil}
 	})
-
-	// The payload round-trips through JSON because that is how it was stored. A payload that cannot
-	// be decoded becomes an empty object rather than a hard failure: the message still deserves to
-	// reach its handler, which can then report a shape it does not recognise.
-	var decoded any
-	if claimed.Payload != "" {
-		if err := json.Unmarshal([]byte(claimed.Payload), &decoded); err != nil {
-			decoded = map[string]any{}
-		}
-	}
-
-	return value.New(map[string]value.Value{
-		"payload":        collectionValue(decoded),
+	job := value.New(map[string]value.Value{
+		"id":             value.New(claim.ID),
+		"name":           value.New(claim.Name),
+		"attempt":        value.New(claim.Attempt),
+		"maxAttempts":    value.New(claim.MaxAttempts),
+		"isFinalAttempt": value.New(claim.Attempt >= claim.MaxAttempts),
+		"createdAt":      value.New(claim.CreatedAt),
+		"startedAt":      value.New(claim.StartedAt),
 		"log":            logFn,
-		"name":           value.New(claimed.Name),
-		"id":             value.New(int(claimed.ID)),
-		"attempt":        value.New(claimed.Attempt),
-		"maxAttempts":    value.New(claimed.MaxAttempts),
-		"isFinalAttempt": value.New(final),
 	})
+	return value.Value{K: value.Proxy, V: &jobContext{data: claim.Data, job: job}}
 }
 
-// runInQueueVM runs a lambda belonging to a queue file's bytecode: a pooled VM is FastReset onto THAT
-// bytecode (the lambda's Address offsets index into it) with the tenant's builtins and globals.
-func (t *Tenant) runInQueueVM(handler *QueueHandler, lambda *value.Lambda, args []value.Value) (gas uint64, runErr error) {
-	if handler.Bytecode == nil {
-		return 0, fmt.Errorf("queue %q has no bytecode", handler.Name)
-	}
-	if lambda == nil {
-		return 0, fmt.Errorf("queue %q has no handler", handler.Name)
-	}
-	if len(args) > 0 {
-		args = append([]value.Value{jobArgument(lambda, args[0])}, args[1:]...)
-	}
-	return t.Execute(handler.Bytecode.Program, lambda, args)
+// jobContext is the context of a job: data() and job, and an error naming the new spelling for each word
+// of the handler argument it replaced (job.payload, job.log, job.attempt…).
+type jobContext struct {
+	data string
+	job  value.Value
 }
 
-// queueRetentionSweep prunes finished messages — successes fast, failures for the handler's window.
-func (t *Tenant) queueRetentionSweep(worker *queueRuntime) {
-	appID := t.appID()
-	now := time.Now()
-	completedBefore := now.Add(-queueSuccessRetention)
+// jobContextRemoved are the words of the old handler argument, each now under context.job, and payload.
+var jobContextRemoved = map[string]bool{"log": true, "attempt": true, "maxAttempts": true, "isFinalAttempt": true, "id": true, "name": true}
 
-	worker.mu.Lock()
-	handlers := make([]*QueueHandler, len(worker.handlers))
-	copy(handlers, worker.handlers)
-	worker.mu.Unlock()
-
-	for _, handler := range handlers {
-		days := handler.RetentionDays
-		if days < 1 {
-			days = 30
-		}
-		worker.store.Retention(appID, handler.Name, completedBefore, now.AddDate(0, 0, -days))
+func (c *jobContext) OnGet(key string) value.Value {
+	switch {
+	case key == "data":
+		return value.NewFunc(func(...value.Value) value.Value { return decodeJobData(c.data) })
+	case key == "job":
+		return c.job
+	case key == "payload":
+		return value.InvalidFailure(value.InvalidArgumentCode, "context.payload đã bỏ: dữ liệu đã gửi là context.data()")
+	case jobContextRemoved[key]:
+		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("context.%s đã bỏ: context.job.%s", key, key))
 	}
+	return value.Value{K: value.Nil}
+}
+
+func (c *jobContext) OnCompare(_ string, _ value.Value) value.Value { return value.NewNil() }
+
+func (c *jobContext) OnInvoke(method string, args ...value.Value) value.Value {
+	if method == "data" {
+		return decodeJobData(c.data)
+	}
+	read := c.OnGet(method)
+	if read.IsError {
+		return read
+	}
+	return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("context.%s không phải hàm: context của job có data() và job", method))
 }

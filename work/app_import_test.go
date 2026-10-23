@@ -104,15 +104,15 @@ func TestRouterAppImportOfAMissingFileFailsTheBoot(t *testing.T) {
 }
 
 // The loaders that run the app's background files at boot (LoadCronFiles, LoadQueueFiles, from Run)
-// compile them as the app's: an app/ import resolves from the app's folder, so the cron and the queue
-// register under their file's name with what the import gave them. A loader that compiled them as no
-// app's would print "[Cron] compile …: file này không thuộc app nào" and register nothing.
+// compile them as the app's: an app/ import resolves from the app's folder, so the cron registers under its
+// file's name and the job under its export's, with what the import gave them. A loader that compiled them
+// as no app's would print "[Cron] compile …: file này không thuộc app nào" and register nothing.
 func TestBackgroundLoadersImportFromTheAppRoot(t *testing.T) {
 	root := t.TempDir()
 	writeAppTree(t, root, map[string]string{
 		"acme/.shared/plan.work":           "export const every = \"1h\";\nexport const attempts = 4;",
 		"acme/_cron/daily.kitwork.js":      "import { cron } from \"kitwork\";\nimport { every } from \"app/.shared/plan.work\";\ncron.every(every).handle(() => {});",
-		"acme/_queue/mail.kitwork.js":      "import { queue } from \"kitwork\";\nimport { attempts } from \"app/.shared/plan.work\";\nqueue.retry(attempts).handle(() => {});",
+		"acme/.shared/queue/mail.work":     "import * as queue from \"kitwork/queue\";\nimport { attempts } from \"app/.shared/plan.work\";\nexport const mail = queue.job((context) => {}).retry(attempts);",
 		"acme/localhost/router.kitwork.js": `import { router } from "kitwork"; router.get((ctx) => ctx.text("ok"));`,
 		// another app with the same names: never reached from acme
 		"other/.shared/plan.work": "export const every = \"2h\";\nexport const attempts = 9;",
@@ -144,20 +144,20 @@ func TestBackgroundLoadersImportFromTheAppRoot(t *testing.T) {
 		t.Fatal("the queue worker did not start")
 	}
 	handler := worker.handlerFor("mail")
-	if handler == nil || handler.MaxAttempts != 4 {
-		t.Errorf("queue mail: handler = %+v, want MaxAttempts 4 from the app's .shared/plan.work (nil: _queue/mail.kitwork.js did not compile as the app's)", handler)
+	if handler == nil || handler.Retry != 4 {
+		t.Errorf("queue mail: handler = %+v, want Retry 4 from the app's .shared/plan.work (nil: .shared/queue/mail.work did not compile as the app's)", handler)
 	}
 }
 
-// The app's background files (_cron/, _queue/) are the app's too: their app/ imports resolve from its
-// folder in the preflight (CheckCronFiles, CheckQueueFiles) as in the loaders above.
+// The app's background files (_cron/, .shared/queue/) are the app's too: their app/ imports resolve from
+// its folder in the preflight (CheckCronFiles, CheckQueueFiles) as in the loaders above.
 func TestBackgroundFilesImportFromTheAppRoot(t *testing.T) {
 	root := t.TempDir()
 	writeAppTree(t, root, map[string]string{
 		"acme/.shared/report.work":        `export const report = () => "ok";`,
 		"acme/_cron/daily.kitwork.js":     "import { report } from \"app/.shared/report.work\";\nreport();",
-		"acme/_queue/mail.kitwork.js":     "import { report } from \"app/.shared/report.work\";\nreport();",
-		"acme/_queue/broken.kitwork.js":   "import { gone } from \"app/.shared/gone.work\";",
+		"acme/.shared/queue/mail.work":    "import { report } from \"app/.shared/report.work\";\nreport();",
+		"acme/.shared/queue/broken.work":  "import { gone } from \"app/.shared/gone.work\";",
 		"acme/shop.example/router.work":   `import * as router from "kitwork/router";`,
 		"other/.shared/report.work":       `export const report = () => "other";`,
 		"other/other.example/router.work": `import * as router from "kitwork/router";`,
@@ -166,8 +166,8 @@ func TestBackgroundFilesImportFromTheAppRoot(t *testing.T) {
 		t.Fatalf("cron issues = %v", issues)
 	}
 	issues := CheckQueueFiles(root, "acme")
-	if len(issues) != 1 || filepath.Base(issues[0].File) != "broken.kitwork.js" ||
+	if len(issues) != 1 || filepath.Base(issues[0].File) != "broken.work" ||
 		!strings.Contains(issues[0].Err.Error(), `import "app/.shared/gone.work": app không có file .shared/gone.work`) {
-		t.Fatalf("queue issues = %v, want only broken.kitwork.js, missing .shared/gone.work", issues)
+		t.Fatalf("queue issues = %v, want only broken.work, missing .shared/gone.work", issues)
 	}
 }

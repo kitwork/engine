@@ -138,6 +138,20 @@ func (r *Runtime) Close() {
 	r.closeOnce.Do(func() {
 		r.closed.Store(true)
 
+		// a worker stops and waits for its work first, with every resource still reachable: a resource
+		// closed under it (the app's database) would lose the outcome of work that ends meanwhile
+		r.mu.RLock()
+		drainers := make([]Drainer, 0, len(r.resources))
+		for _, resource := range r.resources {
+			if drainer, ok := resource.(Drainer); ok {
+				drainers = append(drainers, drainer)
+			}
+		}
+		r.mu.RUnlock()
+		for _, drainer := range drainers {
+			drainer.Drain()
+		}
+
 		r.mu.Lock()
 		sites := make([]*site.Runtime, 0, len(r.sites))
 		for _, current := range r.sites {

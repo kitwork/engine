@@ -54,7 +54,8 @@ One app with routes directly at its root:
 ```text
 app/
   _cron/
-  _queue/
+  .shared/queue/
+  .database/
   _core/
   .data/
   router.kitwork.js
@@ -66,7 +67,8 @@ One app with multiple domain-scoped sites:
 ```text
 app/
   _cron/
-  _queue/
+  .shared/queue/
+  .database/
   _core/
   .data/
   <domain>/
@@ -79,7 +81,8 @@ Multiple tenant apps:
 ```text
 apps/<identity>/
   _cron/
-  _queue/
+  .shared/queue/
+  .database/
   _core/
   .data/
   <domain>/

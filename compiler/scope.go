@@ -89,6 +89,12 @@ type binding struct {
 	// "kitwork/database", import { database } from "kitwork"), whose connection and connect are refused
 	// outside the app's .shared/schema/ (namespaceDeclaration).
 	databaseModule bool
+	// queueModule: a name bound to the module kitwork/queue itself; queueHandle: an import of a job's handle
+	// from a file of .shared/queue/ (the file's name from the app); queueReceipt: a const whose value is a
+	// send on a handle. Their old spellings are refused where they are written (compiler/queue.go).
+	queueModule  bool
+	queueHandle  string
+	queueReceipt bool
 }
 
 type lexicalScope struct {
@@ -177,6 +183,10 @@ type resolver struct {
 	// const that names the handle again (aliases).
 	handleUse bool
 	aliases   map[*Identifier]bool
+	// queue is what the bundler found of the app's .shared/queue/; nil for a program that bundles none of
+	// it. inQueueModule: the code being read is a file of .shared/queue/, where queue.job is written.
+	queue         *QueueBundle
+	inQueueModule bool
 }
 
 // resolveProgram resolves every name of a program and gives each variable its slot.
@@ -202,6 +212,7 @@ func (c *Compiler) resolveObserved(
 		},
 		bundle:  program.Database,
 		aliases: map[*Identifier]bool{},
+		queue:   program.Queue,
 	}
 	r.databases = r.bundle != nil && len(r.bundle.Imports) > 0
 	r.enterFunction(nil)
@@ -287,10 +298,12 @@ func (r *resolver) hoist(statements []Statement) {
 				kind = bindingLet
 			}
 			r.declarationSite(node)
+			r.queueDeclaration(node)
 			alias := r.databaseAlias(node)
 			for _, name := range node.Names {
 				declared := r.declare(name, kind)
 				r.markDatabase(node, name, declared, alias)
+				r.markQueue(node, name, declared)
 				if declared != nil && node.Function {
 					declared.constant = false
 				}
@@ -612,6 +625,9 @@ func (r *resolver) expression(expression Expression) {
 		if r.namespaceDeclaration(node.Object, node.Property) {
 			return
 		}
+		if r.queueMember(node.Object, node.Property) {
+			return
+		}
 		r.expression(node.Object)
 	case *IndexExpression:
 		if r.databases && r.handleMember(node.Left, node.Token, nil) {
@@ -665,6 +681,9 @@ func (r *resolver) expression(expression Expression) {
 		if r.namespaceDeclaration(node.Object, node.Method) {
 			return
 		}
+		if r.queueCall(node) {
+			return
+		}
 		r.expression(node.Object)
 		for _, argument := range node.Arguments {
 			r.expression(argument)
@@ -710,6 +729,11 @@ func (r *resolver) functionLiteral(literal *FunctionLiteral) {
 		outer := r.inSchemaModule
 		r.inSchemaModule = true
 		defer func() { r.inSchemaModule = outer }()
+	}
+	if r.queue != nil && r.queue.Modules[literal] != "" {
+		outer := r.inQueueModule
+		r.inQueueModule = true
+		defer func() { r.inQueueModule = outer }()
 	}
 	r.enterFunction(literal)
 	for _, parameter := range literal.Parameters {

@@ -234,9 +234,14 @@ func CheckWithLayout(
 			var bytecode *compiler.Bytecode
 			var compileErr error
 			appRoot := profileAppRoot(root, layout, file)
-			if artifactCache != nil {
+			switch {
+			case isQueueJobFile(file):
+				// a job file runs as the module its importers and the loader see (work/queue_load.go); as
+				// an entry its queue.job would stand outside .shared/queue/ and never compile
+				bytecode, compileErr = compiler.CompileModuleFileInApp(appRoot, file)
+			case artifactCache != nil:
 				bytecode, compileErr = artifactCache.CompileFileInApp(appRoot, file)
-			} else {
+			default:
 				bytecode, compileErr = compiler.CompileFileInApp(appRoot, file)
 			}
 			// Site preparation and app checks already report compilation

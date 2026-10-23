@@ -226,3 +226,68 @@ func TestRuntimeDrainsTasksBeforeResources(t *testing.T) {
 		t.Fatal("closed app accepted another task")
 	}
 }
+
+// closingResource is a resource that says when it closed.
+type closingResource struct {
+	closed atomic.Bool
+}
+
+func (r *closingResource) Close() { r.closed.Store(true) }
+
+// drainingResource is a worker: its Drain is the work that ends while the app closes, which still needs
+// the other resource (the app's database) installed and open to record what it did.
+type drainingResource struct {
+	runtime *app.Runtime
+	other   *closingResource
+	// saw is what the drain found of the other resource: "" when it was there and open.
+	saw     string
+	drained atomic.Int32
+	closed  atomic.Bool
+}
+
+func (r *drainingResource) Drain() {
+	r.drained.Add(1)
+	switch current, _ := r.runtime.Resource("database").(*closingResource); {
+	case current == nil:
+		r.saw = "the other resource was no longer installed"
+	case current.closed.Load():
+		r.saw = "the other resource was closed"
+	}
+}
+
+func (r *drainingResource) Close() {
+	if r.drained.Load() == 0 {
+		panic("a drainer closed before it drained")
+	}
+	r.closed.Store(true)
+}
+
+// A resource that drains (a queue worker) is drained before any resource closes, every resource still
+// installed: work that ends during the drain records its outcome through the others. Several installs in
+// either order, so the map's random order cannot pass the test by luck. CONTROL: a resource that does not
+// drain is only closed.
+func TestRuntimeDrainsWorkersBeforeClosingResources(t *testing.T) {
+	for round := 0; round < 20; round++ {
+		runtime := app.NewRuntime("identity-a")
+		database := &closingResource{}
+		worker := &drainingResource{runtime: runtime, other: database}
+		first, second := app.Resource(worker), app.Resource(database)
+		firstName, secondName := "queue", "database"
+		if round%2 == 1 {
+			first, second, firstName, secondName = second, first, secondName, firstName
+		}
+		if _, installed, err := runtime.InstallResource(firstName, first); err != nil || !installed {
+			t.Fatalf("install %s: installed=%v err=%v", firstName, installed, err)
+		}
+		if _, installed, err := runtime.InstallResource(secondName, second); err != nil || !installed {
+			t.Fatalf("install %s: installed=%v err=%v", secondName, installed, err)
+		}
+		runtime.Close()
+		if worker.drained.Load() != 1 || worker.saw != "" {
+			t.Fatalf("round %d: drained %d times; %s", round, worker.drained.Load(), worker.saw)
+		}
+		if !worker.closed.Load() || !database.closed.Load() {
+			t.Fatalf("round %d: closed worker=%v database=%v, want both", round, worker.closed.Load(), database.closed.Load())
+		}
+	}
+}

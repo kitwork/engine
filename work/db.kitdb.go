@@ -102,6 +102,11 @@ type kitDatabaseHandle struct {
 // "@application").
 const kitDBApplicationName = "@application"
 
+// engineTable reports a table the engine keeps in the app's file for itself (kitwork_runs and
+// kitwork_definitions, the runs of its background work: queue_runs.go). schema() refuses the prefix for the
+// app's tables, and the app's handle never takes the engine's tables in as tables of its own.
+func engineTable(name string) bool { return strings.HasPrefix(strings.ToLower(name), "kitwork_") }
+
 // kitDBApplicationFile is the file of the app's database inside .database/application/.
 const kitDBApplicationFile = "application.kitdb"
 
@@ -240,6 +245,9 @@ func (proxy *dbProxy) ensureKitDBCatalogLoaded() error {
 			}
 		}
 		for _, entry := range snapshot.Structs {
+			if engineTable(entry.Name) {
+				continue
+			}
 			stored, err := decodeKitDBCatalog(entry.Definition, entry.Name)
 			if err != nil {
 				proxy.catalogErr = err
@@ -452,6 +460,9 @@ func (proxy *dbProxy) replaceKitDBCatalogDefinitionsLocked(
 	pendingIndexes := false
 	catalogNames := make(map[string]string, len(catalog.Structs))
 	for _, entry := range catalog.Structs {
+		if engineTable(entry.Name) {
+			continue
+		}
 		key := strings.ToLower(entry.Name)
 		if previous := catalogNames[key]; previous != "" && previous != entry.Name {
 			return false, false, fmt.Errorf(

@@ -10,6 +10,13 @@ type Resource interface {
 	Close()
 }
 
+// Drainer is a resource that runs work of its own (a worker): Runtime.Close drains every one before it
+// closes any resource, while all of them are still installed, so work that ends during the drain can
+// still use the others (the app's database) to record what it did. Close follows as for any resource.
+type Drainer interface {
+	Drain()
+}
+
 // InstallResource publishes one named app resource. The runtime takes
 // ownership only when installed is true.
 func (r *Runtime) InstallResource(name string, resource Resource) (current Resource, installed bool, err error) {

@@ -213,7 +213,7 @@ instruction fingerprints. Every counted Program has passed the complete
 artifact encode, decode, verification, and deterministic re-encode gate.
 The host command profiles the resolved root layout: direct `app/` routes,
 domain sites under `app/<domain>`, or tenant sites under
-`apps/<identity>/<domain>`. App-level `_cron` and `_queue` sources are included
+`apps/<identity>/<domain>`. App-level `_cron` sources and the jobs of `.shared/queue/` are included
 once at their owning app boundary; legacy trees are not counted and misplaced
 multi-tenant root routers are reported as layout errors.
 Direct Go callers can use `ProfileWithLayout` for the same strict behavior.

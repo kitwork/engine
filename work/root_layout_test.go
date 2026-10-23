@@ -154,7 +154,7 @@ func TestDiscoverTenantSitesUsesOnlyIdentityDomainShape(t *testing.T) {
 	writeTenantLayoutMarker(t, filepath.Join(root, "first", "one.example"))
 	writeTenantLayoutMarker(t, filepath.Join(root, "second", "two.example"))
 	writeTenantLayoutMarker(t, filepath.Join(root, "_core", "ignored.example"))
-	writeTenantLayoutMarker(t, filepath.Join(root, "first", "_queue"))
+	writeTenantLayoutMarker(t, filepath.Join(root, "first", "_cron"))
 
 	sites, err := DiscoverTenantSites(root)
 	if err != nil {

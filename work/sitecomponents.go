@@ -14,7 +14,7 @@ import (
 //	apps/<identity>/_components/bid-stepper.js      ← every domain of this identity
 //	apps/<identity>/<domain>/_components/search.js  ← this domain only (wins on a name clash)
 //
-// The underscore and the walk-up are the conventions `_core`, `_cron` and `_queue` already use: a
+// The underscore and the walk-up are the conventions `_core` and `_cron` already use: a
 // folder the machine owns, found by walking up from the site. There is no configuration — dropping
 // the file is the declaration, exactly like an icon or a font.
 //
