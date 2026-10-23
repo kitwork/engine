@@ -11,7 +11,8 @@ import (
 
 // Per-app isolation is what Kitwork sells: many sites in one process, none able to reach another's
 // files. That promise is only as good as the weakest path sink, and the sinks are spread across
-// file/collection/sqlite/ctx.file/saveFile plus two URL-driven static paths. A session that found
+// kitwork/file (each read, each change of a handle, context.file), collection, sqlite, plus two
+// URL-driven static paths. A session that found
 // two unguarded sinks by hand-grepping (fixed in bbe9ece) is the reason this is a TABLE: adding a
 // capability that takes a path means adding a row here, not remembering to re-grep.
 //
@@ -67,9 +68,11 @@ func serveIsolation(t *testing.T, tenant *Tenant, target string) *httptest.Respo
 // ── JS-driven sinks: a handler passes request input to an API that takes a path ────────────────
 
 // readSinkRouter routes each sink behind ?api=, so one fixture covers every JS path API and a new
-// capability is one more branch instead of one more fixture.
+// capability is one more branch instead of one more fixture. The paths of kitwork/file start in the app's
+// data (.database/files/) or, written app/…, in its code: the escapes are tried from both.
 const readSinkRouter = `
-import { router, file, collection } from "kitwork";
+import { router, collection } from "kitwork";
+import * as file from "kitwork/file";
 
 router.get((ctx) => {
     const api = ctx.query("api");
@@ -77,11 +80,30 @@ router.get((ctx) => {
     if (api === "file.read") {
         return ctx.text(file.read(p));
     }
-    if (api === "file.base64") {
-        return ctx.text(file.base64(p));
+    if (api === "file.text") {
+        return ctx.text(file.text(p));
+    }
+    if (api === "file.bytes") {
+        return ctx.type("text/plain").file(file.bytes(p));
+    }
+    if (api === "file.json") {
+        return ctx.json(file.json(p));
+    }
+    if (api === "file.list") {
+        return ctx.json(file.list(p));
+    }
+    if (api === "file.info") {
+        return ctx.json(file.info(p));
+    }
+    if (api === "file.exists") {
+        return ctx.json(file.exists(p));
+    }
+    if (api === "open.copy") {
+        file.open(p).copy("stolen.txt");
+        return ctx.text(file.text("stolen.txt"));
     }
     if (api === "ctx.file") {
-        return ctx.file(p);
+        return ctx.file(file.open(p));
     }
     if (api === "collection.open") {
         return ctx.json({ items: collection.open(p).all() });
@@ -99,8 +121,12 @@ func TestAppIsolationReadSinksDenyEscape(t *testing.T) {
 		"./../../victim-corp/victim.com/secret.txt",
 		"..\\..\\victim-corp\\victim.com\\secret.txt",
 		"foo/../../../victim-corp/victim.com/secret.txt",
+		"app/../victim-corp/victim.com/secret.txt",
+		"app/../../victim-corp/victim.com/secret.txt",
+		"app/localhost/../../victim-corp/victim.com/secret.txt",
 	}
-	apis := []string{"file.read", "file.base64", "ctx.file", "collection.open"}
+	apis := []string{"file.read", "file.text", "file.bytes", "file.json", "file.list", "file.info", "file.exists",
+		"open.copy", "ctx.file", "collection.open"}
 
 	for _, api := range apis {
 		for _, p := range escapes {
@@ -119,11 +145,60 @@ func TestAppIsolationReadSinksDenyEscape(t *testing.T) {
 func TestAppIsolationReadSinksAllowOwnFile(t *testing.T) {
 	_, tenant := buildIsolationFixture(t, readSinkRouter)
 
-	for _, api := range []string{"file.read", "ctx.file"} {
-		rec := serveIsolation(t, tenant, "http://localhost/?api="+api+"&p=allowed.txt")
+	for _, api := range []string{"file.read", "file.text", "file.bytes", "open.copy", "ctx.file"} {
+		rec := serveIsolation(t, tenant, "http://localhost/?api="+api+"&p=app/localhost/allowed.txt")
 		if !strings.Contains(rec.Body.String(), "ALLOWED-OWN-FILE") {
 			t.Fatalf("%s must read the tenant's own file; got %d %q", api, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+// writeSinkRouter is every change of a handle of kitwork/file, at a path the request gives: none may land
+// in, or take from, another app.
+const writeSinkRouter = `
+import { router } from "kitwork";
+import * as file from "kitwork/file";
+
+router.get((ctx) => {
+    const api = ctx.query("api");
+    const p = ctx.query("p");
+    file.open("own.txt").write("OWN");
+    if (api === "write") { return ctx.json(file.open(p).write("PLANTED")); }
+    if (api === "create") { return ctx.json(file.open(p).create()); }
+    if (api === "copy") { return ctx.json(file.open("own.txt").copy(p)); }
+    if (api === "move") { return ctx.json(file.open("own.txt").move(p)); }
+    if (api === "delete") { return ctx.json(file.open(p).delete()); }
+    if (api === "clear") { return ctx.json(file.open(p).clear()); }
+    return ctx.text("no-api");
+});
+`
+
+// The changes of kitwork/file never reach another app: a path that climbs is refused, so nothing is
+// planted there and its file stays.
+func TestAppIsolationWriteSinksDenyEscape(t *testing.T) {
+	root, tenant := buildIsolationFixture(t, writeSinkRouter)
+	victim := filepath.Join(root, "victim-corp", "victim.com")
+	for _, api := range []string{"write", "create", "copy", "move", "delete", "clear"} {
+		for _, p := range []string{
+			"../../victim-corp/victim.com/planted.txt", "app/../victim-corp/victim.com/planted.txt",
+			"../../victim-corp/victim.com/secret.txt", "../../victim-corp/victim.com/",
+			"app/../victim-corp/victim.com/",
+		} {
+			serveIsolation(t, tenant, "http://localhost/?api="+api+"&p="+p)
+			if _, err := os.Stat(filepath.Join(victim, "planted.txt")); err == nil {
+				t.Fatalf("%s %q planted a file in another app", api, p)
+			}
+			if content, err := os.ReadFile(filepath.Join(victim, "secret.txt")); err != nil || string(content) != victimMarker {
+				t.Fatalf("%s %q changed another app's file: %q %v", api, p, content, err)
+			}
+		}
+	}
+	// CONTROL: the same route writes inside the app
+	if rec := serveIsolation(t, tenant, "http://localhost/?api=write&p=inside.txt"); rec.Code != http.StatusOK {
+		t.Fatalf("write inside the app = %d %s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "acme", ".database", "files", "inside.txt")); err != nil {
+		t.Fatalf("the control write is not in the app's data: %v", err)
 	}
 }
 

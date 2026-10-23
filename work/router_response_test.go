@@ -25,7 +25,7 @@ func TestResponseAnswersReturnTheResponse(t *testing.T) {
 		"html":       two(r.HTML(data)),
 		"css":        r.CSS(data),
 		"svg":        two(r.SVG(data)),
-		"file":       two(r.File(value.New("a.txt"))),
+		"file":       two(r.File(value.Value{K: value.Proxy, V: &fileHandle{}})),
 		"file bytes": two(r.File(value.New([]byte("x")))),
 		"redirect":   two(r.Redirect(value.New("/x"))),
 		"view":       two(r.View(data)),

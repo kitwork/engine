@@ -269,11 +269,31 @@ func (h *storageHandle) call(caller *runtime.VM, method string, args []value.Val
 // segment(…) is the handle of the key with segments added: each a non-empty string or a number, which is
 // written as text (segment(123) is "123", mục 4).
 func (h *storageHandle) segment(args []value.Value) value.Value {
+	segments, failure := segmentWords(args, `users.segment("123"), users.segment(id, "profile")`, `dựng khoá bằng từng đoạn, users.segment(id, "profile")`)
+	if failure.IsError {
+		return failure
+	}
+	size := len(h.key.Human())
+	for _, segment := range segments {
+		size += 1 + len(segment)
+	}
+	if size > storageKeyLimit {
+		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("segment(…): khoá dài %d byte, quá trần %d byte của một khoá", size, storageKeyLimit))
+	}
+	next := *h
+	next.key = h.key.With(segments...)
+	return value.Value{K: value.Proxy, V: &next}
+}
+
+// segmentWords reads the arguments of segment(…), of a storage handle and of a file handle alike
+// (KITWORK_FILE.md mục 2: segment() as storage's): at least one, each a non-empty string or a finite number,
+// which is written as text (segment(123) is "123"). examples and hint are the caller's words: how its
+// segment is written, and how to build with it.
+func segmentWords(args []value.Value, examples, hint string) ([]string, value.Value) {
 	if len(args) == 0 {
-		return value.InvalidFailure(value.InvalidArgumentCode, `segment(…) nhận ít nhất một đoạn: users.segment("123"), users.segment(id, "profile")`)
+		return nil, value.InvalidFailure(value.InvalidArgumentCode, "segment(…) nhận ít nhất một đoạn: "+examples)
 	}
 	segments := make([]string, len(args))
-	size := len(h.key.Human())
 	for index, argument := range args {
 		switch {
 		case argument.K == value.String && argument.Text() != "":
@@ -285,16 +305,10 @@ func (h *storageHandle) segment(args []value.Value) value.Value {
 			if argument.K == value.String {
 				kind = "chuỗi rỗng"
 			}
-			return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("segment(…) nhận chuỗi không rỗng hay số, đoạn thứ %d là %s: dựng khoá bằng từng đoạn, users.segment(id, \"profile\")", index+1, kind))
+			return nil, value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("segment(…) nhận chuỗi không rỗng hay số, đoạn thứ %d là %s: %s", index+1, kind, hint))
 		}
-		size += 1 + len(segments[index])
 	}
-	if size > storageKeyLimit {
-		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("segment(…): khoá dài %d byte, quá trần %d byte của một khoá", size, storageKeyLimit))
-	}
-	next := *h
-	next.key = h.key.With(segments...)
-	return value.Value{K: value.Proxy, V: &next}
+	return segments, value.Value{K: value.Nil}
 }
 
 // withExpire is expire(hạn): the expiry of the next write, as a route's cache writes it (mục 6): a span

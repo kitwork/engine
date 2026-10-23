@@ -4,12 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"mime/multipart"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -31,6 +28,11 @@ type Request struct {
 	// the fields of the form the body carries, read once (request.form, request_form.go)
 	formRead   bool
 	formFields url.Values
+
+	// the body's multipart form, parsed once for its uploads (request.file, request_upload.go)
+	uploadRead bool
+	uploadForm *multipart.Form
+	uploadErr  error
 }
 
 func (r *Request) request() *http.Request {
@@ -461,49 +463,4 @@ func (r *Request) MultipartForm() (*multipart.Form, error) {
 		return nil, err
 	}
 	return req.MultipartForm, nil
-}
-
-func (r *Request) SaveFile(fieldName string, destPath string) value.Value {
-	req := r.request()
-	if req == nil {
-		return value.New(false)
-	}
-
-	file, header, err := req.FormFile(fieldName)
-	if err != nil {
-		return value.New(false)
-	}
-	defer file.Close()
-
-	fullDest := r.router.tenant.resolve(destPath)
-	// An upload destination that escapes the app is a WRITE primitive — worse than a read, since
-	// landing a file on another app's router.kitwork.js would hand it execution. Refuse before
-	// creating anything.
-	if !r.router.tenant.insideAppRoot(fullDest) {
-		return value.New(false)
-	}
-	// Create directory if not exists
-	dir := filepath.Dir(fullDest)
-	if filepath.Ext(fullDest) == "" {
-		// If destPath is a directory
-		dir = fullDest
-		os.MkdirAll(dir, 0755)
-		// header.Filename comes from the CLIENT's multipart headers, so the joined path needs its
-		// own check even though destPath already passed.
-		fullDest = filepath.Join(dir, header.Filename)
-		if !r.router.tenant.insideAppRoot(fullDest) {
-			return value.New(false)
-		}
-	} else {
-		os.MkdirAll(dir, 0755)
-	}
-
-	out, err := os.Create(fullDest)
-	if err != nil {
-		return value.New(false)
-	}
-	defer out.Close()
-
-	_, err = io.Copy(out, file)
-	return value.New(err == nil)
 }

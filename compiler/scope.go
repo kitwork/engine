@@ -109,6 +109,8 @@ type binding struct {
 	routineHandle bool
 	// storageModule: a name bound to the module kitwork/storage itself (compiler/storage.go).
 	storageModule bool
+	// fileModule: a name bound to the module kitwork/file itself (compiler/file.go).
+	fileModule bool
 	// parameterPart: a name a destructured parameter gives (({ request }) => …), which routineRequest
 	// reads as the parameter it is.
 	parameterPart bool
@@ -343,6 +345,7 @@ func (r *resolver) hoist(statements []Statement) {
 			r.scheduleDeclaration(node)
 			r.routineDeclaration(node)
 			r.storageDeclaration(node)
+			r.fileDeclaration(node)
 			alias := r.databaseAlias(node)
 			for _, name := range node.Names {
 				declared := r.declare(name, kind)
@@ -351,6 +354,7 @@ func (r *resolver) hoist(statements []Statement) {
 				r.markSchedule(node, name, declared)
 				r.markRoutine(node, name, declared)
 				r.markStorage(node, name, declared)
+				r.markFile(node, name, declared)
 				if declared != nil && node.Function {
 					declared.constant = false
 				}
@@ -690,6 +694,9 @@ func (r *resolver) expression(expression Expression) {
 		if r.storageMember(node.Object, node.Property) {
 			return
 		}
+		if r.fileMember(node.Object, node.Property) {
+			return
+		}
 		r.expression(node.Object)
 	case *IndexExpression:
 		if r.databases && r.handleMember(node.Left, node.Token, nil) {
@@ -753,6 +760,9 @@ func (r *resolver) expression(expression Expression) {
 			return
 		}
 		if r.storageMember(node.Object, node.Method) {
+			return
+		}
+		if r.fileMember(node.Object, node.Method) {
 			return
 		}
 		r.expression(node.Object)

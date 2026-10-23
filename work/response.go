@@ -119,9 +119,11 @@ func (r *Response) String(data string, code ...int) *Response {
 	return r
 }
 
-// File answers with bytes the handler made, in the media type .type() set, else
-// application/octet-stream: context.type("image/png").file(bytes). A template site may also give a
-// path of the app; router.work takes bytes only.
+// File answers with a handle of kitwork/file, served from the disk when the answer is written (mục 9:
+// Range, ETag, Last-Modified, the media type by the extension unless .type() came first), or with bytes
+// the handler made, in the media type .type() set, else application/octet-stream:
+// context.type("image/png").file(bytes). A path written as a string, which a template site gave until
+// 22/10/2026, is refused with the handle's spelling.
 func (r *Response) File(data value.Value, options ...any) (*Response, error) {
 	if err := r.answering("file"); err != nil {
 		return r, err
@@ -129,10 +131,13 @@ func (r *Response) File(data value.Value, options ...any) (*Response, error) {
 	if data.K == value.Bytes {
 		return r.answer(data, "bytes", options), nil
 	}
-	if r.ordered() {
-		return r, fmt.Errorf("`.file()` nhận bytes: `context.type(\"image/png\").file(bytes)`; trả lời bằng chữ thì `.text(…)`")
+	if _, ok := data.V.(*fileHandle); ok && data.K == value.Proxy {
+		return r.answer(data, "file", options), nil
 	}
-	return r.answer(value.New(data.Text()), "file", options), nil
+	if data.K == value.String {
+		return r, fmt.Errorf("`.file()` nhận một handle của kitwork/file hay bytes, không nhận chuỗi đường dẫn: `context.file(file.open(%q))`, `context.type(\"image/png\").file(bytes)` (KITWORK_FILE.md mục 9)", data.Text())
+	}
+	return r, fmt.Errorf("`.file()` nhận một handle của kitwork/file hay bytes: `context.file(file.open(\"exports/bao-cao.csv\"))`, `context.type(\"image/png\").file(bytes)`; trả lời bằng chữ thì `.text(…)`")
 }
 
 func (r *Response) Directory(path string, code ...int) *Response {

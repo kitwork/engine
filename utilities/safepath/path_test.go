@@ -3,6 +3,7 @@ package safepath
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -48,6 +49,43 @@ func TestBoundaryRejectsEscapingSymlinkAndMissingChild(t *testing.T) {
 	}
 	if inside {
 		t.Fatal("prepared boundary accepted an escaping symlink")
+	}
+}
+
+// Relative is the target's path from the boundary as the disk holds it (a name of the code zone of
+// kitwork/file is checked on it, KITWORK_FILE.md mục 1): "" for the root itself, a child that does not
+// exist yet as written, a name written in another case read in the disk's case (Windows), a link read as
+// where it leads (elsewhere), and nothing for a target outside.
+//
+// CONTROL: with Relative taking the target as written (canonical skipped), SITE/new.txt stayed in the case
+// it was written in on Windows and the test failed.
+func TestBoundaryRelative(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "Site"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	boundary, err := NewBoundary(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]string{
+		root:                                    "",
+		filepath.Join(root, "Site", "new.txt"):  filepath.Join("Site", "new.txt"),
+		filepath.Join(root, "Site", "a", "b.c"): filepath.Join("Site", "a", "b.c"),
+	}
+	if runtime.GOOS == "windows" {
+		cases[filepath.Join(root, "SITE", "new.txt")] = filepath.Join("Site", "new.txt")
+	} else if err := os.Symlink(filepath.Join(root, "Site"), filepath.Join(root, "alias")); err == nil {
+		cases[filepath.Join(root, "alias", "new.txt")] = filepath.Join("Site", "new.txt")
+	}
+	for target, want := range cases {
+		relative, inside, err := boundary.Relative(target)
+		if err != nil || !inside || relative != want {
+			t.Errorf("Relative(%q) = %q %v %v, want %q", target, relative, inside, err, want)
+		}
+	}
+	if relative, inside, err := boundary.Relative(filepath.Join(filepath.Dir(root), "x")); inside || relative != "" || err != nil {
+		t.Errorf("a target outside = %q %v %v, want not inside", relative, inside, err)
 	}
 }
 

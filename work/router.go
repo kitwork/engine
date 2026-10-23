@@ -217,16 +217,15 @@ func (r *Router) responder(w http.ResponseWriter) {
 		w.WriteHeader(r.response.Code())
 		w.Write(r.response.toBytes())
 	case "file":
-		// Boundary check at the point of USE, so it covers every producer of a file response
-		// (ctx.file, response.file, …) rather than trusting each one. A handler that builds its
-		// path from request input — ctx.file(ctx.query("f")) is an ordinary download pattern —
-		// must not be able to read another app's files. 404, not 403: a denial must not reveal
-		// whether the out-of-bounds file exists.
-		if !r.tenant.insideAppRoot(data.String()) {
+		// a handle of kitwork/file (context.file(file.open(…))), checked where it is used: its zone, the
+		// names the code zone never reaches, a link out of it. 404, not 403: a denial must not reveal
+		// whether the file exists (KITWORK_FILE.md mục 9)
+		handle, ok := data.V.(*fileHandle)
+		if !ok || handle.tenant == nil {
 			http.NotFound(w, request)
 			return
 		}
-		http.ServeFile(w, request, data.String())
+		serveFile(w, request, handle, r.response)
 	case "directory":
 		dirPath := strings.TrimSuffix(data.String(), "*")
 		dirPath = strings.TrimSuffix(dirPath, "/")

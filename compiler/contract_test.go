@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestCompilerV17GoldenContract(t *testing.T) {
-	if CompilerSchemaVersion != 17 {
-		t.Fatalf("CompilerSchemaVersion = %d, want schema v17", CompilerSchemaVersion)
+func TestCompilerV18GoldenContract(t *testing.T) {
+	if CompilerSchemaVersion != 18 {
+		t.Fatalf("CompilerSchemaVersion = %d, want schema v18", CompilerSchemaVersion)
 	}
 	// Bytecode 3 (14/10/2026) moved the fingerprint and every checksum below with the version alone: each
 	// fixture's instructions, constants and debug table are those bytecode 2 wrote (none needs a wide
@@ -23,8 +23,10 @@ func TestCompilerV17GoldenContract(t *testing.T) {
 	// Schema 15 (22/10/2026, a schedule named by its export) moved the fingerprint alone: no fixture imports a
 	// file of .schedule/ or writes cron. Schema 16 (22/10/2026, go moves into kitwork/routine) moved the
 	// fingerprint alone: no fixture writes go or imports kitwork/routine. Schema 17 (22/10/2026, cache and sse
-	// replaced by kitwork/storage) moved the fingerprint alone: no fixture writes cache or sse.
-	const expectedFingerprint = "4a62b52142f2263f49eb298b94793c6573d313d6da01d71bb150e097fda06359"
+	// replaced by kitwork/storage) moved the fingerprint alone: no fixture writes cache or sse. Schema 18
+	// (22/10/2026, the older words of kitwork/file refused) moved the fingerprint alone: no fixture imports
+	// kitwork/file.
+	const expectedFingerprint = "14263ce6a384ce77df0a1c5ed405357708c7059fb4a3df38e19a6544df8ac47d"
 	if got := Fingerprint(); got != expectedFingerprint {
 		t.Fatalf("compiler fingerprint = %q, want %q", got, expectedFingerprint)
 	}

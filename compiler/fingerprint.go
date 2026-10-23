@@ -120,7 +120,15 @@ import (
 // (storage.go). A cached artifact of schema 16 that writes one of them would run until the word fails where
 // it is read, instead of the file failing where it is written: the bump retires it. A program that writes
 // none of them compiles as before, byte for byte. No opcode or operand changed.
-const CompilerSchemaVersion uint16 = 17
+//
+// 18 (22/10/2026, KITWORK_FILE.md, file in the app's data): the words of kitwork/file of before
+// (file.write, file.save, file.base64), the changes at the module's level the spec never has (file.create,
+// file.copy, file.move, file.delete, file.remove), file.directory, file.folder, file.path, any other word it
+// has not, and a word imported by name off it are compile errors (file.go). A cached artifact of schema 17
+// that writes one would run until the word fails where it is read, instead of the file failing where it
+// is written: the bump retires it. A program that writes none of them compiles as before, byte for byte.
+// No opcode or operand changed.
+const CompilerSchemaVersion uint16 = 18
 
 var currentCompilerFingerprint = compilerFingerprintFor(CompilerSchemaVersion)
 

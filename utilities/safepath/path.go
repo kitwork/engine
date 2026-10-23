@@ -39,6 +39,33 @@ func (b *Boundary) Contains(target string) (bool, error) {
 	return containsCanonical(b.base, targetReal)
 }
 
+// Relative is target's canonical path relative to this boundary, links
+// resolved and, on Windows, short names and case read as the disk holds them:
+// "" for the root itself. inside is false for a target that leads outside. A
+// check of names (a folder no program may read) reads this, not the target as
+// written, so a link or another spelling of a name cannot get past it.
+func (b *Boundary) Relative(target string) (relative string, inside bool, err error) {
+	if b == nil || b.base == "" {
+		return "", false, fmt.Errorf("filesystem boundary is not initialized")
+	}
+	targetReal, err := canonical(target)
+	if err != nil {
+		return "", false, fmt.Errorf("resolve target path: %w", err)
+	}
+	inside, err = containsCanonical(b.base, targetReal)
+	if err != nil || !inside {
+		return "", false, err
+	}
+	relative, err = filepath.Rel(b.base, targetReal)
+	if err != nil {
+		return "", false, err
+	}
+	if relative == "." {
+		relative = ""
+	}
+	return relative, true, nil
+}
+
 // Resolve joins paths to base and verifies that the canonical target remains
 // under the canonical base. Missing final components are supported for writes.
 func Resolve(base string, paths ...string) (string, error) {

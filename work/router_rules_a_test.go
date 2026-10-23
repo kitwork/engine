@@ -163,10 +163,15 @@ func TestUIStaticAllowlist(t *testing.T) {
 	}
 }
 
-// A router.work handler does not see request.benchmark, request.saveFile, request.multipartForm, nor
-// context.saveFile; a template site still does.
+// A router.work handler does not see request.benchmark nor request.multipartForm; a template site still
+// does. request.saveFile and context.saveFile are gone from both (KITWORK_FILE.md mục 17, 22/10/2026):
+// reading either fails with the spelling of kitwork/file.
+//
+// CONTROL: with Request.SaveFile giving null, request.saveFile read no failure (its message null) in both
+// sites and the test failed.
 func TestUIHidesBenchmarkAndUploads(t *testing.T) {
-	probe := `[typeof request.benchmark, typeof request.saveFile, typeof request.multipartForm, typeof context.saveFile]`
+	probe := `[typeof request.benchmark, typeof request.multipartForm, safe(() => request.saveFile).error.message, safe(() => context.saveFile("doc", "uploads/")).error.message]`
+	gone := `request.saveFile(tên, đích) đã bỏ: lưu một upload bằng file.open(\"uploads/\").segment(id, \"avatar.png\").write(request.file(\"avatar\")), vào vùng dữ liệu của app (KITWORK_FILE.md mục 9, 17)`
 	ui := NewTenant(writeSite(t, map[string]string{
 		"router.work": `import * as router from "kitwork/router";`,
 		"a/router.work": "import * as router from \"kitwork/router\";\n" +
@@ -175,7 +180,7 @@ func TestUIHidesBenchmarkAndUploads(t *testing.T) {
 	if err := ui.Run(); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if r := serveGet(ui, "/a", nil); r.Body.String() != `["undefined","undefined","undefined","undefined"]` {
+	if r := serveGet(ui, "/a", nil); r.Body.String() != `["undefined","undefined","`+gone+`","`+gone+`"]` {
 		t.Errorf("router.work: %s", r.Body.String())
 	}
 	template := NewTenant(writeSite(t, map[string]string{
@@ -187,7 +192,7 @@ func TestUIHidesBenchmarkAndUploads(t *testing.T) {
 	if err := template.Run(); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if r := serveGet(template, "/a", nil); strings.Contains(r.Body.String(), "undefined") {
+	if r := serveGet(template, "/a", nil); strings.Contains(r.Body.String(), "undefined") || strings.Count(r.Body.String(), gone) != 2 {
 		t.Errorf("template: %s", r.Body.String())
 	}
 }

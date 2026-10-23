@@ -55,9 +55,10 @@ func buildBoundaryFixture(t *testing.T, routerScript string) (root string, tenan
 
 const boundaryFileRouter = `
 import { router } from "kitwork";
+import * as file from "kitwork/file";
 
 router.get((ctx) => {
-    return ctx.file(ctx.query("f"));
+    return ctx.file(file.open(ctx.query("f")));
 });
 `
 
@@ -74,7 +75,7 @@ func getBoundary(t *testing.T, tenant *Tenant, query string) *httptest.ResponseR
 func TestContextFileServesOwnFile(t *testing.T) {
 	_, tenant := buildBoundaryFixture(t, boundaryFileRouter)
 
-	rec := getBoundary(t, tenant, "own.txt")
+	rec := getBoundary(t, tenant, "app/localhost/own.txt")
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "OWN-FILE") {
 		t.Fatalf("ctx.file must serve the app's own file; got %d %q", rec.Code, rec.Body.String())
 	}
@@ -87,13 +88,13 @@ func TestTenantPreparesCanonicalPathBoundaries(t *testing.T) {
 	}
 }
 
-// The boundary is the app IDENTITY, not the domain folder (STABILITY.md §1). Leaving the domain
-// folder to reach an identity-level share is legitimate and must keep working — this is what stops
-// the fix from being quietly over-restrictive.
+// The boundary is the app IDENTITY, not the domain folder (STABILITY.md §1). A file of the app's folder
+// outside the domain's is the code zone's, app/shared.txt (KITWORK_FILE.md mục 1), and must keep working —
+// this is what stops the fix from being quietly over-restrictive.
 func TestContextFileAllowsIdentityLevelShare(t *testing.T) {
 	_, tenant := buildBoundaryFixture(t, boundaryFileRouter)
 
-	rec := getBoundary(t, tenant, "../shared.txt")
+	rec := getBoundary(t, tenant, "app/shared.txt")
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "IDENTITY-SHARED") {
 		t.Fatalf("identity-level share must remain reachable; got %d %q", rec.Code, rec.Body.String())
 	}
@@ -104,12 +105,22 @@ func TestContextFileAllowsIdentityLevelShare(t *testing.T) {
 func TestContextFileRejectsCrossAppTraversal(t *testing.T) {
 	_, tenant := buildBoundaryFixture(t, boundaryFileRouter)
 
-	rec := getBoundary(t, tenant, "../../victim-corp/victim.com/secret.txt")
-	if strings.Contains(rec.Body.String(), "TOP-SECRET-CROSS-TENANT") {
-		t.Fatalf("ctx.file escaped the app root: %q", rec.Body.String())
+	for _, path := range []string{"../../victim-corp/victim.com/secret.txt", "app/../victim-corp/victim.com/secret.txt"} {
+		rec := getBoundary(t, tenant, path)
+		if strings.Contains(rec.Body.String(), "TOP-SECRET-CROSS-TENANT") {
+			t.Fatalf("ctx.file escaped the app root: %q", rec.Body.String())
+		}
+		// file.open refuses the path as written, before anything is touched: the same failure whether the
+		// file exists or not, so it confirms nothing
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("%s: expected the handler's failure at file.open, got %d", path, rec.Code)
+		}
 	}
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 (a denial must not confirm the file exists), got %d", rec.Code)
+	// a handle that passes as written but leads nowhere the zone reaches answers 404, as a missing file
+	for _, path := range []string{"app/.env", "app/localhost/missing.txt"} {
+		if rec := getBoundary(t, tenant, path); rec.Code != http.StatusNotFound {
+			t.Fatalf("%s: expected 404 (a denial must not confirm the file exists), got %d", path, rec.Code)
+		}
 	}
 }
 
@@ -128,7 +139,7 @@ func TestStaticAndContextFileRejectCrossAppSymlink(t *testing.T) {
 		t.Fatal("zero-VM static serving followed a symlink outside the site")
 	}
 
-	contextRec := getBoundary(t, tenant, "external/secret.txt")
+	contextRec := getBoundary(t, tenant, "app/localhost/external/secret.txt")
 	if strings.Contains(contextRec.Body.String(), "TOP-SECRET-CROSS-TENANT") {
 		t.Fatal("ctx.file followed a symlink outside the app")
 	}
@@ -136,14 +147,15 @@ func TestStaticAndContextFileRejectCrossAppSymlink(t *testing.T) {
 
 const boundaryUploadRouter = `
 import { router } from "kitwork";
+import * as file from "kitwork/file";
 
 router.post((ctx) => {
-    const saved = ctx.request.saveFile("doc", ctx.query("dest"));
-    return ctx.json({ saved: saved });
+    const saved = file.open("uploads/").segment(ctx.query("name")).write(ctx.request.file("doc"));
+    return ctx.json({ saved: saved.path });
 });
 `
 
-func postUpload(t *testing.T, tenant *Tenant, dest, filename string) *httptest.ResponseRecorder {
+func postUpload(t *testing.T, tenant *Tenant, name, filename string) *httptest.ResponseRecorder {
 	t.Helper()
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
@@ -154,53 +166,62 @@ func postUpload(t *testing.T, tenant *Tenant, dest, filename string) *httptest.R
 	part.Write([]byte("UPLOADED-PAYLOAD"))
 	mw.Close()
 
-	req := httptest.NewRequest(http.MethodPost, "http://localhost/?dest="+dest, &body)
+	req := httptest.NewRequest(http.MethodPost, "http://localhost/?name="+name, &body)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	rec := httptest.NewRecorder()
 	tenant.Serve(rec, req)
 	return rec
 }
 
-// CONTROL: a normal upload inside the app must still succeed.
-func TestSaveFileAcceptsDestinationInsideApp(t *testing.T) {
+// CONTROL: an upload into the app's data must still succeed (KITWORK_FILE.md mục 9).
+func TestUploadWritesIntoTheAppsData(t *testing.T) {
 	root, tenant := buildBoundaryFixture(t, boundaryUploadRouter)
 
-	rec := postUpload(t, tenant, "uploads/report.txt", "report.txt")
-	if !strings.Contains(rec.Body.String(), "true") {
-		t.Fatalf("upload inside the app must succeed; got %q", rec.Body.String())
+	rec := postUpload(t, tenant, "report.bin", "report.bin")
+	if !strings.Contains(rec.Body.String(), `"saved":"uploads/report.bin"`) {
+		t.Fatalf("upload inside the app must succeed; got %d %q", rec.Code, rec.Body.String())
 	}
-	if _, err := os.Stat(filepath.Join(root, "acme", "localhost", "uploads", "report.txt")); err != nil {
-		t.Fatalf("uploaded file not written inside the app: %v", err)
+	content, err := os.ReadFile(filepath.Join(root, "acme", ".database", "files", "uploads", "report.bin"))
+	if err != nil || string(content) != "UPLOADED-PAYLOAD" {
+		t.Fatalf("uploaded file not written into the app's data: %q %v", content, err)
 	}
 }
 
 // An escaping upload destination is a WRITE primitive: dropping a file onto another app's
-// router.kitwork.js would hand it execution. Nothing may be created outside the app.
-func TestSaveFileRejectsEscapingDestination(t *testing.T) {
+// router.kitwork.js would hand it execution. segment() takes one name, so a name from the request never
+// climbs, and the client's file name is never a path. Nothing may be created outside the app.
+func TestUploadRefusesEscapingName(t *testing.T) {
 	root, tenant := buildBoundaryFixture(t, boundaryUploadRouter)
 
-	rec := postUpload(t, tenant, "../../victim-corp/victim.com/planted.txt", "planted.txt")
-	if strings.Contains(rec.Body.String(), "true") {
+	rec := postUpload(t, tenant, "../../../victim-corp/victim.com/planted.bin", "../../planted.bin")
+	if strings.Contains(rec.Body.String(), "saved") {
 		t.Fatalf("escaping upload reported success: %q", rec.Body.String())
 	}
-	if _, err := os.Stat(filepath.Join(root, "victim-corp", "victim.com", "planted.txt")); err == nil {
+	if _, err := os.Stat(filepath.Join(root, "victim-corp", "victim.com", "planted.bin")); err == nil {
 		t.Fatal("upload was written into another app's directory")
 	}
 }
 
-func TestSaveFileRejectsSymlinkedDestination(t *testing.T) {
+// A folder of the app's data that leads into another app through a link (a symlink, or on Windows a
+// junction) is refused by the zone's os.Root when the upload is written: nothing lands there.
+//
+// CONTROL: with Zone.Write writing the machine path first (os.MkdirAll and os.WriteFile of the app's
+// folder, .database/files and the names joined, as file.write did before 22/10/2026), the upload followed
+// the junction: "upload followed a link into another app".
+func TestUploadRefusesLinkedDestination(t *testing.T) {
 	root, tenant := buildBoundaryFixture(t, boundaryUploadRouter)
-	link := filepath.Join(root, "acme", "localhost", "external")
+	data := filepath.Join(root, "acme", ".database", "files")
+	if err := os.MkdirAll(data, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	target := filepath.Join(root, "victim-corp", "victim.com")
-	if err := os.Symlink(target, link); err != nil {
-		t.Skipf("symlink unavailable: %v", err)
-	}
+	linkFolder(t, target, filepath.Join(data, "uploads"))
 
-	rec := postUpload(t, tenant, "external/planted.txt", "planted.txt")
-	if strings.Contains(rec.Body.String(), "true") {
-		t.Fatalf("symlinked upload reported success: %q", rec.Body.String())
+	rec := postUpload(t, tenant, "planted.bin", "planted.bin")
+	if strings.Contains(rec.Body.String(), "saved") {
+		t.Fatalf("linked upload reported success: %q", rec.Body.String())
 	}
-	if _, err := os.Stat(filepath.Join(target, "planted.txt")); err == nil {
-		t.Fatal("upload followed a symlink into another app")
+	if _, err := os.Stat(filepath.Join(target, "planted.bin")); err == nil {
+		t.Fatal("upload followed a link into another app")
 	}
 }

@@ -54,13 +54,10 @@ func (c *Context) Redirect(url string, options ...any) (*Response, error) {
 	return c.Response().Redirect(value.New(url), options...)
 }
 
-// File answers with bytes (context.type("image/png").file(bytes)), or, on a template site, with a
-// file of the app by its path, resolved in the app.
+// File answers with a file of kitwork/file, served from the disk (context.file(file.open("exports/a.csv")),
+// KITWORK_FILE.md mục 9), or with bytes the handler made (context.type("image/png").file(bytes)).
 func (c *Context) File(data value.Value, options ...any) (*Response, error) {
-	if data.K == value.Bytes {
-		return c.Response().File(data, options...)
-	}
-	return c.Response().File(value.New(c.tenant().resolve(data.Text())), options...)
+	return c.Response().File(data, options...)
 }
 
 // Error answers the request with an error of the site's: its .error() hook, or in router.work the
@@ -145,15 +142,14 @@ func (c *Context) SetCookie(name string, data value.Value, options ...value.Valu
 func (c *Context) DeleteCookie(name string, options ...value.Value) *Response {
 	return c.Response().DeleteCookie(name, options...)
 }
-func (c *Context) Hostname() value.Value                   { return c.request.Hostname() }
-func (c *Context) Secure() value.Value                     { return c.request.Secure() }
-func (c *Context) OriginalURL() value.Value                { return c.request.OriginalURL() }
-func (c *Context) URL() value.Value                        { return c.request.URL() }
-func (c *Context) Href() value.Value                       { return c.request.Href() }
-func (c *Context) URI() value.Value                        { return c.request.URI() }
-func (c *Context) Pattern() value.Value                    { return c.request.Pattern() }
-func (c *Context) Route() value.Value                      { return c.request.Route() }
-func (c *Context) SaveFile(field, dest string) value.Value { return c.request.SaveFile(field, dest) }
+func (c *Context) Hostname() value.Value    { return c.request.Hostname() }
+func (c *Context) Secure() value.Value      { return c.request.Secure() }
+func (c *Context) OriginalURL() value.Value { return c.request.OriginalURL() }
+func (c *Context) URL() value.Value         { return c.request.URL() }
+func (c *Context) Href() value.Value        { return c.request.Href() }
+func (c *Context) URI() value.Value         { return c.request.URI() }
+func (c *Context) Pattern() value.Value     { return c.request.Pattern() }
+func (c *Context) Route() value.Value       { return c.request.Route() }
 
 func (c *Context) arguments(lambda *value.Lambda) []value.Value {
 	if lambda == nil {

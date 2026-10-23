@@ -30,7 +30,7 @@ func TestUIResponseOrderErrors(t *testing.T) {
 		"text-title":  "`.title()` là chữ của trang, chỉ đi với hàm trả lời vẽ trang (`.view()`, `.notFound()`, `.error()`)",
 		"type-view":   "`.type()` không hợp với `.view()`",
 		"type-json":   "`.type()` không hợp với `.json()`",
-		"file-path":   "`.file()` nhận bytes",
+		"file-path":   "`.file()` nhận một handle của kitwork/file hay bytes, không nhận chuỗi đường dẫn: `context.file(file.open(\"a.txt\"))`",
 		"after-file":  "`.header()` nối sau `.file()`",
 	}
 	files := map[string]string{"router.work": `import * as router from "kitwork/router";`}

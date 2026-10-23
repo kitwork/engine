@@ -5,8 +5,8 @@ package work
 // the URL's query, which request.query reads. "" when the body has no such field, and for a body that
 // is not a form, or not a well formed one. The body is read under the ceiling every body read has,
 // 1 MiB (or the host's, app.web({ maxBody }), when it is lower): past it the request answers 413 and
-// nothing more is read. A file of a multipart form is not a field: its name reads "" (the upload API is
-// still open, §14).
+// nothing more is read. A file of a multipart form is not a field: its name reads "", and request.file
+// reads it (request_upload.go); read after request.file, request.form counts only the fields' bytes.
 //
 // request.formValue stays what it was for every site: Go's FormValue, the body's field or else the
 // query's, read without this ceiling (legacy apps read their login forms with it). A body formValue or
@@ -63,6 +63,15 @@ func (r *Request) readForm() (url.Values, error) {
 	if req == nil {
 		r.formRead = true
 		return nil, nil
+	}
+	// request.file parsed the multipart body first: its fields, a file beside them not counted
+	// (request_upload.go)
+	if fields, parsed, err := r.uploadFields(); parsed {
+		if err != nil {
+			return nil, err
+		}
+		r.formRead, r.formFields = true, fields
+		return r.formFields, nil
 	}
 	if !r.bodyRead && goReadTheForm(req) {
 		if goFormSize(req) > formLimit() || goStoppedShort(req) {

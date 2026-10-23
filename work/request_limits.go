@@ -227,14 +227,9 @@ func (r *Request) Member(name string) (value.Value, bool) {
 }
 
 // hiddenUIRequestMembers are what a router.work handler does not see on the request: a benchmark loop
-// and the upload API, whose shape is still open (KITWORK_ROUTER §5). A template site keeps them.
-var hiddenUIRequestMembers = map[string]bool{"benchmark": true, "savefile": true, "multipartform": true}
+// and Go's multipart form (an upload is request.file, KITWORK_FILE.md mục 9). A template site keeps them.
+var hiddenUIRequestMembers = map[string]bool{"benchmark": true, "multipartform": true}
 
 func (r *Request) HiddenMember(name string) bool {
 	return hiddenUIRequestMembers[strings.ToLower(name)] && r.inUISite()
-}
-
-// HiddenMember of the context hides its saveFile shortcut in router.work, as the request's.
-func (c *Context) HiddenMember(name string) bool {
-	return strings.EqualFold(name, "saveFile") && c.request != nil && c.request.inUISite()
 }
