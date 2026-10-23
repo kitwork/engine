@@ -66,6 +66,13 @@ func (vm *VM) nativeMethod(target value.Value, method string, args []value.Value
 			result = vm.takeBack(result)
 		}
 	}()
+	if target.K == value.Proxy {
+		if host, ok := target.V.(CallerMethods); ok {
+			if answered, handled := host.InvokeFrom(vm, method, args); handled {
+				return answered
+			}
+		}
+	}
 	return target.Invoke(method, args...)
 }
 

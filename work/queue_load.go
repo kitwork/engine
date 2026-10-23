@@ -138,6 +138,7 @@ func (t *Tenant) runQueueFile(bc *compiler.Bytecode, relative string, say func(s
 	vm.Builtins = []value.Value{kitworkFunc}
 	vm.Globals = globals
 	vm.MaxEnergy = t.MaxEnergy
+	defer loadingFile(vm)()
 	if result := vm.Run(); result.K == value.Invalid {
 		say(fmt.Sprintf("[Queue] run %s: %s", relative, result.Text()))
 		return nil, nil, false
@@ -195,7 +196,9 @@ func (t *Tenant) readQueueConfig(file string) queueConfig {
 	vm.Builtins = t.vm.Builtins
 	vm.Globals = globals
 	vm.MaxEnergy = t.MaxEnergy
+	finished := loadingFile(vm)
 	result := vm.Run()
+	finished()
 	if result.K != value.Map {
 		fmt.Printf("[Queue] run %s: %s\n", where, result.Text())
 		return config

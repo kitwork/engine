@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestCompilerV15GoldenContract(t *testing.T) {
-	if CompilerSchemaVersion != 15 {
-		t.Fatalf("CompilerSchemaVersion = %d, want schema v15", CompilerSchemaVersion)
+func TestCompilerV16GoldenContract(t *testing.T) {
+	if CompilerSchemaVersion != 16 {
+		t.Fatalf("CompilerSchemaVersion = %d, want schema v16", CompilerSchemaVersion)
 	}
 	// Bytecode 3 (14/10/2026) moved the fingerprint and every checksum below with the version alone: each
 	// fixture's instructions, constants and debug table are those bytecode 2 wrote (none needs a wide
@@ -21,10 +21,17 @@ func TestCompilerV15GoldenContract(t *testing.T) {
 	// database spellings removed) moved the fingerprint alone: no fixture imports one. Schema 14 (22/10/2026, a
 	// job named by its export) moved the fingerprint alone: no fixture imports a job file or aliases an export.
 	// Schema 15 (22/10/2026, a schedule named by its export) moved the fingerprint alone: no fixture imports a
-	// file of .schedule/ or writes cron.
-	const expectedFingerprint = "d17e01ab067f55b6e08ac8d15e496fa6757558ab847e20f0a608b256391996af"
+	// file of .schedule/ or writes cron. Schema 16 (22/10/2026, go moves into kitwork/routine) moved the
+	// fingerprint alone: no fixture writes go or imports kitwork/routine.
+	const expectedFingerprint = "1fd92fc738cb012e76c3a1f08c73bb3a6bf6670c76388972c7470b70d142413b"
 	if got := Fingerprint(); got != expectedFingerprint {
 		t.Fatalf("compiler fingerprint = %q, want %q", got, expectedFingerprint)
+	}
+	// schema 15 compiled go(fn) bare, go off "kitwork" and a function of routine.go that uses the request: its
+	// artifacts are not reused
+	const schema15 = "d17e01ab067f55b6e08ac8d15e496fa6757558ab847e20f0a608b256391996af"
+	if stamped := compilerFingerprintFor(15); hex.EncodeToString(stamped[:]) != schema15 || Fingerprint() == schema15 {
+		t.Fatalf("schema 15 on bytecode 4 stamps %x, the current compiler %s: want %s and another", stamped, Fingerprint(), schema15)
 	}
 	// schema 14 bundled a file of .schedule/ without naming its schedules, and compiled cron: its artifacts
 	// are not reused

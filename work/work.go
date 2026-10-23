@@ -84,7 +84,7 @@ func (w *KitWork) Safe() value.Value { return value.NewSafeFunction() }
 //	http.go      HTTP()          jwt.go       JWT()         render.go    Render()
 //	qrcode.go    Qrcode()        napas.go     Napas()       file.go      File()
 //	collection.go Collection()   (directory-backed Markdown content)
-//	browser.go   Browser()       chromedp.go  Chromedp()/Screenshot()   go.go  Go()
+//	browser.go   Browser()       chromedp.go  Chromedp()/Screenshot()   routine.go  Routine()
 //	env.go       Env()           (per-tenant, path-isolated env)
 type KitWork struct {
 	tenant       *Tenant
@@ -97,14 +97,17 @@ type KitWork struct {
 }
 
 // MissingMember is a word the module kitwork has not. An older word of it (sqlite, removed on 22/10/2026;
-// cron, 22/10/2026) is the error that says what the spec writes instead; the compiler refuses its import in
-// the same words. Any other word is nothing, as it was.
+// cron, 22/10/2026; go, 22/10/2026, now routine.go of kitwork/routine) is the error that says what the spec
+// writes instead; the compiler refuses its import in the same words. Any other word is nothing, as it was.
 func (w *KitWork) MissingMember(name string) value.Value {
 	if spelling, removed := statement.RemovedKitworkWord(name); removed {
 		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf(`%s của "kitwork" đã bỏ: %s`, name, spelling))
 	}
-	if name == "cron" {
+	switch name {
+	case "cron":
 		return value.InvalidFailure(value.InvalidArgumentCode, compiler.CronRemoved)
+	case "go":
+		return value.InvalidFailure(value.InvalidArgumentCode, compiler.RoutineGoRemoved)
 	}
 	return value.Value{K: value.Nil}
 }

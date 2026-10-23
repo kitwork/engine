@@ -786,29 +786,35 @@ func (e *Engine) cleanupLoop(interval time.Duration) {
 	for {
 		select {
 		case <-ticker.C:
-			var evicted []*work.Tenant
-			e.mu.Lock()
-			timeout := e.idleTimeout
-			if timeout > 0 { // 0 = không evict (giữ ấm mọi tenant)
-				now := time.Now()
-				for domain, cached := range e.cache {
-					if cached.isExpired(now, timeout) {
-						slog.Info("Evicting idle tenant from cache", "domain", domain)
-						evicted = append(evicted, cached.tenant)
-						delete(e.cache, domain)
-					}
-				}
-			}
-			e.mu.Unlock()
-			for _, tenant := range evicted {
-				e.drainTenant(tenant)
-				e.closeTenantSearch(tenant)
-				if owner := tenant.AppRuntime(); owner != nil {
-					owner.RemoveSite(tenant.Domain())
-				}
-			}
+			e.evictIdle(time.Now())
 		case <-e.stopCleanup:
 			return
+		}
+	}
+}
+
+// evictIdle drains and drops every tenant idle past the idle timeout. A tenant whose routines of go are
+// still running is not idle: routine.go lives as long as its app, not as long as its site is visited
+// (KITWORK_ROUTINE.md mục 3), so the site stays until they end.
+func (e *Engine) evictIdle(now time.Time) {
+	var evicted []*work.Tenant
+	e.mu.Lock()
+	timeout := e.idleTimeout
+	if timeout > 0 { // 0 = không evict (giữ ấm mọi tenant)
+		for domain, cached := range e.cache {
+			if cached.isExpired(now, timeout) && cached.current().RunningRoutines() == 0 {
+				slog.Info("Evicting idle tenant from cache", "domain", domain)
+				evicted = append(evicted, cached.tenant)
+				delete(e.cache, domain)
+			}
+		}
+	}
+	e.mu.Unlock()
+	for _, tenant := range evicted {
+		e.drainTenant(tenant)
+		e.closeTenantSearch(tenant)
+		if owner := tenant.AppRuntime(); owner != nil {
+			owner.RemoveSite(tenant.Domain())
 		}
 	}
 }

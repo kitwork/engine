@@ -83,7 +83,7 @@ Kitwork hỗ trợ các hàm biến đổi dữ liệu bậc cao ngay trong Core
 Bổ sung cấu hình danh sách domain được phép gọi (`egress_allowed_domains`) trong cấu hình YAML của mỗi Tenant. Tự động kiểm tra và chặn các yêu cầu HTTP từ VM gọi tới mạng nội bộ (`localhost`, `192.168.*`) để phòng chống tấn công SSRF.
 
 ### 2. Durable Worker Queue & Background Jobs (Hàng đợi tác vụ nền bền bỉ)
-Thay vì thực thi Goroutine trực tiếp trên RAM qua hàm `go()`, phát triển hệ thống Queue có sự bền bỉ (Durable). Các task nền sẽ được lưu vào cơ sở dữ liệu và xử lý bởi Go-native Worker Pools hỗ trợ retry (exponential backoff) và hàng đợi lỗi (DLQ).
+Thay vì thực thi trực tiếp trên RAM qua `routine.go()` của `kitwork/routine`, phát triển hệ thống Queue có sự bền bỉ (Durable). Các task nền sẽ được lưu vào cơ sở dữ liệu và xử lý bởi Go-native Worker Pools hỗ trợ retry (exponential backoff) và hàng đợi lỗi (DLQ).
 
 ### 3. Distributed Shared State (Bộ nhớ đệm phân tán)
 Cung cấp Driver kết nối Redis hoặc cơ chế đồng bộ Cluster State qua gRPC để chia sẻ dữ liệu bộ nhớ đệm `cache` của các Tenant khi chạy mở rộng trên nhiều máy chủ vật lý.

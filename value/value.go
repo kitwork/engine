@@ -59,7 +59,7 @@ func (v Value) Invoke(name string, args ...Value) Value {
 	}
 
 	// fmt.Printf("[Value] Invoking method: %s on kind: %s\n", name, v.K.String())
-	attr := v.Get(name)
+	attr := v.member(name, false)
 	if attr.K == Func {
 		if fn, ok := attr.V.(Method); ok {
 			return fn(v, args...)
@@ -99,6 +99,13 @@ func (v Value) Call(name string, args ...Value) Value {
 	}
 	if fo, ok := v.V.(*FuncObject); ok {
 		return fo.Fn(args...)
+	}
+	if fn, ok := v.V.(*CallerFunction); ok && fn.Call != nil {
+		// a host calling it lends no VM
+		return fn.Call(nil, args)
+	}
+	if bound, ok := v.V.(*BoundMethod); ok && bound != nil {
+		return bound.Function.Call(name, args...)
 	}
 
 	if fn, ok := v.V.(reflect.Value); ok {

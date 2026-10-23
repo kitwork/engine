@@ -109,6 +109,10 @@ func (vm *VM) nativeCallback(function value.Value, args ...value.Value) value.Va
 		if handler, ok := function.V.(value.ProxyHandler); ok && function.K == value.Proxy {
 			return handler.OnInvoke("", args...)
 		}
+		if caller, ok := function.V.(*value.CallerFunction); ok && function.K == value.Func {
+			// handed this VM, as CALL hands it (caller.go)
+			return caller.Call(vm, args)
+		}
 		return function.Call(function.Text(), args...)
 	})
 }

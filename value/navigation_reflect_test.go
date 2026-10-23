@@ -105,3 +105,38 @@ func BenchmarkStructReflectionMemberLookup(b *testing.B) {
 }
 
 var benchmarkResult Value
+
+type navigationBoundFixture struct{ name string }
+
+func (fixture *navigationBoundFixture) Echo(message string) string {
+	return fixture.name + ":" + message
+}
+
+// An object of a type BindMethods names gives a method read without its call as a BoundMethod that names
+// the object and the method, and calling it calls the method; a call after a dot runs the method as
+// before, and an object of another type still gives the Go method value.
+//
+// CONTROL: with reflect never binding, the read gave the Go method value ("read = reflect.Value").
+func TestBoundMethodNamesItsObject(t *testing.T) {
+	BindMethods((*navigationBoundFixture)(nil))
+	object := New(&navigationBoundFixture{name: "a"})
+	read := object.Get("echo")
+	bound, ok := read.V.(*BoundMethod)
+	if read.K != Func || !ok {
+		t.Fatalf("read = %T, want a *BoundMethod", read.V)
+	}
+	if bound.Object.V != object.V || bound.Name != "echo" {
+		t.Fatalf("bound = %+v, want the object and echo", bound)
+	}
+	if called := read.Call("echo", New("x")); called.Text() != "a:x" {
+		t.Fatalf("calling the bound method gave %s", called.Text())
+	}
+	if invoked := object.Invoke("echo", New("y")); invoked.Text() != "a:y" {
+		t.Fatalf("invoke gave %s", invoked.Text())
+	}
+	if other := New(&navigationReflectFixture{Name: "b"}).Get("echo"); other.K != Func {
+		t.Fatalf("another type's method read = %v", other)
+	} else if _, isBound := other.V.(*BoundMethod); isBound {
+		t.Fatal("a type BindMethods did not name gave a BoundMethod")
+	}
+}

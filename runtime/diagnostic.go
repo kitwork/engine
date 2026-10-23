@@ -48,6 +48,9 @@ type Diagnostic struct {
 	Function   string
 	Stack      []StackFrame
 	Suppressed []*Diagnostic
+	// Cause is the failure this one wraps, a runtime error itself: what failed among the things a host
+	// call ran (WrapFailure). safe gives it as error.cause; nil for a failure that wraps none.
+	Cause *Diagnostic
 }
 
 func (d *Diagnostic) Error() string {
@@ -99,6 +102,10 @@ func (d *Diagnostic) Error() string {
 		text := suppressed.Error()
 		text = strings.ReplaceAll(text, "\n", "\n        ")
 		out.WriteString(text)
+	}
+	if d.Cause != nil {
+		out.WriteString("\n    cause: ")
+		out.WriteString(strings.ReplaceAll(d.Cause.Error(), "\n", "\n        "))
 	}
 	return out.String()
 }

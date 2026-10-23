@@ -216,7 +216,12 @@ func (r *Request) inUISite() bool {
 // template site reads request.json as the property it was.
 func (r *Request) Member(name string) (value.Value, bool) {
 	if strings.EqualFold(name, "json") && r.inUISite() {
-		return value.NewFunc(func(args ...value.Value) value.Value { return r.jsonWithChoices(args...) }), true
+		// a method of the request, as its others read without a call are (value.BindMethods)
+		return value.Value{K: value.Func, V: &value.BoundMethod{
+			Object:   value.Value{K: value.Struct, V: r},
+			Name:     name,
+			Function: value.NewFunc(func(args ...value.Value) value.Value { return r.jsonWithChoices(args...) }),
+		}}, true
 	}
 	return value.Value{}, false
 }

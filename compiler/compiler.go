@@ -885,6 +885,9 @@ func (c *Compiler) Compile(node Node) error {
 		if err := c.checkSafeCall(n); err != nil {
 			return err
 		}
+		if err := c.checkBareGo(n); err != nil {
+			return err
+		}
 		if err := c.Compile(n.Function); err != nil {
 			return err
 		}

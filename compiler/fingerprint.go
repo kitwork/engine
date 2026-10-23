@@ -105,7 +105,15 @@ import (
 // artifact of schema 14 that imports a .schedule/ file holds handles with no name, and one that writes
 // cron would run until the word fails where it is read: the bump retires both. A program that writes
 // neither compiles as before, byte for byte. No opcode or operand changed.
-const CompilerSchemaVersion uint16 = 15
+//
+// 16 (22/10/2026, KITWORK_ROUTINE.md, go moves into kitwork/routine): go(fn) written bare, go read off
+// "kitwork" (import { go } from "kitwork", kitwork().go), a word kitwork/routine has not, a function of
+// routine.go that uses context, request or response from outside it, and a routine.wait that mixes functions
+// with handles or puts retry or timeout on a handle are compile errors (routine.go). A cached artifact of
+// schema 15 that writes one of them would run until the call fails where it runs, instead of the file
+// failing where it is written: the bump retires it. A program that writes none of them compiles as before,
+// byte for byte. No opcode or operand changed.
+const CompilerSchemaVersion uint16 = 16
 
 var currentCompilerFingerprint = compilerFingerprintFor(CompilerSchemaVersion)
 

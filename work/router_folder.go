@@ -1002,6 +1002,8 @@ func runFolderRouter(t *Tenant, n *RouteNode, bc *compiler.Bytecode) error {
 		}
 		defer func() { fr.callSite = nil }()
 	}
+	// a router only declares as it loads: routine.go or routine.wait at its top level is refused
+	defer loadingFile(vm)()
 	if result := vm.Run(); result.K == value.Invalid {
 		return fmt.Errorf("%s", result.Text())
 	}

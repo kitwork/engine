@@ -180,7 +180,35 @@ type CallOnly interface {
 	CallOnly(name string) bool
 }
 
-func (v Value) Get(key string) Value {
+// BoundMethod is a method of a host object read without its call (const header = context.header):
+// Function is the method, Object the object it belongs to. Calling it calls Function, as calling the
+// method read would; a host that must know whose a function is reads Object and Name (the copy a routine
+// makes sees the request's objects its own way, their methods with them: work/routine_snapshot.go). Only
+// an object of a type that asks for it (BindMethods) gives its methods this way, and only when they are
+// read: a call after a dot (Invoke) runs the method as it always did.
+type BoundMethod struct {
+	Object   Value
+	Name     string
+	Function Value
+}
+
+// boundTypes are the types BindMethods named.
+var boundTypes sync.Map // map[reflect.Type]struct{}
+
+// BindMethods makes the type of each object give its methods read without a call as BoundMethod values.
+func BindMethods(objects ...any) {
+	for _, object := range objects {
+		reflectedType := reflect.TypeOf(object)
+		boundTypes.Store(reflectedType, struct{}{})
+		reflectedMemberCache.Delete(reflectedType)
+	}
+}
+
+func (v Value) Get(key string) Value { return v.member(key, true) }
+
+// member is Get; bind is false for the read a call after a dot makes (Invoke), which runs a method at
+// once: only a method read without its call is a BoundMethod (BindMethods).
+func (v Value) member(key string, bind bool) Value {
 	if v.K == Invalid {
 		// A failure (a failed db query, fail("…")) is K==Invalid carrying its message in .V. A program
 		// never holds one: it ends the run the instruction that made it (safe(() => …) is how a program
@@ -236,7 +264,7 @@ func (v Value) Get(key string) Value {
 		if hidden, ok := v.V.(HiddenMembers); ok && hidden.HiddenMember(key) {
 			return Value{K: Nil}
 		}
-		res := v.reflect(key)
+		res := v.reflect(key, bind)
 		if res.K != Nil {
 			return res
 		}
@@ -306,6 +334,8 @@ type reflectedMethod struct {
 type reflectedMembers struct {
 	methods map[string]reflectedMethod
 	fields  map[string]int
+	// bound: the type gives its methods read without a call as BoundMethod values (BindMethods)
+	bound bool
 }
 
 var reflectedMemberCache sync.Map // map[reflect.Type]*reflectedMembers
@@ -318,6 +348,7 @@ func membersFor(reflectedType reflect.Type) *reflectedMembers {
 	members := &reflectedMembers{
 		methods: make(map[string]reflectedMethod, reflectedType.NumMethod()),
 	}
+	_, members.bound = boundTypes.Load(reflectedType)
 	for index := 0; index < reflectedType.NumMethod(); index++ {
 		method := reflectedType.Method(index)
 		key := strings.ToLower(method.Name)
@@ -356,7 +387,7 @@ func callOnly(host any, name string) bool {
 	return ok && marked.CallOnly(name)
 }
 
-func (v Value) reflect(key string) Value {
+func (v Value) reflect(key string, bind bool) Value {
 	if v.V == nil {
 		return Value{K: Nil}
 	}
@@ -372,6 +403,9 @@ func (v Value) reflect(key string) Value {
 			// a method read as a field still has its error channel: a Go method of no argument that
 			// returns only an error (napas.validate()) fails with it, as a call of it does
 			return reflectedCallResult(key, method.Call(nil))
+		}
+		if bind && members.bound {
+			return Value{K: Func, V: &BoundMethod{Object: v, Name: key, Function: Value{K: Func, V: method}}}
 		}
 		return Value{K: Func, V: method}
 	}

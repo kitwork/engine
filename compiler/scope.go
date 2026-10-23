@@ -101,6 +101,15 @@ type binding struct {
 	scheduleModule bool
 	scheduleRule   string
 	scheduleHandle string
+	// routineModule: a name bound to the module kitwork/routine itself; routineWord: a word of it bound by
+	// name (import { go } from "kitwork/routine"); routineHandle: a const holding what a go() of it gave
+	// (compiler/routine.go).
+	routineModule bool
+	routineWord   string
+	routineHandle bool
+	// parameterPart: a name a destructured parameter gives (({ request }) => …), which routineRequest
+	// reads as the parameter it is.
+	parameterPart bool
 }
 
 type lexicalScope struct {
@@ -146,8 +155,10 @@ type resolution struct {
 	// all bindings and functions, in source order, for tests and scans.
 	bindings  []*binding
 	functions []*functionScope
-	// declaresSafe: the program declares or assigns a name safe somewhere (checkSafeCall).
+	// declaresSafe: the program declares or assigns a name safe somewhere (checkSafeCall); writesGo: it
+	// assigns a global go, one no scope declares (checkBareGo).
 	declaresSafe bool
+	writesGo     bool
 	// once gives an update or a compound assignment of a member or an item whose object or key does
 	// more than read (a[i++]++, get().n += 1) the slots they are kept in, so each runs once
 	// (evaluateOnce, 15/10/2026).
@@ -198,6 +209,10 @@ type resolver struct {
 	schedule         *ScheduleBundle
 	inScheduleModule bool
 	scheduleChains   map[*MethodCallExpression]bool
+	// routineGo marks the functions handed to routine.go; goFunctions are those being read, outermost
+	// first: a name of the request one of them reads from outside is refused (routineRequest).
+	routineGo   map[*FunctionLiteral]bool
+	goFunctions []*functionScope
 }
 
 // resolveProgram resolves every name of a program and gives each variable its slot.
@@ -241,6 +256,7 @@ func (c *Compiler) resolveObserved(
 	r.assignEnvironments()
 	r.assignOnce()
 	r.result.declaresSafe = declaresName(r.result, "safe")
+	r.result.writesGo = writesGlobal(r.result, "go")
 	return r.result, nil
 }
 
@@ -253,6 +269,16 @@ func declaresName(result *resolution, name string) bool {
 			return true
 		}
 	}
+	for _, function := range result.functions {
+		if function.written[name] {
+			return true
+		}
+	}
+	return false
+}
+
+// writesGlobal reports a write of name that no scope declares, in any function of the program.
+func writesGlobal(result *resolution, name string) bool {
 	for _, function := range result.functions {
 		if function.written[name] {
 			return true
@@ -313,12 +339,14 @@ func (r *resolver) hoist(statements []Statement) {
 			r.declarationSite(node)
 			r.queueDeclaration(node)
 			r.scheduleDeclaration(node)
+			r.routineDeclaration(node)
 			alias := r.databaseAlias(node)
 			for _, name := range node.Names {
 				declared := r.declare(name, kind)
 				r.markDatabase(node, name, declared, alias)
 				r.markQueue(node, name, declared)
 				r.markSchedule(node, name, declared)
+				r.markRoutine(node, name, declared)
 				if declared != nil && node.Function {
 					declared.constant = false
 				}
@@ -427,6 +455,9 @@ func (r *resolver) reference(name *Identifier, write bool) {
 		return
 	}
 	if r.databases && !r.databaseReference(name, found) {
+		return
+	}
+	if r.routineRequest(name, found) {
 		return
 	}
 	r.result.slots[name] = found
@@ -629,6 +660,9 @@ func (r *resolver) expression(expression Expression) {
 		r.expression(node.Consequence)
 		r.expression(node.Alternative)
 	case *CallExpression:
+		if r.routineNamedCall(node) {
+			return
+		}
 		r.expression(node.Function)
 		for _, argument := range node.Arguments {
 			r.expression(argument)
@@ -644,6 +678,9 @@ func (r *resolver) expression(expression Expression) {
 			return
 		}
 		if r.scheduleMember(node.Object, node.Property) {
+			return
+		}
+		if r.routineMember(node.Object, node.Property) {
 			return
 		}
 		r.expression(node.Object)
@@ -705,6 +742,9 @@ func (r *resolver) expression(expression Expression) {
 		if r.scheduleCall(node) {
 			return
 		}
+		if r.routineCall(node) {
+			return
+		}
 		r.expression(node.Object)
 		for _, argument := range node.Arguments {
 			r.expression(argument)
@@ -762,6 +802,10 @@ func (r *resolver) functionLiteral(literal *FunctionLiteral) {
 		defer func() { r.inScheduleModule = outer }()
 	}
 	r.enterFunction(literal)
+	if r.routineGo[literal] {
+		r.goFunctions = append(r.goFunctions, r.function)
+		defer func() { r.goFunctions = r.goFunctions[:len(r.goFunctions)-1] }()
+	}
 	for _, parameter := range literal.Parameters {
 		r.declare(parameter, bindingParameter)
 	}

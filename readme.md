@@ -435,8 +435,10 @@ time of a schedule and each send of a job is a run stored in `kitwork_runs` of t
 KitDB file before it runs, never in a database of the host, with deduplication keys, retries with
 backoff, a time limit per attempt and replay of failed jobs; a retried handler runs again, so it must
 be idempotent. `docs/KITWORK_SCHEDULE.md` and `docs/KITWORK_QUEUE.md` in the Kitwork repository say
-how an author declares them. `go(fn)` runs detached work that may be
-lost on restart, on purpose. Server-sent events go through a broker that outlives the request:
+how an author declares them. `routine.go(fn)` of `kitwork/routine` runs work after the answer and
+`routine.wait(a, b)` runs functions at once, each in a VM of its own on a copy of what it reads; both
+live in memory and are lost on restart, on purpose (`docs/KITWORK_ROUTINE.md`). Server-sent events go
+through a broker that outlives the request:
 
 ```js
 router.get((ctx, sse) => sse.connect({ channel: "orders", retry: 3000 }));

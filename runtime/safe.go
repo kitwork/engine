@@ -14,7 +14,8 @@ import (
 //	{ ok: false, value: null, error: { message, code, at, cause } }      f failed, anywhere inside, however deep
 //
 // error.progress is there too for a PARTIAL failure. cause is the failure this one wraps, of the same
-// shape; null while no failure of the engine carries the one it wraps. The frame gives the failure a floor: a failure in
+// shape (Diagnostic.Cause: routine.wait of several functions wraps the first that failed); null for a
+// failure that wraps none. The frame gives the failure a floor: a failure in
 // f unwinds f's frames, running their defers, down to it and no further (ExecuteLambda), so the program
 // goes on after safe. What safe catches is a runtime error of the program, or of something the program
 // asked for (a query, a body read, a call): fail, a call of what is not a function, an operation on
@@ -67,7 +68,7 @@ func (vm *VM) safeResult(ip int, result value.Value) value.Value {
 		if diagnostic.Code != DiagnosticRuntimeError {
 			return result
 		}
-		return safeFailure(diagnostic.Message, diagnostic.CauseCode, diagnosticAt(diagnostic), diagnostic.Progress)
+		return safeFailure(diagnostic.Message, diagnostic.CauseCode, diagnosticAt(diagnostic), diagnostic.Progress, diagnostic.Cause)
 	}
 	// A host function safe called directly failed without a frame of its own: the failure is at the
 	// call of safe.
@@ -83,12 +84,25 @@ func (vm *VM) safeResult(ip int, result value.Value) value.Value {
 	if code, never := uncatchableCode(failure.Code); never {
 		return vm.diagnosticValue(code, failure.Message, ip)
 	}
-	return safeFailure(failure.Message, failure.Code, locationAt(vm.currentLocation(ip)), failure.Progress)
+	return safeFailure(failure.Message, failure.Code, locationAt(vm.currentLocation(ip)), failure.Progress, nil)
 }
 
 // safeFailure is { ok: false, value: null, error: { message, code, at, cause } }, with error.progress for
 // PARTIAL.
-func safeFailure(message, code, at string, progress value.Value) value.Value {
+func safeFailure(message, code, at string, progress value.Value, cause *Diagnostic) value.Value {
+	return value.New(map[string]value.Value{
+		"ok":    value.FALSE,
+		"value": {K: value.Nil},
+		"error": errorObject(message, code, at, progress, cause, 0),
+	})
+}
+
+// causeDepth bounds how many causes an error object shows: the engine wraps a failure once per host call
+// that reports it, so a deeper chain is one no program reads to its end.
+const causeDepth = 16
+
+// errorObject is { message, code, at, cause }, with progress for PARTIAL; cause is the same shape, or null.
+func errorObject(message, code, at string, progress value.Value, cause *Diagnostic, depth int) value.Value {
 	code = value.ClosedCode(code)
 	failure := map[string]value.Value{
 		"message": value.NewString(message),
@@ -102,11 +116,10 @@ func safeFailure(message, code, at string, progress value.Value) value.Value {
 	if code == value.PartialCode && progress.K != value.Invalid {
 		failure["progress"] = progress
 	}
-	return value.New(map[string]value.Value{
-		"ok":    value.FALSE,
-		"value": {K: value.Nil},
-		"error": value.New(failure),
-	})
+	if cause != nil && depth < causeDepth {
+		failure["cause"] = errorObject(cause.Message, cause.FailureCode(), diagnosticAt(cause), cause.Progress, cause.Cause, depth+1)
+	}
+	return value.New(failure)
 }
 
 // FailureObject is the error object of a failure, the shape safe gives as error, for a host that
@@ -116,17 +129,17 @@ func safeFailure(message, code, at string, progress value.Value) value.Value {
 func FailureObject(failure value.Value) value.Value {
 	if diagnostic, ok := DiagnosticFrom(failure); ok {
 		if diagnostic.Code != DiagnosticRuntimeError {
-			object := safeFailure(diagnostic.Message, "", diagnosticAt(diagnostic), value.Value{}).Get("error")
+			object := errorObject(diagnostic.Message, "", diagnosticAt(diagnostic), value.Value{}, nil, 0)
 			object.Map()["code"] = value.NewString(string(diagnostic.Code))
 			return object
 		}
-		return safeFailure(diagnostic.Message, diagnostic.CauseCode, diagnosticAt(diagnostic), diagnostic.Progress).Get("error")
+		return errorObject(diagnostic.Message, diagnostic.CauseCode, diagnosticAt(diagnostic), diagnostic.Progress, diagnostic.Cause, 0)
 	}
 	attached, ok := value.FailureFrom(failure)
 	if !ok {
 		attached = value.NewFailure(value.DefaultFailureCode, failure.Text())
 	}
-	return safeFailure(attached.Message, attached.Code, "", attached.Progress).Get("error")
+	return errorObject(attached.Message, attached.Code, "", attached.Progress, nil, 0)
 }
 
 // Failure is the failure value of this diagnostic, for a host that holds it as a Go error

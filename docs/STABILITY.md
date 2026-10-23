@@ -363,26 +363,56 @@ their stable owner scope, never a request scope retained only for authorization.
 
 ## 4. Detached background work
 
-`kitwork().go(fn)` must snapshot its execution inputs before returning:
+`routine.go(fn)` and `routine.wait(fn…)` of `kitwork/routine` (`docs/KITWORK_ROUTINE.md`
+of the Kitwork repository) run each function in a pooled VM of its own, with
+the app's energy limit and a frame ceiling of its own. Before either returns,
+the function is copied with what it reads from outside:
 
-- builtins, globals, top-level variables, arguments, and the lambda scope chain;
+- the lambda scope chain, deep: the objects and arrays its variables hold,
+  with sharing and cycles kept; each attempt of a retry starts from that copy
+  again;
 - the immutable Program reference carried by the lambda;
-- the app energy limit.
+- the tenant's builtins, globals and top-level variables, as any VM gets them.
 
-The detached lambda must not reference a mutable request frame that can be
-returned to the VM pool. Every accepted task is tracked by its app. App shutdown
-stops accepting tasks, cancels pending work, and waits for accepted work to
-finish before closing app resources.
+No routine writes a map another goroutine reads: a function's write to an
+outer variable never reaches the caller, and two functions of one wait never
+share an object. Objects of the host stay shared and guard themselves. The
+request's own objects are not copied: a function of `routine.go` reads none of
+them (the request may be over), a function of `routine.wait` reads them one
+function at a time and never answers the request. A method of one of them read
+as a value (`const header = context.header`) goes with its object, under the
+same rules.
 
-Site eviction and generation replacement do not cancel app-owned detached
-work. The app task group drains before scheduler and app capabilities close;
-app-owned database connections close last, then the host closes shared KitDB
-and search managers after all app runtimes drain.
+Every routine is counted by its app's task group, within a per-app limit; past
+it `go` and `wait` fail at once, nothing waits in line. A routine of
+`routine.go` belongs to the tenant, the site generation, that started it: it
+outlives its request, and stops when that generation is replaced, its site is
+removed, or the app closes. An idle site is not evicted from memory while one
+of its routines runs. A generation waits for its routines to stop before it
+retires, for two seconds at most: a routine blocked in a host call that does
+not hear the stop ends when the call returns, with a warning in the log, and a
+hot reload is not held by it. A function of `routine.wait` belongs to its
+caller and stops with the caller's context; `wait` returns only once all its
+functions have ended. A failure of a `routine.go` that no wait reads is logged
+with its app, site, code, message and place once the call that started it (its
+request, job or routine) is over. A stop is cooperative: a VM stops at its next
+checkpoint, a host call blocked outside the VM when it returns.
+
+App shutdown stops accepting tasks, cancels running work, and waits for
+accepted work to finish before closing app resources. The app task group
+drains before scheduler and app capabilities close; app-owned database
+connections close last, then the host closes shared KitDB and search managers
+after all app runtimes drain.
 
 ## 5. Public API compatibility
 
-- Methods exported through `import { ... } from "kitwork"` are public API.
-- Removing or changing a public method requires an explicit deprecation period.
+- Methods exported through `import { ... } from "kitwork"` and the
+  `kitwork/…` modules are public API.
+- The specs `docs/KITWORK_*.md` of the Kitwork repository are the source of
+  truth. When a spec replaces a spelling, the old one is removed in the same
+  change and becomes a compile or boot error that names the new spelling: no
+  deprecation period, no alias. `kitwork().go(fn)`, now `routine.go(fn)` of
+  `kitwork/routine` (22/10/2026), is one.
 - Contract tests must execute representative `.kitwork.js` fixtures through
   the real compiler, VM, router, and response path.
 - Unit tests that only assert a non-nil adapter do not prove integration.

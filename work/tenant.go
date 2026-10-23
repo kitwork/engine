@@ -93,6 +93,11 @@ type Tenant struct {
 	requestClosing bool
 	closeOnce      sync.Once
 
+	// routines are the routines of go this tenant started (routine.go): they outlive their request and
+	// stop when the tenant closes.
+	routinesMu sync.Mutex
+	routines   *routineGroup
+
 	// App-only compatibility tenants have no site generation.
 	capabilitiesMu    sync.Mutex
 	capabilitiesCache *capabilities.InstanceCache
@@ -923,6 +928,10 @@ func (t *Tenant) Close() {
 			releaseSSEBroker(t.brokerKey())
 		}
 		t.requestWG.Wait()
+		// the routines of go outlive their requests, not the generation: they stop before it retires, and
+		// with them what they hold of it (KITWORK_ROUTINE.md mục 3), within routineStopGrace. An idle site
+		// is not closed while one runs (core's evictIdle).
+		t.stopRoutines()
 		if t.generation != nil {
 			t.generation.Retire()
 		} else if t.respCache != nil {

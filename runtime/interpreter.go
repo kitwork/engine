@@ -684,6 +684,15 @@ func (vm *VM) callHost(callable value.Value, args []value.Value) (result value.V
 			return vm.nativeValue("function object call", func() value.Value {
 				return function.Fn(args...)
 			}), true
+		case *value.CallerFunction:
+			// the host is handed this VM: the request it runs for, where the call is (caller.go)
+			return vm.nativeValue("function call", func() value.Value {
+				return function.Call(vm, args)
+			}), true
+		case *value.BoundMethod:
+			return vm.nativeValue("method call", func() value.Value {
+				return callable.Call(function.Name, args...)
+			}), true
 		case reflect.Value:
 			return vm.nativeValue("reflected function call", func() value.Value {
 				return callable.Call(callable.Text(), args...)
@@ -818,8 +827,17 @@ func (vm *VM) executeInvoke(frame *Frame) {
 
 	if target.K == value.Map {
 		if member := target.Get(method); member.K == value.Func {
-			if lambda, ok := member.V.(*value.Lambda); ok {
-				vm.push(vm.ExecuteLambda(lambda, args))
+			switch function := member.V.(type) {
+			case *value.Lambda:
+				vm.push(vm.ExecuteLambda(function, args))
+				return
+			case *value.CallerFunction:
+				// a function of the host kept in an object ({ all: routine.wait }.all(fn)) is handed this VM,
+				// as CALL hands it (caller.go)
+				mark := vm.passLambdas(args)
+				result, _ := vm.callHost(member, args)
+				vm.withdrawLambdas(mark)
+				vm.push(result)
 				return
 			}
 		}

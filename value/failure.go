@@ -49,6 +49,10 @@ const (
 	// datastore()), or past the ceiling of a read into the VM's memory (22/10/2026). A ceiling of the
 	// argument itself stays INVALID_ARGUMENT ("x".repeat past 8 MB), a body past its limit INVALID_INPUT.
 	TooLargeCode = "TOO_LARGE"
+	// RoutineCancelledCode is a routine stopped by routine.cancel(handle) that a routine.wait(handle) reads
+	// (KITWORK_ROUTINE.md mục 6, 22/10/2026): the program asked for the stop, so it can be caught. It is not
+	// CancelledCode, the request that is over, which nothing catches; SQLite's own CANCELLED is that one.
+	RoutineCancelledCode = "CANCELLED"
 	// DefaultFailureCode is the fallback of a failure made without a code. A test counts the places
 	// that still make one (failure_ratchet_test.go) and only lets the count go down, to zero.
 	DefaultFailureCode = "ERROR"
@@ -60,22 +64,23 @@ const (
 
 // closedCodes is the set error.code is drawn from.
 var closedCodes = map[string]bool{
-	FailCode:            true,
-	NotAFunctionCode:    true,
-	TypeCode:            true,
-	InvalidArgumentCode: true,
-	InvalidInputCode:    true,
-	UnavailableCode:     true,
-	UnsupportedCode:     true,
-	DatabaseCode:        true,
-	ConflictCode:        true,
-	PartialCode:         true,
-	TimeoutCode:         true,
-	NetworkCode:         true,
-	DeniedCode:          true,
-	NotFoundCode:        true,
-	TooLargeCode:        true,
-	DefaultFailureCode:  true,
+	FailCode:             true,
+	NotAFunctionCode:     true,
+	TypeCode:             true,
+	InvalidArgumentCode:  true,
+	InvalidInputCode:     true,
+	UnavailableCode:      true,
+	UnsupportedCode:      true,
+	DatabaseCode:         true,
+	ConflictCode:         true,
+	PartialCode:          true,
+	TimeoutCode:          true,
+	NetworkCode:          true,
+	DeniedCode:           true,
+	NotFoundCode:         true,
+	TooLargeCode:         true,
+	RoutineCancelledCode: true,
+	DefaultFailureCode:   true,
 }
 
 // ClosedCode is code when it is one of the set, and DefaultFailureCode for any other: a host value a
