@@ -114,9 +114,13 @@ func Run(configFile ...string) (err error) {
 	}
 	cfg.Web = builder.hasWeb
 	cfg.Minify = builder.minify
+	cfg.SharedEnvironment = builder.sharedEnvironment
 	if builder.hasWeb || builder.hasDatabase {
 		if err := resolveRootConfig(cfg); err != nil {
 			return fmt.Errorf("resolve app root: %w", err)
+		}
+		if err := validateSharedApps(cfg.SharedEnvironment, cfg.Root, cfg.RootLayout); err != nil {
+			return err
 		}
 	} else {
 		cfg.Root = "."
@@ -295,6 +299,7 @@ func Run(configFile ...string) (err error) {
 	}
 	defer handler.Close()
 	handler.SetWebEnabled(builder.hasWeb)
+	handler.SetSharedEnvironment(cfg.SharedEnvironment)
 	if builder.hasWeb {
 		if err := handler.SetRootLayout(cfg.RootLayout); err != nil {
 			return fmt.Errorf("configure app root layout: %w", err)
@@ -450,10 +455,11 @@ func Check(configFile ...string) (core.CheckReport, error) {
 	}
 	applyDatabaseManifest(cfg)
 	work.AllowLocal = cfg.AllowLocal
-	return core.CheckWithLayout(
+	return core.CheckWithEnvironment(
 		cfg.Root,
 		cfg.MaxEnergy,
 		cfg.RootLayout,
+		cfg.SharedEnvironment,
 		bytecodeCacheDirectory(cfg),
 	), nil
 }
@@ -569,6 +575,7 @@ func commandConfig(configFile ...string) (*Config, error) {
 		return nil, fmt.Errorf("failed to process configuration: %w", err)
 	}
 	cfg.Web = builder.hasWeb
+	cfg.SharedEnvironment = builder.sharedEnvironment
 	if err := validateGatewaySurface(builder.hasWeb, cfg.Gateway); err != nil {
 		return nil, err
 	}
@@ -578,6 +585,9 @@ func commandConfig(configFile ...string) (*Config, error) {
 	if builder.hasWeb || builder.hasDatabase {
 		if err := resolveRootConfig(cfg); err != nil {
 			return nil, fmt.Errorf("resolve app root: %w", err)
+		}
+		if err := validateSharedApps(cfg.SharedEnvironment, cfg.Root, cfg.RootLayout); err != nil {
+			return nil, err
 		}
 	} else {
 		cfg.Root = "."

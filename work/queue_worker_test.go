@@ -338,7 +338,7 @@ func TestCheckQueueFilesSaysQueueFolderIsNotRead(t *testing.T) {
 		"acme/_queue/mail.kitwork.js":   "queue.handle((job) => 1);",
 		"acme/shop.example/router.work": `import * as router from "kitwork/router";`,
 	})
-	issues := CheckQueueFiles(root, "acme")
+	issues := CheckQueueFiles(root, "acme", nil)
 	if len(issues) != 1 || filepath.Base(issues[0].File) != "_queue" ||
 		issues[0].Err.Error() != "_queue/ không còn đọc: khai job trong .shared/queue/<tên>.work bằng export const <tên> = queue.job(fn)" {
 		t.Fatalf("issues = %v", issues)

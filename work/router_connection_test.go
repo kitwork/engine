@@ -74,7 +74,7 @@ func TestRouterConnectionAndConnectAreErrors(t *testing.T) {
 		})
 	}
 	if !strings.Contains(removedRouterConnection, `connection("warehouse")`) || !strings.Contains(removedRouterConnection, "app.databases") ||
-		!strings.Contains(removedRouterConnect, `connect({ postgresql: env.CRM_URL })`) || !strings.Contains(removedRouterConnect, "crm.query(sql, [giá trị])") {
+		!strings.Contains(removedRouterConnect, `connect({ postgresql: environment.CRM_URL })`) || !strings.Contains(removedRouterConnect, "crm.query(sql, [giá trị])") {
 		t.Fatalf("the errors name the spec's spelling: %q, %q", removedRouterConnection, removedRouterConnect)
 	}
 }

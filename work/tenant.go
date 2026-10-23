@@ -107,6 +107,10 @@ type Tenant struct {
 	// this Tenant in place.
 	HotReload bool
 
+	// sharedEnvironment is what application.work shares with apps (environment.go); nil when it shares
+	// nothing.
+	sharedEnvironment *SharedEnvironment
+
 	// Compatibility aliases. A web tenant borrows these from its generation
 	// and site runtime; an app-only tenant still owns local fallbacks.
 	env          value.Value
@@ -564,14 +568,21 @@ func (t *Tenant) Run() error {
 		return fmt.Errorf("prepare filesystem boundaries: %w", err)
 	}
 
-	envFile := t.resolve(".env")
-	environment := NewEnv(ParseDotEnv(envFile))
+	// the app's .env, the site's over it key by key, over what the host shares (environment.go); an edit
+	// of either file builds the generation again, of every site of the app for the app's
+	vars, err := t.buildEnvironment()
+	if err != nil {
+		return err
+	}
+	environment := NewEnv(vars)
 	if t.generation != nil {
 		if err := t.generation.SetEnvironment(environment); err != nil {
 			return err
 		}
-		if err := t.generation.Sources().WatchFile(envFile); err != nil {
-			return err
+		for _, file := range t.environmentFiles() {
+			if err := t.generation.Sources().WatchFile(file); err != nil {
+				return err
+			}
 		}
 		t.env = t.generation.Environment()
 	} else {

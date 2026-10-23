@@ -43,6 +43,8 @@ type Program struct {
 	// bundles none of it. Schedule is the same of the app's .schedule/ (schedule.go).
 	Queue    *QueueBundle
 	Schedule *ScheduleBundle
+	// App: a file of an app, compiled with the app's folder; false for a file of no app, as a manifest.
+	App bool
 }
 
 // ExportAlias is `export { local as exported }`: Token is where exported is written.

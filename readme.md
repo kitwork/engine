@@ -227,9 +227,16 @@ app
   `run`, the last call, which opens the listener.
 
 `env.KEY` reads the host's `.env` and then the real environment, which wins, and coerces numbers and
-booleans; `env.require("KEY")` stops the boot when the key is missing. Do not name a key after an
+booleans in their canonical form (`42`, `true`; `0123` and anything quoted stay strings);
+`env.require("KEY")` stops the boot when the key is missing. Do not name a key after an
 operating-system variable such as `PATH` or `HOME`. A manifest with no `website` and no `run` starts
 no listener: a `database` surface alone is a complete manifest.
+
+An app never sees the host's environment. It reads its own with `import { environment } from
+"kitwork"`: the app's `.env` at its folder, the site's `.env` over it key by key, and the keys the
+manifest shares by name with `shareEnvironment(["SMTP_URL"])`. `environment.KEY` is read by name
+only, and every `environment.require("KEY")` is checked at boot (`docs/KITWORK_ENVIRONMENT.md` in the
+Kitwork repository is the spec).
 
 Three layouts are recognised: one site at the root (`app/router.work`), one application with a
 folder per domain (`app/<domain>/`), or many tenants (`apps/<identity>/<domain>/`). Within an
@@ -409,7 +416,7 @@ are used (`docs/KITWORK_DATABASE.md` in the Kitwork repository is the spec):
   (`.database/application/`), one for every site of the app.
 - `connection("warehouse").schema({ stocks })`: a database the host named in the manifest's
   `databases({ … })`; today a SQLite file of the host.
-- `connect({ postgresql: env.CRM_URL })`: a database outside the app, someone else's; it has only
+- `connect({ postgresql: environment.CRM_URL })`: a database outside the app, someone else's; it has only
   `query(sql, [values])`, its values bound by the driver, and it dials through the same guard as
   outbound HTTP.
 - `collection.open("name")`: Markdown documents under `_collection/<name>`, with a full-text index.

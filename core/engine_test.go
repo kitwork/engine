@@ -301,8 +301,8 @@ func TestEngineReloadsEnvironmentAsGenerationState(t *testing.T) {
 		t.Fatal(err)
 	}
 	routerFile := filepath.Join(dir, "router.kitwork.js")
-	router := `import { router, env } from "kitwork";
-router.get().handle((ctx) => ctx.text(env.MESSAGE));`
+	router := `import { router, environment } from "kitwork";
+router.get().handle((ctx) => ctx.text(environment.MESSAGE));`
 	if err := os.WriteFile(routerFile, []byte(router), 0o644); err != nil {
 		t.Fatal(err)
 	}

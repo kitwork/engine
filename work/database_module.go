@@ -17,7 +17,7 @@ import (
 //	import { connection, connect } from "kitwork/database";
 //	export const db = connection().schema({ orders });                    // the app's own: KitDB in its folder
 //	export const warehouse = connection("warehouse").schema({ stocks });  // a name of the host's app.databases
-//	export const crm = connect({ postgresql: env.CRM_URL });              // a database outside the app: query()
+//	export const crm = connect({ postgresql: environment.CRM_URL });      // a database outside the app: query()
 //
 // The older spellings of the module (database.kitdb(…), database.text(), database.entity(), database.where(…),
 // database.atomic(…), …) were removed on 22/10/2026. The compiler refuses them where it sees them; reading

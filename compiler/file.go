@@ -23,7 +23,7 @@ const FileImportOne = `kitwork/file import một cách: import * as file from "k
 
 // FileEnvInApp is the error of file.env in an app's code: env is read there by name, the manifest alone
 // names files of env (KITWORK_ENVIRONMENT.md mục 7).
-const FileEnvInApp = `file.env chỉ có trong application.work (manifest); code trong app đọc biến môi trường bằng environment.KEY (KITWORK_ENVIRONMENT.md mục 7; engine hôm nay: env.KEY của import { env } from "kitwork")`
+const FileEnvInApp = `file.env chỉ có trong application.work (manifest); code trong app đọc biến môi trường bằng environment.KEY của import { environment } from "kitwork" (KITWORK_ENVIRONMENT.md mục 7)`
 
 // FileRemovedWord is the error of a word of kitwork/file that the spec replaced or never has at the
 // module's level, "" for any other word.

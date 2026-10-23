@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestCompilerV18GoldenContract(t *testing.T) {
-	if CompilerSchemaVersion != 18 {
-		t.Fatalf("CompilerSchemaVersion = %d, want schema v18", CompilerSchemaVersion)
+func TestCompilerV19GoldenContract(t *testing.T) {
+	if CompilerSchemaVersion != 19 {
+		t.Fatalf("CompilerSchemaVersion = %d, want schema v19", CompilerSchemaVersion)
 	}
 	// Bytecode 3 (14/10/2026) moved the fingerprint and every checksum below with the version alone: each
 	// fixture's instructions, constants and debug table are those bytecode 2 wrote (none needs a wide
@@ -25,10 +25,16 @@ func TestCompilerV18GoldenContract(t *testing.T) {
 	// fingerprint alone: no fixture writes go or imports kitwork/routine. Schema 17 (22/10/2026, cache and sse
 	// replaced by kitwork/storage) moved the fingerprint alone: no fixture writes cache or sse. Schema 18
 	// (22/10/2026, the older words of kitwork/file refused) moved the fingerprint alone: no fixture imports
-	// kitwork/file.
-	const expectedFingerprint = "14263ce6a384ce77df0a1c5ed405357708c7059fb4a3df38e19a6544df8ac47d"
+	// kitwork/file. Schema 19 (22/10/2026, environment read by name) moved the fingerprint alone: no fixture
+	// reads env or environment.
+	const expectedFingerprint = "ede67c227333423db96f7cd76c0913c73308f7db9604d31350aa4d5c3f043cfa"
 	if got := Fingerprint(); got != expectedFingerprint {
 		t.Fatalf("compiler fingerprint = %q, want %q", got, expectedFingerprint)
+	}
+	// schema 18 compiled env of "kitwork" in an app and environment read whole: its artifacts are not reused
+	const schema18 = "14263ce6a384ce77df0a1c5ed405357708c7059fb4a3df38e19a6544df8ac47d"
+	if stamped := compilerFingerprintFor(18); hex.EncodeToString(stamped[:]) != schema18 || Fingerprint() == schema18 {
+		t.Fatalf("schema 18 on bytecode 4 stamps %x, the current compiler %s: want %s and another", stamped, Fingerprint(), schema18)
 	}
 	// schema 16 compiled cache and sse off "kitwork", which now fail only where they are read: its artifacts
 	// are not reused

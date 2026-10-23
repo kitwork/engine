@@ -128,7 +128,15 @@ import (
 // that writes one would run until the word fails where it is read, instead of the file failing where it
 // is written: the bump retires it. A program that writes none of them compiles as before, byte for byte.
 // No opcode or operand changed.
-const CompilerSchemaVersion uint16 = 18
+//
+// 19 (22/10/2026, KITWORK_ENVIRONMENT.md, environment read by name): env read off "kitwork" in a file of an
+// app (import { env } from "kitwork", kitwork().env), any use of environment but environment.NAME and
+// environment.require("NAME") (a write, another name for the whole, an index, going through it), a require
+// of a name not written as a string, and a key not named PUBLIC_… handed straight to a page by .view(…) are
+// compile errors (environment.go). A cached artifact of schema 18 that writes one of them would run until
+// the word fails where it is read, or hand a page a secret: the bump retires it. A program that writes none
+// of them compiles as before, byte for byte. No opcode or operand changed.
+const CompilerSchemaVersion uint16 = 19
 
 var currentCompilerFingerprint = compilerFingerprintFor(CompilerSchemaVersion)
 

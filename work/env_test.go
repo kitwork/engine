@@ -35,9 +35,9 @@ func TestParseDotEnv_Missing(t *testing.T) {
 	}
 }
 
-// env.KEY auto-coerces (number/bool/string) over the proxy's OWN map only.
+// environment.KEY auto-coerces (number/bool/string) over the proxy's OWN map only.
 func TestNewEnv_AccessorsAndIsolation(t *testing.T) {
-	env := NewEnv(map[string]string{"PORT": "9091", "DEBUG": "true", "OFF": "false", "NAME": "kit"})
+	env := NewEnv(TextEntries(map[string]string{"PORT": "9091", "DEBUG": "true", "OFF": "false", "NAME": "kit"}))
 	if env.K != value.Proxy {
 		t.Fatalf("expected Proxy, got %v", env.K)
 	}
@@ -63,10 +63,10 @@ func TestNewEnv_AccessorsAndIsolation(t *testing.T) {
 	}
 }
 
-// env.require records misses for fail-fast.
+// The manifest's env.require records misses for fail-fast.
 func TestNewEnv_RequireMissing(t *testing.T) {
 	var missing []string
-	env := NewEnvWithMissing(map[string]string{"HAVE": "x"}, &missing)
+	env := NewEnvWithMissing(TextEntries(map[string]string{"HAVE": "x"}), &missing)
 	env.Invoke("require", value.NewString("HAVE"))
 	env.Invoke("require", value.NewString("NEED_ME"))
 	if len(missing) != 1 || missing[0] != "NEED_ME" {

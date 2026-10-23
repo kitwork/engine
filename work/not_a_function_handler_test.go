@@ -158,21 +158,22 @@ func TestHandlerThatStartedAViewKeepsItsPageOnANonFunctionCall(t *testing.T) {
 	}
 }
 
-// env has one method, require: env.API_KEY() calls a value, so it is the not-a-function error like
-// any other (14/10/2026), named as written and without the string's text, which is the secret. Until
-// then the env proxy answered every other name with null, without a word. env.require is the control.
+// environment has one method, require: environment.API_KEY() calls a value, so it is the not-a-function
+// error like any other (14/10/2026), named as written and without the string's text, which is the secret.
+// Until then the proxy answered every other name with null, without a word. environment.require is the
+// control. (env until 22/10/2026, KITWORK_ENVIRONMENT.md.)
 func TestCallingAnEnvValueIsNotAFunction(t *testing.T) {
 	developing(t) // a 500 carries its diagnostic only while developing
 	serve := notAFunctionSite(t, map[string]string{
 		".env":                     "API_KEY=sk-live-secret\nPORT=8080\n",
-		"broken/router.kitwork.js": "import { router, env } from \"kitwork\";\nrouter.get((ctx) => {\n  env.API_KEY();\n  return ctx.json({ reached: true });\n});\n",
-		"safe/router.kitwork.js":   "import { router, env } from \"kitwork\";\nrouter.get((ctx) => {\n  const r = safe(() => env.PORT());\n  return ctx.json({ error: r.error.message, at: r.error.at, code: r.error.code, port: env.PORT, required: env.require(\"PORT\") });\n});\n",
+		"broken/router.kitwork.js": "import { router, environment } from \"kitwork\";\nrouter.get((ctx) => {\n  environment.API_KEY();\n  return ctx.json({ reached: true });\n});\n",
+		"safe/router.kitwork.js":   "import { router, environment } from \"kitwork\";\nrouter.get((ctx) => {\n  const r = safe(() => environment.PORT());\n  return ctx.json({ error: r.error.message, at: r.error.at, code: r.error.code, port: environment.PORT, required: environment.require(\"PORT\") });\n});\n",
 	})
 
 	code, body, record := serve("/broken")
-	const message = "router.kitwork.js:3:3: env.API_KEY không phải hàm (là chuỗi): không gọi được"
+	const message = "router.kitwork.js:3:3: environment.API_KEY không phải hàm (là chuỗi): không gọi được"
 	if code != http.StatusInternalServerError || !strings.HasPrefix(body, message) || strings.Contains(body, "reached") {
-		t.Fatalf("env.API_KEY() = %d %q, want 500 with %q", code, body, message)
+		t.Fatalf("environment.API_KEY() = %d %q, want 500 with %q", code, body, message)
 	}
 	if strings.Contains(body, "sk-live-secret") || strings.Contains(record, "sk-live-secret") {
 		t.Fatalf("the error shows the env value: body %q, record %q", body, record)
@@ -190,8 +191,8 @@ func TestCallingAnEnvValueIsNotAFunction(t *testing.T) {
 		t.Fatalf("the safe() handler = %d %q (%v)", code, body, err)
 	}
 	// a number is not shown either (14/10/2026): env.PIN() would print the PIN
-	if safe.Code != "NOT_A_FUNCTION" || safe.Error != "env.PORT không phải hàm (là số): không gọi được" ||
+	if safe.Code != "NOT_A_FUNCTION" || safe.Error != "environment.PORT không phải hàm (là số): không gọi được" ||
 		safe.At != "router.kitwork.js:3:24" || safe.Port != 8080 || safe.Required != 8080 {
-		t.Fatalf("safe(() => env.PORT()) and the control env.require(\"PORT\") = %+v", safe)
+		t.Fatalf("safe(() => environment.PORT()) and the control environment.require(\"PORT\") = %+v", safe)
 	}
 }

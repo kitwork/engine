@@ -150,10 +150,10 @@ func TestBackgroundFilesImportFromTheAppRoot(t *testing.T) {
 		"other/.shared/report.work":       `export const report = () => "other";`,
 		"other/other.example/router.work": `import * as router from "kitwork/router";`,
 	})
-	if issues := CheckScheduleFiles(root, "acme"); len(issues) != 0 {
+	if issues := CheckScheduleFiles(root, "acme", nil); len(issues) != 0 {
 		t.Fatalf("schedule issues = %v", issues)
 	}
-	issues := CheckQueueFiles(root, "acme")
+	issues := CheckQueueFiles(root, "acme", nil)
 	if len(issues) != 1 || filepath.Base(issues[0].File) != "broken.work" ||
 		!strings.Contains(issues[0].Err.Error(), `import "app/.shared/gone.work": app không có file .shared/gone.work`) {
 		t.Fatalf("queue issues = %v, want only broken.work, missing .shared/gone.work", issues)

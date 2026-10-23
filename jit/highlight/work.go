@@ -42,7 +42,7 @@ var dialectWork = javascriptDialectLists{
 	types:         []string{"Array", "BigInt", "Boolean", "Date", "Error", "JSON", "Math", "Number", "Object", "String"},
 	subset:        true,
 	hostNames: []string{
-		"app", "cache", "collection", "component", "console", "cron", "ctx", "database", "env", "file",
+		"app", "cache", "collection", "component", "console", "cron", "ctx", "database", "environment", "file",
 		"http", "insights", "jwt", "kitwork", "log", "napas", "palette", "path", "pigment", "playground",
 		"qrcode", "queue", "router", "shortbase", "sqlite", "sync", "timer", "webhook",
 	},

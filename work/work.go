@@ -109,6 +109,8 @@ func (w *KitWork) MissingMember(name string) value.Value {
 		return value.InvalidFailure(value.InvalidArgumentCode, compiler.CacheRemoved)
 	case "sse":
 		return value.InvalidFailure(value.InvalidArgumentCode, compiler.SSERemoved)
+	case "env":
+		return value.InvalidFailure(value.InvalidArgumentCode, compiler.EnvironmentRenamed)
 	}
 	return value.Value{K: value.Nil}
 }

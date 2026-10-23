@@ -339,10 +339,10 @@ func crmApp(t *testing.T, address, password string) map[string]string {
 // crmAppAt is crmApp with the URL written as it is.
 func crmAppAt(connection string) map[string]string {
 	return map[string]string{
-		".shared/schema/crm.work": `import { env } from "kitwork";
+		".shared/schema/crm.work": `import { environment } from "kitwork";
 import { connect } from "kitwork/database";
 
-export const crm = connect({ postgresql: env.CRM_URL });
+export const crm = connect({ postgresql: environment.CRM_URL });
 `,
 		"shop.example/.env": "CRM_URL=" + connection + "\n",
 		"shop.example/router.work": `import * as router from "kitwork/router";

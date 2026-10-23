@@ -10,6 +10,7 @@ package work
 // before publication, so request-time resolution only reads immutable nodes.
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -20,6 +21,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/ui"
 )
 
@@ -267,11 +269,23 @@ func (rt *RouteTree) Prepare() error {
 	if rt == nil || rt.root == nil {
 		return nil
 	}
+	// unmet gathers the keys environment.require names that the app's environment has not, of every
+	// folder: one report for all of them (environment.go)
+	var unmet []compiler.NameUse
 	var prepare func(*RouteNode) error
 	prepare = func(node *RouteNode) error {
+		if node.parent != nil {
+			if err := branchEnvironment(node.diskPath(), node.relPath()); err != nil {
+				return err
+			}
+		}
 		node.ensureFolder(rt.tenant)
 		if err := node.compileError(); err != nil {
-			return err
+			var missing *environmentMissing
+			if !errors.As(err, &missing) {
+				return err
+			}
+			unmet = append(unmet, missing.uses...)
 		}
 		if err := rt.scheduleInSite(node); err != nil {
 			return err
@@ -325,6 +339,9 @@ func (rt *RouteTree) Prepare() error {
 	}
 	if err := prepare(rt.root); err != nil {
 		return err
+	}
+	if len(unmet) > 0 {
+		return &environmentMissing{uses: unmet}
 	}
 	rt.tenant = nil
 	return nil

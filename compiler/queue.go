@@ -371,7 +371,7 @@ func CompileModuleFileInApp(appRoot, path string) (*Bytecode, error) {
 		return nil, err
 	}
 	origin := Token{Source: b.sourceName(absolute)}
-	program := &Program{Database: b.database, Queue: b.queue, Schedule: b.schedule}
+	program := &Program{Database: b.database, Queue: b.queue, Schedule: b.schedule, App: root != ""}
 	program.Statements = append(program.Statements, b.defs...)
 	program.Statements = append(program.Statements, &ReturnStatement{Token: tokenFrom(origin, Return), ReturnValue: ident(module, origin)})
 	// the file first, as the entry of any other compile, then every module it bundles

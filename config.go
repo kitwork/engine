@@ -47,6 +47,9 @@ type Config struct {
 	// TenantConnections is app.policy({ tenantConnections }): whether app code may connect({ … }); true
 	// unless the manifest says false.
 	TenantConnections bool `json:"-" yaml:"-"`
+	// SharedEnvironment is what app.shareEnvironment shares with apps, values of the host; nil when it
+	// shares nothing. Never written into the configuration map: it holds secrets.
+	SharedEnvironment *work.SharedEnvironment `json:"-" yaml:"-"`
 }
 
 // RateLimitConfig is the HOST-level (server-wide) rate-limit block — the first gate every request

@@ -16,7 +16,7 @@ import (
 
 const (
 	removedRouterConnection = `router.connection(…) đã bỏ: database có tên khai export const warehouse = connection("warehouse").schema({ bảng }) trong app/.shared/schema/<tên>.work, tên đó khai trong app.databases({ … }) của application.work; database của app là connection() không tên`
-	removedRouterConnect    = `router.connect(…) đã bỏ: database ngoài khai export const crm = connect({ postgresql: env.CRM_URL }) trong app/.shared/schema/<tên>.work, rồi crm.query(sql, [giá trị])`
+	removedRouterConnect    = `router.connect(…) đã bỏ: database ngoài khai export const crm = connect({ postgresql: environment.CRM_URL }) trong app/.shared/schema/<tên>.work, rồi crm.query(sql, [giá trị])`
 	removedContextDatabase  = `context.database đã bỏ: database khai trong app/.shared/schema/ và dùng bằng import { db } from "app/.shared/schema/<tên>.work", rồi db.list((bảng) => …); database có tên là connection("tên") với app.databases của host, database ngoài là connect({ … })`
 )
 

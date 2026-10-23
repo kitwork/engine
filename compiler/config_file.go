@@ -52,6 +52,7 @@ func CompileConfigFileInApp(appRoot, path string) (*Bytecode, []string, error) {
 			sources[name] = source
 		}
 	}
+	prog.App = appRoot != ""
 	origin := Token{Source: sourceName, Position: int32(len(data))}
 	entries := make([]ObjectEntry, 0, len(names))
 	for _, name := range names {

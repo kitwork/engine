@@ -928,6 +928,13 @@ func (n *RouteNode) compileFolder(t *Tenant) error {
 		if len(bc.Files) > 0 {
 			n.srcFiles = append([]string(nil), bc.Files...)
 		}
+		// every environment.require("KEY") of the folder's code against the app's environment, before it
+		// runs: a missing key stops the boot, with every other folder's in one report (RouteTree.Prepare)
+		if missing := t.missingEnvironment(bc); missing != nil {
+			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))
+			missing.placeEntry(filepath.Base(routerFile), filepath.ToSlash(relative))
+			return missing
+		}
 		if err := runFolderRouter(t, n, bc); err != nil {
 			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))
 			return fmt.Errorf("initialize router %s: %w", relative, err)

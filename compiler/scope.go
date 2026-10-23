@@ -114,6 +114,15 @@ type binding struct {
 	// parameterPart: a name a destructured parameter gives (({ request }) => …), which routineRequest
 	// reads as the parameter it is.
 	parameterPart bool
+	// kitworkEnvironment: a name bound to environment of "kitwork", read only by name (environment.go);
+	// kitworkRoot: a name bound to the module "kitwork" itself (import * as kitwork from "kitwork", or a
+	// const of it); environmentHeld: what a const or a let holds of keys not named PUBLIC_… (environmentHolds),
+	// nothing for any other variable; function: the function a const is declared with (const page =
+	// (context) => …), which a .view(page) runs.
+	kitworkEnvironment bool
+	kitworkRoot        bool
+	environmentHeld    environmentHeld
+	function           *FunctionLiteral
 }
 
 type lexicalScope struct {
@@ -170,6 +179,9 @@ type resolution struct {
 	// statements maps a database statement's action (db.list(…)) to the call the compiler emits in its
 	// place: db.#statement(template, holes…) (database_translate.go).
 	statements map[*MethodCallExpression]*MethodCallExpression
+	// requires lists every environment.require("KEY") of the program, where it is written: the boot checks
+	// them (environment.go).
+	requires []NameUse
 }
 
 // onceSlots are the slots of an assignment's object and key; "" for one that is compiled where it is.
@@ -217,6 +229,13 @@ type resolver struct {
 	// first: a name of the request one of them reads from outside is refused (routineRequest).
 	routineGo   map[*FunctionLiteral]bool
 	goFunctions []*functionScope
+	// inApp: the program is a file of an app (compiled with its folder), where env of "kitwork" is refused;
+	// a manifest has none. environmentUse lets the next reference of environment through: a read by name.
+	inApp          bool
+	environmentUse bool
+	// functionScopes gives each function literal read so far its scope: a .view(…) reads the variables of
+	// the function it runs, and an import what its module returns (environment.go).
+	functionScopes map[*FunctionLiteral]*functionScope
 }
 
 // resolveProgram resolves every name of a program and gives each variable its slot.
@@ -245,6 +264,8 @@ func (c *Compiler) resolveObserved(
 		queue:          program.Queue,
 		schedule:       program.Schedule,
 		scheduleChains: map[*MethodCallExpression]bool{},
+		inApp:          program.App,
+		functionScopes: map[*FunctionLiteral]*functionScope{},
 	}
 	r.databases = r.bundle != nil && len(r.bundle.Imports) > 0
 	r.enterFunction(nil)
@@ -313,6 +334,9 @@ func (r *resolver) enterFunction(literal *FunctionLiteral) {
 	function := &functionScope{parent: r.function, literal: literal, written: map[string]bool{}}
 	function.scope = &lexicalScope{parent: r.scope, function: function, names: map[string]*binding{}}
 	r.result.functions = append(r.result.functions, function)
+	if literal != nil && r.functionScopes != nil {
+		r.functionScopes[literal] = function
+	}
 	r.function = function
 	r.scope = function.scope
 }
@@ -346,6 +370,7 @@ func (r *resolver) hoist(statements []Statement) {
 			r.routineDeclaration(node)
 			r.storageDeclaration(node)
 			r.fileDeclaration(node)
+			r.environmentDeclaration(node)
 			alias := r.databaseAlias(node)
 			for _, name := range node.Names {
 				declared := r.declare(name, kind)
@@ -355,6 +380,7 @@ func (r *resolver) hoist(statements []Statement) {
 				r.markRoutine(node, name, declared)
 				r.markStorage(node, name, declared)
 				r.markFile(node, name, declared)
+				r.markEnvironment(node, name, declared)
 				if declared != nil && node.Function {
 					declared.constant = false
 				}
@@ -458,6 +484,15 @@ func (r *resolver) reference(name *Identifier, write bool) {
 		}
 		return
 	}
+	if found.kitworkEnvironment && !r.environmentUse {
+		// environment is read by name only (environment.go)
+		if write {
+			r.fail(fmt.Errorf("%s: %s", r.where(name.Token), EnvironmentReadOnly("")))
+		} else {
+			r.fail(fmt.Errorf("%s: %s", r.where(name.Token), EnvironmentByName))
+		}
+		return
+	}
 	if previous, ok := r.result.slots[name]; ok && previous != found {
 		r.fail(fmt.Errorf("%s: compiler: tên %s trỏ tới hai biến", r.where(name.Token), name.Value))
 		return
@@ -501,10 +536,15 @@ func (r *resolver) statement(statement Statement) {
 	}
 	switch node := statement.(type) {
 	case *VarStatement:
-		r.expression(node.Value)
+		if module, ok := kitworkModulePath(node.Value); !ok || module != "environment" || node.Pattern != nil {
+			// import { environment as e } from "kitwork" is const e = kitwork().environment: a declaration of
+			// environment under another name, read by name as it is (markEnvironment), not a read of the whole
+			r.expression(node.Value)
+		}
 		if node.Pattern != nil {
 			r.patternDefaults(node.Pattern)
 		}
+		r.holdEnvironment(node)
 		r.bindHTTP(node)
 	case *ExpressionStatement:
 		r.expression(node.Expression)
@@ -676,6 +716,9 @@ func (r *resolver) expression(expression Expression) {
 			r.expression(argument)
 		}
 	case *MemberExpression:
+		if r.environmentMember(node) {
+			return
+		}
 		if r.databases && r.handleMember(node.Object, node.Token, node.Property) {
 			return
 		}
@@ -699,6 +742,9 @@ func (r *resolver) expression(expression Expression) {
 		}
 		r.expression(node.Object)
 	case *IndexExpression:
+		if r.environmentIndex(node) {
+			return
+		}
 		if r.databases && r.handleMember(node.Left, node.Token, nil) {
 			return
 		}
@@ -744,6 +790,12 @@ func (r *resolver) expression(expression Expression) {
 	case *FunctionLiteral:
 		r.functionLiteral(node)
 	case *MethodCallExpression:
+		// what a .view(…) hands its page is read once the call is: the variables of the function it runs
+		// are known then (environment.go)
+		defer r.environmentView(node)
+		if r.environmentCall(node) {
+			return
+		}
 		if r.databases && r.databaseStatement(node) {
 			return
 		}
@@ -798,6 +850,11 @@ func (r *resolver) target(target Expression) {
 			}
 			r.expression(element.Default)
 		}
+	case *MemberExpression, *IndexExpression:
+		if r.environmentTarget(node) {
+			return
+		}
+		r.expression(target)
 	default:
 		r.expression(target)
 	}

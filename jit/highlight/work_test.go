@@ -7,7 +7,7 @@ import "testing"
 // the subset shares — with no regular-expression literals.
 func TestWork(t *testing.T) {
 	checkExact(t, "work", []tokenCase{
-		{"import { router, env } from \"kitwork\";", tokensOf(
+		{"import { router, environment } from \"kitwork\";", tokensOf(
 			Keyword, "import",
 			Plain, " ",
 			Punctuation, "{",
@@ -15,7 +15,7 @@ func TestWork(t *testing.T) {
 			Variable, "router",
 			Punctuation, ",",
 			Plain, " ",
-			Variable, "env",
+			Variable, "environment",
 			Plain, " ",
 			Punctuation, "}",
 			Plain, " ",
@@ -299,12 +299,12 @@ func TestWork(t *testing.T) {
 			Type, "Date",
 			Punctuation, "();",
 		)},
-		{"const port = env.PORT || 8080;", tokensOf(
+		{"const port = environment.PORT || 8080;", tokensOf(
 			Keyword, "const",
 			Plain, " port ",
 			Operator, "=",
 			Plain, " ",
-			Variable, "env",
+			Variable, "environment",
 			Punctuation, ".",
 			Property, "PORT",
 			Plain, " ",
@@ -458,12 +458,12 @@ func TestWork(t *testing.T) {
 			Plain, " ",
 			Comment, "/* mặc định 1 */",
 		)},
-		{"const port = env.require(\"PORT\"); kitwork.log", tokensOf(
+		{"const port = environment.require(\"PORT\"); kitwork.log", tokensOf(
 			Keyword, "const",
 			Plain, " port ",
 			Operator, "=",
 			Plain, " ",
-			Variable, "env",
+			Variable, "environment",
 			Punctuation, ".",
 			Function, "require",
 			Punctuation, "(",
@@ -481,9 +481,9 @@ func TestWork(t *testing.T) {
 // matters, in order.
 func TestWorkSample(t *testing.T) {
 	checkContains(t, "work", []tokenCase{{javascriptSample(t, "work", "router.work"), tokensOf(
-		Keyword, "import", Variable, "router", Variable, "database", Variable, "env", Variable, "log",
+		Keyword, "import", Variable, "router", Variable, "database", Variable, "environment", Variable, "log",
 		Keyword, "from", String, `"kitwork"`,
-		Keyword, "const", Variable, "env", Property, "PAGE_SIZE", Operator, "||", Number, "20",
+		Keyword, "const", Variable, "environment", Property, "PAGE_SIZE", Operator, "||", Number, "20",
 		Property, "S", Number, "0",
 		Variable, "router", Function, "reload", Constant, "false",
 		Function, "favicon", Function, "meta", Property, "site",

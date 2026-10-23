@@ -33,7 +33,7 @@ import (
 // someone else's, so it has no schema, policy, before or after here: it answers query(sql, [giá trị]) and
 // nothing else.
 //
-//	export const crm = connect({ postgresql: env.CRM_URL });                    // .shared/schema/crm.work
+//	export const crm = connect({ postgresql: environment.CRM_URL });            // .shared/schema/crm.work
 //	crm.query("SELECT id, email FROM customers WHERE id = $1", [customerId]);  // anywhere in the app
 //
 // Declaring opens nothing: the pool opens when the first query runs, one per configuration in the app's

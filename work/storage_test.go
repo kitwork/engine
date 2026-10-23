@@ -3,11 +3,15 @@ package work
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,7 +20,6 @@ import (
 
 	"github.com/kitwork/engine/app"
 	"github.com/kitwork/engine/storage"
-	"github.com/kitwork/engine/utilities/safepath"
 	"github.com/kitwork/engine/value"
 )
 
@@ -672,60 +675,94 @@ func TestStorageReadOrComputeWaitersAfterAFailedLeadAndACancel(t *testing.T) {
 	<-returned
 }
 
-// disk() never reads or writes outside the app's folder: a .database/disk/ that leads elsewhere is refused
-// with DENIED at every access, and nothing is written there. Here the folder of the place is set outside
-// the app directly, as a link would resolve it; TestStorageDiskRefusesALinkOutOfTheApp makes the link
-// where the system lets a test make one.
+// disk() never reads, writes or deletes in another app's folder: a .database/disk/ of the app, or its whole
+// .database/, that is a link into another app's is refused with DENIED at every access, the other app's
+// value is neither read nor changed, and nothing is written there. On Windows the link is a junction, the
+// kind filepath.EvalSymlinks has not followed since Go 1.23: a check of the path before the operation
+// (safepath) took it for a folder of the app. Elsewhere it is a symbolic link.
 //
-// CONTROL: with diskPlace.inside refusing nothing, the value was written outside the app: "set = <nil>,
-// want the path refused".
-func TestStorageDiskStaysInsideTheApp(t *testing.T) {
-	appRoot, elsewhere := t.TempDir(), t.TempDir()
-	boundary, err := safepath.NewBoundary(appRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	place := &diskPlace{dir: filepath.Join(elsewhere, "disk"), app: boundary}
-	key := storage.Key{Place: storage.Disk, Name: "x"}.Encoded()
-	if err := place.set(key, []byte("1"), time.Time{}); !errors.Is(err, errStorageOutside) {
-		t.Fatalf("set = %v, want the path refused", err)
-	}
-	if _, _, err := place.get(key); !errors.Is(err, errStorageOutside) {
-		t.Fatalf("get = %v, want the path refused", err)
-	}
-	if _, err := place.remove(key); !errors.Is(err, errStorageOutside) {
-		t.Fatalf("delete = %v, want the path refused", err)
-	}
-	if entries, _ := os.ReadDir(elsewhere); len(entries) != 0 {
-		t.Fatalf("written outside the app: %v", entries)
-	}
-	failure, _ := value.FailureFrom(storageFailure(`disk("x")`, place.set(key, []byte("1"), time.Time{})))
-	want := value.Failure{Code: value.DeniedCode, Message: `disk("x"): disk() đi ra ngoài thư mục của app: .database/disk/ của app dẫn tới chỗ khác qua một liên kết; không đọc, không ghi ở đó (KITWORK_STORAGE.md mục 9)`}
-	if failure.Code != want.Code || failure.Message != want.Message {
-		t.Fatalf("failure = %s %q\nwant %s %q", failure.Code, failure.Message, want.Code, want.Message)
+// CONTROL (22/10/2026, the disk() of before put back: safepath.Boundary.Contains of each path, then os.ReadFile,
+// os.Rename and os.Remove on the machine's path): through a junction of .database/disk "get = {"value":"bí
+// mật"}, want DENIED", the other app's value read; through a junction of .database the same.
+func TestStorageDiskRefusesALinkOutOfTheApp(t *testing.T) {
+	const route = `router.get((context) => {
+  const place = disk("x");
+  const action = context.query("do");
+  const r = action === "set" ? safe(() => place.set("bí mật")) : action === "get" ? safe(() => place.get()) : safe(() => place.delete());
+  return context.json(r.ok ? { value: r.value } : { code: r.error.code, message: r.error.message });
+});`
+	const denied = `{"code":"DENIED","message":"disk(\"x\"): disk() đi ra ngoài thư mục của app: .database/disk/ của app dẫn tới chỗ khác qua một liên kết; không đọc, không ghi ở đó (KITWORK_STORAGE.md mục 9)"}`
+	for _, linked := range []string{filepath.Join(".database", "disk"), ".database"} {
+		t.Run(filepath.ToSlash(linked), func(t *testing.T) {
+			// the other app keeps a value under the same key
+			other := storageSite(t, map[string]string{"x/router.work": route})
+			if _, body := storageGet(t, other, "/x?do=set"); body != `{"value":null}` {
+				t.Fatalf("the other app's set = %s", body)
+			}
+			if _, body := storageGet(t, other, "/x?do=get"); body != `{"value":"bí mật"}` {
+				t.Fatalf("the other app's get = %s", body)
+			}
+			before := listing(t, other.resolveApp(".database"))
+
+			tn := storageSite(t, map[string]string{"x/router.work": route})
+			link := tn.resolveApp(linked)
+			if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			kind := linkOutOfTheApp(t, other.resolveApp(linked), link)
+			for _, action := range []string{"get", "set", "delete"} {
+				if _, body := storageGet(t, tn, "/x?do="+action); body != denied {
+					t.Fatalf("through a %s of %s: %s = %s, want DENIED", kind, linked, action, body)
+				}
+			}
+			if after := listing(t, other.resolveApp(".database")); strings.Join(after, "\n") != strings.Join(before, "\n") {
+				t.Fatalf("the other app's .database changed through the %s:\nbefore %v\nafter  %v", kind, before, after)
+			}
+			if _, body := storageGet(t, other, "/x?do=get"); body != `{"value":"bí mật"}` {
+				t.Fatalf("the other app's value after the refused accesses = %s", body)
+			}
+		})
 	}
 }
 
-// A .database/disk/ that is a link into another folder is refused end to end (skipped where the system does
-// not let a test make a link, as Windows without the privilege).
-func TestStorageDiskRefusesALinkOutOfTheApp(t *testing.T) {
-	elsewhere := t.TempDir()
-	tn := storageSite(t, map[string]string{
-		"write/router.work": `router.get((context) => { const r = safe(() => disk("x").set(1)); return context.json({ code: r.error.code }); });`,
-	})
-	database := tn.resolveApp(".database")
-	if err := os.MkdirAll(database, 0o755); err != nil {
-		t.Fatal(err)
+// linkOutOfTheApp makes link lead to the folder target and tells which kind it made: on Windows a junction
+// (mklink /J needs no privilege, and it is the kind safepath could not see), elsewhere a symbolic link. It
+// skips the test when the system makes neither.
+func linkOutOfTheApp(t *testing.T, target, link string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		if out, err := exec.Command("cmd", "/c", "mklink", "/J", link, target).CombinedOutput(); err != nil {
+			t.Skipf("junction unavailable: %v: %s", err, out)
+		}
+		return "junction"
 	}
-	if err := os.Symlink(elsewhere, filepath.Join(database, "disk")); err != nil {
+	if err := os.Symlink(target, link); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
-	if _, body := storageGet(t, tn, "/write"); body != `{"code":"DENIED"}` {
-		t.Fatalf("/write through a link = %s, want DENIED", body)
+	return "symlink"
+}
+
+// listing is every file under root with its size, by name.
+func listing(t *testing.T, root string) []string {
+	t.Helper()
+	var files []string
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		relative, _ := filepath.Rel(root, path)
+		files = append(files, fmt.Sprintf("%s %d", filepath.ToSlash(relative), info.Size()))
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if entries, _ := os.ReadDir(elsewhere); len(entries) != 0 {
-		t.Fatalf("written through the link: %v", entries)
-	}
+	sort.Strings(files)
+	return files
 }
 
 // Full, disk() and datastore() sweep only when something kept can have expired since they last looked: a

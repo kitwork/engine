@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -1217,7 +1218,7 @@ func (t *Tenant) serveUIView(vm *runtime.VM, leaf *FolderRouter, method *FolderM
 			return // the view answered by itself (redirect, json…)
 		}
 		var err error
-		if scope, converter, err = convertViewScope(vm, method.handle, locals); err != nil {
+		if scope, converter, err = convertViewScope(vm, method.handle, locals, bc.EnvironmentServerOnly...); err != nil {
 			// a value the page would read holds itself (uiConverter): the view's error, as above
 			t.recordFailure(reqRouter, "view", err)
 			reqRouter.fail(err, http.StatusInternalServerError)
@@ -1351,7 +1352,12 @@ func viewScope(vm *runtime.VM, view *value.Lambda, locals map[string]value.Value
 
 // convertViewScope is viewScope with the converter that made it: the functions of the view it hands
 // the page run through it, and its fatal is what ended one of them that nothing may catch.
-func convertViewScope(vm *runtime.VM, view *value.Lambda, locals map[string]value.Value) (map[string]any, *uiConverter, error) {
+//
+// serverOnly names the consts and lets of the file's top level that hold a key of the environment not named
+// PUBLIC_…, imports of one from a module of the app included (compiler.Bytecode.EnvironmentServerOnly): the
+// page never reads them, so a secret a handler of the file uses never becomes page data
+// (KITWORK_ENVIRONMENT.md mục 6, 22/10/2026). A view's own variable that holds one is a compile error already.
+func convertViewScope(vm *runtime.VM, view *value.Lambda, locals map[string]value.Value, serverOnly ...string) (map[string]any, *uiConverter, error) {
 	c := &uiConverter{vm: vm}
 	scope := make(map[string]any, len(locals)+8)
 	for name, v := range locals {
@@ -1370,6 +1376,9 @@ func convertViewScope(vm *runtime.VM, view *value.Lambda, locals map[string]valu
 		for name, v := range runtime.DeclaredNames(l.Scope) {
 			if _, taken := scope[name]; taken || !visibleName(name) {
 				continue
+			}
+			if l.Parent == nil && slices.Contains(serverOnly, name) {
+				continue // the file's const of a secret: the server's, never the page's
 			}
 			if x, ok := c.convert(v, 0); ok {
 				scope[name] = x

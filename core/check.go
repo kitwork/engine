@@ -80,6 +80,18 @@ func CheckWithLayout(
 	layout work.RootLayout,
 	bytecodeCacheDirectory ...string,
 ) CheckReport {
+	return CheckWithEnvironment(root, maxEnergy, layout, nil, bytecodeCacheDirectory...)
+}
+
+// CheckWithEnvironment is CheckWithLayout with what application.work shares with apps
+// (app.shareEnvironment), so a site that requires a shared key is checked as the server would boot it.
+func CheckWithEnvironment(
+	root string,
+	maxEnergy uint64,
+	layout work.RootLayout,
+	shared *work.SharedEnvironment,
+	bytecodeCacheDirectory ...string,
+) CheckReport {
 	report := CheckReport{
 		Root:   root,
 		Layout: layout.String(),
@@ -167,6 +179,7 @@ func CheckWithLayout(
 			generation,
 		)
 		tenant.MaxEnergy = maxEnergy
+		tenant.SetSharedEnvironment(shared)
 		report.Sites++
 
 		// A malformed design token cannot fail at runtime — the browser drops the
@@ -204,13 +217,22 @@ func CheckWithLayout(
 		if layout.IsSingleApp() {
 			sourceIdentity = ""
 		}
-		for _, issue := range work.CheckScheduleFiles(root, sourceIdentity) {
+		// the app's tier of its environment: what its jobs and schedules require is held against it, as the
+		// app's tenant holds a file back at boot (KITWORK_ENVIRONMENT.md mục 3)
+		appEnvironment, environmentErr := work.AppEnvironment(filepath.Join(root, sourceIdentity), shared.For(identity))
+		if environmentErr != nil {
+			report.Issues = append(report.Issues, CheckIssue{
+				Stage: "environment", Identity: identity,
+				File: filepath.Join(root, sourceIdentity, ".env"), Err: environmentErr,
+			})
+		}
+		for _, issue := range work.CheckScheduleFiles(root, sourceIdentity, appEnvironment) {
 			report.Issues = append(report.Issues, CheckIssue{
 				Stage: "schedule compile", Identity: identity,
 				File: issue.File, Err: issue.Err,
 			})
 		}
-		for _, issue := range work.CheckQueueFiles(root, sourceIdentity) {
+		for _, issue := range work.CheckQueueFiles(root, sourceIdentity, appEnvironment) {
 			report.Issues = append(report.Issues, CheckIssue{
 				Stage: "queue compile", Identity: identity,
 				File: issue.File, Err: issue.Err,

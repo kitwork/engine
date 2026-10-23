@@ -1,11 +1,11 @@
 // Router của quán cà phê: tập con JavaScript mà máy ảo Kitwork chạy.
-import { router, database, env, log } from "kitwork";
+import { router, database, environment, log } from "kitwork";
 import { normalize, slugOf } from "./_core/normalize.kitwork.js";
 import { receipt } from "./_core/receipt.kitwork.js";
 
-const PAGE_SIZE = env.PAGE_SIZE || 20;
-const OPEN_HOUR = env.OPEN_HOUR || 7;
-const CLOSE_HOUR = env.CLOSE_HOUR || 22;
+const PAGE_SIZE = environment.PAGE_SIZE || 20;
+const OPEN_HOUR = environment.OPEN_HOUR || 7;
+const CLOSE_HOUR = environment.CLOSE_HOUR || 22;
 const SIZES = ["S", "M", "L"];
 const SURCHARGE = { S: 0, M: 4000, L: 6000 };
 const TAX = 0.08;
@@ -108,6 +108,6 @@ router.get("/status/:code", ctx => {
   return ctx.text(label);
 });
 
-router.get("/health", ctx => ctx.json({ ok: true, version: env.VERSION || "dev", ratio: 3 / 4 }));
+router.get("/health", ctx => ctx.json({ ok: true, version: environment.VERSION || "dev", ratio: 3 / 4 }));
 
 export { priceOf, isOpen, toCard };

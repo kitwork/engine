@@ -83,6 +83,13 @@ func (t *Tenant) LoadQueueFiles() {
 		}
 		relative := ".shared/queue/" + name
 		bc, err := compiler.CompileModuleFileInApp(t.resolveApp(), filepath.Join(dir, name))
+		if err == nil {
+			// a key the file requires that the app's environment has not: the file waits, as one that
+			// does not compile (environment.go)
+			if missing := t.missingEnvironment(bc); missing != nil {
+				err = missing
+			}
+		}
 		if err != nil {
 			say(fmt.Sprintf("[Queue] compile %s: %v", relative, err))
 			unloaded.Sources[relative] = true
@@ -184,6 +191,11 @@ func (t *Tenant) readQueueConfig(file string) queueConfig {
 	}
 	const where = ".shared/queue/config.work"
 	bc, names, err := compiler.CompileConfigFileInApp(t.resolveApp(), file)
+	if err == nil {
+		if missing := t.missingEnvironment(bc); missing != nil {
+			err = missing
+		}
+	}
 	if err != nil {
 		fmt.Printf("[Queue] compile %s: %v\n", where, err)
 		return config

@@ -108,6 +108,11 @@ type Engine struct {
 	stopCleanup      chan struct{}
 	closeOnce        sync.Once
 	closed           bool
+
+	// sharedEnvironment is what application.work shares with apps (app.shareEnvironment); nil when
+	// nothing. Each tenant built receives it.
+	sharedEnvironmentMu sync.RWMutex
+	sharedEnvironment   *work.SharedEnvironment
 }
 
 func New(root string, maxEnergy uint64, hotReload bool, hostname string) *Engine {
@@ -246,6 +251,7 @@ func (e *Engine) StartAppSchedulers() (started int) {
 		appTenant.SetCollectionSearchCanary(e.collectionCanary.Load())
 		appTenant.SetCollectionSearchCanaryTelemetry(e.collectionStats)
 		appTenant.SetRuntimeHealth(e.runtimeHealth)
+		appTenant.SetSharedEnvironment(e.sharedEnvironmentNow())
 		appTenant.MaxEnergy = e.maxEnergy
 		appTenant.HotReload = e.hotReload
 		if err := appTenant.Run(); err != nil {
@@ -321,6 +327,21 @@ func (e *Engine) SetAuthorizer(authorizer Authorizer) {
 	e.mu.Lock()
 	e.authorizer = authorizer
 	e.mu.Unlock()
+}
+
+// SetSharedEnvironment hands every tenant built from now on what application.work shares with apps
+// (app.shareEnvironment, docs/KITWORK_ENVIRONMENT.md mục 2): keys of the host by name, for every app and
+// by app. nil shares nothing.
+func (e *Engine) SetSharedEnvironment(shared *work.SharedEnvironment) {
+	e.sharedEnvironmentMu.Lock()
+	e.sharedEnvironment = shared
+	e.sharedEnvironmentMu.Unlock()
+}
+
+func (e *Engine) sharedEnvironmentNow() *work.SharedEnvironment {
+	e.sharedEnvironmentMu.RLock()
+	defer e.sharedEnvironmentMu.RUnlock()
+	return e.sharedEnvironment
 }
 
 // SetBytecodeCache enables generation-scoped bytecode artifacts. An empty
@@ -734,6 +755,7 @@ func (e *Engine) prepareTenantCandidate(
 	candidate.SetCollectionSearchCanary(e.collectionCanary.Load())
 	candidate.SetCollectionSearchCanaryTelemetry(e.collectionStats)
 	candidate.SetRuntimeHealth(e.runtimeHealth)
+	candidate.SetSharedEnvironment(e.sharedEnvironmentNow())
 	candidate.MaxEnergy = e.maxEnergy
 	candidate.HotReload = e.hotReload
 	if err = candidate.Run(); err != nil {

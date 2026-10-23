@@ -86,6 +86,7 @@ func prepareFile(appRoot string, paths ...string) (*Program, []string, map[strin
 			sources[name] = source
 		}
 	}
+	prog.App = appRoot != ""
 	return prog, files, sources, nil
 }
 

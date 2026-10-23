@@ -2,16 +2,20 @@ package engine
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/manifest"
 	"github.com/kitwork/engine/runtime"
+	envhelper "github.com/kitwork/engine/utilities/env"
 	"github.com/kitwork/engine/utilities/safepath"
 	"github.com/kitwork/engine/value"
 	"github.com/kitwork/engine/work"
@@ -79,6 +83,12 @@ type ServerBuilder struct {
 	// manifestDir is the manifest's folder, which a path the manifest writes is read from
 	// (app.databases({ archive: { sqlite: "./data/archive.db" } })).
 	manifestDir string
+	// shareAll and shareApps are the keys app.shareEnvironment names, for every app and by app;
+	// sharedEnvironment their values, taken from the host's once the manifest has run
+	// (configjs_environment.go).
+	shareAll          []string
+	shareApps         map[string][]string
+	sharedEnvironment *work.SharedEnvironment
 }
 
 // MissingMember is called for a manifest method this engine does not have — app.postgresql() on a
@@ -1160,14 +1170,9 @@ func evalServerBuilder(file string) (*ServerBuilder, error) {
 	serverObj := value.New(builder)
 
 	// HOST env: root .env (cạnh file config) phủ bởi biến môi trường THẬT (OS thắng).
-	envMap := work.ParseDotEnv(filepath.Join(filepath.Dir(file), ".env"))
-	for _, kv := range os.Environ() {
-		if i := strings.IndexByte(kv, '='); i > 0 {
-			envMap[kv[:i]] = kv[i+1:]
-		}
-	}
-	if text, ok := envMap["MINIFY"]; ok {
-		minify, err := parseMinifyEnv(text)
+	envMap := hostEnvironment(filepath.Join(filepath.Dir(file), ".env"))
+	if entry, ok := envMap["MINIFY"]; ok {
+		minify, err := parseMinifyEnv(entry.Text)
 		if err != nil {
 			return nil, err
 		}
@@ -1175,6 +1180,12 @@ func evalServerBuilder(file string) (*ServerBuilder, error) {
 	}
 	var missingEnv []string
 	envObj := work.NewEnvWithMissing(envMap, &missingEnv)
+	// the host's values app.shareEnvironment takes its keys from: the .env beside the manifest, every file
+	// file.env names, the real environment on top of each
+	hostValues := map[string]work.EnvironmentEntry{}
+	for key, entry := range envMap {
+		hostValues[key] = entry
+	}
 
 	// file.env(path): the manifest names the file its environment comes from, relative to its own
 	// folder and never outside it, with the real environment on top (the OS wins), so production with
@@ -1187,6 +1198,9 @@ func evalServerBuilder(file string) (*ServerBuilder, error) {
 			if err != nil {
 				fileEnvErrors = append(fileEnvErrors, err.Error())
 				return work.NewEnv(nil)
+			}
+			for key, entry := range vars {
+				hostValues[key] = entry
 			}
 			return work.NewEnvWithMissing(vars, &missingEnv)
 		}),
@@ -1216,30 +1230,100 @@ func evalServerBuilder(file string) (*ServerBuilder, error) {
 	if len(missingEnv) > 0 {
 		return nil, fmt.Errorf("missing required env var(s): %s", strings.Join(missingEnv, ", "))
 	}
+	if err := builder.resolveSharedEnvironment(hostValues); err != nil {
+		return nil, err
+	}
 	return builder, nil
+}
+
+// hostEnvironment is a .env of the host with the real environment on top: the operating system wins
+// (KITWORK_ENVIRONMENT.md mục 1). A key the file declares that the operating system has too is said once
+// per process, by name, never a value: the file's value never counts.
+func hostEnvironment(path string) map[string]work.EnvironmentEntry {
+	vars := work.ParseDotEnvEntries(path)
+	for _, kv := range os.Environ() {
+		i := strings.IndexByte(kv, '=')
+		if i <= 0 {
+			continue
+		}
+		if _, declared := vars[kv[:i]]; declared {
+			warnHostCollision(kv[:i])
+		}
+		vars[kv[:i]] = work.EnvironmentEntry{Text: kv[i+1:]}
+	}
+	return vars
+}
+
+// hostCollisions are the keys warnHostCollision has said; hostSay writes the line (a test hears it).
+var (
+	hostCollisions sync.Map
+	hostSay        = func(line string) { fmt.Println(line) }
+)
+
+func warnHostCollision(key string) {
+	if _, said := hostCollisions.LoadOrStore(key, true); said {
+		return
+	}
+	hostSay(fmt.Sprintf("[environment] .env của host khai `%s` mà hệ điều hành cũng có: giá trị của hệ điều hành thắng; đặt tên khác cho khoá của host (không dùng HOSTNAME, HOST, USER, PATH, HOME; KITWORK_ENVIRONMENT.md mục 1)", key))
 }
 
 // manifestFileEnv reads the file a manifest's file.env(path) names: a path relative to the manifest's
 // folder that stays inside it, a file rather than a folder; a missing file is no error (the real
 // environment may hold everything). The real environment lies on top: the OS wins. Errors name the
 // path as written, never a value.
-func manifestFileEnv(manifestDir string, args []value.Value) (map[string]string, error) {
+//
+// The file is read through an os.Root of the manifest's folder (22/10/2026): a link out of it, a junction
+// of Windows included, which safepath's filepath.EvalSymlinks does not follow, is refused as it is opened.
+func manifestFileEnv(manifestDir string, args []value.Value) (map[string]work.EnvironmentEntry, error) {
 	if len(args) == 0 || args[0].K != value.String {
 		return nil, fmt.Errorf(`file.env cần đường dẫn tới một file, tính từ thư mục của manifest: file.env("./.env")`)
 	}
 	written := args[0].Text()
+	outside := fmt.Errorf("file.env(%q): đường dẫn nằm ngoài thư mục của manifest", written)
 	path, err := safepath.Resolve(manifestDir, written)
 	if err != nil {
-		return nil, fmt.Errorf("file.env(%q): đường dẫn nằm ngoài thư mục của manifest", written)
+		return nil, outside
 	}
 	if info, err := os.Stat(path); err == nil && info.IsDir() {
 		return nil, fmt.Errorf("file.env(%q) là một thư mục, cần một file", written)
 	}
-	vars := work.ParseDotEnv(path)
+	base, err := filepath.Abs(manifestDir)
+	if err != nil {
+		return nil, outside
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return nil, outside
+	}
+	relative, err := filepath.Rel(base, absolute)
+	if err != nil {
+		return nil, outside
+	}
+	root, err := os.OpenRoot(base)
+	if err != nil {
+		return nil, fmt.Errorf("file.env(%q): không mở được thư mục của manifest: %v", written, err)
+	}
+	defer root.Close()
+	vars := map[string]work.EnvironmentEntry{}
+	opened, err := root.Open(relative)
+	switch {
+	case err == nil:
+		vars = envhelper.ParseEntries(opened)
+		opened.Close()
+	case strings.Contains(err.Error(), "path escapes from parent"):
+		return nil, outside
+	case !errors.Is(err, fs.ErrNotExist):
+		return nil, fmt.Errorf("file.env(%q): không đọc được: %v", written, err)
+	}
 	for _, kv := range os.Environ() {
-		if i := strings.IndexByte(kv, '='); i > 0 {
-			vars[kv[:i]] = kv[i+1:]
+		i := strings.IndexByte(kv, '=')
+		if i <= 0 {
+			continue
 		}
+		if _, declared := vars[kv[:i]]; declared {
+			warnHostCollision(kv[:i])
+		}
+		vars[kv[:i]] = work.EnvironmentEntry{Text: kv[i+1:]}
 	}
 	return vars, nil
 }

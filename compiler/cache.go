@@ -52,6 +52,14 @@ func (c *FileCache) CompileFileInApp(appRoot string, paths ...string) (*Bytecode
 	if data, readErr := os.ReadFile(filename); readErr == nil {
 		if cached, decodeErr := UnmarshalBytecode(data, sourceFingerprint); decodeErr == nil {
 			cached.Files = append([]string(nil), files...)
+			// what the boot checks of environment is read off the program again: an artifact holds code
+			// alone, and a .env changed since it was written must still be checked (environment.go)
+			scopes, err := newCompilerWithSources(sources).resolveProgram(prog)
+			if err != nil {
+				return nil, err
+			}
+			cached.EnvironmentRequires = scopes.requires
+			cached.EnvironmentServerOnly = environmentServerOnly(scopes)
 			return cached, nil
 		}
 	}

@@ -60,7 +60,7 @@ func TestDatabaseOldSpellingsAreCompileErrors(t *testing.T) {
 
 // crmSchema declares a database outside the app (KITWORK_DATABASE.md mục 1): connect({ … }) has no tables,
 // only query().
-const crmSchema = "import { env } from \"kitwork\";\nimport { connect } from \"kitwork/database\";\n\nexport const crm = connect({ postgresql: env.CRM_URL });\n"
+const crmSchema = "import { environment } from \"kitwork\";\nimport { connect } from \"kitwork/database\";\n\nexport const crm = connect({ postgresql: environment.CRM_URL });\n"
 
 const importCRM = "import { crm } from \"app/.shared/schema/crm.work\";\n"
 
