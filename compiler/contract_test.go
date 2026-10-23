@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestCompilerV14GoldenContract(t *testing.T) {
-	if CompilerSchemaVersion != 14 {
-		t.Fatalf("CompilerSchemaVersion = %d, want schema v14", CompilerSchemaVersion)
+func TestCompilerV15GoldenContract(t *testing.T) {
+	if CompilerSchemaVersion != 15 {
+		t.Fatalf("CompilerSchemaVersion = %d, want schema v15", CompilerSchemaVersion)
 	}
 	// Bytecode 3 (14/10/2026) moved the fingerprint and every checksum below with the version alone: each
 	// fixture's instructions, constants and debug table are those bytecode 2 wrote (none needs a wide
@@ -20,9 +20,17 @@ func TestCompilerV14GoldenContract(t *testing.T) {
 	// compile) moved the fingerprint alone: no fixture imports a database. Schema 13 (22/10/2026, the older
 	// database spellings removed) moved the fingerprint alone: no fixture imports one. Schema 14 (22/10/2026, a
 	// job named by its export) moved the fingerprint alone: no fixture imports a job file or aliases an export.
-	const expectedFingerprint = "1e759d93d93eab3e52c327ec335937365eea20d8620569395b51ce9b05ec8d5c"
+	// Schema 15 (22/10/2026, a schedule named by its export) moved the fingerprint alone: no fixture imports a
+	// file of .schedule/ or writes cron.
+	const expectedFingerprint = "d17e01ab067f55b6e08ac8d15e496fa6757558ab847e20f0a608b256391996af"
 	if got := Fingerprint(); got != expectedFingerprint {
 		t.Fatalf("compiler fingerprint = %q, want %q", got, expectedFingerprint)
+	}
+	// schema 14 bundled a file of .schedule/ without naming its schedules, and compiled cron: its artifacts
+	// are not reused
+	const schema14 = "1e759d93d93eab3e52c327ec335937365eea20d8620569395b51ce9b05ec8d5c"
+	if stamped := compilerFingerprintFor(14); hex.EncodeToString(stamped[:]) != schema14 || Fingerprint() == schema14 {
+		t.Fatalf("schema 14 on bytecode 4 stamps %x, the current compiler %s: want %s and another", stamped, Fingerprint(), schema14)
 	}
 	// schema 13 bundled a job file without naming its jobs, which send() refuses: its artifacts are not reused
 	const schema13 = "89008e01476efea5799b15e8c346b46f275806b5aaafff5275763c3b70672c9b"

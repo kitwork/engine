@@ -6,6 +6,7 @@ import (
 
 	"github.com/kitwork/engine/app"
 	"github.com/kitwork/engine/capabilities"
+	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/database/statement"
 	requestscope "github.com/kitwork/engine/request"
 	"github.com/kitwork/engine/runtime"
@@ -89,16 +90,21 @@ type KitWork struct {
 	tenant       *Tenant
 	vm           *runtime.VM
 	requestScope *requestscope.Scope
-	// queueJobs collects the jobs a file of .shared/queue/ declares while the loader runs it (queue_load.go).
-	queueJobs *queueDeclarations
+	// queueJobs collects the jobs a file of .shared/queue/ declares while the loader runs it (queue_load.go);
+	// scheduleDeclarations the schedules a file of .schedule/ declares (schedule_load.go).
+	queueJobs            *queueDeclarations
+	scheduleDeclarations *scheduleDeclarations
 }
 
-// MissingMember is a word the module kitwork has not. An older word of it (sqlite, removed on 22/10/2026)
-// is the error that says what the spec writes instead; the compiler refuses its import in the same words.
-// Any other word is nothing, as it was.
+// MissingMember is a word the module kitwork has not. An older word of it (sqlite, removed on 22/10/2026;
+// cron, 22/10/2026) is the error that says what the spec writes instead; the compiler refuses its import in
+// the same words. Any other word is nothing, as it was.
 func (w *KitWork) MissingMember(name string) value.Value {
 	if spelling, removed := statement.RemovedKitworkWord(name); removed {
 		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf(`%s của "kitwork" đã bỏ: %s`, name, spelling))
+	}
+	if name == "cron" {
+		return value.InvalidFailure(value.InvalidArgumentCode, compiler.CronRemoved)
 	}
 	return value.Value{K: value.Nil}
 }

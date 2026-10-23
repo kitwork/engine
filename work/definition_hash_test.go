@@ -4,12 +4,10 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
-	"os"
-	"path/filepath"
 	"testing"
 )
 
-// A stored job or _cron definition (a job's retry, a cron's schedule) is what running the
+// A stored job or schedule definition (a job's retry, a schedule's retry) is what running the
 // file gives, and the same entry bytes can give another definition under another compiler schema or
 // after a module it imports changed. Sync skips a row whose content_hash is unchanged, so content_hash
 // is the compiled artifact's cache key, which covers every bundled source and the compiler
@@ -72,73 +70,52 @@ func TestQueueDefinitionIsStoredUnderTheArtifactCacheKey(t *testing.T) {
 	q.app.StopQueueWorker()
 }
 
-func TestCronDefinitionIsStoredUnderTheArtifactCacheKey(t *testing.T) {
-	tmp := t.TempDir()
-	site := filepath.Join(tmp, "acme", "localhost")
-	cronDir := filepath.Join(tmp, "acme", "_cron")
-	for _, dir := range []string{site, cronDir} {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(site, "router.kitwork.js"),
-		[]byte(`import { router } from "kitwork"; router.get((ctx) => ctx.text("ok"));`), 0644); err != nil {
-		t.Fatal(err)
-	}
-	source := `import { cron } from "kitwork";` + "\n" + `cron.every("1h").handle(() => {});`
-	if err := os.WriteFile(filepath.Join(cronDir, "beat.kitwork.js"), []byte(source), 0644); err != nil {
-		t.Fatal(err)
-	}
+// A schedule's definition is the same row of kitwork_definitions, of kind schedule: the same rule.
+func TestScheduleDefinitionIsStoredUnderTheArtifactCacheKey(t *testing.T) {
+	source := `import * as schedule from "kitwork/schedule";` + "\n" + `export const beat = schedule.every("1h").retry(3).run((context) => {});`
+	q := newQueueApp(t, map[string]string{".schedule/beat.work": source})
 
-	tenant := NewAppTenant(tmp, "acme")
-	if err := tenant.Run(); err != nil {
-		t.Fatal(err)
+	handler := q.app.scheduleWorker().handlerFor("beat")
+	if handler == nil || handler.Bytecode == nil {
+		t.Fatal("schedule beat did not register")
 	}
-	defer tenant.Close()
-
-	scheduler := tenant.scheduler()
-	if scheduler == nil || scheduler.db == nil {
-		t.Fatal("scheduler has no database — it did not start")
-	}
-	cacheKey := ""
-	scheduler.mu.Lock()
-	for _, job := range scheduler.jobs {
-		if job.Name == "beat" && job.Bytecode != nil {
-			cacheKey = job.Bytecode.CacheKey()
-		}
-	}
-	scheduler.mu.Unlock()
+	cacheKey := handler.Bytecode.CacheKey()
 	if cacheKey == "" || cacheKey == sourceOnlyHash(source) {
 		t.Fatalf("cache key = %q, want a key that differs from the source-only hash", cacheKey)
 	}
 
-	stored := func() (string, string) {
+	stored := func() (string, int) {
 		t.Helper()
-		var hash, schedule string
-		if err := scheduler.db.QueryRow(`SELECT content_hash, schedule FROM crons WHERE name='beat'`).Scan(&hash, &schedule); err != nil {
-			t.Fatalf("read the crons row: %v", err)
+		definitions, err := q.app.scheduleStore().Definitions(10, 0)
+		if err != nil || len(definitions) != 1 || definitions[0].Name != "beat" {
+			t.Fatalf("read the definitions: %+v %v", definitions, err)
 		}
-		return hash, schedule
+		return definitions[0].ContentHash, definitions[0].Retry
 	}
-	if hash, schedule := stored(); hash != cacheKey || schedule != "@every 1h" {
-		t.Errorf("after boot: content_hash = %q, schedule = %q; want %q, @every 1h", hash, schedule, cacheKey)
+	if hash, retry := stored(); hash != cacheKey || retry != 3 {
+		t.Errorf("after boot: content_hash = %q, retry = %d; want %q, 3", hash, retry, cacheKey)
 	}
 
 	for _, row := range []struct {
-		name, hash, want string
+		name, hash string
+		want       int
 	}{
-		{"a row stored under the source-only hash is written again", sourceOnlyHash(source), "@every 1h"},
-		// Control: the same stale schedule under the current key stays.
-		{"a row stored under the current key is left alone", cacheKey, "@every 9h"},
+		{"a row stored under the source-only hash is written again", sourceOnlyHash(source), 3},
+		// Control: the same stale retry under the current key stays.
+		{"a row stored under the current key is left alone", cacheKey, 1},
 	} {
-		tenant.StopCronJobs()
-		if _, err := scheduler.db.Exec(`UPDATE crons SET content_hash=?, schedule='@every 9h' WHERE name='beat'`, row.hash); err != nil {
+		q.app.StopScheduleWorker()
+		err := appRuns{tenant: q.app}.Write(func(db *sql.DB) error {
+			_, err := db.Exec(`UPDATE kitwork_definitions SET content_hash = $1, retry = 1 WHERE kind = 'schedule' AND name = 'beat'`, row.hash)
+			return err
+		})
+		if err != nil {
 			t.Fatalf("%s: %v", row.name, err)
 		}
-		tenant.StartCronJobs()
-		if _, schedule := stored(); schedule != row.want {
-			t.Errorf("%s: schedule = %q, want %q", row.name, schedule, row.want)
+		q.app.StartScheduleWorker()
+		if _, retry := stored(); retry != row.want {
+			t.Errorf("%s: retry = %d, want %d", row.name, retry, row.want)
 		}
 	}
-	tenant.StopCronJobs()
+	q.app.StopScheduleWorker()
 }

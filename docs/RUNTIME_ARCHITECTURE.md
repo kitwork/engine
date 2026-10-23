@@ -53,7 +53,7 @@ One app with routes directly at its root:
 
 ```text
 app/
-  _cron/
+  .schedule/
   .shared/queue/
   .database/
   _core/
@@ -66,7 +66,7 @@ One app with multiple domain-scoped sites:
 
 ```text
 app/
-  _cron/
+  .schedule/
   .shared/queue/
   .database/
   _core/
@@ -80,7 +80,7 @@ Multiple tenant apps:
 
 ```text
 apps/<identity>/
-  _cron/
+  .schedule/
   .shared/queue/
   .database/
   _core/
@@ -237,8 +237,8 @@ Implemented:
   labels;
 - detached work is accepted, cancelled, and drained by the app runtime, so
   site eviction and generation reload do not stop app work;
-- the cron scheduler is an app-owned lifecycle resource; compatibility
-  tenants only provide its bytecode execution adapter;
+- the schedule clock and the queue worker are app-owned lifecycle resources;
+  compatibility tenants only provide their bytecode execution adapter;
 - `LifetimeApp` capability instances live on that app runtime and are shared
   across sibling domains;
 - every HTTP request owns a `request.Scope`, cancellation context,
@@ -329,7 +329,7 @@ Implemented:
 - site eviction closes only that site; engine shutdown closes the full hierarchy.
 - `kitwork check` evaluates the executable host manifest, discovers every app
   and site, prepares route graphs and render plans through the production
-  pipeline, compiles cron sources, reports all failures, and exits without
+  pipeline, compiles schedule and queue sources, reports all failures, and exits without
   opening listeners, activating generations, or starting schedulers.
 - `core.Engine.Health()` exposes only bounded process-local aggregates:
   requests and in-flight high-water marks, fixed latency buckets, VM totals,
@@ -354,7 +354,7 @@ Implemented:
 
 - identity;
 - app-wide lifecycle;
-- cron and background work;
+- schedules and background work;
 - shared database and lifecycle resource managers;
 - app-scoped capabilities;
 - child site registry.

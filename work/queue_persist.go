@@ -23,6 +23,10 @@ import (
 // A heartbeat moves the leases of the attempts running here forward and stops an attempt whose run was
 // cancelled. A lease that ran out with no attempt here behind it (a process that stopped) gives the run
 // back. The poller never runs JavaScript itself.
+//
+// The schedules of the app run on the same worker, a second one of kind schedule (KITWORK_SCHEDULE.md
+// mục 9: "chung bảng kitwork_runs và chung cơ chế lease, fencing, thử lại với queue"): its poller stores
+// the run of each due time first (schedule_runtime.go), then claims and runs as the queue's does.
 
 // queueLeaseTTL is how long a claim holds its run without a heartbeat. A var so tests can shrink it.
 var queueLeaseTTL = 30 * time.Second
@@ -53,12 +57,18 @@ const queueLogLimit = 64 << 10
 
 // QueueSettled, when set, hears each attempt the worker settles: the app, the run, and the status the run
 // took ("" when the attempt no longer held it). A test's way to wait for the worker without sleeping.
-var QueueSettled func(identity, id, status string)
+// ScheduleSettled is the same for the runs of the app's schedules.
+var (
+	QueueSettled    func(identity, id, status string)
+	ScheduleSettled func(identity, id, status string)
+)
 
 // StartQueueWorker writes the app's job definitions into kitwork_definitions and starts the worker when
 // there is a job to run. Called again (hot reload), it stops the running worker first.
-func (t *Tenant) StartQueueWorker() {
-	worker := t.queueWorker()
+func (t *Tenant) StartQueueWorker() { t.startWorker(t.queueWorker()) }
+
+// startWorker starts worker, the queue's or the schedules', stopping it first when it runs.
+func (t *Tenant) startWorker(worker *queueRuntime) {
 	if worker == nil {
 		return
 	}
@@ -76,13 +86,15 @@ func (t *Tenant) StartQueueWorker() {
 		return
 	}
 	if err := t.startQueueRuntime(worker); err != nil {
-		fmt.Printf("[Queue] worker disabled: %v\n", err)
+		fmt.Printf("%s worker disabled: %v\n", worker.label(), err)
 	}
 }
 
 // StopQueueWorker halts claiming and waits for the attempts running here to finish.
-func (t *Tenant) StopQueueWorker() {
-	worker := t.queueWorker()
+func (t *Tenant) StopQueueWorker() { t.stopWorker(t.queueWorker()) }
+
+// stopWorker halts worker's claiming and waits for its attempts.
+func (t *Tenant) stopWorker(worker *queueRuntime) {
 	if worker == nil {
 		return
 	}
@@ -116,7 +128,7 @@ func (t *Tenant) startQueueRuntime(worker *queueRuntime) error {
 		})
 		names = append(names, handler.Name)
 	}
-	store := t.queueStore()
+	store := t.runsStore(worker.kind)
 	kept, err := store.Sync(definitions, worker.unloaded, time.Now())
 	if err != nil {
 		return fmt.Errorf("kitwork_definitions: %w", err)
@@ -130,7 +142,12 @@ func (t *Tenant) startQueueRuntime(worker *queueRuntime) error {
 	}
 	worker.withheld = withheld
 	if len(kept) > 0 {
-		fmt.Printf("[Queue] job %s chưa nạp được (file lỗi): các lần chạy của nó chờ, không thử, tới khi file nạp lại\n", strings.Join(kept, ", "))
+		fmt.Printf("%s %s %s chưa nạp được (file lỗi): các lần chạy của nó chờ, không thử, tới khi file nạp lại\n", worker.label(), worker.noun(), strings.Join(kept, ", "))
+	}
+	if worker.book != nil {
+		if err := t.syncSchedules(worker, store); err != nil {
+			return fmt.Errorf("kitwork_schedules: %w", err)
+		}
 	}
 	if len(worker.handlers) == 0 {
 		return nil
@@ -156,6 +173,11 @@ func (t *Tenant) startQueueRuntime(worker *queueRuntime) error {
 		t.queueHeartbeat(worker, beat, store)
 	}()
 
+	if worker.book != nil {
+		fmt.Printf("[Schedule] đồng hồ chạy (kitwork_runs của .database/application/) — %d lịch cho %q: %s\n",
+			len(names), identity, strings.Join(names, ", "))
+		return nil
+	}
 	fmt.Printf("[Queue] worker up (kitwork_runs của .database/application/) — %d job cho %q: %s\n",
 		len(names), identity, strings.Join(names, ", "))
 	return nil
@@ -172,6 +194,10 @@ func (t *Tenant) queuePoller(worker *queueRuntime, cancel chan struct{}, store *
 			return // the app is closing: its worker closes next, and nothing is claimed in between
 		}
 		now := time.Now()
+		if worker.book != nil {
+			// the run of each due time is stored before anything claims it
+			t.dispatchSchedules(worker, store)
+		}
 		if worker.takeReclaim(now) {
 			t.queueReclaim(worker, store, now)
 		}
@@ -181,7 +207,7 @@ func (t *Tenant) queuePoller(worker *queueRuntime, cancel chan struct{}, store *
 			keep := worker.keep
 			worker.mu.Unlock()
 			if _, err := store.Prune(now.Add(-keep)); err != nil {
-				fmt.Printf("[Queue] keep: %v\n", err)
+				fmt.Printf("%s keep: %v\n", worker.label(), err)
 			}
 		}
 		tick++
@@ -209,7 +235,7 @@ func (t *Tenant) queueReclaim(worker *queueRuntime, store *queuestore.Store, now
 	count, next, err := store.Reclaim(now, skip)
 	switch {
 	case err != nil:
-		fmt.Printf("[Queue] reclaim: %v\n", err)
+		fmt.Printf("%s reclaim: %v\n", worker.label(), err)
 		worker.noteReclaim(now.Add(queueLeaseTTL))
 		return
 	case !next.IsZero():
@@ -252,7 +278,7 @@ func (t *Tenant) claimAndRunQueue(worker *queueRuntime, store *queuestore.Store,
 	}
 	claims, next, err := store.Claim(now, queueLeaseTTL, room, worker.withheldJobs())
 	if err != nil {
-		fmt.Printf("[Queue] claim: %v\n", err)
+		fmt.Printf("%s claim: %v\n", worker.label(), err)
 		worker.noteDue(now.Add(queuePollInterval))
 		return
 	}
@@ -297,6 +323,9 @@ func (t *Tenant) runQueueAttempt(ctx context.Context, worker *queueRuntime, stor
 		// the run ends failed, saying so, rather than coming back for ever. A job whose file did not load
 		// is withheld, never claimed (store.Claim), so it does not end here.
 		message := fmt.Sprintf("không có job %s trong .shared/queue/ của app: job đã đổi tên hay đã xoá sau khi gửi", claim.Name)
+		if worker.book != nil {
+			message = fmt.Sprintf("không có lịch %s trong .schedule/ của app: lịch đã đổi tên hay đã xoá sau khi tới giờ", claim.Name)
+		}
 		log.attemptFailed(claim.Attempt, value.NotFoundCode, message)
 		fail(value.NotFoundCode, message, time.Time{}, time.Now())
 		return
@@ -309,7 +338,7 @@ func (t *Tenant) runQueueAttempt(ctx context.Context, worker *queueRuntime, stor
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := t.ExecuteContext(ctx, handler.Bytecode.Program, handler.Callback, []value.Value{t.queueContext(claim, log)})
+		_, err := t.ExecuteContext(ctx, handler.Bytecode.Program, handler.Callback, []value.Value{t.attemptContext(worker, claim, log)})
 		done <- err
 	}()
 	var runErr error
@@ -331,7 +360,7 @@ func (t *Tenant) runQueueAttempt(ctx context.Context, worker *queueRuntime, stor
 		won, err := store.Complete(claim.ID, claim.Token, log.String(), now)
 		status := queuestore.Completed
 		if err == nil && !won {
-			fmt.Printf("[Queue] %s %s: lần thử %d chạy xong sau khi mất lease; kết quả bỏ\n", claim.Name, claim.ID, claim.Attempt)
+			fmt.Printf("%s %s %s: lần thử %d chạy xong sau khi mất lease; kết quả bỏ\n", worker.label(), claim.Name, claim.ID, claim.Attempt)
 			status = ""
 		}
 		t.settleQueue(worker, claim.ID, status, err)
@@ -357,11 +386,15 @@ func (t *Tenant) runQueueAttempt(ctx context.Context, worker *queueRuntime, stor
 // worker gives it back when the lease runs out.
 func (t *Tenant) settleQueue(worker *queueRuntime, id, status string, err error) {
 	if err != nil {
-		fmt.Printf("[Queue] %s: không ghi được kết quả: %v\n", id, err)
+		fmt.Printf("%s %s: không ghi được kết quả: %v\n", worker.label(), id, err)
 		status = ""
 		worker.noteReclaim(time.Now().Add(queueLeaseTTL))
 	}
-	if hook := QueueSettled; hook != nil {
+	hook := QueueSettled
+	if worker.book != nil {
+		hook = ScheduleSettled
+	}
+	if hook != nil {
 		hook(t.appID(), id, status)
 	}
 }
@@ -409,17 +442,17 @@ func (l *queueLog) String() string {
 	return l.text.String()
 }
 
+// attemptContext is the context the handler of the claimed run gets: a job's, or a schedule's.
+func (t *Tenant) attemptContext(worker *queueRuntime, claim queuestore.Claim, log *queueLog) value.Value {
+	if worker.book != nil {
+		return t.scheduleContext(claim, log)
+	}
+	return t.queueContext(claim, log)
+}
+
 // queueContext is the context a job's handler gets (mục 5): context.data(), the data sent, and context.job,
 // the run and this attempt.
 func (t *Tenant) queueContext(claim queuestore.Claim, log *queueLog) value.Value {
-	logFn := value.NewFunc(func(args ...value.Value) value.Value {
-		parts := make([]string, len(args))
-		for i, a := range args {
-			parts[i] = a.Text()
-		}
-		log.write(strings.Join(parts, " "))
-		return value.Value{K: value.Nil}
-	})
 	job := value.New(map[string]value.Value{
 		"id":             value.New(claim.ID),
 		"name":           value.New(claim.Name),
@@ -428,9 +461,22 @@ func (t *Tenant) queueContext(claim queuestore.Claim, log *queueLog) value.Value
 		"isFinalAttempt": value.New(claim.Attempt >= claim.MaxAttempts),
 		"createdAt":      value.New(claim.CreatedAt),
 		"startedAt":      value.New(claim.StartedAt),
-		"log":            logFn,
+		"log":            logFunction(log),
 	})
 	return value.Value{K: value.Proxy, V: &jobContext{data: claim.Data, job: job}}
+}
+
+// logFunction is context.job.log(…): it writes its arguments, joined by a space, as one line of the run's
+// log.
+func logFunction(log *queueLog) value.Value {
+	return value.NewFunc(func(args ...value.Value) value.Value {
+		parts := make([]string, len(args))
+		for i, a := range args {
+			parts[i] = a.Text()
+		}
+		log.write(strings.Join(parts, " "))
+		return value.Value{K: value.Nil}
+	})
 }
 
 // jobContext is the context of a job: data() and job, and an error naming the new spelling for each word

@@ -9,12 +9,12 @@ import (
 	"github.com/kitwork/engine/work"
 )
 
-func TestCheckAggregatesSiteAndCronFailuresWithoutStartingRuntime(t *testing.T) {
+func TestCheckAggregatesSiteAndScheduleFailuresWithoutStartingRuntime(t *testing.T) {
 	root := t.TempDir()
 	valid := filepath.Join(root, "identity-a", "valid.example")
 	brokenImport := filepath.Join(root, "identity-a", "import.example")
 	brokenTemplate := filepath.Join(root, "identity-b", "template.example")
-	cronDir := filepath.Join(root, "identity-a", "_cron")
+	cronDir := filepath.Join(root, "identity-a", ".schedule")
 	for _, dir := range []string{valid, brokenImport, brokenTemplate, cronDir} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
@@ -42,8 +42,8 @@ router.get((ctx) => ctx.json(missing));`,
 	write(filepath.Join(brokenTemplate, "index.kitwork.html"), `<html>{{ @page }}</html>`)
 	write(filepath.Join(brokenTemplate, "page.kitwork.html"), `{{ if }}`)
 	write(
-		filepath.Join(cronDir, "broken.kitwork.js"),
-		`import { cron } from "kitwork"; cron.every("1m").handle(() => {`,
+		filepath.Join(cronDir, "broken.work"),
+		`import * as schedule from "kitwork/schedule"; export const broken = schedule.every("1m").run((context) => {`,
 	)
 
 	report := Check(root, 100_000)
@@ -71,13 +71,13 @@ router.get((ctx) => ctx.json(missing));`,
 	for _, issue := range report.Issues {
 		joined += issue.Error() + "\n"
 	}
-	for _, want := range []string{"import.example", "template.example", "broken.kitwork.js"} {
+	for _, want := range []string{"import.example", "template.example", "broken.work", "schedule compile"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("report does not identify %q:\n%s", want, joined)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(root, "identity-a", ".data", "scheduler.db")); !os.IsNotExist(err) {
-		t.Fatal("preflight started or persisted the cron scheduler")
+	if _, err := os.Stat(filepath.Join(root, "identity-a", ".database")); !os.IsNotExist(err) {
+		t.Fatal("preflight started the app's schedules or stored their runs")
 	}
 }
 

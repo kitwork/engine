@@ -4,8 +4,11 @@
 // Beside it, kitwork_definitions holds what each job was declared with, so list() reads the definitions
 // whether anything was sent or not.
 //
-// Both tables carry a kind ('queue' today, 'schedule' when KITWORK_SCHEDULE.md moves onto the same store),
-// so the two share the runs, the lease and the retry without sharing a namespace.
+// Both tables carry a kind, 'queue' or 'schedule' (KITWORK_SCHEDULE.md mục 9: "chung bảng kitwork_runs và
+// chung cơ chế lease, fencing, thử lại với queue"), so the two share the runs, the lease and the retry
+// without sharing a namespace. A schedule keeps one more row, in kitwork_schedules: its rule as last
+// synced, the due time a once() chose, and the last due time handled, so a restart neither runs a due time
+// twice nor chooses another "next" for a once().
 //
 // The statements are KitDB's SQL (the app's database is a KitDB file in .database/application/): ON
 // CONFLICT, LIMIT/OFFSET written as numbers, no MAX(), no CASE, no SKIP LOCKED. Columns are TEXT and
@@ -177,6 +180,13 @@ var Schema = []string{
 		content_hash TEXT NOT NULL,
 		updated_at TEXT NOT NULL,
 		PRIMARY KEY (kind, name))`,
+	`CREATE TABLE IF NOT EXISTS kitwork_schedules (
+		name TEXT PRIMARY KEY,
+		rule TEXT NOT NULL,
+		declared_at TEXT NOT NULL,
+		once_at TEXT,
+		last_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL)`,
 }
 
 // InitSchema makes both tables in db.

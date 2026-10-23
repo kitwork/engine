@@ -273,6 +273,9 @@ func (rt *RouteTree) Prepare() error {
 		if err := node.compileError(); err != nil {
 			return err
 		}
+		if err := rt.scheduleInSite(node); err != nil {
+			return err
+		}
 		sources := rt.tenant.SiteGeneration().Sources()
 		for _, filename := range node.sourceFiles() {
 			info, err := os.Stat(filename)
@@ -325,6 +328,23 @@ func (rt *RouteTree) Prepare() error {
 	}
 	rt.tenant = nil
 	return nil
+}
+
+// scheduleInSite is the boot error of a .schedule/ in a folder of a site (KITWORK_SCHEDULE.md mục 2): the
+// app's clock reads only the one at the app's root, so the schedules written there would never run.
+func (rt *RouteTree) scheduleInSite(node *RouteNode) error {
+	folder := filepath.Join(node.diskPath(), ".schedule")
+	if filepath.Clean(node.diskPath()) == filepath.Clean(rt.tenant.resolveApp()) {
+		return nil // a site whose folder is the app's own (one app, no domain folder)
+	}
+	if info, err := os.Stat(folder); err != nil || !info.IsDir() {
+		return nil
+	}
+	where := "/" + node.relPath()
+	if node.parent == nil {
+		where = "gốc site"
+	}
+	return fmt.Errorf("%s có .schedule/: site là web, .schedule/ là đồng hồ, .shared/queue/ là người làm; lịch đặt ở .schedule/ của gốc app (app/.schedule/ hay apps/<identity>/.schedule/)", where)
 }
 
 func (rt *RouteTree) isAssetDirectory(node *RouteNode) bool {

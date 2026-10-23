@@ -95,6 +95,12 @@ type binding struct {
 	queueModule  bool
 	queueHandle  string
 	queueReceipt bool
+	// scheduleModule: a name bound to the module kitwork/schedule itself; scheduleRule: a rule of it imported
+	// by name (import { daily } from "kitwork/schedule"); scheduleHandle: an import of a schedule's handle
+	// from a file of .schedule/ (compiler/schedule.go).
+	scheduleModule bool
+	scheduleRule   string
+	scheduleHandle string
 }
 
 type lexicalScope struct {
@@ -187,6 +193,11 @@ type resolver struct {
 	// it. inQueueModule: the code being read is a file of .shared/queue/, where queue.job is written.
 	queue         *QueueBundle
 	inQueueModule bool
+	// schedule, inScheduleModule: the same of the app's .schedule/; scheduleChains the calls of a chain of a
+	// rule already read (scheduleChain reads a chain once, from its outermost call).
+	schedule         *ScheduleBundle
+	inScheduleModule bool
+	scheduleChains   map[*MethodCallExpression]bool
 }
 
 // resolveProgram resolves every name of a program and gives each variable its slot.
@@ -210,9 +221,11 @@ func (c *Compiler) resolveObserved(
 			once:         map[*AssignmentExpression]onceSlots{},
 			statements:   map[*MethodCallExpression]*MethodCallExpression{},
 		},
-		bundle:  program.Database,
-		aliases: map[*Identifier]bool{},
-		queue:   program.Queue,
+		bundle:         program.Database,
+		aliases:        map[*Identifier]bool{},
+		queue:          program.Queue,
+		schedule:       program.Schedule,
+		scheduleChains: map[*MethodCallExpression]bool{},
 	}
 	r.databases = r.bundle != nil && len(r.bundle.Imports) > 0
 	r.enterFunction(nil)
@@ -299,11 +312,13 @@ func (r *resolver) hoist(statements []Statement) {
 			}
 			r.declarationSite(node)
 			r.queueDeclaration(node)
+			r.scheduleDeclaration(node)
 			alias := r.databaseAlias(node)
 			for _, name := range node.Names {
 				declared := r.declare(name, kind)
 				r.markDatabase(node, name, declared, alias)
 				r.markQueue(node, name, declared)
+				r.markSchedule(node, name, declared)
 				if declared != nil && node.Function {
 					declared.constant = false
 				}
@@ -628,6 +643,9 @@ func (r *resolver) expression(expression Expression) {
 		if r.queueMember(node.Object, node.Property) {
 			return
 		}
+		if r.scheduleMember(node.Object, node.Property) {
+			return
+		}
 		r.expression(node.Object)
 	case *IndexExpression:
 		if r.databases && r.handleMember(node.Left, node.Token, nil) {
@@ -684,6 +702,9 @@ func (r *resolver) expression(expression Expression) {
 		if r.queueCall(node) {
 			return
 		}
+		if r.scheduleCall(node) {
+			return
+		}
 		r.expression(node.Object)
 		for _, argument := range node.Arguments {
 			r.expression(argument)
@@ -734,6 +755,11 @@ func (r *resolver) functionLiteral(literal *FunctionLiteral) {
 		outer := r.inQueueModule
 		r.inQueueModule = true
 		defer func() { r.inQueueModule = outer }()
+	}
+	if r.schedule != nil && r.schedule.Modules[literal] != "" {
+		outer := r.inScheduleModule
+		r.inScheduleModule = true
+		defer func() { r.inScheduleModule = outer }()
 	}
 	r.enterFunction(literal)
 	for _, parameter := range literal.Parameters {

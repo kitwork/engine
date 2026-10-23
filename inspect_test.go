@@ -69,9 +69,9 @@ func TestInspectFileResolvesAppImports(t *testing.T) {
 	importing := `import { report } from "app/.shared/report.work";` + "\nlet result = report();"
 	for relative, content := range map[string]string{
 		"apps/acme/.shared/report.work":    `export const report = () => "acme";`,
-		"apps/acme/_cron/daily.kitwork.js": importing,
+		"apps/acme/tasks/daily.kitwork.js": importing,
 		"app/.shared/report.work":          `export const report = () => "app";`,
-		"app/_cron/mail.kitwork.js":        importing,
+		"app/tasks/mail.kitwork.js":        importing,
 	} {
 		full := filepath.Join(host, filepath.FromSlash(relative))
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
@@ -87,8 +87,8 @@ func TestInspectFileResolvesAppImports(t *testing.T) {
 	t.Chdir(host)
 
 	for _, c := range []struct{ entry, app string }{
-		{"apps/acme/_cron/daily.kitwork.js", "apps/acme"},
-		{"app/_cron/mail.kitwork.js", "app"},
+		{"apps/acme/tasks/daily.kitwork.js", "apps/acme"},
+		{"app/tasks/mail.kitwork.js", "app"},
 	} {
 		entry := filepath.Join(host, filepath.FromSlash(c.entry))
 		appRoot := filepath.Join(host, filepath.FromSlash(c.app))

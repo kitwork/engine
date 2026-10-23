@@ -87,8 +87,8 @@ func requestVM(scope *requestscope.Scope) *runtime.VM {
 }
 
 // Execute implements capabilities.Runtime: run a lambda against its bytecode in a pooled VM, bound to
-// this tenant's Globals/Builtins/Vars and capped by MaxEnergy. This is the SAME runner the cron
-// scheduler uses (runInJobVM now delegates here) — exposed generically so any capability can run
+// this tenant's Globals/Builtins/Vars and capped by MaxEnergy. This is the SAME runner the queue's and the
+// schedules' worker uses (through ExecuteContext) — exposed generically so any capability can run
 // handlers off the request path through its Scope. (Tenant.Run() is the tenant boot method; this is
 // named Execute to avoid that.)
 func (t *Tenant) Execute(program *runtime.Program, fn *value.Lambda, args []value.Value) (gas uint64, runErr error) {
@@ -108,7 +108,7 @@ func (t *Tenant) ExecuteContext(ctx context.Context, program *runtime.Program, f
 		return 0, fmt.Errorf("run: lambda has no program")
 	}
 	// A capability that runs fn while a VM's host call is in progress (an atomic callback) nests it
-	// there, as ExecuteLambda does; a run of its own (a cron job) has no caller and its own budget.
+	// there, as ExecuteLambda does; a run of its own (a job, a schedule) has no caller and its own budget.
 	outer := runtime.LambdaCaller(fn)
 	vm := enginePool.Acquire()
 	res := value.Value{K: value.Nil}

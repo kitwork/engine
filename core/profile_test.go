@@ -34,7 +34,7 @@ router.get((ctx) => ctx.json({ answer: add(20, 22) }));
 import { router } from "kitwork";
 router.get((ctx) => ctx.text("about"));
 `)
-	write("identity/_cron/pulse.kitwork.js", `const pulse = () => 42;`)
+	write("identity/.schedule/pulse.work", `const pulse = () => 42;`)
 	write("identity/.shared/queue/mail.work", `const send = (message) => message;`)
 	write("identity/.shared/queue/config.work", `const parallel = 2;`)
 	write("identity/.shared/lib.work", `export const helper = () => 1;`)
@@ -89,12 +89,13 @@ func TestProfileWithLayoutProfilesOnlyExecutableRootShape(t *testing.T) {
 		root := t.TempDir()
 		writeProfileSource(t, root, work.RouterFileName, profileRouterSource("home"))
 		writeProfileSource(t, root, "about/router.kitwork.js", profileRouterSource("about"))
-		writeProfileSource(t, root, "_cron/pulse.kitwork.js", `const pulse = () => 1;`)
+		writeProfileSource(t, root, ".schedule/pulse.work", `const pulse = () => 1;`)
+		writeProfileSource(t, root, "_cron/old.kitwork.js", `const old = () => 1;`)
 		writeProfileSource(t, root, "_core/router.kitwork.js", profileRouterSource("private"))
 
 		report := ProfileWithLayout(root, work.RootLayoutSingle)
 		assertProfileFiles(t, report, []string{
-			"_cron/pulse.kitwork.js",
+			".schedule/pulse.work",
 			"about/router.kitwork.js",
 			"router.kitwork.js",
 		})
@@ -119,7 +120,7 @@ func TestProfileWithLayoutProfilesOnlyExecutableRootShape(t *testing.T) {
 
 	t.Run("multi tenant", func(t *testing.T) {
 		root := t.TempDir()
-		writeProfileSource(t, root, "first/_cron/pulse.kitwork.js", `const pulse = () => 1;`)
+		writeProfileSource(t, root, "first/.schedule/pulse.work", `const pulse = () => 1;`)
 		writeProfileSource(t, root, "first/one.example/router.kitwork.js", profileRouterSource("one"))
 		writeProfileSource(t, root, "first/one.example/about/router.kitwork.js", profileRouterSource("about"))
 		writeProfileSource(t, root, "second/two.example/router.kitwork.js", profileRouterSource("two"))
@@ -127,7 +128,7 @@ func TestProfileWithLayoutProfilesOnlyExecutableRootShape(t *testing.T) {
 
 		report := ProfileWithLayout(root, work.RootLayoutMultiTenant)
 		assertProfileFiles(t, report, []string{
-			"first/_cron/pulse.kitwork.js",
+			"first/.schedule/pulse.work",
 			"first/one.example/about/router.kitwork.js",
 			"first/one.example/router.kitwork.js",
 			"second/two.example/router.kitwork.js",

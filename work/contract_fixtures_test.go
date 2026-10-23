@@ -228,7 +228,7 @@ router.get((ctx) => {
 	}
 }
 
-func TestRealAppCronContractFixture(t *testing.T) {
+func TestRealAppScheduleContractFixture(t *testing.T) {
 	tmp := t.TempDir()
 	appDir := filepath.Join(tmp, "acme", "localhost")
 	if err := os.MkdirAll(appDir, 0755); err != nil {
@@ -236,10 +236,11 @@ func TestRealAppCronContractFixture(t *testing.T) {
 	}
 
 	routerScript := `
-import { router, cron } from "kitwork";
+import { router } from "kitwork";
+import * as schedule from "kitwork/schedule";
 
 router.get((ctx) => {
-    const list = cron.list();
+    const list = schedule.list();
     return ctx.json({ count: list.length });
 });
 `

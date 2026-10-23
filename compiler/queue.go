@@ -316,16 +316,17 @@ func (b *bundler) defaultToken(prog *Program) Token {
 	return Token{}
 }
 
-// queueExportReturn is the export return of a file of .shared/queue/, its exports' names in the order they
-// are written last (the first name a job is exported under is its name):
+// namedExportReturn is the export return of a file of .shared/queue/ or of .schedule/, its exports' names in
+// the order they are written last (the first name a job or a schedule is exported under is its name):
 //
 //	return kitwork().queue.#exports({ camOn: camOn, … }, ".shared/queue/camOn.work", ["camOn", …]);
-func queueExportReturn(prog *Program, origin Token, module string) Statement {
+//	return kitwork().schedule.#exports({ baoCaoSang: baoCaoSang, … }, ".schedule/baoCao.work", ["baoCaoSang", …]);
+func namedExportReturn(prog *Program, origin Token, module, word string) Statement {
 	ret := exportReturn(prog, origin).(*ReturnStatement)
 	namespace := &MemberExpression{
 		Token:    tokenFrom(origin, Dot),
 		Object:   &CallExpression{Token: tokenFrom(origin, LeftParen), Function: ident("kitwork", origin)},
-		Property: ident("queue", origin),
+		Property: ident(word, origin),
 	}
 	text := func(s string) Expression {
 		return &Literal{Token: Token{Kind: String, Value: value.NewString(s), Source: origin.Source, Position: origin.Position}, Value: value.NewString(s)}
@@ -344,8 +345,9 @@ func queueExportReturn(prog *Program, origin Token, module string) Statement {
 }
 
 // CompileModuleFileInApp compiles a file of an app as a module: its program returns the file's export
-// object, as an import of it sees it (a file of .shared/queue/ names its jobs on the way out). The loader of
-// .shared/queue/ runs it to find the jobs a file exports, and under which names.
+// object, as an import of it sees it (a file of .shared/queue/ names its jobs on the way out, a file of
+// .schedule/ its schedules). The loaders of .shared/queue/ and .schedule/ run it to find the jobs and the
+// schedules a file exports, and under which names.
 func CompileModuleFileInApp(appRoot, path string) (*Bytecode, error) {
 	absolute, err := filepath.Abs(path)
 	if err != nil {
@@ -369,7 +371,7 @@ func CompileModuleFileInApp(appRoot, path string) (*Bytecode, error) {
 		return nil, err
 	}
 	origin := Token{Source: b.sourceName(absolute)}
-	program := &Program{Database: b.database, Queue: b.queue}
+	program := &Program{Database: b.database, Queue: b.queue, Schedule: b.schedule}
 	program.Statements = append(program.Statements, b.defs...)
 	program.Statements = append(program.Statements, &ReturnStatement{Token: tokenFrom(origin, Return), ReturnValue: ident(module, origin)})
 	// the file first, as the entry of any other compile, then every module it bundles

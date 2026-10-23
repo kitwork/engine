@@ -103,15 +103,15 @@ func TestRouterAppImportOfAMissingFileFailsTheBoot(t *testing.T) {
 	}
 }
 
-// The loaders that run the app's background files at boot (LoadCronFiles, LoadQueueFiles, from Run)
-// compile them as the app's: an app/ import resolves from the app's folder, so the cron registers under its
-// file's name and the job under its export's, with what the import gave them. A loader that compiled them
-// as no app's would print "[Cron] compile …: file này không thuộc app nào" and register nothing.
+// The loaders that run the app's background files at boot (LoadScheduleFiles, LoadQueueFiles, from Run)
+// compile them as the app's: an app/ import resolves from the app's folder, so the schedule and the job
+// register under their export's name, with what the import gave them. A loader that compiled them as no
+// app's would print "[Schedule] compile …: file này không thuộc app nào" and register nothing.
 func TestBackgroundLoadersImportFromTheAppRoot(t *testing.T) {
 	root := t.TempDir()
 	writeAppTree(t, root, map[string]string{
 		"acme/.shared/plan.work":           "export const every = \"1h\";\nexport const attempts = 4;",
-		"acme/_cron/daily.kitwork.js":      "import { cron } from \"kitwork\";\nimport { every } from \"app/.shared/plan.work\";\ncron.every(every).handle(() => {});",
+		"acme/.schedule/daily.work":        "import * as schedule from \"kitwork/schedule\";\nimport { every } from \"app/.shared/plan.work\";\nexport const daily = schedule.every(every).run((context) => {});",
 		"acme/.shared/queue/mail.work":     "import * as queue from \"kitwork/queue\";\nimport { attempts } from \"app/.shared/plan.work\";\nexport const mail = queue.job((context) => {}).retry(attempts);",
 		"acme/localhost/router.kitwork.js": `import { router } from "kitwork"; router.get((ctx) => ctx.text("ok"));`,
 		// another app with the same names: never reached from acme
@@ -123,20 +123,8 @@ func TestBackgroundLoadersImportFromTheAppRoot(t *testing.T) {
 	}
 	defer tenant.Close()
 
-	scheduler := tenant.scheduler()
-	if scheduler == nil {
-		t.Fatal("the scheduler did not start")
-	}
-	expression := ""
-	scheduler.mu.Lock()
-	for _, job := range scheduler.jobs {
-		if job.Name == "daily" {
-			expression = job.Expression
-		}
-	}
-	scheduler.mu.Unlock()
-	if expression != "@every 1h" {
-		t.Errorf("cron daily: expression = %q, want \"@every 1h\" from the app's .shared/plan.work (\"\": _cron/daily.kitwork.js did not compile as the app's)", expression)
+	if entry := tenant.scheduleWorker().scheduleEntry("daily"); entry == nil || entry.rule.Text() != `every("1h")` {
+		t.Errorf("schedule daily: %+v, want every(\"1h\") from the app's .shared/plan.work (nil: .schedule/daily.work did not compile as the app's)", entry)
 	}
 
 	worker := tenant.queueWorker()
@@ -149,21 +137,21 @@ func TestBackgroundLoadersImportFromTheAppRoot(t *testing.T) {
 	}
 }
 
-// The app's background files (_cron/, .shared/queue/) are the app's too: their app/ imports resolve from
-// its folder in the preflight (CheckCronFiles, CheckQueueFiles) as in the loaders above.
+// The app's background files (.schedule/, .shared/queue/) are the app's too: their app/ imports resolve from
+// its folder in the preflight (CheckScheduleFiles, CheckQueueFiles) as in the loaders above.
 func TestBackgroundFilesImportFromTheAppRoot(t *testing.T) {
 	root := t.TempDir()
 	writeAppTree(t, root, map[string]string{
 		"acme/.shared/report.work":        `export const report = () => "ok";`,
-		"acme/_cron/daily.kitwork.js":     "import { report } from \"app/.shared/report.work\";\nreport();",
+		"acme/.schedule/daily.work":       "import { report } from \"app/.shared/report.work\";\nreport();",
 		"acme/.shared/queue/mail.work":    "import { report } from \"app/.shared/report.work\";\nreport();",
 		"acme/.shared/queue/broken.work":  "import { gone } from \"app/.shared/gone.work\";",
 		"acme/shop.example/router.work":   `import * as router from "kitwork/router";`,
 		"other/.shared/report.work":       `export const report = () => "other";`,
 		"other/other.example/router.work": `import * as router from "kitwork/router";`,
 	})
-	if issues := CheckCronFiles(root, "acme"); len(issues) != 0 {
-		t.Fatalf("cron issues = %v", issues)
+	if issues := CheckScheduleFiles(root, "acme"); len(issues) != 0 {
+		t.Fatalf("schedule issues = %v", issues)
 	}
 	issues := CheckQueueFiles(root, "acme")
 	if len(issues) != 1 || filepath.Base(issues[0].File) != "broken.work" ||

@@ -16,7 +16,8 @@ import (
 const queueResourceName = "queue"
 
 // QueueHandler is a job the worker runs: what a file of .shared/queue/ exported, with the bytecode its
-// handler belongs to (each file compiles to its own; the runner resets a pooled VM onto it).
+// handler belongs to (each file compiles to its own; the runner resets a pooled VM onto it). On the worker of
+// kind schedule it is a schedule, what a file of .schedule/ exported.
 type QueueHandler struct {
 	Name string
 	// Source is the file from the app's folder (.shared/queue/camOn.work); Place where queue.job is written.
@@ -44,11 +45,15 @@ var errQueueCancelled = errors.New("lần chạy bị huỷ")
 // queueNever is a time the poller never reaches: nothing to look for.
 var queueNever = time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC)
 
-// queueRuntime is the worker resource owned by app.Runtime — one per app, shared by every site of it. It
-// lives in work rather than utilities because the handlers it runs are Kitwork bytecode, and only a Tenant
-// can execute that.
+// queueRuntime is the worker resource owned by app.Runtime — one per app and kind (the queue's, and the
+// schedules' with their clock), shared by every site of it. It lives in work rather than utilities because
+// the handlers it runs are Kitwork bytecode, and only a Tenant can execute that.
 type queueRuntime struct {
 	owner *Tenant
+	// kind is the runs of kitwork_runs the worker runs: queueKind, or scheduleKind for the worker of the
+	// app's schedules, whose book is their rules and their due times (nil for the queue's).
+	kind string
+	book *scheduleBook
 
 	lifecycle sync.Mutex
 	mu        sync.Mutex
@@ -89,6 +94,28 @@ type queueAttempt struct {
 	id    string
 	token string
 	stop  context.CancelCauseFunc
+}
+
+// The kinds of kitwork_runs: a job's runs, a schedule's.
+const (
+	queueKind    = "queue"
+	scheduleKind = "schedule"
+)
+
+// label is how the worker's lines on the server's output begin.
+func (q *queueRuntime) label() string {
+	if q.kind == scheduleKind {
+		return "[Schedule]"
+	}
+	return "[Queue]"
+}
+
+// noun is what the worker runs, as a line names one: job, lịch.
+func (q *queueRuntime) noun() string {
+	if q.kind == scheduleKind {
+		return "lịch"
+	}
+	return "job"
 }
 
 // handlerFor resolves a claimed run's job to the code that runs it.
@@ -248,8 +275,8 @@ func (t *Tenant) ensureQueueWorker() (*queueRuntime, error) {
 	if current := t.queueWorker(); current != nil {
 		return current, nil
 	}
-	candidate := &queueRuntime{owner: t, wake: make(chan struct{}, 1), parallel: queueDefaultParallel, keep: queueDefaultKeep,
-		next: queueNever, reclaimAt: queueNever}
+	candidate := &queueRuntime{owner: t, kind: queueKind, wake: make(chan struct{}, 1), parallel: queueDefaultParallel,
+		keep: queueDefaultKeep, next: queueNever, reclaimAt: queueNever}
 	resource, installed, err := t.appRuntime.InstallResource(queueResourceName, candidate)
 	if err != nil {
 		return nil, err

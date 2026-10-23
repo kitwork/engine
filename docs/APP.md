@@ -144,7 +144,7 @@ app
   .run(8080);
 ```
 
-Both domains share one App Runtime and its app-owned `_cron/`, `.shared/queue/`
+Both domains share one App Runtime and its app-owned `.schedule/`, `.shared/queue/`
 (jobs, their runs in `.database/application/`), `_core/`, and `.data/` resources while retaining separate Site and Generation
 runtimes.
 

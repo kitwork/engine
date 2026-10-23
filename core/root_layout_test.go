@@ -131,13 +131,13 @@ func TestEngineMultiTenantRootSeparatesAppRuntimesByIdentity(t *testing.T) {
 func TestEngineMultiDomainSchedulerSharesTheRootAppRuntime(t *testing.T) {
 	root := t.TempDir()
 	writeRootLayoutRouter(t, filepath.Join(root, "example.com"), "site")
-	cronDir := filepath.Join(root, "_cron")
-	if err := os.MkdirAll(cronDir, 0o755); err != nil {
+	scheduleDir := filepath.Join(root, ".schedule")
+	if err := os.MkdirAll(scheduleDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cron := `import { cron } from "kitwork";
-cron.every("1h").handle(() => {});`
-	if err := os.WriteFile(filepath.Join(cronDir, "heartbeat.kitwork.js"), []byte(cron), 0o644); err != nil {
+	heartbeat := `import * as schedule from "kitwork/schedule";
+export const heartbeat = schedule.every("1h").run((context) => {});`
+	if err := os.WriteFile(filepath.Join(scheduleDir, "heartbeat.work"), []byte(heartbeat), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

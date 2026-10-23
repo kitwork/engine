@@ -86,7 +86,7 @@ type Engine struct {
 	cache            map[string]*cachedTenant
 	localHosts       map[string]string
 	appRuntimes      map[string]*app.Runtime
-	appTenants       map[string]*work.Tenant // identity → app runtime that owns that identity's _cron scheduler
+	appTenants       map[string]*work.Tenant // identity → app runtime that owns that identity's schedules and queue
 	appStarting      map[string]struct{}
 	preparations     map[string]*tenantPreparation
 	preparationWG    sync.WaitGroup
@@ -201,7 +201,7 @@ func (e *Engine) appRuntimeLocked(identity, domain string) *app.Runtime {
 }
 
 // StartAppSchedulers eagerly boots one scheduler owner for each app that has
-// _cron/ sources or jobs in .shared/queue/. A root app loads those sources from app/ once;
+// schedules in .schedule/ or jobs in .shared/queue/. A root app loads those sources from app/ once;
 // multi-tenant mode loads them once per apps/<identity>. Routing remains lazy,
 // but background clocks cannot wait for a domain request. Call after the system
 // DB is wired so a configured shared backend is selected.

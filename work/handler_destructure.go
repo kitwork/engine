@@ -16,11 +16,9 @@ import (
 	"github.com/kitwork/engine/value"
 )
 
-// routeDestructurable and jobDestructurable are the names a handler's first parameter may take apart.
-var (
-	routeDestructurable = []string{"request", "response"}
-	jobDestructurable   = []string{"job"}
-)
+// routeDestructurable is the names a route handler's first parameter may take apart (a job's and a
+// schedule's are queueDestructurable and scheduleDestructurable).
+var routeDestructurable = []string{"request", "response"}
 
 // hasMethod reports whether a host type answers name, as a member read of it in a program does
 // (json → JSON, notFound → NotFound).
@@ -36,7 +34,7 @@ func hasMethod(host any, name string) bool {
 
 // destructureError is the error of a handler whose first parameter takes apart what it may not, nil
 // when it takes nothing apart or only names of allowed. side says what the handler's context offers a
-// name it may not take (routeSide, jobSide).
+// name it may not take (routeSide, queueSide, scheduleSide).
 func destructureError(lambda *value.Lambda, allowed []string, side func(name string) string) error {
 	if lambda == nil || len(lambda.Params) == 0 {
 		return nil
@@ -85,11 +83,6 @@ func routeSide(name string) string {
 	return fmt.Sprintf("`%s` không có trong `context` của một route", name)
 }
 
-// jobSide says the same for a job or a schedule, whose context offers job.
-func jobSide(name string) string {
-	return fmt.Sprintf("`%s` là của `context`; tách ra thì trong JavaScript nó mất `this`: viết `context.%s`, hoặc tách `job`", name, name)
-}
-
 // lambdaPlace is where a function is written, file:line:column, as far as the program knows.
 func lambdaPlace(lambda *value.Lambda) string {
 	file := path.Base(strings.ReplaceAll(lambda.SourceFile, "\\", "/"))
@@ -136,13 +129,4 @@ func (f *FolderRouter) handlerDestructureError() error {
 		}
 	}
 	return first
-}
-
-// jobArgument is what a job's or a schedule's handler gets first: its context, or, when it takes the
-// context apart (({ job }) => …), an object holding it as job.
-func jobArgument(lambda *value.Lambda, context value.Value) value.Value {
-	if lambda == nil || len(lambda.Params) == 0 || compiler.DestructuredEntries(lambda.Params[0]) == nil {
-		return context
-	}
-	return value.New(map[string]value.Value{"job": context})
 }

@@ -40,8 +40,9 @@ type Program struct {
 	// imports no schema file.
 	Database *DatabaseBundle
 	// Queue is what the bundler found of the app's .shared/queue/ (queue.go); nil for a program that
-	// bundles none of it.
-	Queue *QueueBundle
+	// bundles none of it. Schedule is the same of the app's .schedule/ (schedule.go).
+	Queue    *QueueBundle
+	Schedule *ScheduleBundle
 }
 
 // ExportAlias is `export { local as exported }`: Token is where exported is written.

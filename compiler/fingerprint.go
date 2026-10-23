@@ -97,7 +97,15 @@ import (
 // of names nothing declared). A cached artifact of schema 13 that imports a job file holds handles with no
 // name, which send() refuses: the bump retires it. A program that imports no job file and aliases no export
 // compiles as before, byte for byte. No opcode or operand changed.
-const CompilerSchemaVersion uint16 = 14
+//
+// 15 (22/10/2026, KITWORK_SCHEDULE.md, a schedule named by its export): the export object of a file of an
+// app's .schedule/ goes out through kitwork().schedule.#exports({ … }, "<file>", [names]), as a job file's
+// does (schedule.go); cron (import { cron } from "kitwork", kitwork/cron), a rule of kitwork/schedule outside
+// .schedule/, and a chain written with literals that breaks a rule of mục 11 are compile errors. A cached
+// artifact of schema 14 that imports a .schedule/ file holds handles with no name, and one that writes
+// cron would run until the word fails where it is read: the bump retires both. A program that writes
+// neither compiles as before, byte for byte. No opcode or operand changed.
+const CompilerSchemaVersion uint16 = 15
 
 var currentCompilerFingerprint = compilerFingerprintFor(CompilerSchemaVersion)
 

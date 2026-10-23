@@ -62,7 +62,7 @@ type checkTarget struct {
 
 // Check prepares every discovered site through the same Tenant.Run production
 // path, then retires it without activation. It opens no listener and starts no
-// cron scheduler.
+// schedule or queue.
 func Check(root string, maxEnergy uint64, bytecodeCacheDirectory ...string) CheckReport {
 	return CheckWithLayout(
 		root,
@@ -204,9 +204,9 @@ func CheckWithLayout(
 		if layout.IsSingleApp() {
 			sourceIdentity = ""
 		}
-		for _, issue := range work.CheckCronFiles(root, sourceIdentity) {
+		for _, issue := range work.CheckScheduleFiles(root, sourceIdentity) {
 			report.Issues = append(report.Issues, CheckIssue{
-				Stage: "cron compile", Identity: identity,
+				Stage: "schedule compile", Identity: identity,
 				File: issue.File, Err: issue.Err,
 			})
 		}
@@ -235,9 +235,10 @@ func CheckWithLayout(
 			var compileErr error
 			appRoot := profileAppRoot(root, layout, file)
 			switch {
-			case isQueueJobFile(file):
-				// a job file runs as the module its importers and the loader see (work/queue_load.go); as
-				// an entry its queue.job would stand outside .shared/queue/ and never compile
+			case isBackgroundModule(file):
+				// a job file or a schedule file runs as the module its importers and the loader see
+				// (work/queue_load.go, work/schedule_load.go); as an entry its queue.job or schedule.<rule>
+				// would stand outside its folder and never compile
 				bytecode, compileErr = compiler.CompileModuleFileInApp(appRoot, file)
 			case artifactCache != nil:
 				bytecode, compileErr = artifactCache.CompileFileInApp(appRoot, file)

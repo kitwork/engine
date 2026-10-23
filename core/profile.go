@@ -18,7 +18,7 @@ type ProfileIssue struct {
 	Message string `json:"message"`
 }
 
-// ProfileProgram describes one executable router, cron, or queue Program.
+// ProfileProgram describes one executable router, schedule, or queue Program.
 type ProfileProgram struct {
 	File     string                 `json:"file"`
 	Checksum string                 `json:"checksum"`
@@ -88,8 +88,9 @@ func ProfileWithLayout(root string, layout work.RootLayout) ProfileReport {
 	var opcodeNames [256]string
 	for _, file := range files {
 		compile := compiler.CompileFileInApp
-		if isQueueJobFile(file) {
-			// a job file runs as the module its importers and the loader see (work/queue_load.go)
+		if isBackgroundModule(file) {
+			// a job file or a schedule file runs as the module its importers and the loader see
+			// (work/queue_load.go, work/schedule_load.go)
 			compile = func(appRoot string, paths ...string) (*compiler.Bytecode, error) {
 				return compiler.CompileModuleFileInApp(appRoot, filepath.Join(paths...))
 			}
@@ -280,7 +281,7 @@ func isRouterMarker(path, name string) bool {
 func profileAppEntrypoints(root string) ([]string, error) {
 	var files []string
 	for _, folder := range []struct{ path, suffix string }{
-		{"_cron", ".kitwork.js"},
+		{".schedule", ".work"},
 		{filepath.Join(".shared", "queue"), ".work"},
 	} {
 		directory := filepath.Join(root, folder.path)
@@ -310,6 +311,17 @@ func isQueueJobFile(file string) bool {
 		strings.HasSuffix(file, ".work") && filepath.Base(file) != "config.work"
 }
 
+// isScheduleFile reports a file of an app's .schedule/ (KITWORK_SCHEDULE.md mục 2).
+func isScheduleFile(file string) bool {
+	return filepath.Base(filepath.Dir(file)) == ".schedule" &&
+		strings.HasSuffix(file, ".work") && filepath.Base(file) != "config.work"
+}
+
+// isBackgroundModule reports a file the app's loaders run as a module: a job file, a schedule file.
+func isBackgroundModule(file string) bool {
+	return isQueueJobFile(file) || isScheduleFile(file)
+}
+
 func compactProfileEntrypoints(files []string) []string {
 	if len(files) < 2 {
 		return files
@@ -336,15 +348,16 @@ func profileLegacyEntrypoints(root string) ([]string, error) {
 				return nil
 			}
 			name := entry.Name()
-			if name == ".shared" {
-				// the app's jobs, .shared/queue/*.work, are entrypoints; the rest of .shared/ is imported
-				jobs, err := profileAppEntrypoints(filepath.Dir(path))
+			if name == ".shared" || name == ".schedule" {
+				// the app's jobs, .shared/queue/*.work, and its schedules, .schedule/*.work, are entrypoints;
+				// the rest of .shared/ is imported
+				background, err := profileAppEntrypoints(filepath.Dir(path))
 				if err != nil {
 					return err
 				}
-				for _, job := range jobs {
-					if isQueueJobFile(job) {
-						files = append(files, job)
+				for _, file := range background {
+					if (name == ".shared" && isQueueJobFile(file)) || (name == ".schedule" && isScheduleFile(file)) {
+						files = append(files, file)
 					}
 				}
 				return filepath.SkipDir
@@ -369,13 +382,6 @@ func profileLegacyEntrypoints(root string) ([]string, error) {
 		if isRouterMarker(path, name) {
 			files = append(files, path)
 			return nil
-		}
-		if !strings.HasSuffix(strings.ToLower(name), ".kitwork.js") {
-			return nil
-		}
-		parent := filepath.Base(filepath.Dir(path))
-		if parent == "_cron" {
-			files = append(files, path)
 		}
 		return nil
 	})

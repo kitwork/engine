@@ -190,7 +190,26 @@ func (a appRuns) use(write bool, fn func(db *sql.DB) error) error {
 	return fn(db)
 }
 
+// appID is the key of t's app: its identity (the identity column of entity). Every domain of an app shares
+// one .shared/queue/, one .schedule/ and one database, so their runs are the identity's, not a domain's. A
+// root app is the stable logical identity "app"; a legacy flat or sites layout falls back to the domain.
+func (t *Tenant) appID() string {
+	if t.entity.Identity != "" {
+		return t.entity.Identity
+	}
+	if t.config != nil && t.config.layout.IsSingleApp() {
+		return RootAppIdentity
+	}
+	return t.entity.Domain
+}
+
 // queueStore is the store of t's app's queue runs.
-func (t *Tenant) queueStore() *queuestore.Store {
-	return queuestore.New(appRuns{tenant: t}, "queue")
+func (t *Tenant) queueStore() *queuestore.Store { return t.runsStore(queueKind) }
+
+// scheduleStore is the store of t's app's schedule runs (KITWORK_SCHEDULE.md mục 9).
+func (t *Tenant) scheduleStore() *queuestore.Store { return t.runsStore(scheduleKind) }
+
+// runsStore is the store of t's app's runs of kind.
+func (t *Tenant) runsStore(kind string) *queuestore.Store {
+	return queuestore.New(appRuns{tenant: t}, kind)
 }

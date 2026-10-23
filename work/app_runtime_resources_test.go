@@ -40,14 +40,14 @@ func TestSiblingSitesShareAppDatabaseUntilAppShutdown(t *testing.T) {
 
 func TestSchedulerResourceSurvivesFacadeCloseAndStopsWithApp(t *testing.T) {
 	root := t.TempDir()
-	cronDir := filepath.Join(root, "identity-a", "_cron")
-	if err := os.MkdirAll(cronDir, 0o755); err != nil {
+	scheduleDir := filepath.Join(root, "identity-a", ".schedule")
+	if err := os.MkdirAll(scheduleDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(
-		filepath.Join(cronDir, "heartbeat.kitwork.js"),
-		[]byte(`import { cron } from "kitwork";
-cron.every("1h").handle(() => {});`),
+		filepath.Join(scheduleDir, "heartbeat.work"),
+		[]byte(`import * as schedule from "kitwork/schedule";
+export const heartbeat = schedule.every("1h").run((context) => {});`),
 		0o644,
 	); err != nil {
 		t.Fatal(err)
@@ -58,7 +58,7 @@ cron.every("1h").handle(() => {});`),
 	if err := tenant.Run(); err != nil {
 		t.Fatal(err)
 	}
-	scheduler := tenant.scheduler()
+	scheduler := tenant.scheduleWorker()
 	if scheduler == nil || scheduler.closed {
 		t.Fatal("app scheduler was not installed")
 	}

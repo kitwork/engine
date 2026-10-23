@@ -9,18 +9,19 @@ import (
 	"testing"
 )
 
-// A _cron file or a job file of .shared/queue/ whose top level fails at run time says so on the server's
-// output, one line per file, as a file that does not compile already does: "[Cron] run broken.kitwork.js:
-// …". The file registers nothing, as before; until this line existed it left the schedule or the queue
-// without a word. A call of a value that is not a function (14/10/2026) and fail("boom"), the control, fail the
-// same way; a file that runs is the second control and prints no such line.
+// A file of .schedule/ or a job file of .shared/queue/ whose top level fails at run time says so on the
+// server's output, one line per file, as a file that does not compile already does: "[Schedule] run
+// .schedule/broken.work: …". The file registers nothing, as before; until this line existed it left the
+// schedule or the queue without a word. A call of a value that is not a function (14/10/2026) and
+// fail("boom"), the control, fail the same way; a file that runs is the second control and prints no such
+// line.
 func TestBackgroundFileThatFailsAtRunTimeSaysSo(t *testing.T) {
 	tmp := t.TempDir()
 	files := map[string]string{
 		"localhost/router.kitwork.js": `import { router } from "kitwork"; router.get((ctx) => ctx.text("ok"));`,
-		"_cron/broken.kitwork.js":     "import { cron } from \"kitwork\";\nconst o = { x: 3 };\no.x();\ncron.every(\"1h\").handle(() => 1);\n",
-		"_cron/control.kitwork.js":    "import { cron } from \"kitwork\";\nfail(\"boom\");\ncron.every(\"1h\").handle(() => 1);\n",
-		"_cron/good.kitwork.js":       "import { cron } from \"kitwork\";\ncron.every(\"1h\").handle(() => 1);\n",
+		".schedule/broken.work":       "import * as schedule from \"kitwork/schedule\";\nconst o = { x: 3 };\no.x();\nexport const broken = schedule.every(\"1h\").run((context) => 1);\n",
+		".schedule/control.work":      "import * as schedule from \"kitwork/schedule\";\nfail(\"boom\");\nexport const control = schedule.every(\"1h\").run((context) => 1);\n",
+		".schedule/good.work":         "import * as schedule from \"kitwork/schedule\";\nexport const good = schedule.every(\"1h\").run((context) => 1);\n",
 		".shared/queue/qbroken.work":  "import * as queue from \"kitwork/queue\";\nconst o = { x: 3 };\no.x();\nexport const qbroken = queue.job((context) => 1);\n",
 		".shared/queue/qcontrol.work": "import * as queue from \"kitwork/queue\";\nfail(\"boom\");\nexport const qcontrol = queue.job((context) => 1);\n",
 		".shared/queue/qgood.work":    "import * as queue from \"kitwork/queue\";\nexport const qgood = queue.job((context) => 1);\n",
@@ -60,24 +61,24 @@ func TestBackgroundFileThatFailsAtRunTimeSaysSo(t *testing.T) {
 
 	for _, want := range []string{
 		// a printed failure leads with its place (14/10/2026), the not-a-function one and fail's alike
-		"[Cron] run control.kitwork.js: control.kitwork.js:2:1: boom",
+		"[Schedule] run .schedule/control.work: control.work:2:1: boom",
 		"[Queue] run .shared/queue/qcontrol.work: qcontrol.work:2:1: boom",
-		"[Cron] run broken.kitwork.js: broken.kitwork.js:3:1: o.x không phải hàm (là số): không gọi được",
+		"[Schedule] run .schedule/broken.work: broken.work:3:1: o.x không phải hàm (là số): không gọi được",
 		"[Queue] run .shared/queue/qbroken.work: qbroken.work:3:1: o.x không phải hàm (là số): không gọi được",
 	} {
 		if !strings.Contains(output, want) {
 			t.Errorf("the server's output lacks %q:\n%s", want, output)
 		}
 	}
-	if strings.Contains(output, "run good.kitwork.js") || strings.Contains(output, "run .shared/queue/qgood.work") {
+	if strings.Contains(output, "run .schedule/good.work") || strings.Contains(output, "run .shared/queue/qgood.work") {
 		t.Errorf("a file that runs printed a failure:\n%s", output)
 	}
 
-	scheduler := tenant.scheduler()
+	scheduler := tenant.scheduleWorker()
 	scheduler.mu.Lock()
 	var crons []string
-	for _, job := range scheduler.jobs {
-		crons = append(crons, job.Name)
+	for _, handler := range scheduler.handlers {
+		crons = append(crons, handler.Name)
 	}
 	scheduler.mu.Unlock()
 	worker := tenant.queueWorker()
@@ -88,6 +89,6 @@ func TestBackgroundFileThatFailsAtRunTimeSaysSo(t *testing.T) {
 	}
 	worker.mu.Unlock()
 	if strings.Join(crons, ",") != "good" || strings.Join(queues, ",") != "qgood" {
-		t.Fatalf("registered crons %v and queues %v, want [good] and [qgood]", crons, queues)
+		t.Fatalf("registered schedules %v and queues %v, want [good] and [qgood]", crons, queues)
 	}
 }

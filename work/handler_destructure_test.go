@@ -3,11 +3,8 @@ package work
 import (
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/kitwork/engine/value"
 )
@@ -81,21 +78,26 @@ func TestDestructuringOutsideTheHandlerParameterStays(t *testing.T) {
 
 // A job or a schedule takes apart job, and nothing else of its context.
 func TestJobHandlerDestructuring(t *testing.T) {
-	refused := &value.Lambda{Params: []string{"{ log }"}, SourceFile: "_cron/greet.kitwork.js", SourceLine: 2, SourceColumn: 14}
-	err := destructureError(refused, jobDestructurable, jobSide)
+	refused := &value.Lambda{Params: []string{"{ log }"}, SourceFile: ".schedule/greet.work", SourceLine: 2, SourceColumn: 14}
+	err := destructureError(refused, scheduleDestructurable, scheduleSide)
 	if err == nil {
 		t.Fatal("({ log }) passed")
 	}
-	for _, want := range []string{"greet.kitwork.js:2:14", "`log` là của `context`; tách ra thì trong JavaScript nó mất `this`", "tên tách được: job"} {
+	for _, want := range []string{"greet.work:2:14", "`log` không có trong `context` của một lịch: context có job", "tên tách được: job"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %v\nwant substring %q", err, want)
 		}
 	}
-	if err := destructureError(&value.Lambda{Params: []string{"{ job }"}}, jobDestructurable, jobSide); err != nil {
+	if err := destructureError(&value.Lambda{Params: []string{"{ job }"}}, scheduleDestructurable, scheduleSide); err != nil {
 		t.Errorf("({ job }) refused: %v", err)
 	}
-	if err := destructureError(&value.Lambda{Params: []string{"job"}}, jobDestructurable, jobSide); err != nil {
+	if err := destructureError(&value.Lambda{Params: []string{"job"}}, scheduleDestructurable, scheduleSide); err != nil {
 		t.Errorf("(job) refused: %v", err)
+	}
+	// a schedule carries no data (KITWORK_SCHEDULE.md mục 7)
+	noData := &value.Lambda{Params: []string{"{ data }"}, SourceFile: ".schedule/greet.work", SourceLine: 3, SourceColumn: 30}
+	if err := destructureError(noData, scheduleDestructurable, scheduleSide); err == nil || !strings.Contains(err.Error(), "greet.work:3:30: lịch không có context.data(): lịch không mang dữ liệu") {
+		t.Errorf("({ data }) of a schedule: %v", err)
 	}
 	// a queue job's context.data() is a function (KITWORK_QUEUE.md mục 5)
 	data := &value.Lambda{Params: []string{"{ data }"}, SourceFile: ".shared/queue/greet.work", SourceLine: 3, SourceColumn: 30}
@@ -137,64 +139,5 @@ func TestQueueHandlerDestructuringAFunctionIsRefused(t *testing.T) {
 	defer worker.mu.Unlock()
 	if len(worker.handlers) != 0 {
 		t.Fatalf("handler kept: %d", len(worker.handlers))
-	}
-}
-
-// newCronTenant boots an app with one _cron file.
-func newCronTenant(t *testing.T, name, source string) *Tenant {
-	t.Helper()
-	tmp := t.TempDir()
-	site := filepath.Join(tmp, "acme", "localhost")
-	cronDir := filepath.Join(tmp, "acme", "_cron")
-	for _, dir := range []string{site, cronDir} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(site, "router.kitwork.js"), []byte(`import { router } from "kitwork"; router.get((ctx) => ctx.text("ok"));`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(cronDir, name+".kitwork.js"), []byte(source), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	tenant := NewAppTenant(tmp, "acme")
-	if err := tenant.Run(); err != nil {
-		t.Fatal(err)
-	}
-	return tenant
-}
-
-// A schedule takes job apart the same way, and one that takes a function apart is not kept.
-func TestCronHandlerDestructuring(t *testing.T) {
-	tenant := newCronTenant(t, "beat", `import { cron } from "kitwork";
-cron.every("1s").handle(({ job }) => { job.log("tick " + job.attempt); }).keep("7d");`)
-	ok := waitFor(8*time.Second, func() bool {
-		var n int
-		_ = tenant.scheduler().db.QueryRow(`SELECT COUNT(*) FROM cron_runs WHERE status='completed' AND output LIKE '%tick %'`).Scan(&n)
-		return n >= 1
-	})
-	tenant.StopCronJobs()
-	time.Sleep(250 * time.Millisecond)
-	defer tenant.Close()
-	if !ok {
-		rows, _ := tenant.scheduler().db.Query(`SELECT status, COALESCE(output,''), COALESCE(error_message,'') FROM cron_runs`)
-		for rows != nil && rows.Next() {
-			var status, output, failure string
-			_ = rows.Scan(&status, &output, &failure)
-			t.Logf("run: %s %q %q", status, output, failure)
-		}
-		t.Fatal("({ job }) schedule never logged its attempt")
-	}
-
-	refused := newCronTenant(t, "beat", `import { cron } from "kitwork";
-cron.every("1s").handle(({ log }) => { log("tick"); });`)
-	defer refused.Close()
-	if scheduler := refused.scheduler(); scheduler != nil {
-		scheduler.mu.Lock()
-		kept := len(scheduler.jobs)
-		scheduler.mu.Unlock()
-		if kept != 0 {
-			t.Fatalf("schedule kept: %d", kept)
-		}
 	}
 }

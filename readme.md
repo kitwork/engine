@@ -219,9 +219,9 @@ app
   manifest's folder); an app's `.shared/schema/` writes `connection("warehouse")`. A `{ postgresql: url }`
   entry is accepted, but no app reaches it in this build. `policy({ tenantConnections: false })` stops
   apps from connecting to a database of their own with `connect({ … })`.
-- The host's own connections, always alias first: `postgresql`, `sqlite`, `connect` (the system
-  database of the scheduler); no app code reaches them. The queue keeps its runs in the app's own
-  database, never the host's. `mysql` and `redis` are
+- The host's own connections, always alias first: `postgresql`, `sqlite`, `connect` (the host's
+  system database); no app code reaches them. The queue and the schedules keep their runs in the app's
+  own database, never the host's. `mysql` and `redis` are
   accepted by the manifest but have no driver linked in this build.
 - Lifecycle: `prewarm` (the primary hostname by default, named domains, or `"*"` for every site) and
   `run`, the last call, which opens the listener.
@@ -430,10 +430,12 @@ or a managed root of them; `kitdb/README.md` says exactly what is supported and 
 
 ## Background work
 
-Durable schedules and jobs exist in the engine today, stored in the application's SQLite files or
-in the system PostgreSQL when one is connected, with deduplication keys, retry budgets and replay
-of failed jobs; a retried handler runs again, so it must be idempotent. How an author declares them
-is being redesigned, so this file does not teach it yet. `go(fn)` runs detached work that may be
+Durable schedules (`.schedule/`) and jobs (`.shared/queue/`) exist in the engine today. Each due
+time of a schedule and each send of a job is a run stored in `kitwork_runs` of the application's own
+KitDB file before it runs, never in a database of the host, with deduplication keys, retries with
+backoff, a time limit per attempt and replay of failed jobs; a retried handler runs again, so it must
+be idempotent. `docs/KITWORK_SCHEDULE.md` and `docs/KITWORK_QUEUE.md` in the Kitwork repository say
+how an author declares them. `go(fn)` runs detached work that may be
 lost on restart, on purpose. Server-sent events go through a broker that outlives the request:
 
 ```js
@@ -557,11 +559,12 @@ arguments before they start.
   is not yet, and changes with the engine.
 - The tunnel. Server functions called from the page by name, with the checks that make that safe.
   Designed, not implemented. The earlier idea of shipping client logic to the server was dropped.
-- Background work as an author writes it. A job is `export const camOn = queue.job(fn)` in the app's
-  `.shared/queue/` (docs/KITWORK_QUEUE.md); schedules still live in `_cron/`, one `.kitwork.js` file
-  per schedule, until KITWORK_SCHEDULE.md moves them.
+- Background work's open points. A job is `export const camOn = queue.job(fn)` in the app's
+  `.shared/queue/`, a schedule `export const nhip = schedule.every("30s").run(fn)` in `.schedule/`;
+  `where(fn)` on their runs, a schedule's default zone from the app's `router.timezone(…)`, and the
+  rules KITWORK_SCHEDULE.md leaves open (missed due times, overlap) are the engine's own for now.
 - Clustering. `CLUSTER.MD` and `backbone.md` are designs. Nothing coordinates two engine processes
-  today; only the PostgreSQL-backed schedule store was written with that in mind.
+  today: one process holds an app's KitDB file, and with it the app's runs.
 - Desktop and mobile. The manifest declares them; the desktop declaration is validated at boot and
   the mobile one by the native build tooling. A separate shell, not in this repository, opens the
   window.

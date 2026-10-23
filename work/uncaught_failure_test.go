@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 // developing runs the rest of a test as a site runs while it is being developed (AllowLocal): an error
@@ -244,10 +243,10 @@ router.view((ctx) => {
 	}
 }
 
-// A _cron or queue job's handler has no visitor: its error, nothing catching it, goes to its run's record
-// only, and the record keeps the whole diagnostic (file:line:column of the call) in production too.
-// What a visitor of a site is spared is not taken from the author's own record. CONTROL: the job's
-// send was taken and the cron ran; each record is one of a failed run.
+// A schedule's or a queue job's handler has no visitor: its error, nothing catching it, goes to its run's
+// record only, and the record keeps the whole diagnostic (file:line:column of the call) in production too.
+// What a visitor of a site is spared is not taken from the author's own record. CONTROL: the job's send
+// and the schedule's now() were taken; each record is one of a failed run.
 func TestBackgroundFailureKeepsItsWholeDiagnosticInProduction(t *testing.T) {
 	saved := AllowLocal
 	AllowLocal = false
@@ -267,34 +266,18 @@ func TestBackgroundFailureKeepsItsWholeDiagnosticInProduction(t *testing.T) {
 		t.Errorf("the queue job's record lacks its diagnostic: %s %q", run.ErrorCode, run.ErrorMessage)
 	}
 
-	root := t.TempDir()
-	for path, content := range map[string]string{
-		"acme/localhost/router.kitwork.js": "import { router } from \"kitwork\";\nrouter.get((ctx) => ctx.text(\"ok\"));\n",
-		"acme/_cron/tick.kitwork.js":       "import { cron } from \"kitwork\";\ncron.every(\"1s\").handle(() => {\n  const order = { total: 3 };\n  order.total(\"vnd\");\n});\n",
-	} {
-		full := filepath.Join(root, filepath.FromSlash(path))
-		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	scheduled := NewAppTenant(root, "acme")
-	if err := scheduled.Run(); err != nil {
-		t.Fatal(err)
-	}
-	defer scheduled.Close()
-	if scheduled.scheduler().db == nil {
-		t.Fatal("CONTROL: the scheduler did not start")
-	}
-	var ran string
-	waitFor(10*time.Second, func() bool {
-		scheduled.scheduler().db.QueryRow(`SELECT error_message FROM cron_runs WHERE status='failed' LIMIT 1`).Scan(&ran)
-		return ran != ""
+	schedules := watchSchedule(t)
+	scheduled := newQueueApp(t, map[string]string{
+		".schedule/tick.work":       "import * as schedule from \"kitwork/schedule\";\nexport const tick = schedule.every(\"1h\").run((context) => {\n  const order = { total: 3 };\n  order.total(\"vnd\");\n});\n",
+		"localhost/now/router.work": "import * as router from \"kitwork/router\";\nimport { tick } from \"app/.schedule/tick.work\";\nrouter.post((context) => context.json(tick.now()));\n",
 	})
-	scheduled.StopCronJobs()
-	if !strings.Contains(ran, "tick.kitwork.js:4:3: order.total không phải hàm") {
-		t.Errorf("the cron run's record lacks its diagnostic: %q", ran)
+	ran, _ := scheduled.serve(t, http.MethodPost, "/now", url.Values{})["id"].(string)
+	if ran == "" {
+		t.Fatal("CONTROL: tick.now() was refused")
+	}
+	schedules.until(t, ran, "failed")
+	if run, err := scheduled.app.scheduleStore().Get(ran); err != nil || run.ErrorCode != "NOT_A_FUNCTION" ||
+		!strings.Contains(run.ErrorMessage, "tick.work:4:3: order.total không phải hàm") {
+		t.Errorf("the schedule run's record lacks its diagnostic: %+v %v", run, err)
 	}
 }

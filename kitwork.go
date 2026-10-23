@@ -250,13 +250,6 @@ func Run(configFile ...string) (err error) {
 	jitjs.Native = work.NativeShell
 	work.ServerPort = cfg.Port
 
-	// Scheduler backend is chosen automatically: a connected system Postgres → the SHARED cluster store
-	// (crons + cron_runs tables, SKIP LOCKED claim, lease/heartbeat, cross-node reclaim); no system DB →
-	// per-tenant SQLite. No flag — the presence of database.System is the switch (see startPersistedScheduler).
-	if database.System != nil {
-		slog.Info("Scheduler: shared Postgres backend (system DB connected)")
-	}
-
 	// Domain whitelist (for AutoSSL HostPolicy) + redirect rules (engine + :80 fallback).
 	domain.Allows = append([]string(nil), cfg.Domains...)
 	for _, target := range cfg.Gateway {
@@ -349,8 +342,8 @@ func Run(configFile ...string) (err error) {
 			return fmt.Errorf("prepare web runtime: %w", err)
 		}
 
-		// A cron cannot wait for a request, so every app identity with _cron/
-		// starts its scheduler owner eagerly after selected sites are ready.
+		// A schedule cannot wait for a request, so every app identity with .schedule/
+		// or .shared/queue/ starts its owner eagerly after selected sites are ready.
 		handler.StartAppSchedulers()
 		for _, site := range work.DiscoverLegacySites(cfg.Root) {
 			slog.Warn("Legacy site entry is ignored; migrate to router.kitwork.js", "site", site)
@@ -435,7 +428,7 @@ func Run(configFile ...string) (err error) {
 }
 
 // Check validates the executable manifest and prepares every discovered site
-// without opening a listener, publishing a generation, or starting cron.
+// without opening a listener, publishing a generation, or starting a schedule.
 func Check(configFile ...string) (core.CheckReport, error) {
 	cfg, err := commandConfig(configFile...)
 	if err != nil {
@@ -477,7 +470,7 @@ func applyDatabaseManifest(cfg *Config) {
 // ProfileReport is the static bytecode report returned by Profile.
 type ProfileReport = core.ProfileReport
 
-// Profile compiles every executable router, cron, and queue entrypoint and
+// Profile compiles every executable router, schedule, and queue entrypoint and
 // returns immutable bytecode metrics without executing tenant code.
 func Profile(configFile ...string) (core.ProfileReport, error) {
 	cfg, err := commandConfig(configFile...)

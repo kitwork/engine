@@ -62,7 +62,7 @@ func nativeBundleWithSources(
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	combined := &Program{Database: b.database, Queue: b.queue}
+	combined := &Program{Database: b.database, Queue: b.queue, Schedule: b.schedule}
 	combined.Statements = append(combined.Statements, b.defs...) // IIFE const của module (thứ tự phụ thuộc)
 	combined.Statements = append(combined.Statements, body...)   // thân entry (chạy ở top-level)
 
@@ -95,6 +95,8 @@ type bundler struct {
 	database *DatabaseBundle
 	// queue is what the resolver needs of the files of .shared/queue/: nil while no module is one.
 	queue *QueueBundle
+	// schedule is the same of the files of .schedule/.
+	schedule *ScheduleBundle
 }
 
 // schemaModule reports a file of the app's .shared/schema/, and its name from the app's folder. The
@@ -207,6 +209,7 @@ func (b *bundler) rewriteStatements(stmts []Statement, fromDir string) ([]Statem
 			return nil, err
 		}
 		b.queueImports(absPath, bindings)
+		b.scheduleImports(absPath, bindings)
 		out = append(out, bindings...)
 	}
 	return out, nil
@@ -291,13 +294,22 @@ func (b *bundler) ensureModule(absPath string) (string, error) {
 		Source:   sourceName,
 		Position: int32(len(src)),
 	}
-	if queue, isQueue := b.queueModule(absPath); isQueue {
+	queue, isQueue := b.queueModule(absPath)
+	schedule, isSchedule := b.scheduleModule(absPath)
+	switch {
+	case isQueue:
 		// a job is named by its export, in every bundle the file is in (queue.go)
 		if err := b.queueExportsRule(prog); err != nil {
 			return "", err
 		}
-		body = append(body, queueExportReturn(prog, origin, queue))
-	} else {
+		body = append(body, namedExportReturn(prog, origin, queue, "queue"))
+	case isSchedule:
+		// a schedule too (schedule.go)
+		if err := b.scheduleExportsRule(prog); err != nil {
+			return "", err
+		}
+		body = append(body, namedExportReturn(prog, origin, schedule, "schedule"))
+	default:
 		body = append(body, exportReturn(prog, origin))
 	}
 
@@ -309,9 +321,13 @@ func (b *bundler) ensureModule(absPath string) (string, error) {
 		function := definition.(*VarStatement).Value.(*CallExpression).Function.(*FunctionLiteral)
 		b.databaseBundle().SchemaModules[function] = schema
 	}
-	if queue, isQueue := b.queueModule(absPath); isQueue {
+	if isQueue {
 		function := definition.(*VarStatement).Value.(*CallExpression).Function.(*FunctionLiteral)
 		b.queueBundle().Modules[function] = queue
+	}
+	if isSchedule {
+		function := definition.(*VarStatement).Value.(*CallExpression).Function.(*FunctionLiteral)
+		b.scheduleBundle().Modules[function] = schedule
 	}
 	b.defs = append(b.defs, definition) // append SAU các module con → đúng thứ tự
 	return name, nil

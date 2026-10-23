@@ -484,7 +484,7 @@ func (t *Tenant) RAMStore() httphelper.ResponseStore { return t.fetchRAM() }
 
 // resolveApp resolves app-wide infrastructure. Root apps own it directly under
 // app/; tenant apps own it under apps/<identity>/. Every domain of that app
-// shares `_cron`, `.shared/` (its jobs in .shared/queue/), `.database/`, `.data`, and `_core` from this
+// shares `.schedule/`, `.shared/` (its jobs in .shared/queue/), `.database/`, `.data`, and `_core` from this
 // boundary.
 func (t *Tenant) resolveApp(paths ...string) string {
 	if t.config.layout.IsSingleApp() {
@@ -616,8 +616,8 @@ func (t *Tenant) Run() error {
 	// its domains). Both must register before any request arrives: they run on their own clock, so
 	// the lazy compile a route can afford would be too late.
 	if t.entity.Domain == "" {
-		t.LoadCronFiles()
 		t.LoadQueueFiles()
+		t.LoadScheduleFiles()
 	}
 
 	return nil
@@ -669,16 +669,17 @@ func DiscoverAppIdentities(root string) []string {
 	return ids
 }
 
-// HasAppBackgroundSources reports whether an app scope owns at least one cron
-// or queue entrypoint: a _cron/*.kitwork.js, a job file of .shared/queue/, or a
-// _queue/*.kitwork.js the app boots for, to say that folder is no longer read.
-// It does not compile or execute source.
+// HasAppBackgroundSources reports whether an app scope owns at least one schedule
+// or queue entrypoint: a file of .schedule/, a job file of .shared/queue/, or a
+// _cron/*.kitwork.js or _queue/*.kitwork.js the app boots for, to say that folder
+// is no longer read. It does not compile or execute source.
 func HasAppBackgroundSources(root, identity string) bool {
 	appRoot := root
 	if identity != "" {
 		appRoot = filepath.Join(root, identity)
 	}
 	for _, folder := range []struct{ path, suffix string }{
+		{".schedule", ".work"},
 		{"_cron", ".kitwork.js"},
 		{"_queue", ".kitwork.js"},
 		{filepath.Join(".shared", "queue"), ".work"},
