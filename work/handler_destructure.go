@@ -95,6 +95,21 @@ func lambdaPlace(lambda *value.Lambda) string {
 	return fmt.Sprintf("%s:%d:%d", file, lambda.SourceLine, lambda.SourceColumn)
 }
 
+// removedParameterError is the error of a route's function that takes sse, the helper a handler was handed
+// after its context until 22/10/2026 ((ctx, sse) => sse.connect(…)): the stream is context.sse now, and
+// the old helper is gone rather than handed as nothing.
+func removedParameterError(lambda *value.Lambda) error {
+	if lambda == nil {
+		return nil
+	}
+	for _, name := range lambda.Params {
+		if strings.EqualFold(name, "sse") {
+			return fmt.Errorf("%s: %s", lambdaPlace(lambda), compiler.SSEParameterRemoved)
+		}
+	}
+	return nil
+}
+
 // handlerDestructureError checks every function the folder's router file gave the router — each
 // method's handler, guards and hooks, the folder's guards and its notFound/error — and is the first
 // error by place in the file.
@@ -120,7 +135,10 @@ func (f *FolderRouter) handlerDestructureError() error {
 	var first error
 	var at *value.Lambda
 	for _, l := range lambdas {
-		err := destructureError(l, routeDestructurable, routeSide)
+		err := removedParameterError(l)
+		if err == nil {
+			err = destructureError(l, routeDestructurable, routeSide)
+		}
 		if err == nil {
 			continue
 		}

@@ -22,9 +22,10 @@ Host / Engine
 - The host may capture detached diagnostics and an explicitly requested private
   heap profile. Diagnostics observe owners through bounded snapshots; they do
   not become a parallel owner or an automatic HTTP surface.
-- One `AppRuntime` exists per identity and owns identity-wide infrastructure.
+- One `AppRuntime` exists per identity and owns identity-wide infrastructure,
+  `kitwork/storage` among it (memory values, the hub of `send`/`observe`).
 - One `SiteRuntime` exists per domain, publishes monotonic generations, and
-  owns persistent cache, rate-limit, and SSE state across reloads.
+  owns persistent cache and rate-limit state across reloads.
 - One active `Generation` owns its executable route graph, prepared render
   plan, immutable template/environment/presentation/source snapshots, RAM
   response/fetch cache, and `LifetimeSite` capabilities.
@@ -312,8 +313,10 @@ Implemented:
   cleared after that generation drains;
 - disk-persisted responses and rate-limit budgets belong to `SiteRuntime` and
   survive generation replacement;
-- the SSE broker and replay history belong to `SiteRuntime`; reload preserves
-  them, while site shutdown synchronously stops and drains the broker;
+- an SSE stream (`context.sse`, 22/10/2026) is a request of its generation:
+  it holds its VM and generation lease while open, and a generation that
+  closes (reload, eviction, shutdown) closes its streams before it waits for
+  its requests; the browser connects again to the replacement;
 - a generation that fails compilation or initialization is discarded while
   the previous generation continues serving;
 - `LifetimeSite` capability instances live on the generation and close only
@@ -321,9 +324,6 @@ Implemented:
 - reload prepares and initializes a generation before atomically activating it;
   stale generations cannot be reactivated and retire only after their request
   leases drain;
-- SSE first transfers its client to the site broker, then closes its request
-  scope, releases all VM and generation leases, and leaves only the native HTTP
-  goroutine under site ownership for the long-lived stream;
 - hot reload never recompiles an active route node in place; it replaces the
   `work.Tenant` execution facade while preserving both runtimes;
 - site eviction closes only that site; engine shutdown closes the full hierarchy.
@@ -367,7 +367,6 @@ Implemented:
 - bounded immutable content-addressed assets retained across generation hand-off;
 - immutable staged KitJS bytes keyed by exact SHA-256 plus validated role/suffix;
 - rate-limit budgets;
-- SSE connections and replay history;
 
 ### Generation
 

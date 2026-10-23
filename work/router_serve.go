@@ -26,10 +26,7 @@ import (
 	"github.com/kitwork/engine/value"
 )
 
-func (t *Tenant) serveTree(
-	requestScope *requestscope.Scope,
-	streamDetached *bool,
-) {
+func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 	w := requestScope.Writer()
 	r := requestScope.Request()
 	tree := t.routeTree()
@@ -127,21 +124,18 @@ func (t *Tenant) serveTree(
 		if savMethod != nil && reqRouter.err == nil {
 			t.saveResponse(savMethod, savKey, reqRouter.response, savCookies)
 		}
-		if reqRouter.response.Kind() == "sse" {
-			reqRouter.streamSSE(w, func() {
-				// Streaming can remain open for hours and belongs to the site
-				// broker, not to the request or generation that configured it.
-				// streamSSE invokes this only after the broker accepts the client,
-				// so site shutdown can always disconnect the detached stream.
-				requestScope.Close()
-				if streamDetached != nil && !*streamDetached {
-					*streamDetached = true
-					t.endRequest()
-				}
-			})
-		} else {
-			reqRouter.responder(w)
+		if reqRouter.response.Kind() == "sse" && reqRouter.err == nil {
+			// the handler returned its stream: the request stays open as the stream, holding its VM and
+			// its generation, until it closes (stream.go)
+			t.serveStream(w, reqRouter)
+			return
 		}
+		if reqRouter.response.Kind() == "sse" {
+			// the request failed after context.sse was read: the failure is the answer, not the stream
+			reqRouter.response.data = value.Value{K: value.Nil}
+			reqRouter.response.kind = ""
+		}
+		reqRouter.responder(w)
 	}
 
 	// notFound renders the nearest notfound.kitwork.html (walking up from the deepest folder
@@ -197,6 +191,9 @@ func (t *Tenant) serveTree(
 		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	// observe() binds its observer to the request the VM runs (stream.go)
+	requestVMs.Store(vm, reqRouter)
+	defer requestVMs.Delete(vm)
 	t.prepareExecutionVM(vm, t.vm.Globals, t.vm.Builtins, requestScope)
 	vm.MaxEnergy = t.MaxEnergy
 
@@ -320,7 +317,13 @@ func (t *Tenant) serveTree(
 		case method.uiView:
 			t.serveUIView(vm, leaf, method, ctxObj, reqRouter, match.Node)
 		case method.handle != nil:
+			reqRouter.method, reqRouter.handling = method, true
 			res := t.execTree(vm, leaf.bytecode, method.handle, ctxObj)
+			reqRouter.handling = false
+			if stream := reqRouter.openedStream(); stream != nil && res.K != value.Invalid && !stream.is(res) {
+				// context.sse chose the answer: the handler returns the stream (KITWORK_SSE.md mục 1)
+				res = value.InvalidFailure(value.InvalidArgumentCode, "route này đã mở luồng SSE (context.sse); trả về stream: return stream, hay return context.sse.subscribe(…) (KITWORK_SSE.md mục 1)")
+			}
 			if res.K == value.Invalid {
 				t.recordRuntimeFailure(reqRouter, leaf.bytecode, "handler", res)
 				reqRouter.err = uncaught(res.Text())

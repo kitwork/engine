@@ -100,7 +100,6 @@ func TestEngineHotReloadAndFallback(t *testing.T) {
 	oldSiteRuntime := oldTenant.SiteRuntime()
 	oldGeneration := oldTenant.SiteGeneration()
 	oldRouteGraph := oldGeneration.RouteGraph()
-	oldBroker := oldTenant.SSEBroker()
 	const reloadAppCapability = "__core_test_reload_app_capability"
 	const reloadSiteCapability = "__core_test_reload_site_capability"
 	capabilities.DefaultRegistry.RegisterWithLifetime(
@@ -149,9 +148,6 @@ func TestEngineHotReloadAndFallback(t *testing.T) {
 	}
 	if oldRouteGraph == nil || reloadedTenant.SiteGeneration().RouteGraph() == oldRouteGraph {
 		t.Fatal("hot reload reused the old generation route graph")
-	}
-	if reloadedTenant.SSEBroker() != oldBroker {
-		t.Fatal("hot reload replaced the site SSE broker")
 	}
 	if oldSiteRuntime.CurrentGeneration() != reloadedTenant.SiteGeneration() {
 		t.Fatal("hot reload did not publish the new site generation")

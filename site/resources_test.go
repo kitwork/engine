@@ -16,8 +16,7 @@ func TestSiteResourcesSurviveGenerationReplacement(t *testing.T) {
 	}
 	persistStore := siteRuntime.PersistStore()
 	limiter := siteRuntime.Limiter()
-	broker := siteRuntime.SSEBroker()
-	if persistStore == nil || limiter == nil || broker == nil {
+	if persistStore == nil || limiter == nil {
 		t.Fatal("site resources were not initialized")
 	}
 	if got, want := persistStore.Dir, filepath.Join(root, ".persist"); got != want {
@@ -39,9 +38,6 @@ func TestSiteResourcesSurviveGenerationReplacement(t *testing.T) {
 	}
 	if siteRuntime.Limiter() != limiter {
 		t.Fatal("generation replacement changed the site limiter")
-	}
-	if siteRuntime.SSEBroker() != broker {
-		t.Fatal("generation replacement changed the site SSE broker")
 	}
 	if first.ResponseCache() == second.ResponseCache() {
 		t.Fatal("generations shared a RAM response cache")

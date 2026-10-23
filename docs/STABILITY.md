@@ -206,15 +206,15 @@ Current enforcement:
 - The optional bytecode `FileCache` handle is generation-scoped. It may reuse
   reconstructible files in a host-owned directory, but cache corruption or I/O
   failure must fall back to source compilation and cannot block publication.
-- Disk-persisted responses, rate-limit budgets, SSE connections, and replay
-  history are site-scoped. They survive generation replacement and close only
-  when that site leaves the app runtime.
-- Once an SSE handler has configured its native client, the request scope is
-  closed before streaming begins. Its primary and child VM leases, request
-  capabilities, generation lease, and tenant request accounting are released;
-  only the site-owned broker and HTTP goroutine remain. Hot reload therefore
-  cannot be held open by an earlier stream, while site shutdown still stops all
-  streams through the broker.
+- Disk-persisted responses and rate-limit budgets are site-scoped. They survive
+  generation replacement and close only when that site leaves the app runtime.
+- An SSE stream (`context.sse`, KITWORK_SSE.md, 22/10/2026) is its request: it
+  keeps its primary VM, generation lease and tenant request accounting while
+  open, and its observers run on that VM. `Tenant.Close` closes the
+  generation's streams before it waits for its requests, so hot reload is never
+  held open by a stream and the browser reconnects to the replacement. An app
+  holds at most a bounded number of open streams (503 past it), and a site with
+  an open stream is not evicted as idle.
 - Runtime health is bounded and privacy-safe. Latency uses a fixed bucket
   table; route, tenant, URL, user, and argument values are never telemetry
   labels. Program identities are checksum values capped at 4096 entries and
@@ -352,9 +352,9 @@ must not retain site/request state. Cached values that implement
 terminal and cannot recreate resources after shutdown.
 
 Request shutdown cancels its context, releases the primary VM, waits for
-accepted child VM leases, and then closes request-scoped capabilities. SSE must
-complete that request shutdown and release its generation lease before handing
-the long-lived connection to the site broker.
+accepted child VM leases, and then closes request-scoped capabilities. An SSE
+stream runs before that shutdown, inside its request, and its observers close
+with the request.
 
 An authenticated principal and its permissions are immutable request inputs
 attached by trusted host middleware. A capability with declared permissions

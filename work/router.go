@@ -16,7 +16,6 @@ import (
 
 	requestscope "github.com/kitwork/engine/request"
 	"github.com/kitwork/engine/runtime"
-	"github.com/kitwork/engine/utilities/sse"
 	"github.com/kitwork/engine/value"
 )
 
@@ -82,6 +81,11 @@ type Router struct {
 	node *RouteNode
 	// requestScope owns the request: what a host call makes for it is bound to it.
 	requestScope *requestscope.Scope
+	// method is the route method the request runs (serveTree); handling is true while its handler runs,
+	// where context.sse may be read (stream.go); events are what the request observes, and its stream.
+	method   *FolderMethod
+	handling bool
+	events   *requestEvents
 
 	// Cache configuration
 	cacheTTL       time.Duration
@@ -195,7 +199,8 @@ func (r *Router) responder(w http.ResponseWriter) {
 
 	switch kind {
 	case "sse":
-		r.streamSSE(w, nil)
+		// a stream is answered by its route (serveTree → serveStream), never written as a body
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 
 	case "redirect":
@@ -439,85 +444,6 @@ func WriteSiteFailure(w http.ResponseWriter, request *http.Request, status int, 
 		"message", message,
 	)
 	writeFailure(w, request, status, id, uncaught(message))
-}
-
-// streamSSE runs the Go-native side of an SSE connection. Once the site broker
-// accepts the client, handoff closes the request scope and releases its VM and
-// generation ownership. Only the HTTP goroutine and site broker remain for the
-// potentially hours-long connection.
-func (r *Router) streamSSE(w http.ResponseWriter, handoff func()) {
-	client, ok := r.response.Data().V.(*SSEClient)
-	if !ok {
-		http.Error(w, "invalid sse client", http.StatusInternalServerError)
-		return
-	}
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
-		return
-	}
-
-	// Active-connection cap (DoS protection) — each open stream costs a goroutine + broker slot.
-	broker := r.tenant.SSEBroker()
-	maxConn := client.MaxConnections
-	if maxConn <= 0 {
-		maxConn = 1000
-	}
-	if broker.ClientCount() >= maxConn {
-		http.Error(w, "too many concurrent connections", http.StatusTooManyRequests)
-		return
-	}
-
-	if !broker.Register(client) {
-		http.Error(w, "streaming unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	defer broker.Unregister(client)
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	if handoff != nil {
-		handoff()
-	}
-
-	// Send clientSessionId init event
-	initPayload, err := sse.FormatSSEPayload("", "init", map[string]string{"clientSessionId": client.ID})
-	if err == nil {
-		w.Write(initPayload)
-	}
-
-	// Last-Event-ID recovery (header on auto-reconnect, or ?lastEventId= for manual control).
-	lastEventID := r.request.Header.Get("Last-Event-ID")
-	if lastEventID == "" {
-		lastEventID = r.request.URL.Query().Get("lastEventId")
-	}
-	if lastEventID != "" {
-		broker.Replay(client, lastEventID)
-	}
-
-	ticker := time.NewTicker(15 * time.Second)
-	defer ticker.Stop()
-
-	notify := r.request.Context().Done()
-	flusher.Flush()
-
-	for {
-		select {
-		case <-notify:
-			return // client closed the tab / network dropped
-		case msg, open := <-client.SendChan:
-			if !open {
-				return // broker stopped (tenant evicted)
-			}
-			w.Write(msg)
-			flusher.Flush()
-		case <-ticker.C:
-			fmt.Fprint(w, ": heartbeat\n\n")
-			flusher.Flush()
-		}
-	}
 }
 
 type CorsOptions struct {

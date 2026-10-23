@@ -437,11 +437,20 @@ backoff, a time limit per attempt and replay of failed jobs; a retried handler r
 be idempotent. `docs/KITWORK_SCHEDULE.md` and `docs/KITWORK_QUEUE.md` in the Kitwork repository say
 how an author declares them. `routine.go(fn)` of `kitwork/routine` runs work after the answer and
 `routine.wait(a, b)` runs functions at once, each in a VM of its own on a copy of what it reads; both
-live in memory and are lost on restart, on purpose (`docs/KITWORK_ROUTINE.md`). Server-sent events go
-through a broker that outlives the request:
+live in memory and are lost on restart, on purpose (`docs/KITWORK_ROUTINE.md`).
+
+Values by key live in `kitwork/storage`: `memory()` in the process's RAM, `disk()` in the app's
+`.database/disk/`, `datastore()` in a KitDB of its own at `.database/storage/`, one API for the three
+(`docs/KITWORK_STORAGE.md`). A message sent there reaches the server-sent event streams that observe its
+key; a GET handler answers with a stream by reading `context.sse`, and the stream is that request, open
+until the browser goes or the generation is replaced (`docs/KITWORK_SSE.md`):
 
 ```js
-router.get((ctx, sse) => sse.connect({ channel: "orders", retry: 3000 }));
+router.get((context) => context.sse.reconnect("3s").subscribe(memory("rooms").segment("lobby")));
+router.post((context) => {
+  memory("rooms").segment("lobby").send({ event: "chat", id: "msg-1", data: { text: "Xin chào" } });
+  return context.json({ ok: true });
+});
 ```
 
 ## The page's own assets

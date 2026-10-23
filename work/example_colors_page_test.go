@@ -111,7 +111,8 @@ func copyExamples(t *testing.T) string {
 		}
 		rel, _ := filepath.Rel(examplesRoot, path)
 		if d.IsDir() {
-			if d.Name() == ".data" || d.Name() == ".persist" {
+			// .database/ is an app's data (a running dev server holds its KitDB lock), never code.
+			if d.Name() == ".data" || d.Name() == ".persist" || d.Name() == ".database" {
 				return filepath.SkipDir
 			}
 			return os.MkdirAll(filepath.Join(root, rel), 0o755)

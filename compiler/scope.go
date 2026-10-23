@@ -107,6 +107,8 @@ type binding struct {
 	routineModule bool
 	routineWord   string
 	routineHandle bool
+	// storageModule: a name bound to the module kitwork/storage itself (compiler/storage.go).
+	storageModule bool
 	// parameterPart: a name a destructured parameter gives (({ request }) => …), which routineRequest
 	// reads as the parameter it is.
 	parameterPart bool
@@ -340,6 +342,7 @@ func (r *resolver) hoist(statements []Statement) {
 			r.queueDeclaration(node)
 			r.scheduleDeclaration(node)
 			r.routineDeclaration(node)
+			r.storageDeclaration(node)
 			alias := r.databaseAlias(node)
 			for _, name := range node.Names {
 				declared := r.declare(name, kind)
@@ -347,6 +350,7 @@ func (r *resolver) hoist(statements []Statement) {
 				r.markQueue(node, name, declared)
 				r.markSchedule(node, name, declared)
 				r.markRoutine(node, name, declared)
+				r.markStorage(node, name, declared)
 				if declared != nil && node.Function {
 					declared.constant = false
 				}
@@ -683,6 +687,9 @@ func (r *resolver) expression(expression Expression) {
 		if r.routineMember(node.Object, node.Property) {
 			return
 		}
+		if r.storageMember(node.Object, node.Property) {
+			return
+		}
 		r.expression(node.Object)
 	case *IndexExpression:
 		if r.databases && r.handleMember(node.Left, node.Token, nil) {
@@ -743,6 +750,9 @@ func (r *resolver) expression(expression Expression) {
 			return
 		}
 		if r.routineCall(node) {
+			return
+		}
+		if r.storageMember(node.Object, node.Method) {
 			return
 		}
 		r.expression(node.Object)

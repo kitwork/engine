@@ -66,10 +66,6 @@ func (t *Tenant) prepareExecutionVM(
 	}
 }
 
-func (w *KitWork) Cache() *GeneralCache {
-	return &GeneralCache{tenant: w.tenant}
-}
-
 // Safe is the global safe, which the "kitwork" module exports as well (14/10/2026): import { safe }
 // from "kitwork", the habit of import { log }, is const { safe } = kitwork(), and declares safe as this
 // same function. Without it the import gave null and every call of safe was a NOT_A_FUNCTION error.
@@ -97,8 +93,9 @@ type KitWork struct {
 }
 
 // MissingMember is a word the module kitwork has not. An older word of it (sqlite, removed on 22/10/2026;
-// cron, 22/10/2026; go, 22/10/2026, now routine.go of kitwork/routine) is the error that says what the spec
-// writes instead; the compiler refuses its import in the same words. Any other word is nothing, as it was.
+// cron, 22/10/2026; go, 22/10/2026, now routine.go of kitwork/routine; cache and sse, 22/10/2026, now
+// kitwork/storage and context.sse) is the error that says what the spec writes instead; the compiler
+// refuses its import in the same words. Any other word is nothing, as it was.
 func (w *KitWork) MissingMember(name string) value.Value {
 	if spelling, removed := statement.RemovedKitworkWord(name); removed {
 		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf(`%s của "kitwork" đã bỏ: %s`, name, spelling))
@@ -108,6 +105,10 @@ func (w *KitWork) MissingMember(name string) value.Value {
 		return value.InvalidFailure(value.InvalidArgumentCode, compiler.CronRemoved)
 	case "go":
 		return value.InvalidFailure(value.InvalidArgumentCode, compiler.RoutineGoRemoved)
+	case "cache":
+		return value.InvalidFailure(value.InvalidArgumentCode, compiler.CacheRemoved)
+	case "sse":
+		return value.InvalidFailure(value.InvalidArgumentCode, compiler.SSERemoved)
 	}
 	return value.Value{K: value.Nil}
 }
@@ -150,12 +151,7 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	streamDetached := false
-	defer func() {
-		if !streamDetached {
-			t.endRequest()
-		}
-	}()
+	defer t.endRequest()
 	generationLease, err := t.generationLease()
 	if err != nil {
 		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
@@ -185,5 +181,5 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 	if t.serveLibSQLIf(w, r, requestScope) {
 		return
 	}
-	t.serveTree(requestScope, &streamDetached)
+	t.serveTree(requestScope)
 }

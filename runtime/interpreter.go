@@ -786,45 +786,6 @@ func (vm *VM) executeInvoke(frame *Frame) {
 	}
 	target := vm.pop()
 
-	if cache, ok := target.V.(value.TenantCache); ok &&
-		method == "get" &&
-		len(args) > 0 {
-		key := args[0].Text()
-		var cached value.Value
-		var found bool
-		if failure := vm.nativeAction("cache get", func() {
-			cached, found = cache.GetCache(key)
-		}); failure.K == value.Invalid {
-			vm.push(failure)
-			return
-		}
-		if found {
-			vm.push(cached)
-			return
-		}
-		if len(args) > 1 {
-			if callback, ok := args[1].V.(*value.Lambda); ok {
-				result := vm.ExecuteLambda(callback, nil)
-				if result.K == value.Invalid {
-					vm.push(result)
-					return
-				}
-				ttl := value.Value{K: value.Nil}
-				if len(args) > 2 {
-					ttl = args[2]
-				}
-				if failure := vm.nativeAction("cache set", func() {
-					cache.SetCache(key, result, ttl)
-				}); failure.K == value.Invalid {
-					vm.push(failure)
-					return
-				}
-				vm.push(result)
-				return
-			}
-		}
-	}
-
 	if target.K == value.Map {
 		if member := target.Get(method); member.K == value.Func {
 			switch function := member.V.(type) {

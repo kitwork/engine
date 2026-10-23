@@ -6,7 +6,6 @@ import (
 
 	"github.com/kitwork/engine/utilities/persist"
 	"github.com/kitwork/engine/utilities/ratelimit"
-	"github.com/kitwork/engine/utilities/sse"
 )
 
 // ConfigureResources binds durable site resources to the resolved site root.
@@ -58,31 +57,4 @@ func (r *Runtime) Limiter() *ratelimit.Limiter {
 	limiter := r.limiter
 	r.resourceMu.Unlock()
 	return limiter
-}
-
-// SSEBroker owns live streams and replay history for the complete site
-// lifetime, including all hot-reload generations.
-func (r *Runtime) SSEBroker() *sse.SSEBroker {
-	if r == nil {
-		return nil
-	}
-	r.resourceMu.Lock()
-	broker := r.sseBroker
-	r.resourceMu.Unlock()
-	return broker
-}
-
-// StopStreams disconnects the site-owned streams during site shutdown. An SSE
-// handler releases its request and generation ownership before entering the
-// long-lived stream, so generation replacement deliberately leaves it open.
-func (r *Runtime) StopStreams() {
-	if r == nil {
-		return
-	}
-	r.resourceMu.Lock()
-	broker := r.sseBroker
-	r.resourceMu.Unlock()
-	if broker != nil {
-		broker.Stop()
-	}
 }

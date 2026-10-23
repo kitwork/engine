@@ -113,7 +113,14 @@ import (
 // schema 15 that writes one of them would run until the call fails where it runs, instead of the file
 // failing where it is written: the bump retires it. A program that writes none of them compiles as before,
 // byte for byte. No opcode or operand changed.
-const CompilerSchemaVersion uint16 = 16
+//
+// 17 (22/10/2026, KITWORK_STORAGE.md and KITWORK_SSE.md, cache and sse replaced): cache and sse read off
+// "kitwork" (import { cache } from "kitwork", kitwork().sse, kitwork/cache, kitwork/sse) and a word
+// kitwork/storage has not (storage.get, import { get } from "kitwork/storage") are compile errors
+// (storage.go). A cached artifact of schema 16 that writes one of them would run until the word fails where
+// it is read, instead of the file failing where it is written: the bump retires it. A program that writes
+// none of them compiles as before, byte for byte. No opcode or operand changed.
+const CompilerSchemaVersion uint16 = 17
 
 var currentCompilerFingerprint = compilerFingerprintFor(CompilerSchemaVersion)
 

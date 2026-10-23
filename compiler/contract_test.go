@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestCompilerV16GoldenContract(t *testing.T) {
-	if CompilerSchemaVersion != 16 {
-		t.Fatalf("CompilerSchemaVersion = %d, want schema v16", CompilerSchemaVersion)
+func TestCompilerV17GoldenContract(t *testing.T) {
+	if CompilerSchemaVersion != 17 {
+		t.Fatalf("CompilerSchemaVersion = %d, want schema v17", CompilerSchemaVersion)
 	}
 	// Bytecode 3 (14/10/2026) moved the fingerprint and every checksum below with the version alone: each
 	// fixture's instructions, constants and debug table are those bytecode 2 wrote (none needs a wide
@@ -22,10 +22,17 @@ func TestCompilerV16GoldenContract(t *testing.T) {
 	// job named by its export) moved the fingerprint alone: no fixture imports a job file or aliases an export.
 	// Schema 15 (22/10/2026, a schedule named by its export) moved the fingerprint alone: no fixture imports a
 	// file of .schedule/ or writes cron. Schema 16 (22/10/2026, go moves into kitwork/routine) moved the
-	// fingerprint alone: no fixture writes go or imports kitwork/routine.
-	const expectedFingerprint = "1fd92fc738cb012e76c3a1f08c73bb3a6bf6670c76388972c7470b70d142413b"
+	// fingerprint alone: no fixture writes go or imports kitwork/routine. Schema 17 (22/10/2026, cache and sse
+	// replaced by kitwork/storage) moved the fingerprint alone: no fixture writes cache or sse.
+	const expectedFingerprint = "4a62b52142f2263f49eb298b94793c6573d313d6da01d71bb150e097fda06359"
 	if got := Fingerprint(); got != expectedFingerprint {
 		t.Fatalf("compiler fingerprint = %q, want %q", got, expectedFingerprint)
+	}
+	// schema 16 compiled cache and sse off "kitwork", which now fail only where they are read: its artifacts
+	// are not reused
+	const schema16 = "1fd92fc738cb012e76c3a1f08c73bb3a6bf6670c76388972c7470b70d142413b"
+	if stamped := compilerFingerprintFor(16); hex.EncodeToString(stamped[:]) != schema16 || Fingerprint() == schema16 {
+		t.Fatalf("schema 16 on bytecode 4 stamps %x, the current compiler %s: want %s and another", stamped, Fingerprint(), schema16)
 	}
 	// schema 15 compiled go(fn) bare, go off "kitwork" and a function of routine.go that uses the request: its
 	// artifacts are not reused

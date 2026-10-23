@@ -8,7 +8,6 @@ import (
 
 	"github.com/kitwork/engine/utilities/persist"
 	"github.com/kitwork/engine/utilities/ratelimit"
-	"github.com/kitwork/engine/utilities/sse"
 )
 
 // App is the narrow parent contract a site needs. Keeping this interface here
@@ -20,7 +19,8 @@ type App interface {
 // Runtime represents one domain inside an application identity. It owns
 // monotonic generation publication and retirement plus state that must survive
 // generation replacement: persistent responses, immutable content-addressed
-// assets, rate limits, and SSE streams.
+// assets and rate limits. An SSE stream is a request of a generation, and closes with it
+// (KITWORK_SSE.md mục 4); what it observes is the app's (work's kitwork/storage).
 type Runtime struct {
 	app    App
 	root   string
@@ -34,7 +34,6 @@ type Runtime struct {
 	resourceRoot  string
 	persistStore  *persist.Store
 	limiter       *ratelimit.Limiter
-	sseBroker     *sse.SSEBroker
 	contentAssets *contentAssetStore
 
 	closeOnce sync.Once
@@ -47,7 +46,6 @@ func NewRuntime(parent App, root, domain string) *Runtime {
 		root:          root,
 		domain:        domain,
 		limiter:       ratelimit.New(),
-		sseBroker:     sse.NewSSEBroker(),
 		contentAssets: newContentAssetStore(),
 	}
 }
@@ -183,7 +181,6 @@ func (r *Runtime) Close() {
 	}
 	r.closeOnce.Do(func() {
 		r.closed.Store(true)
-		r.StopStreams()
 		r.generationMu.Lock()
 		current := r.current
 		r.current = nil

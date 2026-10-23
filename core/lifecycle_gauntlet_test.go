@@ -117,12 +117,17 @@ func waitLifecycleSSEClosed(t testing.TB, reader *bufio.Reader) {
 // hierarchy with work accepted at three different lifetimes:
 //
 //   - a request holds the old generation and its primary VM in native I/O;
-//   - an SSE connection is handed from request/generation ownership to the
-//     site broker and must survive hot reload;
+//   - an SSE stream holds its request, its VM and its old generation; hot
+//     reload closes it at once (KITWORK_SSE.md mục 4), and the browser
+//     connects again to the new generation, where a send reaches it;
 //   - an app task observes cancellation but controls when app shutdown drains.
 //
 // The barriers are channels and observable lifecycle state. Sleeps do not
 // decide correctness, so the test remains meaningful under the race detector.
+//
+// CONTROL (22/10/2026, streams of context.sse): with Tenant.Close not closing
+// its streams, the replaced generation kept the stream open: "site shutdown
+// did not close the SSE stream".
 func TestEngineLifecycleGauntlet(t *testing.T) {
 	savedAllowLocal := work.AllowLocal
 	work.AllowLocal = true
@@ -159,14 +164,21 @@ router.get((ctx) => {
 `, upstream.URL))
 	writeLifecycleRoute(t, root, "events", `
 import { router } from "kitwork";
-router.get((ctx, sse) => {
-	sse.connect({ channel: "updates" });
+import { memory } from "kitwork/storage";
+router.get((ctx) => ctx.sse.reconnect("1s").subscribe(memory("updates")));
+`)
+	writeLifecycleRoute(t, root, "publish", `
+import { router } from "kitwork";
+import { memory } from "kitwork/storage";
+router.post((ctx) => {
+	memory("updates").send({ event: "reload", id: "reload-1", data: "v2" });
+	return ctx.json(true);
 });
 `)
 
 	engine := New(root, 1_000_000, true, "localhost")
 	server := httptest.NewServer(engine)
-	var stream *http.Response
+	var stream, reconnected *http.Response
 	taskRelease := make(chan struct{})
 	var taskReleaseOnce sync.Once
 	t.Cleanup(func() {
@@ -174,6 +186,9 @@ router.get((ctx, sse) => {
 		taskReleaseOnce.Do(func() { close(taskRelease) })
 		if stream != nil {
 			_ = stream.Body.Close()
+		}
+		if reconnected != nil {
+			_ = reconnected.Body.Close()
 		}
 		engine.Close()
 		server.Close()
@@ -199,7 +214,6 @@ router.get((ctx, sse) => {
 	oldGeneration := oldTenant.SiteGeneration()
 	appRuntime := oldTenant.AppRuntime()
 	siteRuntime := oldTenant.SiteRuntime()
-	broker := oldTenant.SSEBroker()
 	tree, ok := oldGeneration.RouteGraph().(*work.RouteTree)
 	if !ok || !tree.Resolve("/events").Found || !tree.Resolve("/hold").Found {
 		t.Fatal("prepared generation did not include lifecycle child routes")
@@ -214,11 +228,11 @@ router.get((ctx, sse) => {
 		t.Fatalf("SSE status = %d: %s", stream.StatusCode, body)
 	}
 	streamReader := bufio.NewReader(stream.Body)
-	if block := readLifecycleSSEBlock(t, streamReader); !strings.Contains(block, "event: init") {
-		t.Fatalf("SSE init block = %q", block)
+	if block := readLifecycleSSEBlock(t, streamReader); block != "retry: 1000\n\n" {
+		t.Fatalf("SSE first block = %q", block)
 	}
-	waitLifecycleCondition(t, "SSE broker registration", func() bool {
-		return broker.ClientCount() == 1
+	waitLifecycleCondition(t, "the open stream", func() bool {
+		return oldTenant.OpenStreams() == 1
 	})
 
 	holdDone := make(chan *httptest.ResponseRecorder, 1)
@@ -235,14 +249,14 @@ router.get((ctx, sse) => {
 	case <-time.After(3 * time.Second):
 		t.Fatal("request VM did not enter the blocking native call")
 	}
-	if oldGeneration.Active() != 1 {
+	if oldGeneration.Active() != 2 {
 		t.Fatalf(
-			"old generation active leases = %d, want only the blocking request",
+			"old generation active leases = %d, want the open stream and the blocking request",
 			oldGeneration.Active(),
 		)
 	}
-	if active := engine.Health().VMPool.Active; active != 1 {
-		t.Fatalf("active VM leases = %d, want 1 during native I/O", active)
+	if active := engine.Health().VMPool.Active; active != 2 {
+		t.Fatalf("active VM leases = %d, want 2: the stream holds its VM, the request is in native I/O", active)
 	}
 
 	taskContext, taskDone, ok := appRuntime.Tasks().Start()
@@ -280,6 +294,8 @@ router.get((ctx) => ctx.text("v2"));
 	waitLifecycleCondition(t, "replacement generation publication", func() bool {
 		return cached.current() != oldTenant
 	})
+	// the replaced generation closes its stream at once, while its blocking request still runs
+	waitLifecycleSSEClosed(t, streamReader)
 	select {
 	case response := <-reloadDone:
 		t.Fatalf(
@@ -306,7 +322,7 @@ router.get((ctx) => ctx.text("v2"));
 			t.Fatalf("reload response = %d %q", response.Code, response.Body.String())
 		}
 	case <-time.After(3 * time.Second):
-		t.Fatal("SSE stream prevented the old generation from draining")
+		t.Fatal("the reload did not finish after the blocking request")
 	}
 
 	currentTenant := cached.current()
@@ -324,11 +340,27 @@ router.get((ctx) => ctx.text("v2"));
 	if active := engine.Health().VMPool.Active; active != 0 {
 		t.Fatalf("VM pool retained %d active leases after reload drain", active)
 	}
-	if siteRuntime.SSEBroker() != broker || broker.ClientCount() != 1 {
-		t.Fatal("hot reload replaced or disconnected the site SSE broker")
+	if oldTenant.OpenStreams() != 0 {
+		t.Fatal("the replaced generation kept an open stream")
 	}
-	broker.Publish("updates", "reload-1", []byte("event: reload\ndata: v2\n\n"))
-	if block := readLifecycleSSEBlock(t, streamReader); !strings.Contains(block, "data: v2") {
+	// the browser connects again, to the new generation, and a send reaches it
+	reconnected, err = server.Client().Get(server.URL + "/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reconnectedReader := bufio.NewReader(reconnected.Body)
+	if block := readLifecycleSSEBlock(t, reconnectedReader); block != "retry: 1000\n\n" {
+		t.Fatalf("SSE first block after reload = %q", block)
+	}
+	waitLifecycleCondition(t, "the stream on the new generation", func() bool {
+		return currentTenant.OpenStreams() == 1
+	})
+	published, err := server.Client().Post(server.URL+"/publish", "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = published.Body.Close()
+	if block := readLifecycleSSEBlock(t, reconnectedReader); block != "event: reload\nid: reload-1\ndata: \"v2\"\n\n" {
 		t.Fatalf("SSE block after reload = %q", block)
 	}
 
@@ -356,7 +388,7 @@ router.get((ctx) => ctx.text("v2"));
 	if rejected.Code < http.StatusBadRequest {
 		t.Fatalf("closing engine accepted a new request: %d", rejected.Code)
 	}
-	waitLifecycleSSEClosed(t, streamReader)
+	waitLifecycleSSEClosed(t, reconnectedReader)
 
 	taskReleaseOnce.Do(func() { close(taskRelease) })
 	select {

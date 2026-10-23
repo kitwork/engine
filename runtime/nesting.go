@@ -416,3 +416,25 @@ func NativePanic(label string, recovered any) value.Value {
 func nativePanicMessage(label string, recovered any) string {
 	return fmt.Sprintf("Native panic in %s: %v", label, recovered)
 }
+
+// RunsInside reports whether vm is other, or runs nested in a host call of other at any depth: a host that
+// waits for what other is doing (a value of storage another call of the same key is computing) would wait
+// for itself when asked from inside it. The links are made before the nested run begins and read on the
+// goroutine of vm, which runs inside them.
+func (vm *VM) RunsInside(other *VM) bool {
+	current := vm
+	for range nestingWalkLimit {
+		if current == nil {
+			return false
+		}
+		if current == other {
+			return true
+		}
+		link := current.outer
+		if link == nil {
+			return false
+		}
+		current = link.outer
+	}
+	return false
+}

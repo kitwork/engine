@@ -23,6 +23,8 @@ var uiResponseMembers = map[string]bool{
 	"json": true, "view": true, "html": true, "text": true, "svg": true, "file": true, "redirect": true,
 	"notfound": true, "error": true,
 	"url": true, "language": true, "jsonld": true,
+	// context.header(…).sse: the stream, after the edits that apply to it (KITWORK_SSE.md mục 1)
+	"sse": true,
 }
 
 func (r *Response) HiddenMember(name string) bool {

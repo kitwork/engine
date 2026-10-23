@@ -138,8 +138,10 @@ type Tenant struct {
 
 	limiters []*LimiterStore // index 0 = ScopeTenant, index 1 = ScopeServer
 
-	lruCache     map[string]*CacheItem
-	lruCacheLock sync.RWMutex
+	// streams are the open streams of this generation (stream.go): closed when it closes.
+	streamsMu      sync.Mutex
+	streams        map[*eventStream]struct{}
+	streamsClosing bool
 
 	rateLimitRules []rateRule
 
@@ -653,7 +655,6 @@ func NewAppTenantWithRuntimeLayout(
 		SiteScope:  SiteScope{},
 		appRuntime: appRuntime,
 		cache:      make(map[string]*Responser),
-		lruCache:   make(map[string]*CacheItem),
 	}
 }
 
@@ -796,7 +797,6 @@ func NewTenantWithRuntimeLayout(
 		siteRuntime: siteRuntime,
 		generation:  generation,
 		cache:       make(map[string]*Responser),
-		lruCache:    make(map[string]*CacheItem),
 	}
 }
 
@@ -897,20 +897,6 @@ func findIdentity(root, domain string) string {
 	return ""
 }
 
-func (t *Tenant) SSEBroker() *SSEBroker {
-	if t != nil && t.siteRuntime != nil {
-		return t.siteRuntime.SSEBroker()
-	}
-	return sseBrokerFor(t.brokerKey())
-}
-
-func (t *Tenant) brokerKey() string {
-	if t != nil && t.entity != nil && (t.entity.Identity != "" || t.entity.Domain != "") {
-		return t.entity.Identity + "/" + t.entity.Domain
-	}
-	return "default"
-}
-
 func (t *Tenant) Close() {
 	if t == nil {
 		return
@@ -919,14 +905,10 @@ func (t *Tenant) Close() {
 		t.requestMu.Lock()
 		t.requestClosing = true
 		t.requestMu.Unlock()
-		ownsCurrentSite := t.generation == nil ||
-			t.siteRuntime == nil ||
-			t.siteRuntime.CurrentGeneration() == t.generation
-		if ownsCurrentSite && t.siteRuntime != nil {
-			t.siteRuntime.StopStreams()
-		} else if ownsCurrentSite {
-			releaseSSEBroker(t.brokerKey())
-		}
+		// an open stream is a request that never ends by itself: the generation closes its streams before it
+		// waits for its requests, and the browser connects again to the one that replaced it
+		// (KITWORK_SSE.md mục 4)
+		t.closeStreams()
 		t.requestWG.Wait()
 		// the routines of go outlive their requests, not the generation: they stop before it retires, and
 		// with them what they hold of it (KITWORK_ROUTINE.md mục 3), within routineStopGrace. An idle site

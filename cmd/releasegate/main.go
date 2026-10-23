@@ -263,7 +263,7 @@ func releaseModePlan(mode string) ([]gateStep, error) {
 			gateStep{
 				Name: "Focused race",
 				Command: []string{
-					"go", "test", "-race", "./runtime", "./compiler", "./conformance", "./compatibility", "./core", "./site", "./app", "./request", "./work", "./utilities/sse",
+					"go", "test", "-race", "./runtime", "./compiler", "./conformance", "./compatibility", "./core", "./site", "./app", "./request", "./work", "./storage",
 					"-run", "Test", "-count=1",
 				},
 			},

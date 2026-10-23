@@ -35,7 +35,7 @@ var pageTextEdits = map[string]bool{
 var drawsPage = map[string]bool{"view": true, "notFound": true, "error": true}
 
 // ownMediaType are the answers whose media type is theirs: a .type() against them is an error.
-var ownMediaType = map[string]bool{"json": true, "view": true}
+var ownMediaType = map[string]bool{"json": true, "view": true, "sse": true}
 
 // ordered reports whether the order is checked: the site is router.work and its program is running.
 func (r *Response) ordered() bool {
@@ -46,6 +46,9 @@ func (r *Response) ordered() bool {
 func (r *Response) editing(edit string) error {
 	if !r.ordered() {
 		return nil
+	}
+	if r.order.answeredBy == "sse" {
+		return fmt.Errorf("`.%s()` sau context.sse: chỉnh sửa của luồng (header, headers, cookie) đứng trước, context.header(…).sse (KITWORK_SSE.md mục 1)", edit)
 	}
 	if r.order.answeredBy != "" {
 		return fmt.Errorf("`.%s()` nối sau `.%s()`: mọi chỉnh sửa đứng trước hàm trả lời: `context.%s(…).%s(…)`",
@@ -66,6 +69,8 @@ func (r *Response) answering(answer string) error {
 		return nil
 	}
 	switch {
+	case r.order.answeredBy == "sse":
+		return fmt.Errorf("`.%s()` sau context.sse: route đã mở luồng SSE thì trả lời bằng luồng, return stream; không trả lời gì khác (KITWORK_SSE.md mục 1)", answer)
 	case r.order.answeredBy != "":
 		return fmt.Errorf("`.%s()` sau `.%s()`: một chuỗi chỉ có một hàm trả lời, ở cuối: các chỉnh sửa đứng trước nó, `context.status(…).%s(…)`",
 			answer, r.order.answeredBy, r.order.answeredBy)
