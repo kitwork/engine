@@ -130,30 +130,6 @@ func TestCompileModuleFileReturnsItsExports(t *testing.T) {
 	}
 }
 
-// A config.work gives every name it declares at its top level, in the order written; an import's names
-// are the import's, not settings.
-func TestCompileConfigFileGivesItsTopLevelNames(t *testing.T) {
-	root := writeApps(t, map[string]string{
-		"apps/acme/.shared/queue/config.work": "import * as queue from \"kitwork/queue\";\nimport { base } from \"app/.shared/base.work\";\nconst parallel = base + 1;\nconst keep = \"7d\";\n",
-		"apps/acme/.shared/base.work":         "export const base = 1;\n",
-	})
-	app := filepath.Join(root, "apps", "acme")
-	bytecode, names, err := CompileConfigFileInApp(app, filepath.Join(app, ".shared", "queue", "config.work"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Join(names, ",") != "parallel,keep" {
-		t.Fatalf("names = %v, want parallel, keep", names)
-	}
-	vm := runtime.New(bytecode.Program)
-	vm.MaxEnergy = 10_000_000
-	vm.Builtins = []value.Value{value.NewFunc(func(...value.Value) value.Value { return value.New(map[string]value.Value{}) })}
-	settings := vm.Run()
-	if settings.K != value.Map || settings.Get("parallel").N != 2 || settings.Get("keep").Text() != "7d" {
-		t.Fatalf("settings = %v", settings.Interface())
-	}
-}
-
 // The queue's old spellings are compile errors where they are written, with file:line:col (KITWORK_QUEUE.md
 // mục 14): a word of the module or of a handle the spec replaced, queue.job outside the app's
 // .shared/queue/ (a route, a library of .shared/ a job file imports), status(…).list(), runs({ where }),

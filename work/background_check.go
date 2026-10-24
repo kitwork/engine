@@ -71,7 +71,7 @@ func checkFolder(appRoot, dir string, environment map[string]EnvironmentEntry) [
 		var bytecode *compiler.Bytecode
 		var compileErr error
 		if entry.Name() == "config.work" {
-			bytecode, _, compileErr = compiler.CompileConfigFileInApp(appRoot, file)
+			bytecode, compileErr = compiler.CompileConfigFileInApp(appRoot, file)
 		} else {
 			bytecode, compileErr = compiler.CompileModuleFileInApp(appRoot, file)
 		}

@@ -30,8 +30,6 @@ const QueueExportsMethod = "#exports"
 var queueRemoved = map[string]string{
 	"handle":   `queue.handle đã bỏ: job khai trong .shared/queue/<tên>.work bằng export const camOn = queue.job((context) => { … })`,
 	"retry":    `queue.retry đã bỏ: lần thử thêm là luật của job, queue.job(fn).retry(3); chạy lại một lần chạy là queue.replay(id)`,
-	"parallel": `queue.parallel đã bỏ: số lần chạy cùng lúc khai trong .shared/queue/config.work bằng const parallel = 2`,
-	"keep":     `queue.keep đã bỏ: thời gian giữ lịch sử khai trong .shared/queue/config.work bằng const keep = "30d"`,
 	"dispatch": `queue.dispatch đã bỏ: import { camOn } from "app/.shared/queue/camOn.work" rồi camOn.send(data, { delay, key }); biên nhận là { id, name, status }`,
 	"send":     `queue.send không có: gửi qua handle đã import, camOn.send(data), không gửi bằng tên chuỗi`,
 	"jobs":     `queue.jobs đã bỏ: các lần chạy là queue.runs() hay queue.status("failed").runs(), định nghĩa là queue.list()`,
@@ -44,8 +42,8 @@ var queueJobRemoved = map[string]string{
 	"handle":   `.handle đã bỏ: handler là tham số của queue.job((context) => { … })`,
 	"success":  `.success đã bỏ: việc sau khi chạy xong viết ở cuối handler`,
 	"error":    `.error đã bỏ: handler biết lần thử cuối qua context.job.isFinalAttempt; các lần chạy thất bại đọc bằng queue.status("failed").runs()`,
-	"parallel": `.parallel đã bỏ: số lần chạy cùng lúc khai trong .shared/queue/config.work bằng const parallel = 2`,
-	"keep":     `.keep đã bỏ: thời gian giữ lịch sử khai trong .shared/queue/config.work bằng const keep = "30d"`,
+	"parallel": `.parallel đã bỏ: số lần chạy cùng lúc là luật của cả hàng đợi, một dòng trong .shared/queue/config.work: queue.parallel(4)`,
+	"keep":     `.keep đã bỏ: thời gian giữ lịch sử là luật của cả hàng đợi, một dòng trong .shared/queue/config.work: queue.keep("30d")`,
 	"list":     `.list() của một job không có: định nghĩa đọc bằng queue.list(), các lần chạy của job bằng .runs()`,
 }
 
@@ -166,6 +164,11 @@ func (r *resolver) queueDeclaration(node *VarStatement) {
 			r.fail(fmt.Errorf("%s: %s", r.where(word.Token), message))
 			return
 		}
+		if FolderConfigWord("queue", word.Value) {
+			// import { parallel } from "kitwork/queue": a call of config.work is written on the namespace
+			r.fail(fmt.Errorf("%s: %s", r.where(word.Token), r.folderWordMisplaced("queue", word.Value)))
+			return
+		}
 		if word.Value == "job" && !r.inQueueModule {
 			r.fail(fmt.Errorf("%s: %s", r.where(word.Token), queueJobOutside))
 			return
@@ -190,6 +193,11 @@ func (r *resolver) queueMember(object Expression, property *Identifier) bool {
 		case found.queueModule:
 			if message, removed := queueRemoved[property.Value]; removed {
 				r.fail(fmt.Errorf("%s: %s", r.where(property.Token), message))
+				return true
+			}
+			if FolderConfigWord("queue", property.Value) {
+				// a call of config.work written as a line of its own there never gets here (folderCall)
+				r.fail(fmt.Errorf("%s: %s", r.where(property.Token), r.folderWordMisplaced("queue", property.Value)))
 				return true
 			}
 			if property.Value == "job" && !r.inQueueModule {

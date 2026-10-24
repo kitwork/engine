@@ -72,7 +72,7 @@ var removedWords = map[string]string{
 // removedChained is the same for the words chained after a rule the old cron had, or the spec keeps out.
 var removedChained = map[string]string{
 	"handle":     `.handle(fn) đã bỏ: lịch kết thúc bằng .run(fn), hay .once(fn) cho đúng một lần`,
-	"keep":       `.keep đã bỏ: thời gian giữ lịch sử khai trong .schedule/config.work bằng const keep = "30d"`,
+	"keep":       `.keep đã bỏ: thời gian giữ lịch sử là luật của cả .schedule/, một dòng trong .schedule/config.work: schedule.keep("7d")`,
 	"success":    `.success đã bỏ: việc sau khi chạy xong viết ở cuối handler`,
 	"error":      `.error đã bỏ: các lần chạy thất bại đọc bằng schedule.status("failed").runs(); handler biết lần thử cuối qua context.job.isFinalAttempt`,
 	"overlap":    `.overlap đã bỏ: lần tới giờ khi lần trước chưa xong còn mở trong spec (KITWORK_SCHEDULE.md mục 12.4); engine bỏ lần tới giờ mới`,
@@ -97,7 +97,7 @@ func RemovedChained(word string) (string, bool) {
 
 // UnknownWord is the error of schedule.<word> the module does not have.
 func UnknownWord(word string) string {
-	return fmt.Sprintf("schedule.%s không có: lịch khai bằng every, hourly, daily, monday … sunday, weekly, monthly, doubleday, firstday, lastday, on; đọc bằng list, runs, status, where", word)
+	return fmt.Sprintf("schedule.%s không có: lịch khai bằng every, hourly, daily, monday … sunday, weekly, monthly, doubleday, firstday, lastday, on; đọc bằng list, runs, status, where; .schedule/config.work gọi keep, session, database", word)
 }
 
 // Begin starts a chain: schedule.<word>(args). word is one of RuleWords; any other is an error.

@@ -226,7 +226,7 @@ func TestChainErrors(t *testing.T) {
 		{"handle", []call{is("daily", text("08:00")), is("handle", handler())}, ".handle(fn) đã bỏ: lịch kết thúc bằng .run(fn)"},
 		{"inline handler", []call{is("daily", text("08:00"), handler())}, "handler đi sau, trong .run(fn), không phải tham số của daily"},
 		{"daily of nothing", []call{is("daily")}, `daily() thiếu giờ: daily("09:00")`},
-		{"keep", []call{is("daily", text("08:00")), is("keep", text("90d"))}, `.keep đã bỏ: thời gian giữ lịch sử khai trong .schedule/config.work bằng const keep = "30d"`},
+		{"keep", []call{is("daily", text("08:00")), is("keep", text("90d"))}, `.keep đã bỏ: thời gian giữ lịch sử là luật của cả .schedule/, một dòng trong .schedule/config.work: schedule.keep("7d")`},
 		{"overlap", []call{is("every", text("1m")), is("overlap", text("skip"))}, ".overlap đã bỏ: lần tới giờ khi lần trước chưa xong còn mở"},
 		{"success", []call{is("every", text("1m")), is("success", handler())}, ".success đã bỏ"},
 		{"error", []call{is("every", text("1m")), is("error", handler())}, `.error đã bỏ: các lần chạy thất bại đọc bằng schedule.status("failed").runs()`},

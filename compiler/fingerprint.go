@@ -144,7 +144,15 @@ import (
 // router.view would run until the router refused it where it runs, instead of the file failing where it is
 // written: the bump retires it. A program that writes none of them compiles as before, byte for byte. No
 // opcode or operand changed.
-const CompilerSchemaVersion uint16 = 20
+//
+// 21 (24/10/2026, KITWORK_QUEUE.md and KITWORK_SCHEDULE.md mục 2, the folder's config.work by calls): a
+// config.work of .shared/queue/ or of .schedule/ no longer returns an object of its top-level names; it runs
+// its calls, queue.parallel(4), schedule.keep("7d"), each a line of its own (folder_config.go). The const of
+// 17/10 there (const parallel = 4), a chain, a word called twice, and a word of a folder's config.work written
+// anywhere else are compile errors; queue.parallel and queue.keep outside it no longer say to write a const.
+// A cached artifact of schema 20 of a config.work returns names the loader no longer reads: the bump retires
+// it. A program that writes none of them compiles as before, byte for byte. No opcode or operand changed.
+const CompilerSchemaVersion uint16 = 21
 
 var currentCompilerFingerprint = compilerFingerprintFor(CompilerSchemaVersion)
 

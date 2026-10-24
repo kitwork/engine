@@ -235,6 +235,9 @@ type resolver struct {
 	environmentUse bool
 	// inRouterFile: the program is a router.work, where router.view is refused (router.go).
 	inRouterFile bool
+	// folderCalls: the program is a config.work of .shared/queue/ or of .schedule/, and these the calls of its
+	// folder written right (folder_config.go); nil for any other program, where every such call is refused.
+	folderCalls *FolderCalls
 	// functionScopes gives each function literal read so far its scope: an import reads what its module
 	// returns (environment.go).
 	functionScopes map[*FunctionLiteral]*functionScope
@@ -268,6 +271,7 @@ func (c *Compiler) resolveObserved(
 		scheduleChains: map[*MethodCallExpression]bool{},
 		inApp:          program.App,
 		inRouterFile:   program.Router,
+		folderCalls:    program.FolderCalls,
 		functionScopes: map[*FunctionLiteral]*functionScope{},
 	}
 	r.databases = r.bundle != nil && len(r.bundle.Imports) > 0
@@ -808,6 +812,9 @@ func (r *resolver) expression(expression Expression) {
 			return
 		}
 		if r.namespaceDeclaration(node.Object, node.Method) {
+			return
+		}
+		if r.folderCall(node) {
 			return
 		}
 		if r.queueCall(node) {

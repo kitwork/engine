@@ -251,56 +251,39 @@ func (t *Tenant) refusePastOnce(entries []*scheduleEntry, say func(string)) []*s
 	return kept
 }
 
-// readScheduleConfig reads .schedule/config.work: const keep (how long an ended run is kept). A missing file
-// is the defaults; a wrong value is said and its default kept.
+// readScheduleConfig reads .schedule/config.work: schedule.keep(duration) (how long an ended run is kept),
+// one call per line (background_config.go); schedule.session({ … }) and schedule.database(db) are said, the
+// engine has neither yet. A missing file is the defaults; a wrong value is said with where it is written, and
+// its default kept.
 func (t *Tenant) readScheduleConfig(file string) scheduleConfig {
 	config := scheduleConfig{keep: queueDefaultKeep}
 	if _, err := os.Stat(file); err != nil {
 		return config
 	}
 	const where = ".schedule/config.work"
-	bc, names, err := compiler.CompileConfigFileInApp(t.resolveApp(), file)
-	if err == nil {
-		if missing := t.missingEnvironment(bc); missing != nil {
-			err = missing
-		}
-	}
-	if err != nil {
-		fmt.Printf("[Schedule] compile %s: %v\n", where, err)
+	settings := t.runFolderConfig(file, "schedule", "[Schedule]", where)
+	if settings == nil {
 		return config
 	}
-	vm := runtime.New(bc.Program)
-	globals := make(map[string]value.Value, len(t.vm.Globals))
-	for name, item := range t.vm.Globals {
-		globals[name] = item
-	}
-	vm.Builtins = t.vm.Builtins
-	vm.Globals = globals
-	vm.MaxEnergy = t.MaxEnergy
-	finished := loadingFile(vm)
-	result := vm.Run()
-	finished()
-	if result.K != value.Map {
-		fmt.Printf("[Schedule] run %s: %s\n", where, result.Text())
-		return config
-	}
-	settings := result.Map()
-	for _, name := range names {
-		item := settings[name]
-		switch name {
+	for _, setting := range settings.calls {
+		place := folderPlace(where, setting.place)
+		item := setting.only()
+		switch setting.word {
 		case "keep":
 			duration, err := ParseDuration(item.Text())
 			if item.K != value.String || err != nil || duration < time.Hour {
-				fmt.Printf("[Schedule] %s: keep là một khoảng từ 1h, thời gian giữ lần chạy đã xong: const keep = \"30d\"\n", where)
+				fmt.Printf("[Schedule] %s: schedule.keep nhận một khoảng từ \"1h\", thời gian giữ lần chạy đã xong: schedule.keep(\"7d\")\n", place)
 				continue
 			}
 			config.keep = duration
-		case "database":
-			fmt.Printf("[Schedule] %s: const database chưa có trong engine hôm nay: các lần chạy nằm trong database của app (.database/application/)\n", where)
 		case "session":
-			fmt.Printf("[Schedule] %s: const session chưa có trong engine hôm nay: lịch chạy không phiên\n", where)
-		default:
-			fmt.Printf("[Schedule] %s: %s không phải luật của lịch: config.work khai const database, session, keep\n", where, name)
+			if item.K != value.Map {
+				fmt.Printf("[Schedule] %s: schedule.session nhận một object, danh tính dịch vụ của lịch: schedule.session({ role: \"system\" })\n", place)
+				continue
+			}
+			fmt.Printf("[Schedule] %s: schedule.session(…) chưa có trong engine hôm nay: lịch chạy không phiên\n", place)
+		case "database":
+			fmt.Printf("[Schedule] %s: schedule.database(…) chưa có trong engine hôm nay: các lần chạy nằm trong database của app (.database/application/)\n", place)
 		}
 	}
 	return config

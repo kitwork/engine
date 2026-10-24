@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestCompilerV20GoldenContract(t *testing.T) {
-	if CompilerSchemaVersion != 20 {
-		t.Fatalf("CompilerSchemaVersion = %d, want schema v20", CompilerSchemaVersion)
+func TestCompilerV21GoldenContract(t *testing.T) {
+	if CompilerSchemaVersion != 21 {
+		t.Fatalf("CompilerSchemaVersion = %d, want schema v21", CompilerSchemaVersion)
 	}
 	// Bytecode 3 (14/10/2026) moved the fingerprint and every checksum below with the version alone: each
 	// fixture's instructions, constants and debug table are those bytecode 2 wrote (none needs a wide
@@ -27,10 +27,17 @@ func TestCompilerV20GoldenContract(t *testing.T) {
 	// (22/10/2026, the older words of kitwork/file refused) moved the fingerprint alone: no fixture imports
 	// kitwork/file. Schema 19 (22/10/2026, environment read by name) moved the fingerprint alone: no fixture
 	// reads env or environment. Schema 20 (23/10/2026, router.view removed) moved the fingerprint alone: no
-	// fixture writes router.view.
-	const expectedFingerprint = "0e2a6963f9bd8c84bf075a9c18fb428054db413e81379e9767f10efd99e6db3e"
+	// fixture writes router.view. Schema 21 (24/10/2026, a folder's config.work by calls) moved the fingerprint
+	// alone: no fixture is a config.work or calls queue.parallel, queue.keep or schedule.keep.
+	const expectedFingerprint = "15285bc1c3aa7374cd2260fc681dd61d42837f62b4227dc70e66c9b36da7622c"
 	if got := Fingerprint(); got != expectedFingerprint {
 		t.Fatalf("compiler fingerprint = %q, want %q", got, expectedFingerprint)
+	}
+	// schema 20 compiled a config.work of .shared/queue/ or .schedule/ into an object of its top-level names,
+	// which the loader no longer reads: its artifacts are not reused
+	const schema20 = "0e2a6963f9bd8c84bf075a9c18fb428054db413e81379e9767f10efd99e6db3e"
+	if stamped := compilerFingerprintFor(20); hex.EncodeToString(stamped[:]) != schema20 || Fingerprint() == schema20 {
+		t.Fatalf("schema 20 on bytecode 4 stamps %x, the current compiler %s: want %s and another", stamped, Fingerprint(), schema20)
 	}
 	// schema 19 compiled router.view in a router.work, which the router now refuses only where it runs: its
 	// artifacts are not reused

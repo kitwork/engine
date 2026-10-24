@@ -11,7 +11,8 @@ import (
 
 // Every spelling the spec replaced is an error naming the new one (KITWORK_QUEUE.md mục 14, 16): the
 // namespace's builders and reads, the handle's .success/.error, cancel and replay by a job's name, and
-// the handler argument of old (job.payload). The compiler refuses each where it is written on the
+// the handler argument of old (job.payload); queue.parallel and queue.keep, calls of .shared/queue/config.work
+// since 24/10/2026, are refused anywhere else, saying where they are written. The compiler refuses each where it is written on the
 // namespace or a handle (compiler TestQueueOldSpellingsAreCompileErrors); here the namespace and the handle
 // reach the line through a function, where the compiler cannot follow them, and the module refuses them as
 // they run, with the same words; a queue.job made there has no name (only a file of .shared/queue/ names
@@ -67,8 +68,8 @@ router.get((context) => context.json({
 		"dispatch":        `INVALID_ARGUMENT: queue.dispatch đã bỏ: import { camOn } from "app/.shared/queue/camOn.work" rồi camOn.send(data, { delay, key }); biên nhận là { id, name, status }`,
 		"handle":          "INVALID_ARGUMENT: queue.handle đã bỏ: job khai trong .shared/queue/<tên>.work bằng export const camOn = queue.job((context) => { … })",
 		"retry":           "INVALID_ARGUMENT: queue.retry đã bỏ: lần thử thêm là luật của job, queue.job(fn).retry(3); chạy lại một lần chạy là queue.replay(id)",
-		"parallel":        "INVALID_ARGUMENT: queue.parallel đã bỏ: số lần chạy cùng lúc khai trong .shared/queue/config.work bằng const parallel = 2",
-		"keep":            `INVALID_ARGUMENT: queue.keep đã bỏ: thời gian giữ lịch sử khai trong .shared/queue/config.work bằng const keep = "30d"`,
+		"parallel":        "INVALID_ARGUMENT: queue.parallel(…) chỉ viết trong .shared/queue/config.work, một dòng ở cấp file: queue.parallel(4); ở file khác nó không có nghĩa",
+		"keep":            `INVALID_ARGUMENT: queue.keep(…) chỉ viết trong .shared/queue/config.work, một dòng ở cấp file: queue.keep("30d"); ở file khác nó không có nghĩa`,
 		"jobs":            `INVALID_ARGUMENT: queue.jobs đã bỏ: các lần chạy là queue.runs() hay queue.status("failed").runs(), định nghĩa là queue.list()`,
 		"failed":          `INVALID_ARGUMENT: queue.failed đã bỏ: queue.status("failed").runs()`,
 		"replayName":      `INVALID_ARGUMENT: queue.replay("camOn"): replay nhận id của một lần chạy và tạo một lần chạy mới; chạy lại mọi lần thất bại của một job là đọc camOn.status("failed").runs() rồi replay(id) từng lần`,
@@ -167,42 +168,196 @@ func TestQueueRunsSurviveARestart(t *testing.T) {
 	}
 }
 
-// .shared/queue/config.work sets the queue's parallel and keep with const; a wrong value or a name the
-// queue has not is said at boot and its default kept.
+// .shared/queue/config.work sets the queue's parallel and keep with calls, one per line (KITWORK_QUEUE.md mục
+// 2, 24/10/2026); a wrong value is said at boot with where it is written, and its default kept;
+// queue.database(…) is said, the engine has it not yet. A call the compiler could not follow (the namespace
+// under another name) is the same error when it runs: a word called twice is said and the first kept, a chain
+// stops the file, and the defaults hold. The const of 17/10 does not compile, and the defaults hold.
+//
+// CONTROL (24/10/2026): with Queue.OnInvoke handing parallel and keep to no collector, the first app booted
+// with "[Queue] run .shared/queue/config.work: config.work:3:6: queue.parallel(…) chỉ viết trong
+// .shared/queue/config.work …" and parallel 4 keep 720h0m0s; with readQueueConfig reading no keep, the first
+// app ran keep 720h0m0s; with folderSettings.call keeping no word seen, the alias app said nothing of the
+// second q.parallel and ran parallel 3; with folderCallResult taking a chain (giving nil), the chained app
+// said nothing and ran parallel 1.
 func TestQueueConfigFile(t *testing.T) {
-	q := newQueueApp(t, map[string]string{
-		".shared/queue/config.work": "const parallel = 1;\nconst keep = \"7d\";\n",
-		".shared/queue/mail.work":   "import * as queue from \"kitwork/queue\";\nexport const mail = queue.job((context) => 1);\n",
-	})
-	worker := q.app.queueWorker()
-	worker.mu.Lock()
-	parallel, keep := worker.parallel, worker.keep
-	worker.mu.Unlock()
-	if parallel != 1 || keep != 7*24*time.Hour {
-		t.Fatalf("parallel %d keep %s, want 1 and 7 days", parallel, keep)
+	const head = "import * as queue from \"kitwork/queue\";\n"
+	const mail = head + "export const mail = queue.job((context) => 1);\n"
+	settings := func(q *queueApp) (int, time.Duration) {
+		worker := q.app.queueWorker()
+		worker.mu.Lock()
+		defer worker.mu.Unlock()
+		return worker.parallel, worker.keep
 	}
-	if handler := worker.handlerFor("mail"); handler == nil {
+	q := newQueueApp(t, map[string]string{
+		".shared/queue/config.work": head + "\nqueue.parallel(1);\nqueue.keep(\"7d\");\n",
+		".shared/queue/mail.work":   mail,
+	})
+	if parallel, keep := settings(q); parallel != 1 || keep != 7*24*time.Hour {
+		t.Fatalf("parallel %d keep %s, want 1 and 7 days:\n%s", parallel, keep, q.output)
+	}
+	if handler := q.app.queueWorker().handlerFor("mail"); handler == nil {
 		t.Fatal("config.work was taken for a job file, or mail was not loaded")
+	}
+	if strings.Contains(q.output, "config.work") {
+		t.Errorf("boot said something of a config.work written right:\n%s", q.output)
 	}
 
 	wrong := newQueueApp(t, map[string]string{
-		".shared/queue/config.work": "const parallel = 0;\nconst paralel = 2;\nconst keep = \"5m\";\nconst database = 1;\n",
-		".shared/queue/mail.work":   "import * as queue from \"kitwork/queue\";\nexport const mail = queue.job((context) => 1);\n",
+		".shared/queue/config.work": head + "queue.parallel(0);\nqueue.keep(\"5m\");\nqueue.database(1);\n",
+		".shared/queue/mail.work":   mail,
 	})
 	for _, line := range []string{
-		"[Queue] .shared/queue/config.work: parallel là số nguyên từ 1 tới 100",
-		"[Queue] .shared/queue/config.work: paralel không phải luật của hàng đợi: config.work khai const parallel, keep, database",
-		`[Queue] .shared/queue/config.work: keep là một khoảng từ 1h, thời gian giữ lần chạy đã xong: const keep = "30d"`,
-		"[Queue] .shared/queue/config.work: const database chưa có trong engine hôm nay",
+		"[Queue] .shared/queue/config.work:2:6: queue.parallel nhận một số nguyên từ 1 tới 100, số lần chạy cùng lúc trên một máy: queue.parallel(4)",
+		`[Queue] .shared/queue/config.work:3:6: queue.keep nhận một khoảng từ "1h", thời gian giữ lần chạy đã xong: queue.keep("30d")`,
+		"[Queue] .shared/queue/config.work:4:6: queue.database(…) chưa có trong engine hôm nay: các lần chạy nằm trong database của app (.database/application/)",
 	} {
 		if !strings.Contains(wrong.output, line) {
 			t.Errorf("boot did not say %q:\n%s", line, wrong.output)
 		}
 	}
-	worker = wrong.app.queueWorker()
-	worker.mu.Lock()
-	defer worker.mu.Unlock()
-	if worker.parallel != queueDefaultParallel || worker.keep != queueDefaultKeep {
-		t.Errorf("a wrong config.work kept parallel %d keep %s, want the defaults", worker.parallel, worker.keep)
+	if parallel, keep := settings(wrong); parallel != queueDefaultParallel || keep != queueDefaultKeep {
+		t.Errorf("a wrong config.work kept parallel %d keep %s, want the defaults", parallel, keep)
+	}
+
+	// the namespace under another name: the compiler does not follow it, the module refuses as it runs
+	alias := newQueueApp(t, map[string]string{
+		".shared/queue/config.work": head + "const q = queue;\nq.parallel(2);\nq.parallel(3);\n",
+		".shared/queue/mail.work":   mail,
+	})
+	if line := "[Queue] .shared/queue/config.work:4:2: queue.parallel gọi hai lần, dòng 3 và dòng 4: mỗi chữ một lần trong config.work, giữ một dòng"; !strings.Contains(alias.output, line) {
+		t.Errorf("boot did not say %q:\n%s", line, alias.output)
+	}
+	if parallel, _ := settings(alias); parallel != 2 {
+		t.Errorf("a word called twice ran parallel %d, want the first call's 2", parallel)
+	}
+	chained := newQueueApp(t, map[string]string{
+		".shared/queue/config.work": head + "const q = queue;\nq.parallel(1).keep(\"7d\");\n",
+		".shared/queue/mail.work":   mail,
+	})
+	if line := "[Queue] run .shared/queue/config.work: "; !strings.Contains(chained.output, line) ||
+		!strings.Contains(chained.output, `queue.parallel(…).keep(…) nối tiếp: mỗi lời gọi của config.work một dòng, tách thành hai dòng: queue.parallel(…); queue.keep(…);`) {
+		t.Errorf("boot did not refuse the chain:\n%s", chained.output)
+	}
+	if parallel, keep := settings(chained); parallel != queueDefaultParallel || keep != queueDefaultKeep {
+		t.Errorf("a chained config.work kept parallel %d keep %s, want the defaults", parallel, keep)
+	}
+
+	old := newQueueApp(t, map[string]string{
+		".shared/queue/config.work": "const parallel = 1;\n",
+		".shared/queue/mail.work":   mail,
+	})
+	if line := "[Queue] compile .shared/queue/config.work: config.work:1:7: const parallel đã bỏ: số lần chạy cùng lúc trên một máy là lời gọi queue.parallel(4)"; !strings.Contains(old.output, line) {
+		t.Errorf("boot did not say %q:\n%s", line, old.output)
+	}
+	if parallel, _ := settings(old); parallel != queueDefaultParallel {
+		t.Errorf("the const of 17/10 ran parallel %d, want the default", parallel)
+	}
+}
+
+// queue.parallel takes a whole number from 1 to 100, one argument (KITWORK_QUEUE.md mục 11): anything else is
+// said at boot with where it is written, and the default kept; 100 itself is taken.
+//
+// CONTROL (24/10/2026): with readQueueConfig taking any number from 1 up, 101 ran parallel 101 and 2.5 ran
+// parallel 2, neither said; with its ceiling at 99, queue.parallel(100) ran the default 4; with
+// folderSetting.only taking the first of two arguments, queue.parallel(2, 3) ran parallel 2, not said.
+func TestQueueParallelIsAWholeNumberFrom1To100(t *testing.T) {
+	const head = "import * as queue from \"kitwork/queue\";\n"
+	const said = "[Queue] .shared/queue/config.work:2:6: queue.parallel nhận một số nguyên từ 1 tới 100, số lần chạy cùng lúc trên một máy: queue.parallel(4)"
+	parallel := func(q *queueApp) int {
+		worker := q.app.queueWorker()
+		worker.mu.Lock()
+		defer worker.mu.Unlock()
+		return worker.parallel
+	}
+	for _, call := range []string{"queue.parallel(101);", "queue.parallel(2.5);", `queue.parallel("4");`, "queue.parallel(2, 3);", "queue.parallel();"} {
+		t.Run(call, func(t *testing.T) {
+			q := newQueueApp(t, map[string]string{
+				".shared/queue/config.work": head + call + "\n",
+				".shared/queue/mail.work":   head + "export const mail = queue.job((context) => 1);\n",
+			})
+			if !strings.Contains(q.output, said) {
+				t.Errorf("boot did not say %q:\n%s", said, q.output)
+			}
+			if got := parallel(q); got != queueDefaultParallel {
+				t.Errorf("%s ran parallel %d, want the default %d", call, got, queueDefaultParallel)
+			}
+		})
+	}
+	q := newQueueApp(t, map[string]string{
+		".shared/queue/config.work": head + "queue.parallel(100);\n",
+		".shared/queue/mail.work":   head + "export const mail = queue.job((context) => 1);\n",
+	})
+	if got := parallel(q); got != 100 || strings.Contains(q.output, "config.work") {
+		t.Errorf("queue.parallel(100) ran parallel %d, want 100, and boot said:\n%s", got, q.output)
+	}
+}
+
+// A call of a folder's config.work the compiler could not follow, the namespace under another name, is refused
+// as it runs where the compiler refuses it written plainly (KITWORK_QUEUE.md mục 2, KITWORK_SCHEDULE.md mục 2):
+// the other folder's word, a call inside a function, a call a library makes. The file stops, and the defaults
+// hold; the line names the file the call is written in.
+//
+// CONTROL (24/10/2026): with folderSettings.call refusing only a nil s (not another module's word), the
+// queue's config.work ran the schedule's keep as the queue's (queue keep 48h0m0s) and the schedule's ran the
+// queue's (schedule keep 48h0m0s), neither said; with no frame check, both calls inside a function were taken
+// (parallel 2, schedule keep 48h0m0s), not said; with no file check, both library calls were refused as "là
+// một dòng ở cấp file của config.work" instead of "chỉ viết trong .shared/queue/config.work". Before the two
+// checks were written, the function and library calls were all taken (parallel 2, schedule keep 48h0m0s).
+func TestFolderConfigRefusesWhatTheCompilerCannotFollow(t *testing.T) {
+	const queueHead = "import * as queue from \"kitwork/queue\";\n"
+	const scheduleHead = "import * as schedule from \"kitwork/schedule\";\n"
+	const outsideQueue = "queue.parallel(…) chỉ viết trong .shared/queue/config.work, một dòng ở cấp file: queue.parallel(4); ở file khác nó không có nghĩa"
+	settings := func(q *queueApp) (int, time.Duration, time.Duration) {
+		queueWorker, scheduleWorker := q.app.queueWorker(), q.app.scheduleWorker()
+		queueWorker.mu.Lock()
+		parallel, queueKeep := queueWorker.parallel, queueWorker.keep
+		queueWorker.mu.Unlock()
+		scheduleWorker.mu.Lock()
+		defer scheduleWorker.mu.Unlock()
+		return parallel, queueKeep, scheduleWorker.keep
+	}
+	for _, each := range []struct {
+		name  string
+		files map[string]string
+		said  string
+	}{
+		{"the schedule's keep in the queue's config.work", map[string]string{
+			".shared/queue/config.work": scheduleHead + "const s = schedule;\ns.keep(\"2d\");\n",
+		}, `[Queue] run .shared/queue/config.work: config.work:3:2: schedule.keep(…) chỉ viết trong .schedule/config.work, một dòng ở cấp file: schedule.keep("7d"); ở file khác nó không có nghĩa`},
+		{"the queue's keep in the schedule's config.work", map[string]string{
+			".schedule/config.work": queueHead + "const q = queue;\nq.keep(\"2d\");\n",
+		}, `[Schedule] run .schedule/config.work: config.work:3:2: queue.keep(…) chỉ viết trong .shared/queue/config.work, một dòng ở cấp file: queue.keep("30d"); ở file khác nó không có nghĩa`},
+		{"a queue call inside a function", map[string]string{
+			".shared/queue/config.work": queueHead + "const q = queue;\nconst set = () => q.parallel(2);\nset();\n",
+		}, "[Queue] run .shared/queue/config.work: config.work:3:20: queue.parallel(…) là một dòng ở cấp file của config.work: queue.parallel(4); không viết trong hàm, trong khối hay làm giá trị"},
+		{"a schedule call inside a function", map[string]string{
+			".schedule/config.work": scheduleHead + "const s = schedule;\nconst set = () => s.keep(\"2d\");\nset();\n",
+		}, `[Schedule] run .schedule/config.work: config.work:3:20: schedule.keep(…) là một dòng ở cấp file của config.work: schedule.keep("7d"); không viết trong hàm, trong khối hay làm giá trị`},
+		{"a library's function", map[string]string{
+			".shared/settings.work":     "export const set = (q) => q.parallel(2);\n",
+			".shared/queue/config.work": queueHead + "import { set } from \"app/.shared/settings.work\";\nset(queue);\n",
+		}, "[Queue] run .shared/queue/config.work: ../settings.work:1:28: " + outsideQueue},
+		{"a library's top level", map[string]string{
+			".shared/settings.work":     queueHead + "const q = queue;\nq.parallel(2);\nexport const ready = true;\n",
+			".shared/queue/config.work": "import { ready } from \"app/.shared/settings.work\";\n",
+		}, "[Queue] run .shared/queue/config.work: ../settings.work:3:2: " + outsideQueue},
+	} {
+		t.Run(each.name, func(t *testing.T) {
+			files := map[string]string{
+				".shared/queue/mail.work":  queueHead + "export const mail = queue.job((context) => 1);\n",
+				".schedule/heartbeat.work": scheduleHead + "export const heartbeat = schedule.every(\"1h\").run((context) => 1);\n",
+			}
+			for name, text := range each.files {
+				files[name] = text
+			}
+			q := newQueueApp(t, files)
+			if !strings.Contains(q.output, each.said) {
+				t.Errorf("boot did not say %q:\n%s", each.said, q.output)
+			}
+			if parallel, queueKeep, scheduleKeep := settings(q); parallel != queueDefaultParallel || queueKeep != queueDefaultKeep || scheduleKeep != queueDefaultKeep {
+				t.Errorf("ran parallel %d, queue keep %s, schedule keep %s; want the defaults", parallel, queueKeep, scheduleKeep)
+			}
+		})
 	}
 }

@@ -29,7 +29,7 @@ func TestBackgroundFilesHoldTheirEnvironment(t *testing.T) {
 		".env":                      "HAVE=secret-xyz\n",
 		".shared/queue/mail.work":   header + "const key = environment.require(\"MAIL_KEY\");\nexport const mail = queue.job((context) => key.length);\n",
 		".shared/queue/notify.work": header + "export const notify = queue.job((context) => environment.require(\"SMTP_URL\").length + environment.require(\"HAVE\").length);\n",
-		".shared/queue/config.work": "import { environment } from \"kitwork\";\nconst parallel = environment.require(\"QUEUE_PARALLEL\");\n",
+		".shared/queue/config.work": "import { environment } from \"kitwork\";\nimport * as queue from \"kitwork/queue\";\nqueue.parallel(environment.require(\"QUEUE_PARALLEL\"));\n",
 		".schedule/report.work":     scheduleHeader + "export const report = schedule.every(\"1h\").run((context) => environment.require(\"REPORT_TO\").length);\n",
 		".schedule/heartbeat.work":  scheduleHeader + "export const heartbeat = schedule.every(\"1h\").run((context) => environment.require(\"HAVE\").length);\n",
 		"localhost/router.work":     "import * as router from \"kitwork/router\";\nrouter.get((context) => context.text(\"ok\"));\n",
@@ -48,7 +48,7 @@ func TestBackgroundFilesHoldTheirEnvironment(t *testing.T) {
 
 	for _, line := range []string{
 		"[Queue] compile .shared/queue/mail.work: environment.require: thiếu MAIL_KEY (mail.work:3:33);",
-		"[Queue] compile .shared/queue/config.work: environment.require: thiếu QUEUE_PARALLEL (config.work:2:38);",
+		"[Queue] compile .shared/queue/config.work: environment.require: thiếu QUEUE_PARALLEL (config.work:3:36);",
 		"[Schedule] compile .schedule/report.work: environment.require: thiếu REPORT_TO (report.work:3:81);",
 	} {
 		if !strings.Contains(output, line) {
@@ -85,8 +85,8 @@ func TestBackgroundFilesHoldTheirEnvironment(t *testing.T) {
 	old := t.TempDir()
 	writeQueueApp(t, old, map[string]string{
 		".shared/queue/old.work":    "import * as queue from \"kitwork/queue\";\nimport { env } from \"kitwork\";\nexport const old = queue.job((context) => env.KEY);\n",
-		".shared/queue/config.work": "import { env } from \"kitwork\";\nconst parallel = env.PARALLEL || 2;\n",
-		".schedule/config.work":     "import { env } from \"kitwork\";\nconst keep = env.KEEP || \"7d\";\n",
+		".shared/queue/config.work": "import { env } from \"kitwork\";\nimport * as queue from \"kitwork/queue\";\nqueue.parallel(env.PARALLEL || 2);\n",
+		".schedule/config.work":     "import { env } from \"kitwork\";\nimport * as schedule from \"kitwork/schedule\";\nschedule.keep(env.KEEP || \"7d\");\n",
 		".schedule/heartbeat.work":  "import * as schedule from \"kitwork/schedule\";\nexport const heartbeat = schedule.every(\"1h\").run((context) => 1);\n",
 		"localhost/router.work":     "import * as router from \"kitwork/router\";\nrouter.get((context) => context.text(\"ok\"));\n",
 	})

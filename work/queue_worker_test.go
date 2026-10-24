@@ -231,7 +231,7 @@ func TestQueueParallelBoundsTheRunsAtOnce(t *testing.T) {
 	upstream := holdUpstream(t, 2)
 	watch := watchQueue(t)
 	q := newQueueApp(t, map[string]string{
-		".shared/queue/config.work":  "const parallel = 1;\n",
+		".shared/queue/config.work":  "import * as queue from \"kitwork/queue\";\nqueue.parallel(1);\n",
 		".shared/queue/held.work":    heldJob(upstream.server.URL, ""),
 		"localhost/send/router.work": heldRoute,
 	})
@@ -342,5 +342,50 @@ func TestCheckQueueFilesSaysQueueFolderIsNotRead(t *testing.T) {
 	if len(issues) != 1 || filepath.Base(issues[0].File) != "_queue" ||
 		issues[0].Err.Error() != "_queue/ không còn đọc: khai job trong .shared/queue/<tên>.work bằng export const <tên> = queue.job(fn)" {
 		t.Fatalf("issues = %v", issues)
+	}
+}
+
+// The preflight compiles the config.work of .shared/queue/ and of .schedule/ as their loaders do, so kitwork check
+// finds what boot would refuse (KITWORK_QUEUE.md mục 2, KITWORK_SCHEDULE.md mục 2, 24/10/2026): the const of 17/10
+// and a chain, each at its place. CONTROL: the same folders written with one call per line give no issue.
+// CONTROL (24/10/2026): with CompileConfigFileInApp reading no folder call (readFolderCalls giving nil), the
+// const compiled with no issue, the chain was "config.work:2:10: schedule.keep(…) chỉ viết trong
+// .schedule/config.work …" (not the chain), and the spec's two files each gave that issue.
+func TestCheckFindsAFolderConfigWrittenTheOldWay(t *testing.T) {
+	root := t.TempDir()
+	writeAppTree(t, root, map[string]string{
+		"acme/.shared/queue/config.work": "const parallel = 2;\n",
+		"acme/.schedule/config.work":     "import * as schedule from \"kitwork/schedule\";\nschedule.keep(\"7d\").session({ role: \"system\" });\n",
+		"acme/shop.example/router.work":  `import * as router from "kitwork/router";`,
+	})
+	issues := append(CheckQueueFiles(root, "acme", nil), CheckScheduleFiles(root, "acme", nil)...)
+	var said []string
+	for _, issue := range issues {
+		said = append(said, filepath.ToSlash(filepath.Base(filepath.Dir(issue.File)))+"/"+filepath.Base(issue.File)+": "+issue.Err.Error())
+	}
+	for _, want := range []string{
+		"queue/config.work: config.work:1:7: const parallel đã bỏ: số lần chạy cùng lúc trên một máy là lời gọi queue.parallel(4)",
+		".schedule/config.work: config.work:2:21: schedule.keep(…).session(…) nối tiếp: mỗi lời gọi của config.work một dòng, tách thành hai dòng",
+	} {
+		found := false
+		for _, line := range said {
+			found = found || strings.HasPrefix(line, want)
+		}
+		if !found {
+			t.Errorf("the preflight did not say %q: %v", want, said)
+		}
+	}
+	if len(issues) != 2 {
+		t.Errorf("issues = %v, want the two config.work", said)
+	}
+
+	right := t.TempDir()
+	writeAppTree(t, right, map[string]string{
+		"acme/.shared/queue/config.work": "import * as queue from \"kitwork/queue\";\nqueue.parallel(2);\nqueue.keep(\"7d\");\n",
+		"acme/.schedule/config.work":     "import * as schedule from \"kitwork/schedule\";\nschedule.keep(\"7d\");\nschedule.session({ role: \"system\" });\n",
+		"acme/shop.example/router.work":  `import * as router from "kitwork/router";`,
+	})
+	if issues := append(CheckQueueFiles(right, "acme", nil), CheckScheduleFiles(right, "acme", nil)...); len(issues) != 0 {
+		t.Errorf("the spec's config.work gave issues: %v", issues)
 	}
 }

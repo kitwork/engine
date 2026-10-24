@@ -36,7 +36,7 @@ router.get((ctx) => ctx.text("about"));
 `)
 	write("identity/.schedule/pulse.work", `const pulse = () => 42;`)
 	write("identity/.shared/queue/mail.work", `const send = (message) => message;`)
-	write("identity/.shared/queue/config.work", `const parallel = 2;`)
+	write("identity/.shared/queue/config.work", "import * as queue from \"kitwork/queue\";\nqueue.parallel(2);\n")
 	write("identity/.shared/lib.work", `export const helper = () => 1;`)
 	write("identity/site/_core/ignored.kitwork.js", `const helper = () => 1;`)
 	write("identity/site/broken/router.kitwork.js", `const broken = ;`)

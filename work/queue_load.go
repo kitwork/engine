@@ -181,61 +181,38 @@ func (t *Tenant) runQueueFile(bc *compiler.Bytecode, relative string, say func(s
 	return handlers, withheld, true
 }
 
-// readQueueConfig reads .shared/queue/config.work: const parallel (runs at once on one machine) and const
-// keep (how long an ended run is kept). A missing file is the defaults; a wrong value is said and its
-// default kept.
+// readQueueConfig reads .shared/queue/config.work: queue.parallel(n) (runs at once on one machine) and
+// queue.keep(duration) (how long an ended run is kept), one call per line (background_config.go). A missing
+// file is the defaults; a wrong value is said with where it is written, and its default kept.
 func (t *Tenant) readQueueConfig(file string) queueConfig {
 	config := queueConfig{parallel: queueDefaultParallel, keep: queueDefaultKeep}
 	if _, err := os.Stat(file); err != nil {
 		return config
 	}
 	const where = ".shared/queue/config.work"
-	bc, names, err := compiler.CompileConfigFileInApp(t.resolveApp(), file)
-	if err == nil {
-		if missing := t.missingEnvironment(bc); missing != nil {
-			err = missing
-		}
-	}
-	if err != nil {
-		fmt.Printf("[Queue] compile %s: %v\n", where, err)
+	settings := t.runFolderConfig(file, "queue", "[Queue]", where)
+	if settings == nil {
 		return config
 	}
-	vm := runtime.New(bc.Program)
-	globals := make(map[string]value.Value, len(t.vm.Globals))
-	for name, item := range t.vm.Globals {
-		globals[name] = item
-	}
-	vm.Builtins = t.vm.Builtins
-	vm.Globals = globals
-	vm.MaxEnergy = t.MaxEnergy
-	finished := loadingFile(vm)
-	result := vm.Run()
-	finished()
-	if result.K != value.Map {
-		fmt.Printf("[Queue] run %s: %s\n", where, result.Text())
-		return config
-	}
-	settings := result.Map()
-	for _, name := range names {
-		item := settings[name]
-		switch name {
+	for _, setting := range settings.calls {
+		place := folderPlace(where, setting.place)
+		item := setting.only()
+		switch setting.word {
 		case "parallel":
 			if item.K != value.Number || item.N < 1 || item.N > 100 || item.N != math.Trunc(item.N) {
-				fmt.Printf("[Queue] %s: parallel là số nguyên từ 1 tới 100, số lần chạy cùng lúc trên một máy: const parallel = 2\n", where)
+				fmt.Printf("[Queue] %s: queue.parallel nhận một số nguyên từ 1 tới 100, số lần chạy cùng lúc trên một máy: queue.parallel(4)\n", place)
 				continue
 			}
 			config.parallel = int(item.N)
 		case "keep":
 			duration, err := ParseDuration(item.Text())
 			if item.K != value.String || err != nil || duration < time.Hour {
-				fmt.Printf("[Queue] %s: keep là một khoảng từ 1h, thời gian giữ lần chạy đã xong: const keep = \"30d\"\n", where)
+				fmt.Printf("[Queue] %s: queue.keep nhận một khoảng từ \"1h\", thời gian giữ lần chạy đã xong: queue.keep(\"30d\")\n", place)
 				continue
 			}
 			config.keep = duration
 		case "database":
-			fmt.Printf("[Queue] %s: const database chưa có trong engine hôm nay: các lần chạy nằm trong database của app (.database/application/)\n", where)
-		default:
-			fmt.Printf("[Queue] %s: %s không phải luật của hàng đợi: config.work khai const parallel, keep, database\n", where, name)
+			fmt.Printf("[Queue] %s: queue.database(…) chưa có trong engine hôm nay: các lần chạy nằm trong database của app (.database/application/)\n", place)
 		}
 	}
 	return config

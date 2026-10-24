@@ -90,6 +90,9 @@ type KitWork struct {
 	// scheduleDeclarations the schedules a file of .schedule/ declares (schedule_load.go).
 	queueJobs            *queueDeclarations
 	scheduleDeclarations *scheduleDeclarations
+	// folderSettings collects the calls the config.work of .shared/queue/ or of .schedule/ makes while the
+	// loader runs it (background_config.go): queue.parallel(4), schedule.keep("7d").
+	folderSettings *folderSettings
 }
 
 // MissingMember is a word the module kitwork has not. An older word of it (sqlite, removed on 22/10/2026;

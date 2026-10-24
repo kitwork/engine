@@ -181,6 +181,9 @@ func (r *resolver) scheduleWord(word string) string {
 		if !r.inScheduleModule {
 			return fmt.Sprintf(ScheduleRuleOutside, word)
 		}
+	case FolderConfigWord("schedule", word):
+		// a call of config.work written as a line of its own there never gets here (folderCall)
+		return r.folderWordMisplaced("schedule", word)
 	case !schedulerule.ReadWords[word] && word != ScheduleExportsMethod:
 		return schedulerule.UnknownWord(word)
 	}

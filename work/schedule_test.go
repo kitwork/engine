@@ -262,7 +262,7 @@ func TestScheduleBootErrors(t *testing.T) {
 		".schedule/destructure.work": "import * as schedule from \"kitwork/schedule\";\nexport const bad = schedule.every(\"1h\").run(({ log }) => 1);\n",
 		// a namespace passed through a function: the compiler does not see the chain, the loader says it
 		".schedule/ends.work":        "import * as schedule from \"kitwork/schedule\";\nconst pass = (namespace) => namespace;\nexport const ends = pass(schedule).daily(\"09:00\").once().run((context) => 1);\n",
-		".schedule/config.work":      "const keep = \"7d\";\nconst parallel = 2;\n",
+		".schedule/config.work":      "import * as schedule from \"kitwork/schedule\";\nschedule.keep(\"7d\");\nschedule.session(\"system\");\n",
 		"_cron/heartbeat.kitwork.js": "cron.every(\"1h\").handle(() => {});\n",
 	})
 	for _, want := range []string{
@@ -273,7 +273,7 @@ func TestScheduleBootErrors(t *testing.T) {
 		"[Schedule] value.work:3:29: giờ \"25:00\" sai: viết \"HH:MM\", từ \"00:00\" tới \"23:59\"",
 		"[Schedule] past.work:2:29: schedule.on(\"2026-01-01T09:00:00+07:00\") đã qua lúc khai: thời điểm của once() phải ở tương lai",
 		"[Schedule] unended.work:2:29: lịch open chưa kết thúc: nối .run(fn), hay .once(fn) cho đúng một lần",
-		"[Schedule] .schedule/config.work: parallel không phải luật của lịch: config.work khai const database, session, keep",
+		`[Schedule] .schedule/config.work:3:9: schedule.session nhận một object, danh tính dịch vụ của lịch: schedule.session({ role: "system" })`,
 		"[Schedule] destructure.work:2:55: `log` không có trong `context` của một lịch: context có job; tên tách được: job",
 		"[Schedule] run .schedule/ends.work: ends.work:3:57: .run và .once loại trừ nhau và đứng cuối: lịch đã kết thúc bằng .once(…), sau đó không nối gì",
 		scheduleLegacyLine,
@@ -298,6 +298,64 @@ func TestScheduleBootErrors(t *testing.T) {
 	}
 	if keep != 7*24*time.Hour {
 		t.Errorf("config.work keep = %s, want 7d", keep)
+	}
+}
+
+// .schedule/config.work sets how long an ended run is kept with schedule.keep(…), one call per line
+// (KITWORK_SCHEDULE.md mục 2, 24/10/2026); schedule.session({ … }) and schedule.database(db) are accepted and
+// said, the engine has neither yet; a keep under an hour is said with where it is written, and the default
+// kept. The const of 17/10 does not compile, and the default holds.
+//
+// CONTROL (24/10/2026): with Schedule.OnInvoke handing the words to no collector, the first app booted with
+// "[Schedule] run .schedule/config.work: config.work:4:9: schedule.keep(…) chỉ viết trong
+// .schedule/config.work …" and keep 720h0m0s; with readScheduleConfig saying nothing of session, the first
+// app said nothing of it.
+func TestScheduleConfigFile(t *testing.T) {
+	const head = "import * as schedule from \"kitwork/schedule\";\n"
+	const heartbeat = head + "export const heartbeat = schedule.every(\"1h\").run((context) => 1);\n"
+	keep := func(q *queueApp) time.Duration {
+		worker := q.app.scheduleWorker()
+		worker.mu.Lock()
+		defer worker.mu.Unlock()
+		return worker.keep
+	}
+	q := newQueueApp(t, map[string]string{
+		".schedule/config.work":    head + "import { db } from \"app/.shared/schema/shop.work\";\n\nschedule.keep(\"2d\");\nschedule.session({ role: \"system\" });\nschedule.database(db);\n",
+		".shared/schema/shop.work": "import { struct, id, text } from \"kitwork/schema\";\nimport { connection } from \"kitwork/database\";\nconst notes = struct({ id: id(), body: text() });\nexport const db = connection().schema({ notes });\n",
+		".schedule/heartbeat.work": heartbeat,
+	})
+	if got := keep(q); got != 48*time.Hour {
+		t.Fatalf("keep = %s, want 2 days:\n%s", got, q.output)
+	}
+	for _, line := range []string{
+		"[Schedule] .schedule/config.work:5:9: schedule.session(…) chưa có trong engine hôm nay: lịch chạy không phiên",
+		"[Schedule] .schedule/config.work:6:9: schedule.database(…) chưa có trong engine hôm nay: các lần chạy nằm trong database của app (.database/application/)",
+	} {
+		if !strings.Contains(q.output, line) {
+			t.Errorf("boot did not say %q:\n%s", line, q.output)
+		}
+	}
+
+	wrong := newQueueApp(t, map[string]string{
+		".schedule/config.work":    head + "schedule.keep(\"5m\");\n",
+		".schedule/heartbeat.work": heartbeat,
+	})
+	if line := `[Schedule] .schedule/config.work:2:9: schedule.keep nhận một khoảng từ "1h", thời gian giữ lần chạy đã xong: schedule.keep("7d")`; !strings.Contains(wrong.output, line) {
+		t.Errorf("boot did not say %q:\n%s", line, wrong.output)
+	}
+	if got := keep(wrong); got != queueDefaultKeep {
+		t.Errorf("a keep of 5m ran keep %s, want the default", got)
+	}
+
+	old := newQueueApp(t, map[string]string{
+		".schedule/config.work":    "const keep = \"2d\";\n",
+		".schedule/heartbeat.work": heartbeat,
+	})
+	if line := `[Schedule] compile .schedule/config.work: config.work:1:7: const keep đã bỏ: thời gian giữ lần chạy đã xong là lời gọi schedule.keep("7d")`; !strings.Contains(old.output, line) {
+		t.Errorf("boot did not say %q:\n%s", line, old.output)
+	}
+	if got := keep(old); got != queueDefaultKeep {
+		t.Errorf("the const of 17/10 ran keep %s, want the default", got)
 	}
 }
 

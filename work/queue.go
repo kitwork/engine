@@ -57,6 +57,9 @@ type Queue struct {
 	vm     *runtime.VM
 	// declared is the loader's list of the jobs a file of .shared/queue/ declares, nil everywhere else.
 	declared *queueDeclarations
+	// settings is what .shared/queue/config.work calls as the loader runs it (queue.parallel(4)), nil
+	// everywhere else, where such a call is refused (background_config.go).
+	settings *folderSettings
 }
 
 // queueDeclarations is every queue.job(…) evaluated while the loader runs one file (and the files it
@@ -67,7 +70,7 @@ type queueDeclarations struct {
 
 // Queue is the module: a proxy, so the name the bundler gives a job (#exports) is no name a program reads.
 func (w *KitWork) Queue() value.Value {
-	return value.Value{K: value.Proxy, V: &Queue{tenant: w.tenant, vm: w.vm, declared: w.queueJobs}}
+	return value.Value{K: value.Proxy, V: &Queue{tenant: w.tenant, vm: w.vm, declared: w.queueJobs, settings: w.folderSettings}}
 }
 
 // queueWords are the words of the module, what queue.<word>(…) calls.
@@ -81,7 +84,7 @@ func (q *Queue) OnGet(key string) value.Value {
 	if message, removed := compiler.QueueRemovedWord(key); removed {
 		return value.InvalidFailure(value.InvalidArgumentCode, message)
 	}
-	if queueWords[key] {
+	if queueWords[key] || compiler.FolderConfigWord("queue", key) {
 		return value.NewFunc(func(args ...value.Value) value.Value { return q.OnInvoke(key, args...) })
 	}
 	return value.Value{K: value.Nil}
@@ -90,6 +93,10 @@ func (q *Queue) OnGet(key string) value.Value {
 func (q *Queue) OnCompare(_ string, _ value.Value) value.Value { return value.NewNil() }
 
 func (q *Queue) OnInvoke(method string, args ...value.Value) value.Value {
+	if compiler.FolderConfigWord("queue", method) {
+		// queue.parallel(4) in .shared/queue/config.work, refused anywhere else
+		return q.settings.call(q.vm, "queue", method, args)
+	}
 	switch method {
 	case "job":
 		return q.job(args)
@@ -105,7 +112,7 @@ func (q *Queue) OnInvoke(method string, args ...value.Value) value.Value {
 	if message, removed := compiler.QueueRemovedWord(method); removed {
 		return value.InvalidFailure(value.InvalidArgumentCode, message)
 	}
-	return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("queue.%s không có: kitwork/queue có job, list, runs, status, where, cancel, replay", method))
+	return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("queue.%s không có: kitwork/queue có job, list, runs, status, where, cancel, replay; .shared/queue/config.work gọi parallel, keep, database", method))
 }
 
 // place is where the call running now is written, file:line:column.

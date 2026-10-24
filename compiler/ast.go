@@ -47,6 +47,9 @@ type Program struct {
 	App bool
 	// Router: the program is a router.work, where router.view is refused (router.go).
 	Router bool
+	// FolderCalls: the program is a config.work of .shared/queue/ or of .schedule/, and these are the calls of
+	// its folder it makes, each a line of its own at the top level (folder_config.go); nil for any other.
+	FolderCalls *FolderCalls
 }
 
 // ExportAlias is `export { local as exported }`: Token is where exported is written.

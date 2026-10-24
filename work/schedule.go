@@ -40,6 +40,9 @@ type Schedule struct {
 	vm     *runtime.VM
 	// declared is the loader's list of the schedules a file of .schedule/ declares, nil everywhere else.
 	declared *scheduleDeclarations
+	// settings is what .schedule/config.work calls as the loader runs it (schedule.keep("7d")), nil everywhere
+	// else, where such a call is refused (background_config.go).
+	settings *folderSettings
 }
 
 // scheduleDeclarations is every schedule.<rule>(…) evaluated while the loader runs one file (and the files
@@ -51,14 +54,14 @@ type scheduleDeclarations struct {
 // Schedule is the module: a proxy, so the name the bundler gives a schedule (#exports) is no name a program
 // reads.
 func (w *KitWork) Schedule() value.Value {
-	return value.Value{K: value.Proxy, V: &Schedule{tenant: w.tenant, vm: w.vm, declared: w.scheduleDeclarations}}
+	return value.Value{K: value.Proxy, V: &Schedule{tenant: w.tenant, vm: w.vm, declared: w.scheduleDeclarations, settings: w.folderSettings}}
 }
 
 func (s *Schedule) OnGet(key string) value.Value {
 	if message, removed := schedulerule.RemovedWord(key); removed {
 		return value.InvalidFailure(value.InvalidArgumentCode, message)
 	}
-	if schedulerule.RuleWords[key] || schedulerule.ReadWords[key] {
+	if schedulerule.RuleWords[key] || schedulerule.ReadWords[key] || compiler.FolderConfigWord("schedule", key) {
 		return value.NewFunc(func(args ...value.Value) value.Value { return s.OnInvoke(key, args...) })
 	}
 	return value.Value{K: value.Nil}
@@ -70,6 +73,9 @@ func (s *Schedule) OnInvoke(method string, args ...value.Value) value.Value {
 	switch {
 	case method == compiler.ScheduleExportsMethod:
 		return s.exports(args)
+	case compiler.FolderConfigWord("schedule", method):
+		// schedule.keep("7d") in .schedule/config.work, refused anywhere else
+		return s.settings.call(s.vm, "schedule", method, args)
 	case schedulerule.ReadWords[method]:
 		return (&scheduleQuery{tenant: s.tenant, who: "schedule"}).OnInvoke(method, args...)
 	case schedulerule.RuleWords[method] && s.outsideScheduleFolder():
