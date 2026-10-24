@@ -35,11 +35,13 @@ func queueSide(name string) string {
 	return fmt.Sprintf("`%s` không có trong `context` của một job: context có data() và job", name)
 }
 
-// queueConfig is what .shared/queue/config.work sets: how many runs one machine runs at once, and how long
-// an ended run is kept.
+// queueConfig is what .shared/queue/config.work sets: how many runs one machine runs at once, how long an
+// ended run is kept, and the database of the runs (nil for the app's), with where its call is written.
 type queueConfig struct {
-	parallel int
-	keep     time.Duration
+	parallel      int
+	keep          time.Duration
+	database      *runsPlace
+	databasePlace string
 }
 
 // LoadQueueFiles reads the app's .shared/queue/ and starts the worker. Every job must be registered before
@@ -124,6 +126,10 @@ func (t *Tenant) LoadQueueFiles() {
 	worker.unloaded = unloaded
 	worker.parallel, worker.keep = config.parallel, config.keep
 	worker.mu.Unlock()
+	// the runs move with the worker's restart: an attempt of the old worker settles where its run is
+	place := t.useRunsPlace(queueKind, config.database, "[Queue]", config.databasePlace)
+	worker.runs.Store(place)
+	t.sayLeftBehind(queueKind, place, "[Queue]", "queue.database(…)")
 	t.StartQueueWorker()
 }
 
@@ -181,9 +187,10 @@ func (t *Tenant) runQueueFile(bc *compiler.Bytecode, relative string, say func(s
 	return handlers, withheld, true
 }
 
-// readQueueConfig reads .shared/queue/config.work: queue.parallel(n) (runs at once on one machine) and
-// queue.keep(duration) (how long an ended run is kept), one call per line (background_config.go). A missing
-// file is the defaults; a wrong value is said with where it is written, and its default kept.
+// readQueueConfig reads .shared/queue/config.work: queue.parallel(n) (runs at once on one machine),
+// queue.keep(duration) (how long an ended run is kept) and queue.database(db) (the database of the runs,
+// runs_database.go), one call per line (background_config.go). A missing file is the defaults; a wrong value
+// is said with where it is written, and its default kept.
 func (t *Tenant) readQueueConfig(file string) queueConfig {
 	config := queueConfig{parallel: queueDefaultParallel, keep: queueDefaultKeep}
 	if _, err := os.Stat(file); err != nil {
@@ -212,7 +219,8 @@ func (t *Tenant) readQueueConfig(file string) queueConfig {
 			}
 			config.keep = duration
 		case "database":
-			fmt.Printf("[Queue] %s: queue.database(…) chưa có trong engine hôm nay: các lần chạy nằm trong database của app (.database/application/)\n", place)
+			config.database, _ = readRunsDatabase(setting, "queue", "[Queue]", place)
+			config.databasePlace = place
 		}
 	}
 	return config

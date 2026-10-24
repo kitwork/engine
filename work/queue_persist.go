@@ -128,7 +128,8 @@ func (t *Tenant) startQueueRuntime(worker *queueRuntime) error {
 		})
 		names = append(names, handler.Name)
 	}
-	store := t.runsStore(worker.kind)
+	place := worker.runs.Load()
+	store := t.runsStoreAt(worker.kind, place)
 	kept, err := store.Sync(definitions, worker.unloaded, time.Now())
 	if err != nil {
 		return fmt.Errorf("kitwork_definitions: %w", err)
@@ -159,10 +160,13 @@ func (t *Tenant) startQueueRuntime(worker *queueRuntime) error {
 
 	poll := make(chan struct{})
 	worker.cancels = append(worker.cancels, poll)
+	// the worker's writes wait for another writer of a file of the catalogue while it runs; stopping it (a
+	// load, the app closing) closes poll and ends the wait
+	running := queuestore.New(t.runsDatabase(worker.kind, place, poll), worker.kind)
 	worker.wg.Add(1)
 	go func() {
 		defer worker.wg.Done()
-		t.queuePoller(worker, poll, store)
+		t.queuePoller(worker, poll, running)
 	}()
 
 	beat := make(chan struct{})
@@ -170,16 +174,16 @@ func (t *Tenant) startQueueRuntime(worker *queueRuntime) error {
 	worker.wg.Add(1)
 	go func() {
 		defer worker.wg.Done()
-		t.queueHeartbeat(worker, beat, store)
+		t.queueHeartbeat(worker, beat, running)
 	}()
 
 	if worker.book != nil {
-		fmt.Printf("[Schedule] đồng hồ chạy (kitwork_runs của .database/application/) — %d lịch cho %q: %s\n",
-			len(names), identity, strings.Join(names, ", "))
+		fmt.Printf("[Schedule] đồng hồ chạy (kitwork_runs của %s) — %d lịch cho %q: %s\n",
+			placeName(place), len(names), identity, strings.Join(names, ", "))
 		return nil
 	}
-	fmt.Printf("[Queue] worker up (kitwork_runs của .database/application/) — %d job cho %q: %s\n",
-		len(names), identity, strings.Join(names, ", "))
+	fmt.Printf("[Queue] worker up (kitwork_runs của %s) — %d job cho %q: %s\n",
+		placeName(place), len(names), identity, strings.Join(names, ", "))
 	return nil
 }
 

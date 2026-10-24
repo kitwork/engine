@@ -131,8 +131,8 @@ func (c *ConnectionDeclaration) schema(args []value.Value) value.Value {
 		switch {
 		case name == "session":
 			return value.InvalidFailure(value.InvalidArgumentCode, "session là tên dành riêng của phiên (tham số của policy), không làm tên bảng: bảng lưu phiên là sessions")
-		case strings.HasPrefix(name, "kitwork_"):
-			return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("%s: tiền tố kitwork_ là của bảng engine", name))
+		case statement.EngineTable(name):
+			return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("%s: tiền tố kitwork_ hay _kitwork_ (viết hoa hay thường) là của bảng engine", name))
 		}
 		definition, ok := tables[name].V.(*StructDef)
 		if !ok || definition == nil {

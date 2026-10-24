@@ -16,6 +16,10 @@
 // well. Times are text of one width (2026-10-22T08:30:00.000Z), so text order is time order. A write is
 // one writer at a time (Database.Write), which makes a read and the write after it one step: a claim, a
 // settle, a cancel and a replay check the row and change it with nothing in between.
+//
+// The same statements run on SQLite, the database of a name of the host's catalogue that queue.database(db)
+// or schedule.database(db) chooses (KITWORK_QUEUE.md mục 2, 24/10/2026): there a write holds the file's gate
+// and is one transaction begun IMMEDIATE (Immediate, sqlite.go).
 package queue
 
 import (
@@ -30,22 +34,29 @@ import (
 	"time"
 )
 
+// SQL is what the statements of a store run on: a database (*sql.DB), or one transaction of it.
+type SQL interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	Query(query string, args ...any) (*sql.Rows, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
+
 // Database is where the runs are kept: the app's database through SQL. Write runs one write at a time,
 // with every other write of the database (the app's own included) held back while it runs.
 type Database interface {
-	Read(fn func(db *sql.DB) error) error
-	Write(fn func(db *sql.DB) error) error
+	Read(fn func(db SQL) error) error
+	Write(fn func(db SQL) error) error
 }
 
 // Sequencer is a Database that numbers new runs itself, inside Write: the number after the highest seq
 // of the table, read once and counted on from there, rather than read from the table at every send. A
 // Database that is not one is read each time.
 type Sequencer interface {
-	NextSeq(db *sql.DB) (int64, error)
+	NextSeq(db SQL) (int64, error)
 }
 
 // HighestSeq reads the highest seq of kitwork_runs, 0 for an empty table: where a Sequencer starts.
-func HighestSeq(db *sql.DB) (int64, error) {
+func HighestSeq(db SQL) (int64, error) {
 	var last sql.NullInt64
 	err := db.QueryRow(`SELECT seq FROM kitwork_runs ORDER BY seq DESC LIMIT 1`).Scan(&last)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -190,7 +201,7 @@ var Schema = []string{
 }
 
 // InitSchema makes both tables in db.
-func InitSchema(db *sql.DB) error {
+func InitSchema(db SQL) error {
 	for _, statement := range Schema {
 		if _, err := db.Exec(statement); err != nil {
 			return fmt.Errorf("kitwork_runs: %w", err)
@@ -248,7 +259,7 @@ func newToken() string {
 }
 
 // get reads one run of this kind by id, under whatever the caller holds.
-func (s *Store) get(db *sql.DB, id string) (Run, error) {
+func (s *Store) get(db SQL, id string) (Run, error) {
 	run, err := scanRun(db.QueryRow(`SELECT `+runColumns+` FROM kitwork_runs WHERE id = $1 AND kind = $2`, id, s.kind))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Run{}, ErrNotFound
@@ -259,7 +270,7 @@ func (s *Store) get(db *sql.DB, id string) (Run, error) {
 // Get reads one run by id.
 func (s *Store) Get(id string) (Run, error) {
 	var run Run
-	err := s.database.Read(func(db *sql.DB) error {
+	err := s.database.Read(func(db SQL) error {
 		var err error
 		run, err = s.get(db, id)
 		return err
@@ -270,7 +281,7 @@ func (s *Store) Get(id string) (Run, error) {
 // insert stores a run as pending. A key another run of the same job holds stores nothing: the run holding
 // it is given back with duplicate true. The UNIQUE (kind, name, dedupe_key) of the table decides, not a read
 // before; a run without a key never collides (NULL keys are distinct).
-func (s *Store) insert(db *sql.DB, run NewRun, now time.Time) (Run, bool, error) {
+func (s *Store) insert(db SQL, run NewRun, now time.Time) (Run, bool, error) {
 	var seq int64
 	var err error
 	if sequencer, ok := s.database.(Sequencer); ok {
@@ -320,7 +331,7 @@ func (s *Store) insert(db *sql.DB, run NewRun, now time.Time) (Run, bool, error)
 func (s *Store) Enqueue(run NewRun, now time.Time) (Run, bool, error) {
 	var stored Run
 	var duplicate bool
-	err := s.database.Write(func(db *sql.DB) error {
+	err := s.database.Write(func(db SQL) error {
 		var err error
 		stored, duplicate, err = s.insert(db, run, now)
 		return err
@@ -359,7 +370,7 @@ func (s *Store) Claim(now time.Time, lease time.Duration, limit int, withheld ma
 	}
 	var claims []Claim
 	var next time.Time
-	err := s.database.Write(func(db *sql.DB) error {
+	err := s.database.Write(func(db SQL) error {
 		condition, names := except(withheld, 3)
 		rows, err := db.Query(fmt.Sprintf(`SELECT `+runColumns+` FROM kitwork_runs
 			WHERE kind = $1 AND status = 'pending' AND available_at <= $2%s
@@ -411,7 +422,7 @@ func (s *Store) Claim(now time.Time, lease time.Duration, limit int, withheld ma
 
 // held reads a run and reports whether token still holds it: the run is running or cancelling under that
 // lease. A run reclaimed, settled or cancelled since is held by no one, or by another token.
-func (s *Store) held(db *sql.DB, id, token string) (Run, bool, error) {
+func (s *Store) held(db SQL, id, token string) (Run, bool, error) {
 	run, err := s.get(db, id)
 	if errors.Is(err, ErrNotFound) {
 		return Run{}, false, nil
@@ -434,7 +445,7 @@ func (s *Store) held(db *sql.DB, id, token string) (Run, bool, error) {
 // never reports success. A run being cancelled that finished first is completed (mục 7).
 func (s *Store) Complete(id, token, log string, now time.Time) (bool, error) {
 	won := false
-	err := s.database.Write(func(db *sql.DB) error {
+	err := s.database.Write(func(db SQL) error {
 		_, held, err := s.held(db, id, token)
 		if err != nil || !held {
 			return err
@@ -459,7 +470,7 @@ func (s *Store) Complete(id, token, log string, now time.Time) (bool, error) {
 // when token no longer held it.
 func (s *Store) Fail(id, token, code, message, log string, retryAt, now time.Time) (string, error) {
 	status := ""
-	err := s.database.Write(func(db *sql.DB) error {
+	err := s.database.Write(func(db SQL) error {
 		run, held, err := s.held(db, id, token)
 		if err != nil || !held {
 			return err
@@ -498,7 +509,7 @@ func (s *Store) Fail(id, token, code, message, log string, retryAt, now time.Tim
 // it, and the run's status (cancelling tells the worker to stop the attempt).
 func (s *Store) Extend(id, token string, until time.Time) (string, bool, error) {
 	status, holds := "", false
-	err := s.database.Write(func(db *sql.DB) error {
+	err := s.database.Write(func(db SQL) error {
 		run, held, err := s.held(db, id, token)
 		if err != nil || !held {
 			return err
@@ -522,7 +533,7 @@ func (s *Store) Extend(id, token string, until time.Time) (string, bool, error) 
 func (s *Store) Reclaim(now time.Time, skip map[string]bool) (int, time.Time, error) {
 	count := 0
 	var next time.Time
-	err := s.database.Write(func(db *sql.DB) error {
+	err := s.database.Write(func(db SQL) error {
 		rows, err := db.Query(`SELECT `+runColumns+`, lease_until FROM kitwork_runs
 			WHERE kind = $1 AND status IN ('running', 'cancelling')`, s.kind)
 		if err != nil {
@@ -592,7 +603,7 @@ func (r rowWith) Scan(dest ...any) error { return r.row.Scan(append(dest, r.extr
 // job's run is ErrNotFound, as an id that does not exist.
 func (s *Store) Cancel(id, name string, now time.Time) (Run, error) {
 	var run Run
-	err := s.database.Write(func(db *sql.DB) error {
+	err := s.database.Write(func(db SQL) error {
 		var err error
 		run, err = s.get(db, id)
 		if err != nil {
@@ -631,7 +642,7 @@ func (s *Store) Cancel(id, name string, now time.Time) (Run, error) {
 func (s *Store) Replay(id, name string, now time.Time, declared func(name string) bool) (Run, Definition, error) {
 	var replayed Run
 	var definition Definition
-	err := s.database.Write(func(db *sql.DB) error {
+	err := s.database.Write(func(db SQL) error {
 		run, err := s.get(db, id)
 		if err != nil {
 			return err
@@ -672,7 +683,7 @@ type Filter struct {
 // Runs reads runs newest first, limit of them after skipping offset.
 func (s *Store) Runs(filter Filter, limit, offset int) ([]Run, error) {
 	var runs []Run
-	err := s.database.Read(func(db *sql.DB) error {
+	err := s.database.Read(func(db SQL) error {
 		where := []string{"kind = $1"}
 		arguments := []any{s.kind}
 		if filter.Name != "" {
@@ -705,7 +716,7 @@ func (s *Store) Runs(filter Filter, limit, offset int) ([]Run, error) {
 // refused. It returns how many it deleted.
 func (s *Store) Prune(before time.Time) (int, error) {
 	count := 0
-	err := s.database.Write(func(db *sql.DB) error {
+	err := s.database.Write(func(db SQL) error {
 		result, err := db.Exec(`DELETE FROM kitwork_runs WHERE kind = $1
 			AND status IN ('completed', 'failed', 'cancelled') AND finished_at < $2`, s.kind, Stamp(before))
 		if err != nil {
@@ -718,7 +729,7 @@ func (s *Store) Prune(before time.Time) (int, error) {
 	return count, err
 }
 
-func (s *Store) definition(db *sql.DB, name string) (Definition, bool, error) {
+func (s *Store) definition(db SQL, name string) (Definition, bool, error) {
 	var definition Definition
 	var timeout sql.NullString
 	err := db.QueryRow(`SELECT name, source, retry, timeout, timeout_ms, content_hash FROM kitwork_definitions
@@ -734,7 +745,7 @@ func (s *Store) definition(db *sql.DB, name string) (Definition, bool, error) {
 // Definitions reads the declared jobs by name, limit of them after skipping offset.
 func (s *Store) Definitions(limit, offset int) ([]Definition, error) {
 	var definitions []Definition
-	err := s.database.Read(func(db *sql.DB) error {
+	err := s.database.Read(func(db SQL) error {
 		rows, err := db.Query(fmt.Sprintf(`SELECT name, source, retry, timeout, timeout_ms, content_hash
 			FROM kitwork_definitions WHERE kind = $1 ORDER BY name LIMIT %d OFFSET %d`, limit, offset), s.kind)
 		if err != nil {
@@ -771,7 +782,7 @@ type Withheld struct {
 // gone stays, and fails when claimed, saying so.
 func (s *Store) Sync(definitions []Definition, withheld Withheld, now time.Time) ([]string, error) {
 	var kept []string
-	err := s.database.Write(func(db *sql.DB) error {
+	err := s.database.Write(func(db SQL) error {
 		stored := map[string]string{}
 		sources := map[string]string{}
 		rows, err := db.Query(`SELECT name, source, content_hash FROM kitwork_definitions WHERE kind = $1`, s.kind)

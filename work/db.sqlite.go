@@ -48,16 +48,27 @@ func sqliteForRequest(t *Tenant, rel string, requestScope *requestscope.Scope) *
 // application.work, the path read from the manifest's folder. The host chose it; it may lie outside every
 // app, and every app that names it shares it.
 func hostSQLite(t *Tenant, name, path string, requestScope *requestscope.Scope) *SQLite {
-	preset := &database.Config{
-		Alias: "sqlite:" + name,
-		Type:  "sqlite",
-		Name:  path,
-	}
 	return &SQLite{Database: &Database{
 		tenant:       t,
 		requestScope: requestScope,
-		preset:       preset,
+		preset:       hostSQLiteConfig(name, path),
 	}}
+}
+
+// hostSQLiteMaxIdle is how many connections the pool of a SQLite file of the host's catalogue keeps between
+// statements: none kept (the config's zero) would open the file, read its schema and checkpoint its WAL
+// again for every statement, a write of the runs on it (queue.database, 24/10/2026) included.
+const hostSQLiteMaxIdle = 2
+
+// hostSQLiteConfig is the pool config of the host's SQLite file of connection("tên"), the same whichever of
+// the app's statements and the runs (catalogRuns) opens the pool first.
+func hostSQLiteConfig(name, path string) *database.Config {
+	return &database.Config{
+		Alias:   "sqlite:" + name,
+		Type:    "sqlite",
+		Name:    path,
+		MaxIdle: hostSQLiteMaxIdle,
+	}
 }
 
 // appSqliteFor is like sqliteFor but resolves under the IDENTITY-level .data/ (apps/<identity>/.data),

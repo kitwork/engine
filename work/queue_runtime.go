@@ -61,6 +61,10 @@ type queueRuntime struct {
 	byName    map[string]*QueueHandler
 	parallel  int
 	keep      time.Duration
+	// runs is the database of the host's catalogue the runs of the kind live in, as the config.work of its
+	// folder chose with queue.database(db) or schedule.database(db) (runs_database.go); nil is the app's
+	// database. A send, a read and the worker started next all read it.
+	runs atomic.Pointer[runsPlace]
 	// unloaded is what the last load could not read (a file that did not compile or run, a job whose
 	// declaration has a problem); withheld is the jobs of it, by name: the jobs with a problem, and those
 	// kitwork_definitions holds from a file that did not load. Their runs stay pending, attempts untouched,

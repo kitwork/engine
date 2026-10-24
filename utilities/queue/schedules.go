@@ -29,7 +29,7 @@ type ScheduleState struct {
 // ScheduleStates reads the state of every schedule, by name.
 func (s *Store) ScheduleStates() (map[string]ScheduleState, error) {
 	states := map[string]ScheduleState{}
-	err := s.database.Read(func(db *sql.DB) error {
+	err := s.database.Read(func(db SQL) error {
 		rows, err := db.Query(`SELECT name, rule, declared_at, once_at, last_at FROM kitwork_schedules`)
 		if err != nil {
 			return err
@@ -66,7 +66,7 @@ func (s *Store) SyncSchedules(put []ScheduleState, remove []string, now time.Tim
 	if len(put) == 0 && len(remove) == 0 {
 		return nil
 	}
-	return s.database.Write(func(db *sql.DB) error {
+	return s.database.Write(func(db SQL) error {
 		for _, state := range put {
 			var once any
 			if !state.OnceAt.IsZero() {
@@ -112,7 +112,7 @@ var ErrNoSchedule = errors.New("queue: schedule not synced")
 func (s *Store) Dispatch(at time.Time, run NewRun, skipBusy bool, now time.Time) (Run, string, error) {
 	var stored Run
 	outcome := ""
-	err := s.database.Write(func(db *sql.DB) error {
+	err := s.database.Write(func(db SQL) error {
 		var last string
 		err := db.QueryRow(`SELECT last_at FROM kitwork_schedules WHERE name = $1`, run.Name).Scan(&last)
 		if errors.Is(err, sql.ErrNoRows) {

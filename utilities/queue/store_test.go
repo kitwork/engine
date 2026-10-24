@@ -14,20 +14,34 @@ import (
 )
 
 // fileDatabase is a KitDB file on its own: the tables in a file of the test, one writer at a time as the
-// app's database gives (work's runs database holds the file's writer gate).
+// app's database gives (work's runs database holds the file's writer gate). On SQLite (onSQLite) it is a
+// SQLite file, each write one transaction begun IMMEDIATE under the file's gate, as work's database of a
+// name of the host's catalogue gives (Immediate).
 type fileDatabase struct {
 	gate   sync.RWMutex
-	engine *relational.Engine
+	engine *relational.Engine // nil on SQLite
 	db     *sql.DB
+	path   string
 }
 
-func (f *fileDatabase) Read(fn func(db *sql.DB) error) error {
+// sqlite is the file as work writes a SQLite file of the runs.
+func (f *fileDatabase) sqlite() Immediate {
+	return Immediate{Pool: f.db, Gate: FileGate(f.path)}
+}
+
+func (f *fileDatabase) Read(fn func(db SQL) error) error {
+	if f.engine == nil {
+		return f.sqlite().Read(fn)
+	}
 	f.gate.RLock()
 	defer f.gate.RUnlock()
 	return fn(f.db)
 }
 
-func (f *fileDatabase) Write(fn func(db *sql.DB) error) error {
+func (f *fileDatabase) Write(fn func(db SQL) error) error {
+	if f.engine == nil {
+		return f.sqlite().Write(fn)
+	}
 	f.gate.Lock()
 	defer f.gate.Unlock()
 	return fn(f.db)
@@ -35,11 +49,16 @@ func (f *fileDatabase) Write(fn func(db *sql.DB) error) error {
 
 func (f *fileDatabase) close() {
 	f.db.Close()
-	f.engine.Close()
+	if f.engine != nil {
+		f.engine.Close()
+	}
 }
 
 func openFile(t *testing.T, path string) *fileDatabase {
 	t.Helper()
+	if _, sqlite := sqliteTests.Load(t); sqlite {
+		return openSQLiteFile(t, path)
+	}
 	engine, err := relational.OpenWithContext(context.Background(), path, relational.Options{})
 	if err != nil {
 		t.Fatal(err)
@@ -52,7 +71,7 @@ func openFile(t *testing.T, path string) *fileDatabase {
 	if err := InitSchema(db); err != nil {
 		t.Fatal(err)
 	}
-	return &fileDatabase{engine: engine, db: db}
+	return &fileDatabase{engine: engine, db: db, path: path}
 }
 
 func newStore(t *testing.T) (*Store, *fileDatabase) {
@@ -463,7 +482,7 @@ type numbered struct {
 	next int64
 }
 
-func (n *numbered) NextSeq(*sql.DB) (int64, error) {
+func (n *numbered) NextSeq(SQL) (int64, error) {
 	n.next++
 	return 99 + n.next, nil
 }

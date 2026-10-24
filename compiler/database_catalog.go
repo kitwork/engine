@@ -454,7 +454,7 @@ func (reader *schemaReader) readDeclaration(name *Identifier, e Expression) *sta
 		return nil
 	}
 	database := &statement.Database{Export: name.Value, Connection: connectionName}
-	seen := map[string]bool{}
+	seen := map[string]string{}
 	used := map[string]string{}
 	for _, entry := range tables.Entries {
 		if entry.IsSpread {
@@ -470,14 +470,17 @@ func (reader *schemaReader) readDeclaration(name *Identifier, e Expression) *sta
 		case tableName == "session":
 			reader.fail(at, "session là tên dành riêng của phiên (tham số của policy), không làm tên bảng: bảng lưu phiên là sessions")
 			return nil
-		case strings.HasPrefix(tableName, "kitwork_"):
-			reader.fail(at, fmt.Sprintf("%s: tiền tố kitwork_ là của bảng engine", tableName))
+		case statement.EngineTable(tableName):
+			reader.fail(at, fmt.Sprintf("%s: tiền tố kitwork_ hay _kitwork_ (viết hoa hay thường) là của bảng engine", tableName))
 			return nil
-		case seen[tableName]:
+		case seen[strings.ToLower(tableName)] == tableName:
 			reader.fail(at, fmt.Sprintf("bảng %s khai hai lần", tableName))
 			return nil
+		case seen[strings.ToLower(tableName)] != "":
+			reader.fail(at, fmt.Sprintf("bảng %s khai hai lần: %s là cùng tên, tên bảng không phân biệt chữ hoa, thường", tableName, seen[strings.ToLower(tableName)]))
+			return nil
 		}
-		seen[tableName] = true
+		seen[strings.ToLower(tableName)] = tableName
 		var table *statement.Table
 		switch value := entry.Value.(type) {
 		case *Identifier:

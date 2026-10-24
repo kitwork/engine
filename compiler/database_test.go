@@ -316,7 +316,15 @@ func TestDatabaseGrammarErrors(t *testing.T) {
 }
 
 // The schema file declares struct and connection() only, in the spec's words; anything else is a compile
-// error at its place in that file. struct() and connection() are refused outside .shared/schema/.
+// error at its place in that file. struct() and connection() are refused outside .shared/schema/. A table
+// named kitwork_… or _kitwork_… in any case is refused, and two tables whose names differ only in case: SQLite
+// reads table names without case, and the engine's tables can be in a database of the catalogue
+// (queue.database, 24/10/2026).
+//
+// CONTROL (24/10/2026): with the kitwork_ check reading the name as written, KITWORK_RUNS compiled
+// (got "không có bảng orders; bảng của db: KITWORK_RUNS"); with statement.EngineTable reading kitwork_ alone,
+// _kitwork_migrations, the ledger of a SQLite file's migrations, compiled; with the tables seen by their
+// spelling, orders and Orders compiled as two tables of one SQLite table.
 func TestDatabaseSchemaModuleRules(t *testing.T) {
 	route := importDB + "const all = db.list((orders) => orders);\n"
 	schema := func(columns, declaration string) string {
@@ -350,7 +358,10 @@ func TestDatabaseSchemaModuleRules(t *testing.T) {
 		{"connect not exported", schema(columns, "export const db = connection().schema({ orders });\nconst crm = connect({ postgresql: \"x\" });"), "crm = connect", "database crm khai mà không export"},
 		{"not exported", schema(columns, `const db = connection().schema({ orders });`), "db = connection", "database db khai mà không export"},
 		{"session table", schema(columns, `export const db = connection().schema({ session: orders });`), "session:", "session là tên dành riêng"},
-		{"kitwork_ table", schema(columns, `export const db = connection().schema({ kitwork_x: orders });`), "kitwork_x", "tiền tố kitwork_ là của bảng engine"},
+		{"kitwork_ table", schema(columns, `export const db = connection().schema({ kitwork_x: orders });`), "kitwork_x", "tiền tố kitwork_ hay _kitwork_ (viết hoa hay thường) là của bảng engine"},
+		{"KITWORK_ table", schema(columns, `export const db = connection("jobs").schema({ KITWORK_RUNS: orders });`), "KITWORK_RUNS", "KITWORK_RUNS: tiền tố kitwork_ hay _kitwork_ (viết hoa hay thường) là của bảng engine"},
+		{"_kitwork_ table", schema(columns, `export const db = connection("jobs").schema({ _kitwork_migrations: orders });`), "_kitwork_migrations", "_kitwork_migrations: tiền tố kitwork_ hay _kitwork_ (viết hoa hay thường) là của bảng engine"},
+		{"a table twice in two cases", schema(columns, `export const db = connection().schema({ orders, Orders: users });`), "Orders:", "bảng Orders khai hai lần: orders là cùng tên, tên bảng không phân biệt chữ hoa, thường"},
 		{"created on text", schema("id: id(), note: text().created()", exported), "created", ".created() chỉ đi sau timestamp()"},
 		{"spread", schema("...users", exported), "{ ...users", "struct({ ...x }) chưa có trong engine hôm nay"},
 		{"helper", schema(columns, "const helper = 5;\n"+exported), "helper", "file trong .shared/schema/ chỉ khai struct và connection(): helper"},
@@ -615,7 +626,7 @@ func TestDatabaseFileCacheSeesSchemaEdits(t *testing.T) {
 // The template's format is part of the compiler's schema: a change of one without the other would give
 // an artifact the engine reads another way.
 func TestStatementVersionPairsWithSchema(t *testing.T) {
-	if statement.Version != 1 || CompilerSchemaVersion != 21 {
+	if statement.Version != 1 || CompilerSchemaVersion != 22 {
 		t.Fatalf("statement format %d with compiler schema %d: a change of the format bumps the schema (fingerprint.go) and this pair",
 			statement.Version, CompilerSchemaVersion)
 	}

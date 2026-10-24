@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/kitwork/engine/database/statement"
+	"github.com/kitwork/engine/value"
 )
 
 // The config.work of .shared/queue/ and of .schedule/ (KITWORK_QUEUE.md mục 2, KITWORK_SCHEDULE.md mục 2,
@@ -255,23 +258,121 @@ func folderCallOf(expression Expression, module string, namespaces map[string]bo
 }
 
 // folderCall lets through a call of a folder's config.work written as a line of its own at the file's top
-// level (readFolderCalls), reading its namespace and its arguments; a database handle handed to
-// queue.database(db) is read as the root it is. Any other call is not this one's.
+// level (readFolderCalls), reading its namespace and its arguments; what queue.database(…) and
+// schedule.database(…) are handed is checked (folderDatabase). Any other call is not this one's.
 func (r *resolver) folderCall(node *MethodCallExpression) bool {
 	if r.folderCalls == nil || !r.folderCalls.Calls[node] {
 		return false
 	}
 	r.expression(node.Object)
+	if node.Method.Value == "database" {
+		r.folderDatabase(node)
+		return true
+	}
 	for _, argument := range node.Arguments {
-		if name, isName := argument.(*Identifier); isName && node.Method.Value == "database" {
-			r.handleUse = true
-			r.reference(name, false)
-			r.handleUse = false
-			continue
-		}
 		r.expression(argument)
 	}
 	return true
+}
+
+// folderDatabase checks what queue.database(…) or schedule.database(…) is handed (KITWORK_QUEUE.md mục 2,
+// KITWORK_SCHEDULE.md mục 2, 24/10/2026): the name of a database a file of .shared/schema/ declares with
+// connection() or connection("tên"), imported from it (or a const that names it again), read as the root it
+// is. The engine makes and keeps the tables of the runs there, so a database of connect({ … }), outside the
+// app, is refused, and so is a name that is not a database and anything else written there: a database is
+// only ever reached by its name (a member, a computed value or a call's result is never one). A call the
+// compiler does not see as queue.database (the namespace under another name) is left to the loader, which
+// refuses what is not a database the same way as it runs (work/runs_database.go).
+func (r *resolver) folderDatabase(node *MethodCallExpression) {
+	module := r.folderCalls.Module
+	if len(node.Arguments) != 1 {
+		r.fail(fmt.Errorf("%s: %s", r.where(node.Method.Token), FolderDatabaseArity(module)))
+		return
+	}
+	switch argument := node.Arguments[0].(type) {
+	case *Identifier:
+		found := r.lookup(argument.Value)
+		if found == nil || found.database == nil {
+			r.fail(fmt.Errorf("%s: %s", r.where(argument.Token), FolderDatabaseNotAHandle(module, argument.Value)))
+			return
+		}
+		if found.database.Database.External != "" {
+			r.fail(fmt.Errorf("%s: %s", r.where(argument.Token), FolderDatabaseExternal(module, argument.Value)))
+			return
+		}
+		r.handleUse = true
+		r.reference(argument, false)
+		r.handleUse = false
+	case *Literal:
+		if argument.Value.K == value.String {
+			r.fail(fmt.Errorf("%s: %s", r.where(argument.Token), FolderDatabaseName(module, argument.Value.Text())))
+			return
+		}
+		r.fail(fmt.Errorf("%s: %s", r.where(argument.Token), FolderDatabaseNotAHandle(module, "")))
+	case *TemplateLiteral:
+		// `jobs` with nothing interpolated is the string "jobs"
+		var text strings.Builder
+		for _, part := range argument.Parts {
+			if !templateText(part) {
+				r.fail(fmt.Errorf("%s: %s", r.where(argument.Token), FolderDatabaseNotAHandle(module, "")))
+				return
+			}
+			text.WriteString(part.(*Literal).Value.Text())
+		}
+		r.fail(fmt.Errorf("%s: %s", r.where(argument.Token), FolderDatabaseName(module, text.String())))
+	default:
+		r.fail(fmt.Errorf("%s: %s", r.where(expressionToken(argument)), FolderDatabaseNotAHandle(module, "")))
+	}
+}
+
+// FolderDatabaseArity is the error of queue.database(…) or schedule.database(…) handed no database, or more
+// than one.
+func FolderDatabaseArity(module string) string {
+	return fmt.Sprintf("%s.database(…) nhận đúng một database: %s.database(db), db là tên import của một database khai trong .shared/schema/",
+		module, module)
+}
+
+// FolderDatabaseNotAHandle is the error of queue.database(…) or schedule.database(…) handed what is not a
+// database of .shared/schema/: name is the name written, "" for a value written in place or one the loader
+// read as it ran.
+func FolderDatabaseNotAHandle(module, name string) string {
+	const write = `import { db } from "app/.shared/schema/<tên>.work"; %s.database(db)`
+	if name == "" {
+		return fmt.Sprintf("%s.database(…) nhận tên import của một database khai trong .shared/schema/ (export const db = connection().schema({ … })): "+write+"; giá trị này không phải database đó",
+			module, module)
+	}
+	return fmt.Sprintf("%s.database(%s): %s không phải database khai trong .shared/schema/; %s.database nhận tên import của database đó: "+write,
+		module, name, name, module, module)
+}
+
+// FolderDatabaseName is the error of queue.database("tên") or schedule.database("tên"): a name of the host's
+// catalogue is chosen in .shared/schema/, and the call is handed the database declared there. A name
+// connection("…") does not take (statement.ReservedConnection, or nothing written) is never offered as one:
+// "application" is the app's own database, connection() with no name, where the runs are when the call is not
+// written; the others are no databases of the catalogue.
+func FolderDatabaseName(module, name string) string {
+	switch {
+	case name == "application":
+		return fmt.Sprintf(`%s.database("application"): một chuỗi không phải database; database của app là connection() không tên, và các lần chạy đã ở đó khi không gọi %s.database`,
+			module, module)
+	case strings.TrimSpace(name) == "" || statement.ReservedConnection(name) != "":
+		return fmt.Sprintf(`%s.database(%q): một chuỗi không phải database; %q không phải tên database của danh mục, các lần chạy ở database của app (connection()) hay ở một tên host khai trong app.databases({ … })`,
+			module, name, name)
+	}
+	return fmt.Sprintf(`%s.database(%q): một chuỗi không phải database; database tên %s của host khai trong .shared/schema/ bằng export const db = connection(%q).schema({ … }), rồi %s.database(db) với tên import của nó`,
+		module, name, name, name, module)
+}
+
+// FolderDatabaseExternal is the error of queue.database(…) or schedule.database(…) handed a database of
+// connect({ … }): outside the app, it has no tables the engine keeps. name is the name written, "" when the
+// loader read it as it ran.
+func FolderDatabaseExternal(module, name string) string {
+	written := "…"
+	if name != "" {
+		written = name
+	}
+	return fmt.Sprintf(`%s.database(%s): database khai bằng connect(…) là database ngoài, engine không tạo bảng ở đó; các lần chạy cần database có bảng do engine giữ (kitwork_runs): connection() của app, hay connection("tên") với tên host khai trong app.databases({ … }) của application.work`,
+		module, written)
 }
 
 // folderWordMisplaced is the error of a folder word of module read where it may not be: in its own

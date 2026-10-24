@@ -152,7 +152,17 @@ import (
 // anywhere else are compile errors; queue.parallel and queue.keep outside it no longer say to write a const.
 // A cached artifact of schema 20 of a config.work returns names the loader no longer reads: the bump retires
 // it. A program that writes none of them compiles as before, byte for byte. No opcode or operand changed.
-const CompilerSchemaVersion uint16 = 21
+//
+// 22 (24/10/2026, KITWORK_QUEUE.md and KITWORK_SCHEDULE.md mục 2, queue.database(db) and schedule.database(db)
+// in the engine): what a config.work hands queue.database(…) or schedule.database(…) is checked where it is
+// written (folder_config.go): a name that is not a database of .shared/schema/, a database of connect(…), a
+// string, any other value, or not one argument, are compile errors. A file of .shared/schema/ no longer
+// declares a table named _kitwork_… (the ledger of a SQLite file's migrations) or kitwork_… in any case, nor
+// two tables whose names differ only in case (SQLite reads them as one): a cached artifact of a route that
+// imports such a schema compiled under 21, and the bump retires it. A config.work is compiled at each boot,
+// never cached. A program that writes none of these compiles as before, byte for byte. No opcode or operand
+// changed.
+const CompilerSchemaVersion uint16 = 22
 
 var currentCompilerFingerprint = compilerFingerprintFor(CompilerSchemaVersion)
 

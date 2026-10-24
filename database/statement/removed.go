@@ -1,6 +1,9 @@
 package statement
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // The older spellings of the database module, removed on 22/10/2026 (KITWORK_DATABASE.md mục 9): the words
 // kitwork/database answered before connection() and connect() became its only declarations, and sqlite of
@@ -87,6 +90,14 @@ func RemovedKitworkWord(word string) (string, bool) {
 		return declareSQLite, true
 	}
 	return "", false
+}
+
+// EngineTable is whether name is a table of the engine, written in any case (SQLite reads table names without
+// case): kitwork_runs, kitwork_definitions, kitwork_schedules, kitwork_schema, kitwork_history, and on a SQLite
+// file the ledger of its migrations, _kitwork_migrations. schema({ … }) declares none of them.
+func EngineTable(name string) bool {
+	lower := strings.ToLower(name)
+	return strings.HasPrefix(lower, "kitwork_") || strings.HasPrefix(lower, "_kitwork_")
 }
 
 // ReservedConnection is why name cannot be a connection("tên"): a name of the host's catalogue the spec

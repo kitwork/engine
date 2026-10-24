@@ -302,14 +302,16 @@ func TestScheduleBootErrors(t *testing.T) {
 }
 
 // .schedule/config.work sets how long an ended run is kept with schedule.keep(…), one call per line
-// (KITWORK_SCHEDULE.md mục 2, 24/10/2026); schedule.session({ … }) and schedule.database(db) are accepted and
-// said, the engine has neither yet; a keep under an hour is said with where it is written, and the default
-// kept. The const of 17/10 does not compile, and the default holds.
+// (KITWORK_SCHEDULE.md mục 2, 24/10/2026); schedule.session({ … }) is accepted and said, the engine has it not
+// yet; schedule.database(db) of the app's own database (connection()) is the default said again, and boot says
+// nothing of it; a keep under an hour is said with where it is written, and the default kept. The const of
+// 17/10 does not compile, and the default holds.
 //
 // CONTROL (24/10/2026): with Schedule.OnInvoke handing the words to no collector, the first app booted with
 // "[Schedule] run .schedule/config.work: config.work:4:9: schedule.keep(…) chỉ viết trong
 // .schedule/config.work …" and keep 720h0m0s; with readScheduleConfig saying nothing of session, the first
-// app said nothing of it.
+// app said nothing of it; with readRunsDatabase not reading connection() as the app's database (24/10/2026),
+// the first app said a line of schedule.database(db) at config.work:6.
 func TestScheduleConfigFile(t *testing.T) {
 	const head = "import * as schedule from \"kitwork/schedule\";\n"
 	const heartbeat = head + "export const heartbeat = schedule.every(\"1h\").run((context) => 1);\n"
@@ -327,13 +329,11 @@ func TestScheduleConfigFile(t *testing.T) {
 	if got := keep(q); got != 48*time.Hour {
 		t.Fatalf("keep = %s, want 2 days:\n%s", got, q.output)
 	}
-	for _, line := range []string{
-		"[Schedule] .schedule/config.work:5:9: schedule.session(…) chưa có trong engine hôm nay: lịch chạy không phiên",
-		"[Schedule] .schedule/config.work:6:9: schedule.database(…) chưa có trong engine hôm nay: các lần chạy nằm trong database của app (.database/application/)",
-	} {
-		if !strings.Contains(q.output, line) {
-			t.Errorf("boot did not say %q:\n%s", line, q.output)
-		}
+	if line := "[Schedule] .schedule/config.work:5:9: schedule.session(…) chưa có trong engine hôm nay: lịch chạy không phiên"; !strings.Contains(q.output, line) {
+		t.Errorf("boot did not say %q:\n%s", line, q.output)
+	}
+	if strings.Contains(q.output, "config.work:6:") || q.app.scheduleWorker().runs.Load() != nil {
+		t.Errorf("schedule.database(db) of connection() is the app's database, said of nothing:\n%s", q.output)
 	}
 
 	wrong := newQueueApp(t, map[string]string{

@@ -169,10 +169,11 @@ func TestQueueRunsSurviveARestart(t *testing.T) {
 }
 
 // .shared/queue/config.work sets the queue's parallel and keep with calls, one per line (KITWORK_QUEUE.md mục
-// 2, 24/10/2026); a wrong value is said at boot with where it is written, and its default kept;
-// queue.database(…) is said, the engine has it not yet. A call the compiler could not follow (the namespace
-// under another name) is the same error when it runs: a word called twice is said and the first kept, a chain
-// stops the file, and the defaults hold. The const of 17/10 does not compile, and the defaults hold.
+// 2, 24/10/2026); a wrong value is said at boot with where it is written, and its default kept (queue.database
+// is checked in TestFolderConfigDatabaseTakesADatabaseOfTheSchema and TestRunsDatabaseRefusedAsItRuns). A call
+// the compiler could not follow (the namespace under another name) is the same error when it runs: a word
+// called twice is said and the first kept, a chain stops the file, and the defaults hold. The const of 17/10
+// does not compile, and the defaults hold.
 //
 // CONTROL (24/10/2026): with Queue.OnInvoke handing parallel and keep to no collector, the first app booted
 // with "[Queue] run .shared/queue/config.work: config.work:3:6: queue.parallel(…) chỉ viết trong
@@ -204,13 +205,12 @@ func TestQueueConfigFile(t *testing.T) {
 	}
 
 	wrong := newQueueApp(t, map[string]string{
-		".shared/queue/config.work": head + "queue.parallel(0);\nqueue.keep(\"5m\");\nqueue.database(1);\n",
+		".shared/queue/config.work": head + "queue.parallel(0);\nqueue.keep(\"5m\");\n",
 		".shared/queue/mail.work":   mail,
 	})
 	for _, line := range []string{
 		"[Queue] .shared/queue/config.work:2:6: queue.parallel nhận một số nguyên từ 1 tới 100, số lần chạy cùng lúc trên một máy: queue.parallel(4)",
 		`[Queue] .shared/queue/config.work:3:6: queue.keep nhận một khoảng từ "1h", thời gian giữ lần chạy đã xong: queue.keep("30d")`,
-		"[Queue] .shared/queue/config.work:4:6: queue.database(…) chưa có trong engine hôm nay: các lần chạy nằm trong database của app (.database/application/)",
 	} {
 		if !strings.Contains(wrong.output, line) {
 			t.Errorf("boot did not say %q:\n%s", line, wrong.output)

@@ -1,7 +1,6 @@
 package work
 
 import (
-	"database/sql"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -269,7 +268,7 @@ func TestQueueWorkerDeletesRunsPastKeep(t *testing.T) {
 	recent := q.serve(t, http.MethodPost, "/send", order("an@example.com", "2", "order:2", ""))["id"].(string)
 	watch.until(t, old, "completed")
 	watch.until(t, recent, "completed")
-	if err := (appRuns{tenant: q.app}).Write(func(db *sql.DB) error {
+	if err := (appRuns{tenant: q.app}).Write(func(db queuestore.SQL) error {
 		_, err := db.Exec(`UPDATE kitwork_runs SET finished_at = '2000-01-01T00:00:00.000Z' WHERE id = $1`, old)
 		return err
 	}); err != nil {

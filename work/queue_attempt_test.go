@@ -1,7 +1,6 @@
 package work
 
 import (
-	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -9,6 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	queuestore "github.com/kitwork/engine/utilities/queue"
 )
 
 // heldUpstream is a server whose n-th request (from 1) is answered only once release(n) is called; arrived
@@ -137,7 +138,7 @@ func TestQueueLateSuccessOfALostLeaseIsRefused(t *testing.T) {
 	id := q.serve(t, http.MethodPost, "/send", url.Values{})["id"].(string)
 	upstream.wait(t, 1)
 	// the lease of attempt 1 ran out with no heartbeat: the run goes back
-	if err := (appRuns{tenant: q.app}).Write(func(db *sql.DB) error {
+	if err := (appRuns{tenant: q.app}).Write(func(db queuestore.SQL) error {
 		_, err := db.Exec(`UPDATE kitwork_runs SET lease_until = '2000-01-01T00:00:00.000Z' WHERE id = $1`, id)
 		return err
 	}); err != nil {

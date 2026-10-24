@@ -14,8 +14,10 @@ import (
 // The runs of an app's background work live in its own database (KITWORK_QUEUE.md mục 2: "Các lần chạy lưu
 // trong kitwork_runs của database của app"): the table kitwork_runs of the KitDB file in
 // .database/application/, the file connection().schema({ … }) of .shared/schema/ declares the app's tables
-// in. Never a database of the host: a host's system database is often a server other apps and other
-// machines share, and an app's runs are the app's data.
+// in. Never a connection of the host's own (app.postgresql({ alias: "system" })): a host's system database is
+// often a server other apps and other machines share, and an app's runs are the app's data. The config.work of
+// a folder may choose a database of the host's catalogue the app declares (queue.database(db),
+// schedule.database(db): runs_database.go); that is the app's choice, made in its own files.
 //
 // The file is reached as the app's ORM reaches it, a lease of the app's KitDB manager for each use (so a
 // file nobody uses can close, and the manager never waits on a lease the queue keeps), with KitDB's own SQL
@@ -64,7 +66,7 @@ func (r *runsDatabase) detachLocked() {
 
 // nextSeq is the seq of the next run stored through db, the SQL face attached now; called under the
 // file's writer gate.
-func (r *runsDatabase) nextSeq(db *sql.DB) (int64, error) {
+func (r *runsDatabase) nextSeq(db queuestore.SQL) (int64, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.db != db {
@@ -138,11 +140,11 @@ func (t *Tenant) runsResource() (*runsDatabase, error) {
 	return current, nil
 }
 
-func (a appRuns) Read(fn func(db *sql.DB) error) error  { return a.use(false, fn) }
-func (a appRuns) Write(fn func(db *sql.DB) error) error { return a.use(true, fn) }
+func (a appRuns) Read(fn func(db queuestore.SQL) error) error  { return a.use(false, fn) }
+func (a appRuns) Write(fn func(db queuestore.SQL) error) error { return a.use(true, fn) }
 
 // NextSeq numbers a run being stored (queuestore.Sequencer), inside Write.
-func (a appRuns) NextSeq(db *sql.DB) (int64, error) {
+func (a appRuns) NextSeq(db queuestore.SQL) (int64, error) {
 	resource, err := a.tenant.runsResource()
 	if err != nil {
 		return 0, err
@@ -152,7 +154,7 @@ func (a appRuns) NextSeq(db *sql.DB) (int64, error) {
 
 // use runs fn on the app's file: a lease for the call, the tables made the first time the file is used, the
 // writer gate held for a write and shared for a read.
-func (a appRuns) use(write bool, fn func(db *sql.DB) error) error {
+func (a appRuns) use(write bool, fn func(db queuestore.SQL) error) error {
 	resource, err := a.tenant.runsResource()
 	if err != nil {
 		return err
@@ -209,7 +211,32 @@ func (t *Tenant) queueStore() *queuestore.Store { return t.runsStore(queueKind) 
 // scheduleStore is the store of t's app's schedule runs (KITWORK_SCHEDULE.md mục 9).
 func (t *Tenant) scheduleStore() *queuestore.Store { return t.runsStore(scheduleKind) }
 
-// runsStore is the store of t's app's runs of kind.
+// runsStore is the store of t's app's runs of kind, in the database the config.work of its folder chose.
 func (t *Tenant) runsStore(kind string) *queuestore.Store {
-	return queuestore.New(appRuns{tenant: t}, kind)
+	worker := t.queueWorker()
+	if kind == scheduleKind {
+		worker = t.scheduleWorker()
+	}
+	var place *runsPlace
+	if worker != nil {
+		place = worker.runs.Load()
+	}
+	return t.runsStoreAt(kind, place)
+}
+
+// runsStoreAt is the store of t's app's runs of kind in place: a database of the host's catalogue, or the
+// app's database for nil. A write of it on a database of the catalogue tries once (runsDatabase).
+func (t *Tenant) runsStoreAt(kind string, place *runsPlace) *queuestore.Store {
+	return queuestore.New(t.runsDatabase(kind, place, nil), kind)
+}
+
+// runsDatabase is the database of t's app's runs of kind in place: a database of the host's catalogue, or the
+// app's database for nil. stop, when set, is the running worker's: its writes on a database of the catalogue
+// (a claim, a settle, a heartbeat) wait for another writer of the file until stop closes; with none (boot's
+// sync, a request's send, cancel, replay) a write fails when the busy timeout runs out.
+func (t *Tenant) runsDatabase(kind string, place *runsPlace, stop <-chan struct{}) queuestore.Database {
+	if place == nil {
+		return appRuns{tenant: t}
+	}
+	return catalogRuns{tenant: t, place: place, kind: kind, stop: stop}
 }

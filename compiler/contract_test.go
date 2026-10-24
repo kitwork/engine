@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestCompilerV21GoldenContract(t *testing.T) {
-	if CompilerSchemaVersion != 21 {
-		t.Fatalf("CompilerSchemaVersion = %d, want schema v21", CompilerSchemaVersion)
+func TestCompilerV22GoldenContract(t *testing.T) {
+	if CompilerSchemaVersion != 22 {
+		t.Fatalf("CompilerSchemaVersion = %d, want schema v22", CompilerSchemaVersion)
 	}
 	// Bytecode 3 (14/10/2026) moved the fingerprint and every checksum below with the version alone: each
 	// fixture's instructions, constants and debug table are those bytecode 2 wrote (none needs a wide
@@ -28,10 +28,18 @@ func TestCompilerV21GoldenContract(t *testing.T) {
 	// kitwork/file. Schema 19 (22/10/2026, environment read by name) moved the fingerprint alone: no fixture
 	// reads env or environment. Schema 20 (23/10/2026, router.view removed) moved the fingerprint alone: no
 	// fixture writes router.view. Schema 21 (24/10/2026, a folder's config.work by calls) moved the fingerprint
-	// alone: no fixture is a config.work or calls queue.parallel, queue.keep or schedule.keep.
-	const expectedFingerprint = "15285bc1c3aa7374cd2260fc681dd61d42837f62b4227dc70e66c9b36da7622c"
+	// alone: no fixture is a config.work or calls queue.parallel, queue.keep or schedule.keep. Schema 22
+	// (24/10/2026, queue.database(db) checked where it is written) moved the fingerprint alone: no fixture is a
+	// config.work or calls queue.database.
+	const expectedFingerprint = "58dc706d807f0a7e734138dc99273ed41acc619d8ba98e1ca7904daf69a47b93"
 	if got := Fingerprint(); got != expectedFingerprint {
 		t.Fatalf("compiler fingerprint = %q, want %q", got, expectedFingerprint)
+	}
+	// schema 21 compiled what a config.work handed queue.database(…) or schedule.database(…) unchecked: its
+	// artifacts are not reused
+	const schema21 = "15285bc1c3aa7374cd2260fc681dd61d42837f62b4227dc70e66c9b36da7622c"
+	if stamped := compilerFingerprintFor(21); hex.EncodeToString(stamped[:]) != schema21 || Fingerprint() == schema21 {
+		t.Fatalf("schema 21 on bytecode 4 stamps %x, the current compiler %s: want %s and another", stamped, Fingerprint(), schema21)
 	}
 	// schema 20 compiled a config.work of .shared/queue/ or .schedule/ into an object of its top-level names,
 	// which the loader no longer reads: its artifacts are not reused

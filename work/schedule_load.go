@@ -37,9 +37,12 @@ func scheduleSide(name string) string {
 	return fmt.Sprintf("`%s` không có trong `context` của một lịch: context có job", name)
 }
 
-// scheduleConfig is what .schedule/config.work sets: how long an ended run is kept.
+// scheduleConfig is what .schedule/config.work sets: how long an ended run is kept, and the database of the
+// runs (nil for the app's), with where its call is written.
 type scheduleConfig struct {
-	keep time.Duration
+	keep          time.Duration
+	database      *runsPlace
+	databasePlace string
 }
 
 // LoadScheduleFiles reads the app's .schedule/ and starts its clock. Every schedule must be registered
@@ -59,6 +62,9 @@ func (t *Tenant) LoadScheduleFiles() {
 		return
 	}
 	config := t.readScheduleConfig(filepath.Join(dir, "config.work"))
+	// the runs and the state of the schedules move with the clock's restart: what refusePastOnce reads is the
+	// database chosen now, and an attempt of the old clock settles where its run is
+	place := t.useRunsPlace(scheduleKind, config.database, "[Schedule]", config.databasePlace)
 
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
 	said := map[string]bool{}
@@ -116,7 +122,7 @@ func (t *Tenant) LoadScheduleFiles() {
 	for name := range declaredAt {
 		delete(unloaded.Names, name) // a name another file declares right is that file's schedule
 	}
-	loaded = t.refusePastOnce(loaded, say)
+	loaded = t.refusePastOnce(loaded, t.runsStoreAt(scheduleKind, place), say)
 	for _, entry := range loaded {
 		// mục 5 counts a schedule without .timezone(…) in router.timezone(…) of the app's config.work, which
 		// the engine does not read yet: said, so a schedule written as the spec writes it does not fire at an
@@ -139,6 +145,8 @@ func (t *Tenant) LoadScheduleFiles() {
 	worker.unloaded = unloaded
 	worker.keep = config.keep
 	worker.mu.Unlock()
+	worker.runs.Store(place)
+	t.sayLeftBehind(scheduleKind, place, "[Schedule]", "schedule.database(…)")
 	t.StartScheduleWorker()
 }
 
@@ -223,9 +231,9 @@ func (t *Tenant) runScheduleFile(bc *compiler.Bytecode, relative string, say fun
 }
 
 // refusePastOnce leaves out a schedule.on(…) whose instant has passed (mục 3: "thời điểm đã qua lúc khai là
-// lỗi boot"), unless kitwork_schedules holds it with the same rule: it was declared before its instant, and
-// has run, or runs now as a due time missed.
-func (t *Tenant) refusePastOnce(entries []*scheduleEntry, say func(string)) []*scheduleEntry {
+// lỗi boot"), unless kitwork_schedules of store holds it with the same rule: it was declared before its
+// instant, and has run, or runs now as a due time missed.
+func (t *Tenant) refusePastOnce(entries []*scheduleEntry, store *queuestore.Store, say func(string)) []*scheduleEntry {
 	now := scheduleNow()
 	var states map[string]queuestore.ScheduleState
 	kept := entries[:0]
@@ -235,7 +243,7 @@ func (t *Tenant) refusePastOnce(entries []*scheduleEntry, say func(string)) []*s
 			continue
 		}
 		if states == nil {
-			read, err := t.scheduleStore().ScheduleStates()
+			read, err := store.ScheduleStates()
 			if err != nil {
 				say(fmt.Sprintf("[Schedule] kitwork_schedules: %v", err))
 				read = map[string]queuestore.ScheduleState{}
@@ -251,10 +259,10 @@ func (t *Tenant) refusePastOnce(entries []*scheduleEntry, say func(string)) []*s
 	return kept
 }
 
-// readScheduleConfig reads .schedule/config.work: schedule.keep(duration) (how long an ended run is kept),
-// one call per line (background_config.go); schedule.session({ … }) and schedule.database(db) are said, the
-// engine has neither yet. A missing file is the defaults; a wrong value is said with where it is written, and
-// its default kept.
+// readScheduleConfig reads .schedule/config.work: schedule.keep(duration) (how long an ended run is kept) and
+// schedule.database(db) (the database of the runs, runs_database.go), one call per line
+// (background_config.go); schedule.session({ … }) is said, the engine has it not yet. A missing file is the
+// defaults; a wrong value is said with where it is written, and its default kept.
 func (t *Tenant) readScheduleConfig(file string) scheduleConfig {
 	config := scheduleConfig{keep: queueDefaultKeep}
 	if _, err := os.Stat(file); err != nil {
@@ -283,7 +291,8 @@ func (t *Tenant) readScheduleConfig(file string) scheduleConfig {
 			}
 			fmt.Printf("[Schedule] %s: schedule.session(…) chưa có trong engine hôm nay: lịch chạy không phiên\n", place)
 		case "database":
-			fmt.Printf("[Schedule] %s: schedule.database(…) chưa có trong engine hôm nay: các lần chạy nằm trong database của app (.database/application/)\n", place)
+			config.database, _ = readRunsDatabase(setting, "schedule", "[Schedule]", place)
+			config.databasePlace = place
 		}
 	}
 	return config
