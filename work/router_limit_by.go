@@ -45,7 +45,8 @@ func (f *FolderRouter) checkLimitBy(by string) {
 	case "browser":
 		f.limitErr = fmt.Errorf("%sgiới hạn tần suất by: \"browser\" lấy từ header hay cookie client tự gửi, đổi chúng là thoát giới hạn: dùng by: \"ip\" hay \"global\"", at)
 	default:
-		f.limitErr = fmt.Errorf("%sgiới hạn tần suất by: %q không có: by là \"ip\" (mặc định), \"global\" hay \"user\"", at, by)
+		// limitRule refuses it first in a Kitwork UI folder; the same words if anything else reaches here
+		f.limitErr = fmt.Errorf("%sgiới hạn tần suất by: %q không có: by là \"ip\" (mặc định) hay \"global\"", at, by)
 	}
 }
 

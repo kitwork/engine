@@ -183,8 +183,10 @@ router.get((ctx) => {
 	html = partsWarns(t, map[string]string{"/site/content.ui": nested}, where("content.ui", nested, "click="),
 		"toggle ở đây là của dropdown, mà dropdown bao ngoài cũng khai toggle: một tên một nghĩa — gọi qua alias ($tên.toggle) hoặc đổi tên")
 	mustContain(t, html, `<button class="flex-row `+neutralClasses+`" type="button" data-kitwork-event="click: toggle()">x</button>`)
-	// control: a name only the page declares tells nothing
-	partsQuiet(t, map[string]string{"/site/content.ui": `<content><dropdown><text>{{ title }}</text></dropdown></content>`, "/site/router.work": view})
+	// control: a name only the page is given tells nothing (24/10/2026: one it is not given is an error,
+	// given_test.go)
+	titled := "import { router } from \"kitwork\";\nrouter.get((ctx) => ctx.view({ open: true, title: \"Kitwork\" }));"
+	partsQuiet(t, map[string]string{"/site/content.ui": `<content><dropdown><text>{{ title }}</text></dropdown></content>`, "/site/router.work": titled})
 }
 
 // as="$el" says the name is the engine's (host.go:485): aliasName refused it first, with the message

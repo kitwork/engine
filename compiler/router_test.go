@@ -18,18 +18,19 @@ import (
 // call kitwork().router.view(…) compiled ("<nil>, want router.work:2:18: …"); with routerDeclaration's
 // kitwork().router.view branch off as well, const page = kitwork().router.view compiled too (either refuses
 // it, at the same word).
+//
+// 24/10/2026: the rows that reached the router through import { router } from "kitwork" and { router as r }
+// left this table: that import is itself refused in a router.work now, at its line (router_rules_test.go).
 func TestRouterViewIsACompileErrorInRouterWork(t *testing.T) {
 	const namespace = "import * as router from \"kitwork/router\";\n"
 	for source, at := range map[string]string{
-		namespace + "router.view((context) => { });":                                        "router.work:2:8",
-		namespace + "router.view(() => {\n  const title = \"x\";\n});":                      "router.work:2:8",
-		"import { router } from \"kitwork\";\nrouter.view((ctx) => { ctx.title(\"x\"); });": "router.work:2:8",
-		"import { router as r } from \"kitwork\";\nr.view((context) => { });":               "router.work:2:3",
-		namespace + "const { get, view } = router;":                                         "router.work:2:14",
-		"import { view } from \"kitwork/router\";":                                          "router.work:1:1",
-		namespace + "const page = router.view;":                                             "router.work:2:21",
-		"import { kitwork } from \"kitwork\";\nkitwork().router.view((context) => { });":    "router.work:2:18",
-		"import { kitwork } from \"kitwork\";\nconst page = kitwork().router.view;":         "router.work:2:31",
+		namespace + "router.view((context) => { });":                                     "router.work:2:8",
+		namespace + "router.view(() => {\n  const title = \"x\";\n});":                   "router.work:2:8",
+		namespace + "const { get, view } = router;":                                      "router.work:2:14",
+		"import { view } from \"kitwork/router\";":                                       "router.work:1:1",
+		namespace + "const page = router.view;":                                          "router.work:2:21",
+		"import { kitwork } from \"kitwork\";\nkitwork().router.view((context) => { });": "router.work:2:18",
+		"import { kitwork } from \"kitwork\";\nconst page = kitwork().router.view;":      "router.work:2:31",
 	} {
 		_, err := compileAppRoute(t, source)
 		want := at + ": " + RouterViewRemoved

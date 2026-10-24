@@ -60,9 +60,10 @@ func TestRouterHighlightReachesThePageStylesheet(t *testing.T) {
 // colour set or not; keys that are kinds (plain, another spelling, a short name, a typo — a hyphenated
 // key in quotes, the author's and the nearest kind's —, the template's keys, the three window dots in one
 // sentence); a value that is a string or a pair of light and dark, both strings, not empty, no lone #hex
-// (a # that is no colour said so), a side that is a colour, no pair and no #hex for inserted. A call made
-// while a page is served (in a handler) is refused: the colours are the router's, set once. CONTROL: a
-// call that reads boots.
+// (a # that is no colour said so), a side that is a colour, no pair and no #hex for inserted. A call written
+// in a handler is refused as the file compiles (24/10/2026): the colours are the router's, set once (CONTROL,
+// -overlay with the compiler's routerCall letting a call in a function through: "router.highlight in a
+// handler: <nil>, want the compile error at router.work:12:10"). CONTROL: a call that reads boots.
 func TestRouterHighlightRefusesWhatItDoesNotRead(t *testing.T) {
 	for written, want := range map[string]string{
 		`router.highlight();`:  `router.highlight nhận một object màu theo loại chữ: router.highlight({ keyword: "brand", comment: "ink-30" })`,
@@ -105,17 +106,14 @@ func TestRouterHighlightRefusesWhatItDoesNotRead(t *testing.T) {
 	if _, err := bootUISite(t, dots, true); err == nil || strings.Count(err.Error(), "là ba chấm cửa sổ") != 1 {
 		t.Errorf("red, yellow, green: one sentence, got %v", err)
 	}
-	// at request time, in a handler: the page answers it, and the colours stay as the router set them
+	// in a handler: refused where it is written, as the file compiles (24/10/2026; until then the page answered
+	// it at request time): a router call is a line of its own at the file's top level
 	view := withFiles(map[string]string{"localhost/content.ui": highlightCode})
 	view["localhost/router.work"] = strings.Replace(view["localhost/router.work"], `  return ctx.title("Thực đơn")`, `  router.highlight({ keyword: "violet" });
   return ctx.title("Thực đơn")`, 1)
-	tenant := buildUISite(t, view)
-	if rec := serveUI(t, tenant, "http://localhost/"); rec.Code != http.StatusInternalServerError ||
-		!strings.Contains(rec.Body.String(), "router.highlight viết ở cấp đầu của router.work, chạy một lần khi site khởi động") {
-		t.Errorf("router.highlight in a handler: %d %.600s", rec.Code, rec.Body.String())
-	}
-	if css := pageWithStylesheet(t, tenant, "http://localhost/tinh"); strings.Contains(css, "#ee82ee") {
-		t.Errorf("a call refused at request time changes nothing:\n%s", linesWith(css, "code-"))
+	if _, err := bootUISite(t, view, true); err == nil ||
+		!strings.Contains(err.Error(), "router.work:12:10: router.highlight(…) chỉ viết ở cấp file, một dòng; không trong if, vòng lặp hay thân hàm") {
+		t.Errorf("router.highlight in a handler: %v, want the compile error at router.work:12:10", err)
 	}
 	// CONTROL
 	files := withRootRouter(t, sitePalette+"\n"+`router.highlight({ keyword: "brand+40", "regular-expression": "success+30", "function": { light: "#0550ae", dark: "navy" } });`, nil)
@@ -131,7 +129,7 @@ func TestRouterHighlightRefusesWhatItDoesNotRead(t *testing.T) {
 func TestRouterHighlightBranchesPerKind(t *testing.T) {
 	files := withRootRouter(t, sitePalette+"\n"+`router.highlight({ keyword: "violet", comment: "ink-20" });`, map[string]string{
 		"localhost/content.ui": highlightCode,
-		"localhost/mon/{slug}/router.work": `import { router } from "kitwork";
+		"localhost/mon/{slug}/router.work": `import * as router from "kitwork/router";
 router.highlight({ keyword: "brand" });
 router.get((ctx) => {
   if (ctx.params("slug") != "ca-phe") return ctx.notFound();
@@ -165,7 +163,7 @@ router.get((ctx) => {
 // error at the call (router.work:<line>:<column>), and known at the branch's, which render. CONTROL: the
 // token declared at the site root, the site's page renders too.
 func TestRouterHighlightValueAgainstTheRoutePalette(t *testing.T) {
-	branch := `import { router } from "kitwork";
+	branch := `import * as router from "kitwork/router";
 router.colors({ chart: "#0f766e" });
 `
 	files := withRootRouter(t, sitePalette+"\n"+`router.highlight({ keyword: "chart" });`, map[string]string{
@@ -214,7 +212,7 @@ func TestRouterHighlightWarnsOncePerCall(t *testing.T) {
 	atSite := regexp.MustCompile(`(^|\s)router\.work:6:\d+: router\.highlight: `)
 	branched := withRootRouter(t, highlightDark+"\n"+`router.highlight({ keyword: "violet", comment: "ink-40" });`, map[string]string{
 		"localhost/content.ui":      highlightCode,
-		"localhost/kho/router.work": "import { router } from \"kitwork\";\nrouter.highlight({ keyword: \"brand+40\" });\n",
+		"localhost/kho/router.work": "import * as router from \"kitwork/router\";\nrouter.highlight({ keyword: \"brand+40\" });\n",
 		"localhost/kho/content.ui":  highlightCode,
 	})
 	printed = captureBootOutput(t, func() { buildUISite(t, branched) })

@@ -337,6 +337,26 @@ type FolderRouter struct {
 	// router.bundle(): how this folder's .ui pages deliver their CSS and their JavaScript, per part; ""
 	// for a part it does not name (routeBundle: the nearest folder that names it wins, router_ui_bundle.go)
 	bundle bundleChoice
+
+	// The rest is a Kitwork UI folder's (router_vocabulary.go). configBytecode is its config.work, compiled
+	// (nil when it has none): a function config.work hands the router (router.guard) runs with it at request
+	// time (code). running is the file being run as the folder is built, config.work or router.work, for
+	// the rules of the vocabulary; "" otherwise.
+	configBytecode *compiler.Bytecode
+	running        string
+	// app says the folder is the app's, the collector of the config.work at the app's root, parent of every
+	// site's root (appRouterConfig). appRoot says the folder is a site's root that is the app's folder too
+	// (one site in the app's folder): its config.work is the app's as well, and takes the words of both.
+	app, appRoot bool
+	// nearest are the calls of the folder whose nearest folder wins, by word, each with the file and line
+	// it is written at: once per folder, config.work and router.work together
+	nearest map[string]routerCallPlace
+	// seeds are the calls of the app's config.work, as the app's collector heard them, that a site's root
+	// starts from (seed): every one but router.timezone, in written order
+	seeds []routerSeed
+	// timezone is router.timezone(…), the app's zone (nil: UTC): set on the app's collector, and on a site's
+	// root from it, or from its own config.work when that is the app's (appRoot)
+	timezone *time.Location
 }
 
 // MissingMember is called for a member the folder router does not have. The chain must not break
@@ -345,7 +365,8 @@ type FolderRouter struct {
 // has not shipped it, or a typo, is one visible line naming the method instead of a site that
 // silently lost whatever came after. A warning, not a refusal: with the chain intact the only
 // thing ignored is that one declaration, and a router written ahead of its engine should still
-// serve.
+// serve. A template's router only: a Kitwork UI folder's answers the words of kitwork/router and
+// refuses any other (uiRouter, router_vocabulary.go).
 func (f *FolderRouter) MissingMember(name string) value.Value {
 	return value.NewFunc(func(args ...value.Value) value.Value {
 		f.unknown = append(f.unknown, name)
@@ -475,6 +496,12 @@ func (f *FolderRouter) Delete(args ...value.Value) *FolderMethod {
 
 func (f *FolderRouter) output(kind, defaultPath string, args ...value.Value) *FolderMethod {
 	m := &FolderMethod{method: "GET", outputKind: kind, outputData: value.New(map[string]value.Value{})}
+	if f != nil && f.ui {
+		// a Kitwork UI site's built-in door is a route of its folder like any other: its rules are read as
+		// the folder's (checkExpiry, checkLimitBy) and its cache counts in the app's zone (routeNow). A
+		// template's keeps no folder, as before.
+		m.folder = f
+	}
 	outputPath := defaultPath
 	if len(args) > 0 {
 		// BOOLEAN mode: the short way to say "yes, the default". true generates
@@ -863,7 +890,14 @@ type TreeKitWork struct {
 	node *RouteNode
 }
 
-func (tw *TreeKitWork) Router() *FolderRouter { return tw.node.folder }
+// Router is the folder's router. A Kitwork UI folder's answers only the words of kitwork/router
+// (uiRouter, router_vocabulary.go); a template's is the folder itself, every old word with it.
+func (tw *TreeKitWork) Router() value.Value {
+	if folder := tw.node.folder; folder != nil && folder.ui {
+		return value.New(&uiRouter{folder: folder})
+	}
+	return value.New(tw.node.folder)
+}
 
 // ── generation folder compile ──────────────────────────────────────────────
 
@@ -900,7 +934,9 @@ func (n *RouteNode) sourceFiles() []string {
 }
 
 // compileFolder builds this generation's FolderRouter and records every
-// executable source file used by its native import graph.
+// executable source file used by its native import graph. A Kitwork UI folder (uiFolder) runs its
+// config.work before its router.work, its site's root the app's config.work before both
+// (compileUIFolder); a template's folder runs its router.kitwork.js alone, as it always has.
 func (n *RouteNode) compileFolder(t *Tenant) error {
 	fr := &FolderRouter{
 		tenant: t, node: n,
@@ -911,70 +947,161 @@ func (n *RouteNode) compileFolder(t *Tenant) error {
 	routerFile := RouterMarker(n.diskPath()) // router.kitwork.js, or router.work for a Kitwork UI site
 	// watched even when absent — a router APPEARING is a change
 	n.srcFiles = []string{filepath.Join(n.diskPath(), RouterFileName), filepath.Join(n.diskPath(), UIRouterFileName)}
+	if n.uiFolder(routerFile) {
+		return n.compileUIFolder(t, fr, routerFile)
+	}
+	if routerFile == "" {
+		if n.parent == nil {
+			// a site's root is marked by its router file; a config.work there alone would run nowhere, its
+			// guards with it, and neither would the app's (KITWORK_ROUTER.md mục 4)
+			configFile := filepath.Join(n.diskPath(), compiler.RouterConfigFile)
+			n.srcFiles = append(n.srcFiles, configFile)
+			if fileExists(configFile) {
+				return fmt.Errorf("%s: %s", compiler.RouterConfigFile, routerConfigWithoutRouter)
+			}
+		}
+		return nil
+	}
+	bc, err := fr.runRouterFile(t, routerFile)
+	if bc != nil && len(bc.Files) > 0 {
+		n.srcFiles = append([]string(nil), bc.Files...)
+	}
+	return err
+}
+
+// uiFolder reports whether the folder is a Kitwork UI site's (KITWORK_ROUTER.md mục 4): its router file is
+// router.work, or it has none and its site's root's router file is router.work. Only such a folder reads a
+// config.work; a template's (router.kitwork.js) never does.
+func (n *RouteNode) uiFolder(routerFile string) bool {
 	if routerFile != "" {
-		fr.ui = filepath.Base(routerFile) == UIRouterFileName // router.highlight reads Kitwork UI's grammar
-		if n.parent == nil && filepath.Base(routerFile) == UIRouterFileName {
-			// A Kitwork UI site swaps only <content /> between pages by default; router.reload(true) in
-			// it loads every page whole instead.
-			t.presentation().SetDrive(true)
-		}
-		bc, err := t.compileFile(routerFile)
-		if err != nil {
-			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))
-			return fmt.Errorf("compile router %s: %w", relative, err)
-		}
-		fr.bytecode = bc
-		if len(bc.Files) > 0 {
-			n.srcFiles = append([]string(nil), bc.Files...)
-		}
-		// every environment.require("KEY") of the folder's code against the app's environment, before it
-		// runs: a missing key stops the boot, with every other folder's in one report (RouteTree.Prepare)
-		if missing := t.missingEnvironment(bc); missing != nil {
-			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))
-			missing.placeEntry(filepath.Base(routerFile), filepath.ToSlash(relative))
-			return missing
-		}
-		if err := runFolderRouter(t, n, bc); err != nil {
-			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))
-			return fmt.Errorf("initialize router %s: %w", relative, err)
-		}
-		if fr.redeclared != nil {
-			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))
-			return fmt.Errorf("router %s: %w", relative, fr.redeclared)
-		}
-		if fr.limitErr != nil {
-			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))
-			return fmt.Errorf("router %s: %w", relative, fr.limitErr)
-		}
-		if err := fr.handlerDestructureError(); err != nil {
-			return fmt.Errorf("router: %w", err)
-		}
-		if err := fr.responseCacheConfigurationError(); err != nil {
-			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))
-			return fmt.Errorf("router %s: %w", relative, err)
-		}
-		if fr.assetErr != nil {
-			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))
-			return fmt.Errorf("router %s: %w", relative, fr.assetErr)
-		}
-		if warning := fr.unknownMethodWarning(); warning != "" {
-			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))
-			fmt.Printf("[router] %s: %s\n", relative, warning)
-		}
-		if fr.expiryWarning != "" {
-			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))
-			fmt.Printf("[router] %s: %s\n", relative, fr.expiryWarning)
-		}
-		if fr.limitWarning != "" {
-			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))
-			fmt.Printf("[router] %s: %s\n", relative, fr.limitWarning)
-		}
-		for _, warning := range fr.removedMethodWarnings() {
-			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))
-			fmt.Printf("[router] %s: %s\n", relative, warning)
+		return filepath.Base(routerFile) == UIRouterFileName
+	}
+	if n.parent == nil {
+		return false
+	}
+	root := n
+	for root.parent != nil {
+		root = root.parent
+	}
+	return root.folder != nil && root.folder.ui
+}
+
+// compileUIFolder builds a Kitwork UI folder: at a site's root the app's config.work first, as the parent
+// of the site (appRouterConfig, seed), then the folder's own config.work, then its router.work, each run
+// into the same FolderRouter, so the calls of config.work come first (KITWORK_ROUTER.md mục 4, 12).
+// config.work is watched even when absent: one appearing, changing or going builds the generation again.
+func (n *RouteNode) compileUIFolder(t *Tenant, fr *FolderRouter, routerFile string) error {
+	fr.ui = true // router.highlight reads Kitwork UI's grammar; the router answers its words only
+	configFile := filepath.Join(n.diskPath(), compiler.RouterConfigFile)
+	n.srcFiles = append(n.srcFiles, configFile)
+	if n.parent == nil {
+		// A Kitwork UI site swaps only <content /> between pages by default; router.reload(true) in it
+		// loads every page whole instead.
+		t.presentation().SetDrive(true)
+		fr.appRoot = sameFolder(n.diskPath(), t.resolveApp())
+		if !fr.appRoot {
+			collector, files, err := t.appRouterConfig(false)
+			n.srcFiles = append(n.srcFiles, files...)
+			if err != nil {
+				return err
+			}
+			if collector != nil {
+				fr.timezone = collector.timezone
+				if err := fr.seed(collector); err != nil {
+					return err
+				}
+			}
 		}
 	}
-	return nil
+	if fileExists(configFile) {
+		bc, err := fr.runRouterFile(t, configFile)
+		if bc != nil {
+			n.srcFiles = append(n.srcFiles, bc.Files...)
+			fr.configBytecode = bc
+		}
+		if err != nil {
+			return err
+		}
+	}
+	if routerFile == "" {
+		return nil
+	}
+	bc, err := fr.runRouterFile(t, routerFile)
+	if bc != nil {
+		n.srcFiles = append(n.srcFiles, bc.Files...)
+	}
+	return err
+}
+
+// sameFolder reports whether two paths name one folder.
+func sameFolder(one, other string) bool {
+	first, err := filepath.Abs(one)
+	if err != nil {
+		first = one
+	}
+	second, err := filepath.Abs(other)
+	if err != nil {
+		second = other
+	}
+	return filepath.Clean(first) == filepath.Clean(second)
+}
+
+// runRouterFile compiles and runs one router file of the folder (router.kitwork.js, router.work or a
+// config.work) into it, then says what the run left to say: an error stops the generation with the file
+// from the site's root, a template's warnings are printed. The bytecode is given whenever the file compiled,
+// so its sources are watched even when it then fails.
+func (f *FolderRouter) runRouterFile(t *Tenant, file string) (*compiler.Bytecode, error) {
+	relative := strings.TrimPrefix(file, t.resolve()+string(filepath.Separator))
+	bc, err := t.compileFile(file)
+	if err != nil {
+		return nil, fmt.Errorf("compile router %s: %w", relative, err)
+	}
+	if filepath.Base(file) != compiler.RouterConfigFile {
+		f.bytecode = bc
+	}
+	// every environment.require("KEY") of the folder's code against the app's environment, before it
+	// runs: a missing key stops the boot, with every other folder's in one report (RouteTree.Prepare)
+	if missing := t.missingEnvironment(bc); missing != nil {
+		missing.placeEntry(filepath.Base(file), filepath.ToSlash(relative))
+		return bc, missing
+	}
+	if f.ui {
+		f.running = filepath.Base(file)
+		defer func() { f.running = "" }()
+	}
+	if err := runFolderRouter(t, f.node, bc); err != nil {
+		return bc, fmt.Errorf("initialize router %s: %w", relative, err)
+	}
+	if f.redeclared != nil {
+		return bc, fmt.Errorf("router %s: %w", relative, f.redeclared)
+	}
+	if f.limitErr != nil {
+		return bc, fmt.Errorf("router %s: %w", relative, f.limitErr)
+	}
+	if err := f.handlerDestructureError(); err != nil {
+		// the folder's file as the other errors name it: a guard's parameter in a/config.work is not one of
+		// the site's other config.work
+		return bc, fmt.Errorf("router %s: %w", relative, err)
+	}
+	if err := f.responseCacheConfigurationError(); err != nil {
+		return bc, fmt.Errorf("router %s: %w", relative, err)
+	}
+	if f.assetErr != nil {
+		return bc, fmt.Errorf("router %s: %w", relative, f.assetErr)
+	}
+	if warning := f.unknownMethodWarning(); warning != "" {
+		fmt.Printf("[router] %s: %s\n", relative, warning)
+	}
+	if f.expiryWarning != "" {
+		fmt.Printf("[router] %s: %s\n", relative, f.expiryWarning)
+	}
+	if f.limitWarning != "" {
+		fmt.Printf("[router] %s: %s\n", relative, f.limitWarning)
+	}
+	for _, warning := range f.removedMethodWarnings() {
+		fmt.Printf("[router] %s: %s\n", relative, warning)
+	}
+	return bc, nil
 }
 
 // runFolderRouter executes a folder's compiled router in an ISOLATED VM whose kitwork() is the

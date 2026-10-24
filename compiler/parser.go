@@ -824,12 +824,14 @@ func (p *Parser) parseImportStatement() Statement {
 					KitworkSafe:      kitworkSafe,
 					KitworkHTTP:      kitworkHTTP,
 					KitworkHTTPVerbs: kitworkHTTPVerbs,
+					Import:           ImportNamed,
 				}
 			}
 			// có alias → nhóm `const local = kitwork().imported`
 			stmts := make([]Statement, len(specs))
 			for i, s := range specs {
 				stmts[i] = memberConst(s.Local, p.kitworkModule(spec, importTok), s.Imported, importTok)
+				stmts[i].(*VarStatement).Import = ImportNamed
 				if globalSafe(s) {
 					stmts[i].(*VarStatement).KitworkSafe = true
 				}
@@ -880,6 +882,7 @@ func (p *Parser) parseImportStatement() Statement {
 			Names:        []*Identifier{name},
 			DestructMode: DestructNone,
 			Value:        p.kitworkModule(spec, importTok),
+			Import:       ImportNamespace,
 		}
 		if kitworkSubpath(spec) == "http" {
 			namespace.KitworkHTTP = name.Value
@@ -914,6 +917,7 @@ func (p *Parser) parseImportStatement() Statement {
 				Token:        constToken(importTok),
 				Names:        []*Identifier{name},
 				KitworkHTTP:  kitworkHTTP,
+				Import:       ImportDefault,
 				DestructMode: DestructNone,
 				Value: &MemberExpression{
 					Token:  tokenWithValue(importTok, Dot, value.Value{}),

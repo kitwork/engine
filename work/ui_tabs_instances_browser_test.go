@@ -12,7 +12,7 @@ import (
 // tabsInstanceFiles is a site whose component code-window holds, in its own .ui, a tabs that persists
 // (router and page, so page+router) and its two panels; the page uses it twice, each in a box of its own.
 var tabsInstanceFiles = map[string]string{
-	"localhost/router.work": `import { router } from "kitwork";
+	"localhost/router.work": `import * as router from "kitwork/router";
 
 router.colors({ brand: "#c8742c" });
 `,

@@ -15,7 +15,7 @@ import (
 // and stop() inside it, pause() on a button outside it through its alias, and its seconds read outside
 // it through the alias too; a link goes to /tiep, which links back.
 var countdownBrowserFiles = map[string]string{
-	"localhost/router.work": `import { router } from "kitwork";
+	"localhost/router.work": `import * as router from "kitwork/router";
 
 router.language("vi");
 router.reload(false);

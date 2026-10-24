@@ -469,18 +469,18 @@ func TestStorageOldCacheSpellingsAreErrors(t *testing.T) {
 		`const later = () => kitwork().cache.get("x");`:                                     "cache đã bỏ: import { memory } from \"kitwork/storage\"",
 		`const later = () => kitwork().sse;`:                                                "sse đã bỏ: luồng mở bằng context.sse trong router.get",
 		`import * as storage from "kitwork/storage"; const later = () => storage.get("x");`: "storage.get không có: kitwork/storage có memory, disk, datastore",
-		`import { router, cache } from "kitwork";`:                                          "cache đã bỏ: import { memory } from \"kitwork/storage\"",
-		`import { router } from "kitwork"; const c = kitwork().cache;`:                      "cache đã bỏ: import { memory } from \"kitwork/storage\"",
+		`import { cache } from "kitwork";`:                                                  "cache đã bỏ: import { memory } from \"kitwork/storage\"",
+		`const c = kitwork().cache;`:                                                        "cache đã bỏ: import { memory } from \"kitwork/storage\"",
 		`import * as cache from "kitwork/cache";`:                                           "cache đã bỏ: import { memory } from \"kitwork/storage\"",
 		`import { get } from "kitwork/storage";`:                                            "storage.get không có: kitwork/storage có memory, disk, datastore",
 		`import * as storage from "kitwork/storage"; storage.get("x");`:                     "storage.get không có: kitwork/storage có memory, disk, datastore",
-		`import { router, sse } from "kitwork";`:                                            "sse đã bỏ: luồng mở bằng context.sse trong router.get",
-		`import { router } from "kitwork"; kitwork().sse.publish("a", 1);`:                  "sse đã bỏ: luồng mở bằng context.sse trong router.get",
+		`import { sse } from "kitwork";`:                                                    "sse đã bỏ: luồng mở bằng context.sse trong router.get",
+		`kitwork().sse.publish("a", 1);`:                                                    "sse đã bỏ: luồng mở bằng context.sse trong router.get",
 	}
 	for source, want := range cases {
 		root := writeSite(t, map[string]string{
 			"router.work":     `import * as router from "kitwork/router";`,
-			"old/router.work": source + "\nimport * as router2 from \"kitwork/router\";\nrouter2.get((context) => context.json(1));",
+			"old/router.work": source + "\nimport * as router from \"kitwork/router\";\nrouter.get((context) => context.json(1));",
 		})
 		tn := NewTenant(root, "localhost")
 		err := tn.Run()

@@ -15,7 +15,7 @@ import (
 // say each kind of notice through $toast, a tabs a notice's action chooses in, and a second page Drive
 // moves to (router.reload(false)).
 var toastBrowserFiles = map[string]string{
-	"localhost/router.work": `import { router } from "kitwork";
+	"localhost/router.work": `import * as router from "kitwork/router";
 
 router.colors({ brand: "#c8742c" });
 router.language("vi");

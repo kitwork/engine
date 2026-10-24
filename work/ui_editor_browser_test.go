@@ -60,7 +60,8 @@ const editorBrowserSaved = `<p>Xin chào <b>thế giới</b></p><script>window._
 // shown through <richtext> (cleaned by richtext() of "kitwork") and what was sent, to the letter, in a
 // block of code. Nothing is stored. A link goes to /tiep, which links back.
 var editorBrowserFiles = map[string]string{
-	"localhost/router.work": `import { router, richtext } from "kitwork";
+	"localhost/router.work": `import * as router from "kitwork/router";
+import { richtext } from "kitwork";
 
 router.language("vi");
 router.reload(false);
@@ -838,13 +839,16 @@ func TestBrowserEditorDropIsTheEditors(t *testing.T) {
 // editorReviewFiles is a site that moves with Drive whose page holds the canonical editor with a post
 // that links to /tiep, and a page /small whose writing area is written size="small".
 func editorReviewFiles() map[string]string {
-	post := func(body string) string {
-		return `import { router } from "kitwork";
+	// the site's root turns Drive on for the whole site; router.reload is the site root's only (a branch's is a
+	// compile error, KITWORK_ROUTER.md mục 4), so the branch /small only declares its page
+	post := func(body string, root bool) string {
+		rules := ""
+		if root {
+			rules = "router.language(\"vi\");\nrouter.reload(false);\n\n"
+		}
+		return `import * as router from "kitwork/router";
 
-router.language("vi");
-router.reload(false);
-
-router.get((ctx) => {
+` + rules + `router.get((ctx) => {
   const post = { body: "` + body + `" };
   return ctx.view({ post });
 });
@@ -852,10 +856,10 @@ router.get((ctx) => {
 	}
 	page := func(form string) string { return "<content padding=\"4\" gap=\"3\">\n" + form + "\n</content>" }
 	return map[string]string{
-		"localhost/router.work":       post(`<p>Đọc thêm ở <a href=\"/tiep\">trang tài liệu</a> nhé.</p><p>Một hai ba</p>`),
+		"localhost/router.work":       post(`<p>Đọc thêm ở <a href=\"/tiep\">trang tài liệu</a> nhé.</p><p>Một hai ba</p>`, true),
 		"localhost/view.ui":           `<view><content /></view>`,
 		"localhost/content.ui":        page(editorBrowserCanonical),
-		"localhost/small/router.work": post(`<p>Một hai ba</p>`),
+		"localhost/small/router.work": post(`<p>Một hai ba</p>`, false),
 		"localhost/small/content.ui":  page(strings.Replace(editorBrowserCanonical, `rows="12"`, `rows="12" size="small"`, 1)),
 		"localhost/tiep/content.ui":   `<content padding="4"><text id="here">Tiếp</text></content>`,
 	}
@@ -1068,7 +1072,8 @@ const editorV2Saved = `<p>Họp nhóm lúc chín giờ mười giờ sáng nay</
 // and what was sent, to the letter, in a block of HTML code. Its router.post answers with the page for
 // what was sent. Nothing is stored.
 var editorV2Files = map[string]string{
-	"localhost/router.work": `import { router, richtext } from "kitwork";
+	"localhost/router.work": `import * as router from "kitwork/router";
+import { richtext } from "kitwork";
 
 router.language("vi");
 router.reload(false);

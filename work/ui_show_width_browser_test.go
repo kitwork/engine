@@ -16,7 +16,7 @@ import (
 // shown from medium and hidden again from large; #d a text with the same width, which it cannot use
 // (the author is told); #e a panel with no width, the data alone.
 var showWidthFiles = map[string]string{
-	"localhost/router.work": `import { router } from "kitwork";
+	"localhost/router.work": `import * as router from "kitwork/router";
 
 router.colors({ brand: "#c8742c" });
 `,

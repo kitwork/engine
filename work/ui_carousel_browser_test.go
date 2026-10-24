@@ -61,7 +61,7 @@ func carouselBrowserFiles() map[string]string {
 </content>`
 	}
 	return map[string]string{
-		"localhost/router.work": `import { router } from "kitwork";
+		"localhost/router.work": `import * as router from "kitwork/router";
 
 router.colors({ brand: "#c8742c" });
 router.language("vi");
@@ -126,7 +126,7 @@ router.get((context) => {
     </box>
   </carousel>
 </content>`,
-		"localhost/empty/router.work": `import { router } from "kitwork";
+		"localhost/empty/router.work": `import * as router from "kitwork/router";
 
 router.get((context) => {
   const none = [];
@@ -145,7 +145,7 @@ router.get((context) => {
     </box>
   </carousel>
 </content>`,
-		"localhost/named/router.work": `import { router } from "kitwork";
+		"localhost/named/router.work": `import * as router from "kitwork/router";
 
 router.get((context) => {
   const drinks = [

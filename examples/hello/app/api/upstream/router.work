@@ -1,4 +1,5 @@
-import { router, safe } from "kitwork";
+import * as router from "kitwork/router";
+import { safe } from "kitwork";
 import * as http from "kitwork/http";
 
 router.get((ctx) => {

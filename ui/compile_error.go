@@ -9,5 +9,5 @@ func (s *Site) CompileError(routeDir string) (*Page, error) {
 	if file == "" {
 		return nil, nil
 	}
-	return s.compile(routeDir, file)
+	return s.compile(routeDir, file, pageError)
 }

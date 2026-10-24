@@ -67,6 +67,26 @@ var weekdays = map[string]time.Weekday{
 	"thu": time.Thursday, "fri": time.Friday, "sat": time.Saturday,
 }
 
+// untilWallHour is "hourly": the time until the wall clock of now's zone next reads an o'clock (24/10/2026).
+// Truncate counts hours from the zero instant in UTC, which lands at half past in a zone half an hour off
+// (Asia/Kolkata); the next hour by the calendar, Hour()+1, skips the hour a clock turned back repeats
+// (01:30 EDT on the day New York falls back keeps 30 minutes, to 01:00 EST, not 1h30). So the clock moves to
+// the end of the hour it reads, and again while a change of the zone's offset in between leaves it off the
+// hour (Australia/Lord_Howe turns half an hour: 01:45 there falls back to 01:30, then reads 02:00). On a zone
+// whose offset is whole hours it is the same as Truncate.
+func untilWallHour(now time.Time) time.Duration {
+	next := now
+	for turn := 0; turn < 4; turn++ { // an offset changes at most once in an hour: two turns end it
+		within := time.Duration(next.Minute())*time.Minute + time.Duration(next.Second())*time.Second +
+			time.Duration(next.Nanosecond())
+		if turn > 0 && within == 0 {
+			break
+		}
+		next = next.Add(time.Hour - within)
+	}
+	return next.Sub(now)
+}
+
 // calendarExpiry parses a boundary spec into a resolver, or nil if unrecognised.
 func calendarExpiry(s string) func(time.Time) time.Duration {
 	fields := strings.Fields(s)
@@ -92,9 +112,7 @@ func calendarExpiry(s string) func(time.Time) time.Duration {
 
 	switch kind {
 	case "hourly":
-		return func(now time.Time) time.Duration {
-			return now.Truncate(time.Hour).Add(time.Hour).Sub(now)
-		}
+		return untilWallHour
 	case "daily", "midnight", "today":
 		return func(now time.Time) time.Duration {
 			next := atToday(now)

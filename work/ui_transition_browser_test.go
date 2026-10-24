@@ -24,7 +24,7 @@ func transitionSite(transition, toastPlace, networkPlace string) map[string]stri
 `
 	}
 	return map[string]string{
-		"localhost/router.work": `import { router } from "kitwork";
+		"localhost/router.work": `import * as router from "kitwork/router";
 
 router.language("vi");
 `,

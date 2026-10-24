@@ -14,7 +14,7 @@ import (
 // driveStaleFiles is a site that bundles its JavaScript parts (router.bundle({ javascript: "split" })):
 // / has a dropdown, /hai a dropdown and an appearance switch, so each page's bundle is another set.
 var driveStaleFiles = map[string]string{
-	"localhost/router.work": `import { router } from "kitwork";
+	"localhost/router.work": `import * as router from "kitwork/router";
 
 router.colors({ brand: "#c8742c" });
 router.bundle({ javascript: "split" });

@@ -111,6 +111,11 @@ type Tenant struct {
 	// nothing.
 	sharedEnvironment *SharedEnvironment
 
+	// scheduleZone is the app's zone its schedules count in when they write no .timezone(…):
+	// router.timezone(…) of the config.work at the app's folder (appTimezone), set as the app's clock loads
+	// (LoadScheduleFiles); nil until then, UTC.
+	scheduleZone *time.Location
+
 	// Compatibility aliases. A web tenant borrows these from its generation
 	// and site runtime; an app-only tenant still owns local fallbacks.
 	env          value.Value

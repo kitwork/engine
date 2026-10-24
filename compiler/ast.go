@@ -45,8 +45,14 @@ type Program struct {
 	Schedule *ScheduleBundle
 	// App: a file of an app, compiled with the app's folder; false for a file of no app, as a manifest.
 	App bool
-	// Router: the program is a router.work, where router.view is refused (router.go).
-	Router bool
+	// Router: the program is a router.work, where router.view is refused (router.go). RouterConfig: it is
+	// the config.work of the app's folder, a site or a branch, the rules of a branch split out of router.work
+	// (KITWORK_ROUTER.md mục 4); the router's rules apply to both (router_rules.go).
+	Router       bool
+	RouterConfig bool
+	// RouterCalls are the router.<word>(…) lines a router.work or a router config.work writes at its top
+	// level, read before anything is bundled (readRouterFile); nil for any other program.
+	RouterCalls *RouterCalls
 	// FolderCalls: the program is a config.work of .shared/queue/ or of .schedule/, and these are the calls of
 	// its folder it makes, each a line of its own at the top level (folder_config.go); nil for any other.
 	FolderCalls *FolderCalls
@@ -171,7 +177,21 @@ type VarStatement struct {
 	// KitworkHTTPVerbs are the names this import binds to a method of the http module
 	// (import { get } from "kitwork/http"), checked as KitworkHTTP is.
 	KitworkHTTPVerbs []string
+	// Import is the form of the import of "kitwork" this statement lowers (import { a }, import * as n,
+	// import n); ImportNone for a statement the author wrote. A namespace and a default import lower to the
+	// same const, so only this tells them apart: router.work takes exactly one form (router_rules.go).
+	Import ImportForm
 }
+
+// ImportForm is how an import of "kitwork" was written.
+type ImportForm uint8
+
+const (
+	ImportNone      ImportForm = iota
+	ImportNamed                // import { a } from "kitwork/x", import { a as b } from "kitwork/x"
+	ImportNamespace            // import * as n from "kitwork/x"
+	ImportDefault              // import n from "kitwork/x"
+)
 
 func (vs *VarStatement) statementNode() {}
 func (vs *VarStatement) String() string {

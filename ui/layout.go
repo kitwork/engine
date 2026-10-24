@@ -168,9 +168,9 @@ func (c *compiler) layoutCall(n *Node, cx ctx) (op, error) {
 		}
 	}
 
-	// what the call reads is read where it stands
+	// what the call reads is read where it stands, once a row of its own for (callScope)
 	for _, o := range outside {
-		if err := c.checkNames(n, o.attr, o.e, cx.scope, cx.aliases); err != nil {
+		if err := c.checkNames(n, o.attr, o.e, callScope(o, site, cx.scope), cx.aliases); err != nil {
 			return nil, err
 		}
 	}

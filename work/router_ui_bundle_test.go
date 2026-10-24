@@ -280,9 +280,9 @@ func TestRouterBundleSplitAndInlineDeliverTheJavaScriptParts(t *testing.T) {
 // false has every part a file; a folder that writes nothing has the root's.
 func TestRouterBundleNearestFolderWinsPerPart(t *testing.T) {
 	tenant := bundleSite(t, `"inline"`, map[string]string{
-		"localhost/tach/router.work":    "import { router } from \"kitwork\";\nrouter.bundle({ javascript: \"split\" });\n",
+		"localhost/tach/router.work":    "import * as router from \"kitwork/router\";\nrouter.bundle({ javascript: \"split\" });\n",
 		"localhost/tach/content.ui":     `<content><text>Tách</text></content>`,
-		"localhost/tep/router.work":     "import { router } from \"kitwork\";\nrouter.bundle(false);\n",
+		"localhost/tep/router.work":     "import * as router from \"kitwork/router\";\nrouter.bundle(false);\n",
 		"localhost/tep/content.ui":      `<content><text>Tệp</text></content>`,
 		"localhost/tach/con/content.ui": `<content><text>Con</text></content>`,
 	})
@@ -360,7 +360,7 @@ func TestRouterBundleIsValidated(t *testing.T) {
 // file, linked (TestIconsFromDataAreOneFilePerSet).
 func TestRouterBundleIconsFromDataAreInlineToo(t *testing.T) {
 	changes := map[string]string{
-		"localhost/bieu-tuong/router.work": "import { router } from \"kitwork\";\nrouter.get((ctx) => ctx.view({ name: \"mug\" }));\n",
+		"localhost/bieu-tuong/router.work": "import * as router from \"kitwork/router\";\nrouter.get((ctx) => ctx.view({ name: \"mug\" }));\n",
 		"localhost/bieu-tuong/content.ui":  `<content><icon value="coffee" alt="" /><icon value="{{ name }}" alt="" /></content>`,
 	}
 	for _, written := range []string{"", "false"} {

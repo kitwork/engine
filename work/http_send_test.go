@@ -191,17 +191,20 @@ router.get((context) => {
 
 // A route's function that returns a request it never sent fails naming .send(): until 22/10/2026 the
 // request went out at the return, and since then the route answered 200 with nothing, and nothing went
-// out. The router's .error() reads the failure; nothing reaches the upstream.
+// out. While developing the 500 carries the failure's whole text (the route's .error() hook that read it
+// here is gone, 24/10/2026); nothing reaches the upstream.
 func TestHTTPReturnedUnsentRequestFails(t *testing.T) {
 	reachLoopback(t)
+	saved := AllowLocal
+	AllowLocal = true // developing: the answer of an error nothing caught is its whole text
+	t.Cleanup(func() { AllowLocal = saved })
 	upstream, hits := echoUpstream(t)
 	tn := NewTenant(writeSite(t, map[string]string{
 		"router.work": `import * as router from "kitwork/router";`,
 		"returned/router.work": `import * as http from "kitwork/http";
 import * as router from "kitwork/router";
 
-router.get(() => http.post("` + upstream.URL + `/orders").header("Accept", "application/json"))
-  .error((context, error) => context.status(500).json({ code: error.code, message: error.message }));
+router.get(() => http.post("` + upstream.URL + `/orders").header("Accept", "application/json"));
 `,
 		"plain/router.work": `import * as http from "kitwork/http";
 import * as router from "kitwork/router";
@@ -213,13 +216,12 @@ router.get(() => http.get("` + upstream.URL + `/feed"));
 		t.Fatalf("run: %v", err)
 	}
 	rec := sendRequest(tn, http.MethodGet, "/returned", "", "", nil)
-	var got struct{ Code, Message string }
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); rec.Code != http.StatusInternalServerError || err != nil {
-		t.Fatalf("GET /returned = %d %s, want the .error() handler's 500", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("GET /returned = %d %s, want 500", rec.Code, rec.Body.String())
 	}
-	if got.Code != "INVALID_ARGUMENT" || !strings.Contains(got.Message, "trả về http.post(…) chưa gửi") ||
-		!strings.Contains(got.Message, "const upstream = http.post(url).send()") {
-		t.Errorf("the failure = %+v, want INVALID_ARGUMENT naming http.post(url).send()", got)
+	if failure := rec.Body.String(); !strings.Contains(failure, "trả về http.post(…) chưa gửi") ||
+		!strings.Contains(failure, "const upstream = http.post(url).send()") {
+		t.Errorf("the failure = %q, want it naming http.post(url).send()", failure)
 	}
 	if rec := sendRequest(tn, http.MethodGet, "/plain", "", "", nil); rec.Code != http.StatusInternalServerError {
 		t.Errorf("GET /plain = %d %q, want 500, not an empty 200", rec.Code, rec.Body.String())

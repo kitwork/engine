@@ -27,7 +27,7 @@ func TestCheckAndProfileFindAKitworkUISite(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("router.work", `import { router } from "kitwork";
+	write("router.work", `import * as router from "kitwork/router";
 router.colors({ brand: "#c8742c" });
 router.get((ctx) => {
   const title = "Thực đơn";
@@ -35,7 +35,7 @@ router.get((ctx) => {
 });`)
 	write("view.ui", `<view><content /></view>`)
 	write("content.ui", `<content><text heading="1">{{ title }}</text></content>`)
-	write("mon/{slug}/router.work", `import { router } from "kitwork";
+	write("mon/{slug}/router.work", `import * as router from "kitwork/router";
 router.get((ctx) => {
   const name = ctx.params("slug");
   return ctx.view({ name });

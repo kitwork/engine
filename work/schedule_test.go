@@ -653,10 +653,11 @@ router.get((context) => context.json({
 	}
 }
 
-// A schedule without .timezone(…) counts in UTC until the engine reads router.timezone(…) of the app's
-// config.work (mục 5): boot says so for each, with its file:line:column, so the spec's first block copied as
-// written does not fire at 09:00 UTC unseen. CONTROL: a schedule with its zone and an on(…), whose instant
-// carries its offset, are not said. CONTROL (validated by disabling the code): with the line not said, boot
+// A schedule without .timezone(…) in an app that declares no router.timezone(…) in its config.work counts in
+// UTC (mục 5): boot says so for each, with its file:line:column, naming the app's call, so the spec's first
+// block copied as written does not fire at 09:00 UTC unseen. CONTROL: a schedule with its zone and an on(…),
+// whose instant carries its offset, are not said; an app that declares its zone is
+// TestScheduleCountsInTheAppsZone. CONTROL (validated by disabling the code): with the line not said, boot
 // says nothing of sang.
 func TestScheduleWithoutTimezoneIsSaidAtBoot(t *testing.T) {
 	setClock(t, instant(t, "2026-10-23T10:00:00Z"))
@@ -667,7 +668,7 @@ export const zoned = schedule.daily("09:00").timezone("Asia/Ho_Chi_Minh").run((c
 export const launch = schedule.on("2026-12-01T09:00:00+07:00").once((context) => 1);
 `,
 	})
-	want := `[Schedule] baoCao.work:2:29: lịch sang không viết .timezone(…): đếm theo UTC, vì engine chưa đọc router.timezone(…) của config.work gốc app; viết .timezone("Asia/Ho_Chi_Minh") cho lịch`
+	want := `[Schedule] baoCao.work:2:29: lịch sang không viết .timezone(…), và app không khai router.timezone(…): đếm theo UTC; múi giờ của app viết router.timezone("Asia/Ho_Chi_Minh") trong config.work ở gốc app, của riêng lịch thì .timezone(…)`
 	if !strings.Contains(q.output, want) {
 		t.Errorf("boot did not say %q:\n%s", want, q.output)
 	}

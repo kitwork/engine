@@ -113,10 +113,11 @@ func TestTreeProxyPersist(t *testing.T) {
 
 // router.proxy reads the upstream through kitwork/http's Go request (22/10/2026): an upstream that sends
 // no Content-Type is sniffed (PNG bytes come back as image/png, not octet-stream), and a body past the
-// proxy's cap (the host's 64 MiB, lowered here) is TOO_LARGE, which .error() reads, and nothing of it
-// reaches the visitor.
+// proxy's cap (the host's 64 MiB, lowered here) is TOO_LARGE, a 502 whose log names the cap (the route's .error()
+// hook that read it here is gone, 24/10/2026), and nothing of it reaches the visitor.
 func TestProxySniffsTheTypeAndCapsTheBody(t *testing.T) {
 	reachLoopback(t)
+	logs := captureLogs(t)
 	png := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/large" {
@@ -137,8 +138,7 @@ func TestProxySniffsTheTypeAndCapsTheBody(t *testing.T) {
 router.proxy("` + upstream.URL + `/logo");
 `,
 		"large/router.work": `import * as router from "kitwork/router";
-router.proxy("` + upstream.URL + `/large")
-  .error((context, error) => context.status(502).json({ code: error.code }));
+router.proxy("` + upstream.URL + `/large");
 `,
 	}), "localhost")
 	if err := tn.Run(); err != nil {
@@ -153,9 +153,26 @@ router.proxy("` + upstream.URL + `/large")
 	}
 
 	rec = sendRequest(tn, http.MethodGet, "/large", "", "", nil)
+	if rec.Code != http.StatusBadGateway || strings.Contains(rec.Body.String(), "xxxx") || !strings.Contains(logs.String(), "exceeds 1kb") {
+		t.Errorf("GET /large (2048 bytes, a cap of 1024) = %d %s, want 502 with nothing of the body, the log naming the cap:\n%s",
+			rec.Code, rec.Body.String(), logs.String())
+	}
+
+	// A template site keeps the route's .error() hook: the failure it reads carries the code TOO_LARGE.
+	template := NewTenant(writeSite(t, map[string]string{
+		"router.kitwork.js": `import { router } from "kitwork";`,
+		"large/router.kitwork.js": `import { router } from "kitwork";
+router.proxy("` + upstream.URL + `/large")
+  .error((context, error) => context.status(502).json({ code: error.code }));
+`,
+	}), "localhost")
+	if err := template.Run(); err != nil {
+		t.Fatalf("run the template site: %v", err)
+	}
+	rec = sendRequest(template, http.MethodGet, "/large", "", "", nil)
 	var failed struct{ Code string }
 	if err := json.Unmarshal(rec.Body.Bytes(), &failed); rec.Code != http.StatusBadGateway || err != nil || failed.Code != "TOO_LARGE" {
-		t.Errorf("GET /large (2048 bytes, a cap of 1024) = %d %s, want 502 with code TOO_LARGE", rec.Code, rec.Body.String())
+		t.Errorf("template GET /large (2048 bytes, a cap of 1024) = %d %s, want 502 with code TOO_LARGE from .error()", rec.Code, rec.Body.String())
 	}
 }
 

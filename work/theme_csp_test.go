@@ -66,7 +66,7 @@ func TestServedUIPageAllowsTheTabsPrepaintInItsPolicy(t *testing.T) {
 	const policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
 	site := func(persist string) *httptest.ResponseRecorder {
 		tenant := buildUISite(t, map[string]string{
-			"localhost/router.work": `import { router } from "kitwork";` + "\n" +
+			"localhost/router.work": `import * as router from "kitwork/router";` + "\n" +
 				`router.guard((context) => { context.header("Content-Security-Policy", "` + policy + `"); });` + "\n",
 			"localhost/view.ui": `<view><content /></view>`,
 			"localhost/content.ui": `<content>

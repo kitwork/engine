@@ -1,6 +1,7 @@
 package work
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -9,9 +10,10 @@ import (
 )
 
 // router.view is gone (KITWORK_ROUTER.md, 23/10/2026): a page is router.get((context) => context.view({ … })).
-// Written in a router.work it stops the boot where the compiler sees it; written where the compiler
-// cannot follow the router (another name for it), and in a template site's router.kitwork.js, it stops the
-// boot at the call, file:line:column, in the same words. Each names the spelling to write.
+// Written in a router.work it stops the boot where the compiler sees it; in a template site's
+// router.kitwork.js it stops the boot at the call, file:line:column, in the same words. Each names the
+// spelling to write. Another name for the router in a router.work (const r = router) is itself refused where
+// it is written since 24/10/2026: the router is read only at the head of a line's call (compiler/router_rules.go).
 //
 // CONTROL (23/10/2026, go test -overlay, the tree untouched): with FolderRouter.View declaring a GET again
 // and the compiler's routerMember and routerDeclaration refusing nothing, the three sites booted:
@@ -21,18 +23,18 @@ import (
 func TestRouterViewIsGone(t *testing.T) {
 	const view = "{\n  const note = \"x\";\n}"
 	for _, c := range []struct {
-		name, file, source, at string
+		name, file, source, at, want string
 	}{
-		{"router.work", "router.work", "import * as router from \"kitwork/router\";\nrouter.view((context) => " + view + ");\n", "router.work:2:8: "},
-		{"another name", "router.work", "import * as router from \"kitwork/router\";\nconst r = router;\nr.view((context) => " + view + ");\n", "router.work:3:"},
-		{"template", "router.kitwork.js", "import { router } from \"kitwork\";\nrouter.view((ctx) => " + view + ");\n", "router.kitwork.js:2:"},
+		{"router.work", "router.work", "import * as router from \"kitwork/router\";\nrouter.view((context) => " + view + ");\n", "router.work:2:8: ", compiler.RouterViewRemoved},
+		{"another name", "router.work", "import * as router from \"kitwork/router\";\nconst r = router;\nr.view((context) => " + view + ");\n", "router.work:2:11: ", compiler.RouterAsValue("router")},
+		{"template", "router.kitwork.js", "import { router } from \"kitwork\";\nrouter.view((ctx) => " + view + ");\n", "router.kitwork.js:2:", compiler.RouterViewRemoved},
 	} {
 		_, err := bootUISite(t, map[string]string{
 			"localhost/" + c.file:  c.source,
 			"localhost/content.ui": "<content><text>{{ note }}</text></content>",
 		}, true)
-		if err == nil || !strings.Contains(err.Error(), c.at) || !strings.Contains(err.Error(), compiler.RouterViewRemoved) {
-			t.Errorf("%s: run = %v, want %q at %s", c.name, err, compiler.RouterViewRemoved, c.at)
+		if err == nil || !strings.Contains(err.Error(), c.at) || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: run = %v, want %q at %s", c.name, err, c.want, c.at)
 		}
 	}
 	if !strings.Contains(compiler.RouterViewRemoved, "router.get((context) => context.title(\"…\").view({ … }))") {
@@ -42,28 +44,46 @@ func TestRouterViewIsGone(t *testing.T) {
 
 // A page reads exactly the names of the object its handler hands context.view({ … }) (KITWORK_ROUTER.md,
 // 23/10/2026): content.ui, the frame view.ui and the regions it calls (header.ui, footer.ui) all read the
-// same names, a function of the object included; a const of the file, an import of it, and a variable of
-// the handler that the object does not hand read as a name never given does. A path no folder answers
-// draws notfound.ui with no names at all.
+// same names, a function of the object included. Any other name a page reads is a compile error at the read
+// since 24/10/2026 (KITWORK_UI.md mục 4, ui/given.go), answered 500 while developing with the names the page
+// is given and never a value: a const of the file, an import of it, a variable of the handler that the
+// object does not hand, a name nothing has. A path no folder answers draws notfound.ui, which is given no
+// name at all, so a frame that reads the route's names fails there; a branch whose own view.ui reads none
+// draws it. A folder of the site with no router.work draws its content.ui with nothing, and a name it reads
+// is the error naming the folder.
 //
 // CONTROL (23/10/2026, go test -overlay): with serveUIAnswer handing respondUI nothing (scope nil), the
 // page, the frame and both regions lost the object's names: "/ lacks \"[head Kitwork]\"", "[foot Kitwork!]",
 // the links; with viewData adding the names of the handler's scopes as router.view did, the file's const
-// and its import reached the page: "/ page = \"[Kitwork] [file-const] [0] [function () { [native code] }]
-// [0]\"", "/ shows \"file-const\"".
+// and its import reached the page. CONTROL (24/10/2026, go test -overlay): with the render plan not marking
+// the site a Kitwork UI site's, /titled answered 200 and /khong-co 404, the frame's names read as nothing;
+// with ui's notGiven telling nothing, /secret, /hidden, /tagline and /nothing answered 200 too.
 func TestUIPageReadsOnlyTheObjectOfItsView(t *testing.T) {
-	tenant := buildUISite(t, map[string]string{
-		".shared/site.work": "export const tagline = () => \"made with Go\";\n",
-		"localhost/router.work": "import * as router from \"kitwork/router\";\nimport { tagline } from \"app/.shared/site.work\";\n" +
-			"const secret = \"file-const\";\n" +
-			"router.get((context) => {\n  const hidden = \"handler-local\";\n  const site = \"Kitwork\";\n" +
-			"  return context.title(\"Trang\").view({ site, links: [{ url: \"/a\", label: \"A\" }], shout: (word) => word + \"!\" });\n});\n",
-		"localhost/view.ui":     "<view><header /><content /><footer /></view>",
-		"localhost/header.ui":   "<header><text id=\"head\">[head {{ site }}]</text><link for=\"entry of links\" value=\"{{ entry.url }}\">{{ entry.label }}</link></header>",
-		"localhost/footer.ui":   "<footer><text id=\"foot\">[foot {{ shout(site) }}]</text></footer>",
-		"localhost/content.ui":  "<content><text id=\"page\">[{{ site }}] [{{ secret }}] [{{ hidden }}] [{{ tagline }}] [{{ nothing }}]</text></content>",
-		"localhost/notfound.ui": "<content><text id=\"missing\">[{{ site }}] [{{ nothing }}]</text></content>",
-	})
+	route := "import * as router from \"kitwork/router\";\nimport { tagline } from \"app/.shared/site.work\";\n" +
+		"const secret = \"file-const\";\n" +
+		"router.get((context) => {\n  const hidden = \"handler-local\";\n  const site = \"Kitwork\";\n" +
+		"  return context.title(\"Trang\").view({ site, links: [{ url: \"/a\", label: \"A\" }], shout: (word) => word + \"!\" });\n});\n"
+	header := "<header><text id=\"head\">[head {{ site }}]</text><link for=\"entry of links\" value=\"{{ entry.url }}\">{{ entry.label }}</link></header>"
+	plainView := "<view><content /></view>"
+	files := map[string]string{
+		".shared/site.work":           "export const tagline = () => \"made with Go\";\n",
+		"localhost/router.work":       route,
+		"localhost/view.ui":           "<view><header /><content /><footer /></view>",
+		"localhost/header.ui":         header,
+		"localhost/footer.ui":         "<footer><text id=\"foot\">[foot {{ shout(site) }}]</text></footer>",
+		"localhost/content.ui":        "<content><text id=\"page\">[{{ site }}] [{{ shout('Go') }}]</text></content>",
+		"localhost/notfound.ui":       "<content><text id=\"missing\">Không có trang này</text></content>",
+		"localhost/plain/view.ui":     plainView,
+		"localhost/plain/content.ui":  "<content><text id=\"plain\">Trang tĩnh</text></content>",
+		"localhost/titled/view.ui":    plainView,
+		"localhost/titled/content.ui": "<content><text>{{ title }}</text></content>",
+	}
+	never := map[string]string{"secret": "file-const", "hidden": "handler-local", "tagline": "made with Go", "nothing": ""}
+	for name := range never {
+		files["localhost/"+name+"/router.work"] = route
+		files["localhost/"+name+"/content.ui"] = "<content><text id=\"page\">[{{ site }}] [{{ " + name + " }}]</text></content>"
+	}
+	tenant := buildUISite(t, files)
 	page := serveUI(t, tenant, "http://localhost/")
 	body := page.Body.String()
 	if page.Code != http.StatusOK {
@@ -74,20 +94,40 @@ func TestUIPageReadsOnlyTheObjectOfItsView(t *testing.T) {
 			t.Errorf("/ lacks %q\n%.2500s", want, body)
 		}
 	}
-	// secret, hidden and tagline read as nothing, a name never given, does
-	if parts := bracketed(textOf(t, body, "page")); len(parts) != 5 || parts[0] != "Kitwork" ||
-		parts[1] != parts[4] || parts[2] != parts[4] || parts[3] != parts[4] {
-		t.Errorf("/ page = %q, want the object's site, then three names read as one never given", textOf(t, body, "page"))
+	if text := textOf(t, body, "page"); text != "[Kitwork] [Go!]" {
+		t.Errorf("/ page = %q, want the object's site and its function", text)
 	}
-	for _, never := range []string{"file-const", "handler-local", "made with Go"} {
-		if strings.Contains(body, never) {
-			t.Errorf("/ shows %q, a name the object of its view does not hand:\n%.2500s", never, body)
+
+	// a name the object does not hand: the error at the read, the names given, never the value
+	for name, value := range never {
+		content := files["localhost/"+name+"/content.ui"]
+		want := fmt.Sprintf("%s/content.ui:1:%d: router.get không trả về %s: trang đọc %s mà object của context.view({ … }) trong %s/router.work không có; tên có: links, shout, site",
+			name, strings.Index(content, "{{ "+name)+1, name, name, name)
+		rec := serveUI(t, tenant, "http://localhost/"+name)
+		if got := rec.Body.String(); rec.Code != http.StatusInternalServerError || !strings.Contains(got, want) || value != "" && strings.Contains(got, value) {
+			t.Errorf("/%s = %d, want 500 saying %q:\n%.1500s", name, rec.Code, want, got)
 		}
 	}
+
+	// notfound.ui is given nothing: the frame reading site fails where it reads it; a branch whose frame reads
+	// nothing draws it
 	missing := serveUI(t, tenant, "http://localhost/khong-co")
-	if parts := bracketed(textOf(t, missing.Body.String(), "missing")); missing.Code != http.StatusNotFound ||
-		len(parts) != 2 || parts[0] != parts[1] {
-		t.Errorf("/khong-co = %d %q, want notfound.ui with no names", missing.Code, textOf(t, missing.Body.String(), "missing"))
+	want := fmt.Sprintf("header.ui:1:%d: trang không tìm thấy không được đưa tên nào, nên site không đọc ra gì", strings.Index(header, "{{ site")+1)
+	if got := missing.Body.String(); missing.Code != http.StatusInternalServerError || !strings.Contains(got, want) {
+		t.Errorf("/khong-co = %d, want 500 saying %q:\n%.1500s", missing.Code, want, got)
+	}
+	if missing := serveUI(t, tenant, "http://localhost/plain/khong-co"); missing.Code != http.StatusNotFound || textOf(t, missing.Body.String(), "missing") != "Không có trang này" {
+		t.Errorf("/plain/khong-co = %d, want notfound.ui in the branch's frame:\n%.1500s", missing.Code, missing.Body.String())
+	}
+
+	// a folder with no router.work: its page is given nothing
+	if plain := serveUI(t, tenant, "http://localhost/plain"); plain.Code != http.StatusOK || textOf(t, plain.Body.String(), "plain") != "Trang tĩnh" {
+		t.Errorf("/plain = %d, want its page:\n%.1500s", plain.Code, plain.Body.String())
+	}
+	titled := serveUI(t, tenant, "http://localhost/titled")
+	want = "titled/content.ui:1:16: router.get không trả về title: thư mục /titled không có router.work, nên không có router.get và trang không được đưa tên nào"
+	if got := titled.Body.String(); titled.Code != http.StatusInternalServerError || !strings.Contains(got, want) {
+		t.Errorf("/titled = %d, want 500 saying %q:\n%.1500s", titled.Code, want, got)
 	}
 }
 
@@ -113,9 +153,10 @@ func textOf(t *testing.T, page, id string) string {
 }
 
 // A handler in router.work takes its context by position (KITWORK_ROUTER.md mục 5, 23/10/2026): the first
-// parameter is the context whatever its name ((c), (content), (request)) or taken apart; in a hook of a
-// failure the second is what failed; any other parameter is null. A template site's router.kitwork.js
-// keeps its way, by name: (request, response) are the request and the response.
+// parameter is the context whatever its name ((c), (content), (request)) or taken apart; any other
+// parameter is null. A template site's router.kitwork.js keeps its way, by name: (request, response) are
+// the request and the response. (The hooks of a failure, whose second parameter was what failed, are gone
+// from router.work since 24/10/2026: TestRouterWorkFailureHooksAreGone.)
 //
 // CONTROL (23/10/2026, go test -overlay): with arguments binding router.work by name as a template's,
 // (c), (content) and (request) were no context and /c, /content, /request answered 404 "404 page not
@@ -131,8 +172,6 @@ func TestRouterWorkHandlerTakesItsContextByPosition(t *testing.T) {
 		"localhost/parts/router.work":   header + "router.get(({ request, response }) => response.json({ method: request.method }));\n",
 		"localhost/second/router.work":  header + "router.get((context, extra, more) => context.json({ extra, more }));\n",
 		"localhost/guarded/router.work": header + "router.guard((gate) => gate.query(\"key\") === \"open\");\nrouter.get((context) => context.text(\"inside\"));\n",
-		"localhost/failed/router.work": header + "router.get((context) => {\n  fail(\"hỏng\");\n})" +
-			".error((c, failure) => c.status(503).json({ code: failure.code, message: failure.message }));\n",
 		"localhost/template/router.kitwork.js": "import { router } from \"kitwork\";\n" +
 			"router.get((request, response) => response.json({ path: request.path }));\n",
 	})
@@ -146,7 +185,6 @@ func TestRouterWorkHandlerTakesItsContextByPosition(t *testing.T) {
 		"/parts":            {http.StatusOK, `{"method":"GET"}`},
 		"/second":           {http.StatusOK, `{"extra":null,"more":null}`},
 		"/guarded?key=open": {http.StatusOK, "inside"},
-		"/failed":           {http.StatusServiceUnavailable, `{"code":"FAIL","message":"hỏng"}`},
 		"/template":         {http.StatusOK, `{"path":"/template"}`},
 	} {
 		rec := serveUI(t, tenant, "http://localhost"+path)
@@ -162,11 +200,11 @@ func TestRouterWorkHandlerTakesItsContextByPosition(t *testing.T) {
 // A parameter of a router.work function that was read by name until 23/10/2026 and means something else
 // read by position stops the boot where it is written (KITWORK_ROUTER.md mục 5): after the first, a name of
 // the context, the request or the response ((request, response) => …, (req, res) => …, a guard's (context,
-// response)) is the request's failure or null now; the first of a failure's hook named for the failure
-// ((err, ctx) => …, router.error((e) => …)) is the context. Each is told at the function's arrow, as every
-// error of a handler's parameters is, and names the spelling to write. CONTROLS: the spellings it names
-// boot, a hook's (context, failure) and a handler's (e) among them, and a template site's router.kitwork.js
-// keeps reading them by name.
+// response)) is the request's failure or null now. Each is told at the function's arrow, as every error of a
+// handler's parameters is, and names the spelling to write. CONTROLS: the spellings it names boot, a
+// handler's (context, failure) and (e) among them, and a template site's router.kitwork.js keeps reading them
+// by name, its failure hooks' (err, ctx) too. (The rows of router.work's failure hooks, (err, ctx) => … and
+// router.error((e) => …), left on 24/10/2026 with the hooks: TestRouterWorkFailureHooksAreGone.)
 //
 // CONTROL (23/10/2026, go test -overlay): with positionalParameterError refusing nothing, every refused site
 // booted ("(request, response) => …: run = <nil>, want router.work:2:32: tham số `response` đứng sau tham số
@@ -174,7 +212,6 @@ func TestRouterWorkHandlerTakesItsContextByPosition(t *testing.T) {
 func TestRouterWorkParameterReadByNameIsABootError(t *testing.T) {
 	const header = "import * as router from \"kitwork/router\";\n"
 	const after = "đứng sau tham số đầu nên không phải "
-	const hook = "của móc lỗi là context: trong router.work tham số nhận theo vị trí (23/10/2026), lỗi của request là tham số thứ hai; viết (context, failure) => "
 	for _, c := range []struct{ name, source, want string }{
 		{"(request, response) => …", header + "router.get((request, response) => response.json({ a: 1 }));\n",
 			"router.work:2:32: tham số `response` " + after + "response"},
@@ -186,10 +223,6 @@ func TestRouterWorkParameterReadByNameIsABootError(t *testing.T) {
 			"router.work:2:32: tham số `Request` " + after + "request"},
 		{"(c, ctx)", header + "router.get((c, ctx) => c.json({}));\n",
 			"router.work:2:21: tham số `ctx` " + after + "context"},
-		{".error((err, ctx) => …)", header + "router.get((context) => {\n  fail(\"hỏng\");\n}).error((err, ctx) => ctx.status(503).json({ code: err.code }));\n",
-			"router.work:4:21: tham số đầu `err` " + hook},
-		{"router.error((e) => …)", header + "router.error((e) => ({ seen: e.code }));\nrouter.get((context) => context.text(\"x\"));\n",
-			"router.work:2:18: tham số đầu `e` " + hook},
 	} {
 		_, err := bootUISite(t, map[string]string{"localhost/router.work": c.source}, true)
 		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), "(KITWORK_ROUTER.md mục 5)") {
@@ -200,8 +233,6 @@ func TestRouterWorkParameterReadByNameIsABootError(t *testing.T) {
 		header + "router.get((context, failure) => context.json({ failure }));\n",
 		header + "router.get((e) => e.text(\"e\"));\n",
 		header + "router.get(({ request, response }) => response.json({ path: request.path }));\n",
-		header + "router.get((context) => {\n  fail(\"hỏng\");\n}).error((context, error) => context.status(503).json({ code: error.code }));\n",
-		header + "router.error((context, err) => context.status(503).json({ code: err.code }));\n",
 	} {
 		if _, err := bootUISite(t, map[string]string{"localhost/router.work": source}, true); err != nil {
 			t.Errorf("%q: run = %v, want it to boot", source, err)
@@ -210,6 +241,44 @@ func TestRouterWorkParameterReadByNameIsABootError(t *testing.T) {
 	if _, err := bootUISite(t, map[string]string{"localhost/router.kitwork.js": "import { router } from \"kitwork\";\n" +
 		"router.get((request, response) => response.json({ path: request.path })).error((err, ctx) => ctx.status(503).json({ code: err.code }));\n"}, true); err != nil {
 		t.Errorf("a template site's (request, response) and (err, ctx): run = %v, want it to boot", err)
+	}
+}
+
+// The failure hooks of router.work are gone (KITWORK_ROUTER.md mục 3, 24/10/2026): .error(), .success(),
+// .finally() (and their old names .then(), .catch()) chained after a door, and router.error(…) of the branch,
+// are compile errors at the word, naming what a failure does now: the nearest error.ui draws it, and logging
+// or cleaning up is written in the handler. Whatever the hook's parameters were named. A template site's
+// router.kitwork.js keeps its hooks (TestRouterWorkParameterReadByNameIsABootError's last row).
+//
+// CONTROL (24/10/2026, go test -overlay with RouteRuleRemoved and RouterRemovedWord knowing none of these words):
+// .error, .success, .finally, .then and .catch became the nearest-word error (".error không nối sau
+// router.get(…): sau cửa chỉ nối …"), and router.error the unknown-word one: "router.error không có; router
+// có get, …", not the removal.
+func TestRouterWorkFailureHooksAreGone(t *testing.T) {
+	const header = "import * as router from \"kitwork/router\";\n"
+	const route = "lỗi của route vẽ error.ui gần nhất; ghi log hay dọn dẹp viết trong handler"
+	for _, c := range []struct{ name, source, want string }{
+		{".error((err, ctx) => …)", header + "router.get((context) => {\n  fail(\"hỏng\");\n}).error((err, ctx) => ctx.status(503).json({ code: err.code }));\n",
+			"router.work:4:4: .error(…) sau router.get(…) đã bỏ (24/10/2026): " + route},
+		{".error((context, error) => …)", header + "router.get((context) => context.text(\"x\")).error((context, error) => context.status(503).json({ code: error.code }));\n",
+			"router.work:2:44: .error(…) sau router.get(…) đã bỏ (24/10/2026): " + route},
+		{".success", header + "router.post((context) => context.text(\"x\")).guard(() => true).success((context) => context.text(\"y\"));\n",
+			"router.work:2:63: .success(…) sau router.post(…) đã bỏ (24/10/2026): " + route},
+		{".finally", header + "router.get((context) => context.text(\"x\")).finally(() => null);\n",
+			"router.work:2:44: .finally(…) sau router.get(…) đã bỏ (24/10/2026): " + route},
+		{".then", header + "router.get((context) => context.text(\"x\")).then(() => null);\n",
+			"router.work:2:44: .then(…) sau router.get(…) đã bỏ (24/10/2026): " + route},
+		{".catch", header + "router.proxy(\"https://example.com/a.png\").catch(() => null);\n",
+			"router.work:2:43: .catch(…) sau router.proxy(…) đã bỏ (24/10/2026): " + route},
+		{"router.error((e) => …)", header + "router.error((e) => ({ seen: e.code }));\nrouter.get((context) => context.text(\"x\"));\n",
+			"router.work:2:8: router.error đã bỏ (24/10/2026): " + route},
+		{"router.error((context, err) => …)", header + "router.error((context, err) => context.status(503).json({ code: err.code }));\n",
+			"router.work:2:8: router.error đã bỏ (24/10/2026): " + route},
+	} {
+		_, err := bootUISite(t, map[string]string{"localhost/router.work": c.source}, true)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: run = %v, want %s", c.name, err, c.want)
+		}
 	}
 }
 

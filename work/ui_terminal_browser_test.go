@@ -22,7 +22,7 @@ import (
 //   - "far", typing="1s", far below them, off screen until the probe scrolls to it; the clipboard stub
 //     refuses its commands.
 var terminalBrowserFiles = map[string]string{
-	"localhost/router.work": `import { router } from "kitwork";
+	"localhost/router.work": `import * as router from "kitwork/router";
 
 router.colors({ brand: "#c8742c" });
 `,

@@ -350,7 +350,7 @@ func (t *Tenant) cachedResponse(
 	if method.persistExpiry != nil {
 		if record, hit := t.persistStore.Get(hashKey(key)); hit {
 			if method.cacheExpiry != nil {
-				now := time.Now()
+				now := t.routeNow()
 				t.respCache.Set(key, cache.Entry{
 					Body: record.Body, ContentType: record.ContentType, Status: record.Status, Headers: record.Headers,
 				}, refillExpiry(method.cacheExpiry(now), record.ExpireAt, now))
@@ -407,7 +407,8 @@ func (t *Tenant) saveResponse(method *FolderMethod, key string, response *Respon
 	if !ok || !sharedCacheable(response, cookiesBefore, status, headers) {
 		return
 	}
-	now := time.Now()
+	// a boundary ("hourly", "nextday 03:00") falls on the app's clock in a Kitwork UI site (routeNow)
+	now := t.routeNow()
 	if method.cacheExpiry != nil {
 		t.respCache.Set(key, cache.Entry{
 			Body: body, ContentType: contentType, Status: status, Headers: headers,

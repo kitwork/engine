@@ -12,7 +12,7 @@ import (
 // scrolledFiles is a site whose / carries a scrolled: class (a pinned bar that floats up once the page
 // scrolls) and whose /khong carries none: the same layout, other content.
 var scrolledFiles = map[string]string{
-	"localhost/router.work": `import { router } from "kitwork";
+	"localhost/router.work": `import * as router from "kitwork/router";
 
 router.colors({ brand: "#c8742c", canvas: "#f6f3ee", paper: "#ffffff", ink: "#2b211b" });
 `,

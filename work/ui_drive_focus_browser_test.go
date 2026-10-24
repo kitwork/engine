@@ -21,7 +21,7 @@ var driveFocusFiles = func() map[string]string {
 		long.WriteString("\n  <text>" + hex.EncodeToString(sum[:12]) + "</text>")
 	}
 	return map[string]string{
-		"localhost/router.work": `import { router } from "kitwork";
+		"localhost/router.work": `import * as router from "kitwork/router";
 
 router.colors({ brand: "#f5225f", canvas: "#f6f9fc", paper: "#ffffff", line: "#e6ebf1", ink: "#242442" });
 router.fonts({ body: "Outfit" });

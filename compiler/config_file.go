@@ -14,6 +14,10 @@ import (
 // file's calls; the loader reads what each was handed from the module it binds (work/background_config.go).
 // A call of the folder written anywhere but as a line of its own at the top level, chained, or twice, and the
 // const of 17/10, are compile errors with file:line:column.
+//
+// A config.work of the app's folder, of a site or of a branch is the rules of the branch split out of
+// router.work (KITWORK_ROUTER.md mục 4, 24/10/2026): it is read by the rules of the router (router_rules.go),
+// where a door is a compile error, and its program runs the router calls it writes.
 func CompileConfigFileInApp(appRoot, path string) (*Bytecode, error) {
 	absolute, err := filepath.Abs(path)
 	if err != nil {
@@ -28,8 +32,21 @@ func CompileConfigFileInApp(appRoot, path string) (*Bytecode, error) {
 	if err != nil {
 		return nil, err
 	}
-	calls, err := readFolderCalls(prog, folderOf(appRoot, absolute), data)
+	module := folderOf(appRoot, absolute)
+	calls, err := readFolderCalls(prog, module, data)
 	if err != nil {
+		return nil, err
+	}
+	// the config.work of the app's folder, a site or a branch is the router's (router_rules.go), as prepareFile
+	// reads it; the one of .shared/queue/ or .schedule/, or of a folder that is no route (.shared/, _drafts/),
+	// has no router
+	routerKind := routerFileOf(appRoot, absolute)
+	var routerCalls *RouterCalls
+	if routerKind == routerConfigFile {
+		if routerCalls, err = readRouterFile(prog, routerConfigFile, routerDepth(appRoot, absolute), data); err != nil {
+			return nil, err
+		}
+	} else if err := refuseRouterImport(prog, data); err != nil {
 		return nil, err
 	}
 	files := []string{absolute}
@@ -48,5 +65,7 @@ func CompileConfigFileInApp(appRoot, path string) (*Bytecode, error) {
 	}
 	prog.App = appRoot != ""
 	prog.FolderCalls = calls
+	prog.RouterConfig = routerKind == routerConfigFile
+	prog.RouterCalls = routerCalls
 	return compilePreparedFile(prog, files, sources)
 }

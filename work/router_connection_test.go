@@ -106,7 +106,8 @@ router.get((ctx) => {
 // cannot have.
 func TestUIViewContextDatabaseIsAnError(t *testing.T) {
 	files := withFiles(map[string]string{
-		"localhost/router.work": `import { router, safe } from "kitwork";
+		"localhost/router.work": `import * as router from "kitwork/router";
+import { safe } from "kitwork";
 router.get((ctx) => {
   const { error } = safe(() => ctx.database.table("items").count());
   return ctx.title("Kho").view({ message: error.message });

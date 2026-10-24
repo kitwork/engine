@@ -65,7 +65,7 @@ router.fonts({ code: "Fira Code" });`,
 			"localhost/giau/content.ui":     words("Giàu", "một"),
 			"localhost/cung-lop/content.ui": words("Cùng lớp", "hai"),
 			"localhost/khac/content.ui":     strings.Replace(words("Khác", "ba"), `<card gap="3"`, `<card gap="3" border="line"`, 1),
-			"localhost/du-lieu/router.work": `import { router } from "kitwork";
+			"localhost/du-lieu/router.work": `import * as router from "kitwork/router";
 router.get((ctx) => {
   const tone = "danger";
   return ctx.view({ tone });
@@ -331,7 +331,7 @@ func TestPageStylesheetIsAnEngineFile(t *testing.T) {
 func TestUIPageRunsNoPassPerRequest(t *testing.T) {
 	const note = "font-family: Fira Code — toggleTheme"
 	tenant := buildFilesSite(t, withFiles(map[string]string{
-		"localhost/du-lieu/router.work": `import { router } from "kitwork";
+		"localhost/du-lieu/router.work": `import * as router from "kitwork/router";
 router.get((ctx) => {
   const note = "` + note + `";
   return ctx.view({ note });
@@ -373,7 +373,7 @@ func TestUIPageDataClassKeepsItsPlaceInTheCascade(t *testing.T) {
 	tenant := buildFilesSite(t, withRootRouter(t,
 		`router.colors({ brand: "#c8742c", canvas: "#f6f3ee", paper: "#ffffff", danger: "#e5484d" });`,
 		map[string]string{
-			"localhost/muon/router.work": `import { router } from "kitwork";
+			"localhost/muon/router.work": `import * as router from "kitwork/router";
 router.get((ctx) => {
   const tone = "danger";
   return ctx.view({ tone });
@@ -399,7 +399,7 @@ router.get((ctx) => {
 // brand a token of its colours file. CONTROL: the site root's colours file is another.
 func TestBranchSendsNoInlineColourCSS(t *testing.T) {
 	tenant := buildFilesSite(t, withFiles(map[string]string{
-		"localhost/quan-ly/router.work": `import { router } from "kitwork";
+		"localhost/quan-ly/router.work": `import * as router from "kitwork/router";
 router.colors({ brand: "#2563eb" });
 router.get((ctx) => {
   const orders = [{ tone: "warning" }, { tone: "success" }, { tone: "danger" }];
@@ -432,7 +432,7 @@ router.get((ctx) => {
 // already changes nothing (the page's own file).
 func TestIconsFromDataAreOneFilePerSet(t *testing.T) {
 	tenant := buildFilesSite(t, withFiles(map[string]string{
-		"localhost/bieu-tuong/router.work": `import { router } from "kitwork";
+		"localhost/bieu-tuong/router.work": `import * as router from "kitwork/router";
 router.get((ctx) => {
   const glyph = ctx.query("glyph") || "coffee";
   return ctx.view({ glyph });
@@ -508,7 +508,7 @@ func TestIconsFromDataKeepTheRecentlyUsedSets(t *testing.T) {
 
 	// through the tenant: an evicted name is the engine's 404
 	tenant := buildFilesSite(t, withFiles(map[string]string{
-		"localhost/bieu-tuong/router.work": `import { router } from "kitwork";
+		"localhost/bieu-tuong/router.work": `import * as router from "kitwork/router";
 router.get((ctx) => {
   const glyph = ctx.query("glyph");
   return ctx.view({ glyph });

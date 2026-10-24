@@ -16,7 +16,7 @@ func TestDatabaseOldSpellingsAreCompileErrors(t *testing.T) {
 	for _, test := range []struct{ source, marker, want string }{
 		{"import { kitdb } from \"kitwork/database\";\n", "import { kitdb", `import { kitdb } from "kitwork/database" đã bỏ: database của app khai export const db = connection().schema({ bảng })`},
 		{"import { kitdb } from \"kitwork/database\";\n", "import { kitdb", "app.database(path, { port }) của host"},
-		{"import { router, sqlite } from \"kitwork\";\n", "import { router", `import { sqlite } from "kitwork" đã bỏ: SQLite là connection("tên")`},
+		{"import { safe, sqlite } from \"kitwork\";\n", "import { safe", `import { sqlite } from "kitwork" đã bỏ: SQLite là connection("tên")`},
 		{"import { open as file } from \"kitwork/database\";\n", "import { open", `import { open } from "kitwork/database" đã bỏ: database của app khai`},
 		{"import { struct, text } from \"kitwork/database\";\n", "import { struct", `import { struct } from "kitwork/database" đã bỏ: struct import từ "kitwork/schema"`},
 		{"import { text } from \"kitwork/database\";\n", "import { text", `import { text } from "kitwork/database" đã bỏ: kiểu cột import từ "kitwork/schema": import { text } from "kitwork/schema"`},
@@ -50,7 +50,7 @@ func TestDatabaseOldSpellingsAreCompileErrors(t *testing.T) {
 	// the words of the spec still read as they did
 	for _, source := range []string{
 		"import { desc, asc, one, count, sum } from \"kitwork/database\";\n",
-		"import { router, safe, http } from \"kitwork\";\n",
+		"import * as router from \"kitwork/router\";\nimport { safe, http } from \"kitwork\";\n",
 	} {
 		if _, err := compileRoute(t, importDB+source); err != nil {
 			t.Errorf("%q: %v", source, err)

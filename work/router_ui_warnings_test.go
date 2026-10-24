@@ -154,7 +154,7 @@ router.contrast("strict");`, map[string]string{
 	}
 
 	// a branch says "warning" for itself
-	files["localhost/mon/{slug}/router.work"] = strings.Replace(files["localhost/mon/{slug}/router.work"], `import { router } from "kitwork";`, `import { router } from "kitwork";
+	files["localhost/mon/{slug}/router.work"] = strings.Replace(files["localhost/mon/{slug}/router.work"], `import * as router from "kitwork/router";`, `import * as router from "kitwork/router";
 router.contrast("warning");`, 1)
 	tenant = buildUISite(t, files)
 	if rec := serveUI(t, tenant, "http://localhost/mon/ca-phe"); rec.Code != http.StatusOK {

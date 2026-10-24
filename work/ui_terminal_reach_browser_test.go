@@ -16,7 +16,7 @@ import (
 // command for a narrow one, and a command for both; it types them in 2 seconds. Two neutral buttons
 // beside it, one disabled.
 var terminalReachFiles = map[string]string{
-	"localhost/router.work": `import { router } from "kitwork";
+	"localhost/router.work": `import * as router from "kitwork/router";
 
 router.colors({ brand: "#c8742c" });
 `,
@@ -93,7 +93,7 @@ const terminalReachProbe = `<script>
 // clipboard takes the commands of "ok" and refuses those of "no".
 func terminalWordsFiles(language string) map[string]string {
 	return map[string]string{
-		"localhost/router.work": `import { router } from "kitwork";
+		"localhost/router.work": `import * as router from "kitwork/router";
 
 router.colors({ brand: "#c8742c" });
 router.language("` + language + `");

@@ -36,7 +36,7 @@ const networkHost = `  <network as="$network" place="bottom-left" delay="0" offl
 // of the toast test and networkHost; the first page links to /tiep, which links back, and to /tiep?slow,
 // which the server holds past Drive's watchdog.
 var networkBrowserFiles = map[string]string{
-	"localhost/router.work": `import { router } from "kitwork";
+	"localhost/router.work": `import * as router from "kitwork/router";
 
 router.language("vi");
 router.reload(false);
@@ -613,7 +613,7 @@ func TestBrowserNetworkTimes(t *testing.T) {
 // first two are taller than the screen, with a place in the middle (#cuoi) an in-page link goes to,
 // and a link to the next page that the server holds (?held) until the proof lets it answer.
 var networkHistoryFiles = map[string]string{
-	"localhost/router.work": `import { router } from "kitwork";
+	"localhost/router.work": `import * as router from "kitwork/router";
 
 router.language("vi");
 router.reload(false);

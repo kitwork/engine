@@ -72,7 +72,7 @@ func driveBundleServer(t *testing.T, tenant *Tenant, controller string, reports 
 // (its site block changes too); /tach is a branch that writes router.bundle("split") (its site part is
 // a file, site.<hash>.css, and its page block changes).
 var driveCSSFiles = map[string]string{
-	"localhost/router.work": `import { router } from "kitwork";
+	"localhost/router.work": `import * as router from "kitwork/router";
 
 router.colors({ brand: "#c8742c", canvas: "#f6f3ee", paper: "#ffffff", ink: "#2b211b", line: "#e6ded5" });
 router.fonts({ body: "Outfit" });
@@ -87,7 +87,7 @@ router.reload(false);
   <text id="title" heading="1" color="ink-30">Hai</text>
   <link id="next" value="/nhanh">Nhánh</link>
 </content>`,
-	"localhost/nhanh/router.work": `import { router } from "kitwork";
+	"localhost/nhanh/router.work": `import * as router from "kitwork/router";
 
 router.colors({ brand: "#2f6fde" });
 `,
@@ -95,7 +95,7 @@ router.colors({ brand: "#2f6fde" });
   <text id="title" heading="1" color="brand">Nhánh</text>
   <link id="next" value="/tach">Tách</link>
 </content>`,
-	"localhost/tach/router.work": `import { router } from "kitwork";
+	"localhost/tach/router.work": `import * as router from "kitwork/router";
 
 router.bundle("split");
 `,
@@ -234,7 +234,7 @@ func TestBrowserDriveSwapsInlineCSS(t *testing.T) {
 // with { javascript: "split" } and an appearance switch beside the dropdown (one bundle file holding
 // Drive, the progressbar, the reader, the dropdown and the appearance component).
 var driveScriptFiles = map[string]string{
-	"localhost/router.work": `import { router } from "kitwork";
+	"localhost/router.work": `import * as router from "kitwork/router";
 
 router.colors({ brand: "#c8742c" });
 router.bundle({ javascript: "inline" });
@@ -246,7 +246,7 @@ router.bundle({ javascript: "inline" });
   <dropdown><button id="open" click="toggle()" expanded="{{ open }}">Mở</button></dropdown>
   <link id="next" value="/ba">Ba</link>
 </content>`,
-	"localhost/ba/router.work": `import { router } from "kitwork";
+	"localhost/ba/router.work": `import * as router from "kitwork/router";
 
 router.bundle({ javascript: "split" });
 `,

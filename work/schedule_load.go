@@ -45,6 +45,12 @@ type scheduleConfig struct {
 	databasePlace string
 }
 
+// countsInTheAppsZone reports whether rule counts in the app's zone: it writes no .timezone(…), and is not an
+// instant (schedule.on(…) carries its own offset).
+func countsInTheAppsZone(rule *schedulerule.Rule) bool {
+	return rule.Zone == "" && rule.Kind != schedulerule.On
+}
+
 // LoadScheduleFiles reads the app's .schedule/ and starts its clock. Every schedule must be registered
 // before its first due time, so this runs at boot, not on a first request.
 func (t *Tenant) LoadScheduleFiles() {
@@ -62,6 +68,10 @@ func (t *Tenant) LoadScheduleFiles() {
 		return
 	}
 	config := t.readScheduleConfig(filepath.Join(dir, "config.work"))
+	// a schedule that writes no .timezone(…) counts in the app's zone, router.timezone(…) of the config.work
+	// at the app's folder, UTC when it writes none (KITWORK_SCHEDULE.md mục 5)
+	zone, zoneDeclared, zoneFailed := t.appTimezone()
+	t.scheduleZone = zone
 	// the runs and the state of the schedules move with the clock's restart: what refusePastOnce reads is the
 	// database chosen now, and an attempt of the old clock settles where its run is
 	place := t.useRunsPlace(scheduleKind, config.database, "[Schedule]", config.databasePlace)
@@ -122,13 +132,25 @@ func (t *Tenant) LoadScheduleFiles() {
 	for name := range declaredAt {
 		delete(unloaded.Names, name) // a name another file declares right is that file's schedule
 	}
+	if zoneFailed {
+		// the app's config.work did not run, so a schedule in the app's zone has no zone known: it waits, its
+		// state and its runs kept as those of a file that does not load, until the file is fixed (appTimezone)
+		kept := loaded[:0]
+		for _, entry := range loaded {
+			if countsInTheAppsZone(entry.rule) {
+				unloaded.Names[entry.name] = true
+				continue
+			}
+			kept = append(kept, entry)
+		}
+		loaded = kept
+	}
 	loaded = t.refusePastOnce(loaded, t.runsStoreAt(scheduleKind, place), say)
 	for _, entry := range loaded {
-		// mục 5 counts a schedule without .timezone(…) in router.timezone(…) of the app's config.work, which
-		// the engine does not read yet: said, so a schedule written as the spec writes it does not fire at an
-		// hour of UTC unseen
-		if entry.rule.Zone == "" && entry.rule.Kind != schedulerule.On {
-			say(fmt.Sprintf("[Schedule] %s: lịch %s không viết .timezone(…): đếm theo UTC, vì engine chưa đọc router.timezone(…) của config.work gốc app; viết .timezone(\"Asia/Ho_Chi_Minh\") cho lịch", entry.place, entry.name))
+		// a schedule without .timezone(…) in an app that declares no zone counts in UTC: said, so a schedule
+		// written as the spec writes it does not fire at an hour of UTC unseen
+		if countsInTheAppsZone(entry.rule) && !zoneDeclared {
+			say(fmt.Sprintf("[Schedule] %s: lịch %s không viết .timezone(…), và app không khai router.timezone(…): đếm theo UTC; múi giờ của app viết router.timezone(\"Asia/Ho_Chi_Minh\") trong config.work ở gốc app, của riêng lịch thì .timezone(…)", entry.place, entry.name))
 		}
 	}
 
@@ -212,6 +234,8 @@ func (t *Tenant) runScheduleFile(bc *compiler.Bytecode, relative string, say fun
 		case rule.Kind == schedulerule.On:
 			// an instant carries its own offset ("+07:00"): its due time reads as it was written
 			location = rule.Instant.Location()
+		case t.scheduleZone != nil:
+			location = t.scheduleZone // the app's, router.timezone(…) of its config.work
 		default:
 			location = scheduleDefaultLocation
 		}

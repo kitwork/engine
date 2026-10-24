@@ -133,11 +133,12 @@ func TestEnvironmentRequiresAreOnTheBytecode(t *testing.T) {
 // lowers to, with the name to write; a manifest, compiled with no app, keeps its import { env } (mục 9.8).
 //
 // CONTROL (22/10/2026): with environmentDeclaration and environmentMember refusing nothing, every row of an
-// app compiled: "import { router, env } from \"kitwork\";: <nil>, want …".
+// app compiled: "import { router, env } from \"kitwork\";: <nil>, want …". (24/10/2026: the first row imports
+// safe beside env, since import { router } from "kitwork" is itself refused in a router.work now.)
 func TestEnvImportIsRefusedInAnApp(t *testing.T) {
 	const renamed = "`env` đã đổi tên: import { environment } from \"kitwork\", rồi environment.KEY"
 	for source, at := range map[string]string{
-		"import { router, env } from \"kitwork\";\nconst port = env.PORT;":      "router.work:1:1: ",
+		"import { safe, env } from \"kitwork\";\nconst port = env.PORT;":        "router.work:1:1: ",
 		"import { env as e } from \"kitwork\";\nconst port = e.PORT;":           "router.work:1:1: ",
 		"import * as e from \"kitwork/env\";\nconst port = e.PORT;":             "router.work:1:13: ",
 		"import * as kitwork from \"kitwork\";\nconst port = kitwork.env.PORT;": "router.work:2:22: ",
@@ -195,8 +196,6 @@ func TestEnvironmentSecretNeverGoesToThePageHoweverDeep(t *testing.T) {
 	for source, want := range map[string]string{
 		"router.get((context) => context.view({ config: { stripe: environment.STRIPE_SECRET } }));":                                "router.work:3:48: khoá `STRIPE_SECRET` sẽ đi xuống trình duyệt",
 		"router.get((context) => context.view({ keys: [environment.STRIPE_SECRET] }));":                                            "router.work:3:46: khoá `STRIPE_SECRET` sẽ đi xuống trình duyệt",
-		"const secrets = { stripe: environment.STRIPE_SECRET };\nrouter.get((context) => context.view({ ...secrets }));":           "router.work:4:43: khoá `STRIPE_SECRET` sẽ đi xuống trình duyệt",
-		"const data = { stripe: environment.STRIPE_SECRET };\nrouter.get((context) => context.view(data));":                        "router.work:4:38: khoá `STRIPE_SECRET` sẽ đi xuống trình duyệt",
 		"router.get((context) => context.view({ header: `Bearer ${environment.TOKEN}` }));":                                        "router.work:3:48: khoá `TOKEN` sẽ đi xuống trình duyệt",
 		"router.get((context) => context.view({ header: \"Bearer \" + environment.TOKEN }));":                                      "router.work:3:48: khoá `TOKEN` sẽ đi xuống trình duyệt",
 		"const config = { db: { password: environment.DB_PASSWORD } };\nrouter.get((context) => context.view({ db: config.db }));": "router.work:4:44: khoá `DB_PASSWORD` sẽ đi xuống trình duyệt",
@@ -204,6 +203,21 @@ func TestEnvironmentSecretNeverGoesToThePageHoweverDeep(t *testing.T) {
 		_, err := compileAppRoute(t, header+source)
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%q: %v, want %q", source, err, want)
+		}
+	}
+	// a spread and an object passed by its name are refused in router.work itself (context.view takes an object
+	// written in place, 24/10/2026); a page of .shared/ may still hand them, and is checked the same way
+	for page, want := range map[string]string{
+		"const secrets = { stripe: environment.STRIPE_SECRET };\nexport const page = (context) => context.view({ ...secrets });": "../.shared/page.work:3:52: khoá `STRIPE_SECRET` sẽ đi xuống trình duyệt",
+		"const data = { stripe: environment.STRIPE_SECRET };\nexport const page = (context) => context.view(data);":              "../.shared/page.work:3:47: khoá `STRIPE_SECRET` sẽ đi xuống trình duyệt",
+	} {
+		root := writeApps(t, map[string]string{
+			"apps/acme/.shared/page.work":    importEnvironment + page,
+			"apps/acme/shop.com/router.work": "import * as router from \"kitwork/router\";\nimport { page } from \"app/.shared/page.work\";\nrouter.get((context) => page(context));\n",
+		})
+		_, err := CompileFileInApp(filepath.Join(root, "apps", "acme"), filepath.Join(root, "apps", "acme", "shop.com", "router.work"))
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: %v, want %q", page, err, want)
 		}
 	}
 	if _, err := compileAppRoute(t, header+`const config = { host: environment.PUBLIC_HOST, key: environment.STRIPE_SECRET };
@@ -263,7 +277,8 @@ func TestKitworkModuleIsReadByName(t *testing.T) {
 	}
 	for _, source := range []string{
 		namespace + "const k2 = kitwork; const port = k2.environment.PORT || 8080; const key = k2.environment.require(\"KEY\");",
-		"const router = kitwork()[\"router\"];",
+		// (24/10/2026) kitwork()["router"] in a router.work is refused by the router's rule (router_rules_test.go)
+		"const clean = kitwork()[\"richtext\"];",
 		"const table = { a: 1 }; const name = \"a\"; const a = table[name];",
 	} {
 		if _, err := compileAppRoute(t, source); err != nil {

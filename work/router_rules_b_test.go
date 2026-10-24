@@ -158,6 +158,14 @@ func TestUnreadableExpiry(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), `.cache("soon"): không đọc được hạn`) {
 		t.Fatalf("router.work: run error = %v", err)
 	}
+	// a built-in door of a router.work is a route of its folder: its expiry is read as strictly (24/10/2026).
+	// CONTROL (go test -overlay): with output() giving the door no folder, this site booted (run = <nil>).
+	err = NewTenant(writeSite(t, map[string]string{
+		"router.work": "import * as router from \"kitwork/router\";\nrouter.sitemap(true).cache(\"soon\");\n",
+	}), "localhost").Run()
+	if err == nil || !strings.Contains(err.Error(), `router.work: /sitemap.xml response cache: .cache("soon"): không đọc được hạn`) {
+		t.Fatalf("router.sitemap(true).cache(\"soon\"): run error = %v", err)
+	}
 	var tn *Tenant
 	output := captureBootOutput(t, func() {
 		tn = NewTenant(writeSite(t, map[string]string{

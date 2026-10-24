@@ -19,7 +19,7 @@ import (
 // a named colour, and a page with a block of Go: keyword (package, func), string, function (left to the
 // engine) and comment.
 var highlightBrowserFiles = map[string]string{
-	"localhost/router.work": `import { router } from "kitwork";
+	"localhost/router.work": `import * as router from "kitwork/router";
 
 router.colors({ brand: "#c8742c", canvas: { light: "#f6f9fc", dark: "#16161e" }, paper: { light: "#ffffff", dark: "#1e2030" } });
 router.highlight({ keyword: { light: "#7c3aed", dark: "#bb9af7" }, string: "violet" });

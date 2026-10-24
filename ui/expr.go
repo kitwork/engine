@@ -14,6 +14,9 @@ import (
 type expr struct {
 	source string
 	ir     any
+	// brace is where the {{ that opens it stands in the text parseInterpolation read it from, a byte offset
+	// (readAt points an error at it)
+	brace int
 }
 
 func compileExpr(source string, at *Node, attr *Attr) (*expr, error) {
@@ -282,6 +285,7 @@ func parseInterpolation(source string, at *Node, attr *Attr) (*interpolation, er
 		if err != nil {
 			return nil, err
 		}
+		e.brace = len(source) - len(rest) + start
 		out.parts = append(out.parts, part{e: e})
 		rest = rest[start+2+end+2:]
 	}

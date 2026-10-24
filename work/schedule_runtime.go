@@ -30,12 +30,14 @@ import (
 //     rule, counts from when it was synced: nothing before it is missed.
 //   - a due time that comes while a run of the schedule has not ended (pending, running) is passed over:
 //     one run of a schedule at a time (12.4). A once() and now() are never passed over.
-//   - a schedule without .timezone(…) counts in UTC, and boot says so for each: the app's zone,
-//     router.timezone(…) of the app's config.work (KITWORK_ROUTER.md), is not read by the engine yet.
+//   - a schedule without .timezone(…) counts in the app's zone, router.timezone(…) of the config.work at the
+//     app's folder (KITWORK_ROUTER.md mục 4, appTimezone); in UTC when the app declares none, and boot says
+//     so for each.
 
 const scheduleResourceName = "schedule"
 
-// scheduleDefaultLocation is the zone of a schedule that does not write .timezone(…).
+// scheduleDefaultLocation is the zone of a schedule that does not write .timezone(…) in an app that declares
+// no router.timezone(…).
 var scheduleDefaultLocation = time.UTC
 
 // scheduleClock is the clock the schedules read the time from (nil: the system's), set by SetScheduleClock.

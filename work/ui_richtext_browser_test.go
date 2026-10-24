@@ -20,7 +20,8 @@ import (
 // HTML in a block of code, and gives the textarea back what was written. A link goes to /tiep, which
 // links back: the form is reached by Drive's moves too.
 var richtextBrowserFiles = map[string]string{
-	"localhost/router.work": `import { router, richtext } from "kitwork";
+	"localhost/router.work": `import * as router from "kitwork/router";
+import { richtext } from "kitwork";
 
 router.language("en");
 router.reload(false);

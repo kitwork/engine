@@ -200,7 +200,7 @@ func TestUIPageFailureShowsVisitorsOnlyTheRequestID(t *testing.T) {
 	files := withFiles(map[string]string{
 		"localhost/tinh/content.ui": `<content><text>{{ name </text></content>`,
 		"localhost/mon/{slug}/router.work": `
-import { router } from "kitwork";
+import * as router from "kitwork/router";
 router.get((ctx) => {
   const name = "Cà phê sữa";
   const order = { total: 3 };

@@ -13,7 +13,7 @@ import (
 // page writes (<appearance>), with a second page under the same view.ui that Drive moves to
 // without a reload (router.reload(false)). Its colours have a dark look; the page follows the device.
 var backdropBarFiles = map[string]string{
-	"localhost/router.work": `import { router } from "kitwork";
+	"localhost/router.work": `import * as router from "kitwork/router";
 
 router.colors({ brand: "#c8742c", canvas: { light: "#f6f9fc", dark: "#0f1822" } });
 router.reload(false);

@@ -829,8 +829,8 @@ func (c *compiler) wiredAliases() error {
 // component that no row or layout input around declares and the route's view does not either, while a
 // component called on this page declares it: copy() beside a terminal, outside its host, where it
 // means nothing (decision T2, 12/10/2026: copy() and copied outside a component that gives them are a
-// compile error). Told only where the route's own router.work was read: without it what the page is
-// given (Request.Scope: a view elsewhere, a test's data) is not known here, and nothing is told.
+// compile error). Told only where what the page is given is known (given.go): otherwise (Request.Scope: a
+// view the compiler cannot read, a test's data) nothing is told.
 func (c *compiler) strayNames() error {
 	if c.view == nil {
 		return nil

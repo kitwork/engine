@@ -20,7 +20,7 @@ import (
 // scrolled:background="paper/80", the owner's words), and material="none" over paper/80. Its colours
 // have a dark look, and the page follows the device (router.appearance is not written).
 var materialBrowserFiles = map[string]string{
-	"localhost/router.work": `import { router } from "kitwork";
+	"localhost/router.work": `import * as router from "kitwork/router";
 
 router.colors({
   brand: "#c8742c",

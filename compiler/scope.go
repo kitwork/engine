@@ -233,8 +233,14 @@ type resolver struct {
 	// a manifest has none. environmentUse lets the next reference of environment through: a read by name.
 	inApp          bool
 	environmentUse bool
-	// inRouterFile: the program is a router.work, where router.view is refused (router.go).
+	// inRouterFile: the program is a router.work or a router config.work, where router.view is refused
+	// (router.go). routerCalls are the lines it calls the router on (readRouterFile), nil for a program not
+	// read that way: the router is let through only at the head of one (routerUse), and read off the module
+	// "kitwork" only in the import line itself (importValue).
 	inRouterFile bool
+	routerCalls  *RouterCalls
+	routerUse    bool
+	importValue  bool
 	// folderCalls: the program is a config.work of .shared/queue/ or of .schedule/, and these the calls of its
 	// folder written right (folder_config.go); nil for any other program, where every such call is refused.
 	folderCalls *FolderCalls
@@ -270,7 +276,8 @@ func (c *Compiler) resolveObserved(
 		schedule:       program.Schedule,
 		scheduleChains: map[*MethodCallExpression]bool{},
 		inApp:          program.App,
-		inRouterFile:   program.Router,
+		inRouterFile:   program.Router || program.RouterConfig,
+		routerCalls:    program.RouterCalls,
 		folderCalls:    program.FolderCalls,
 		functionScopes: map[*FunctionLiteral]*functionScope{},
 	}
@@ -493,6 +500,9 @@ func (r *resolver) reference(name *Identifier, write bool) {
 		}
 		return
 	}
+	if r.routerRead(name, found) {
+		return
+	}
 	if found.kitworkEnvironment && !r.environmentUse {
 		// environment is read by name only (environment.go)
 		if write {
@@ -547,8 +557,11 @@ func (r *resolver) statement(statement Statement) {
 	case *VarStatement:
 		if module, ok := kitworkModulePath(node.Value); !ok || module != "environment" || node.Pattern != nil {
 			// import { environment as e } from "kitwork" is const e = kitwork().environment: a declaration of
-			// environment under another name, read by name as it is (markEnvironment), not a read of the whole
+			// environment under another name, read by name as it is (markEnvironment), not a read of the whole.
+			// The value of an import is where the router is read off "kitwork" (routerMember).
+			r.importValue = node.Import != ImportNone
 			r.expression(node.Value)
+			r.importValue = false
 		}
 		if node.Pattern != nil {
 			r.patternDefaults(node.Pattern)
@@ -749,12 +762,15 @@ func (r *resolver) expression(expression Expression) {
 		if r.fileMember(node.Object, node.Property) {
 			return
 		}
-		if r.routerMember(node.Object, node.Property) {
+		if r.routerMember(node.Object, node.Property, false) {
 			return
 		}
 		r.expression(node.Object)
 	case *IndexExpression:
 		if r.environmentIndex(node) {
+			return
+		}
+		if r.routerIndex(node) {
 			return
 		}
 		if r.databases && r.handleMember(node.Left, node.Token, nil) {
@@ -832,7 +848,7 @@ func (r *resolver) expression(expression Expression) {
 		if r.fileMember(node.Object, node.Method) {
 			return
 		}
-		if r.routerMember(node.Object, node.Method) {
+		if r.routerCall(node) {
 			return
 		}
 		r.expression(node.Object)

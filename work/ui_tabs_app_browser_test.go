@@ -15,7 +15,7 @@ import (
 
 // tabsAppFiles is a tabs that persists (persist="true": kept under page+router) and its two panels.
 var tabsAppFiles = map[string]string{
-	"localhost/router.work": `import { router } from "kitwork";
+	"localhost/router.work": `import * as router from "kitwork/router";
 
 router.colors({ brand: "#c8742c" });
 router.language("vi");

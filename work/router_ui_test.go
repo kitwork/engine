@@ -187,7 +187,7 @@ func pageWithStylesheet(t *testing.T, tenant *Tenant, target string) string {
 var uiSiteFiles = map[string]string{
 	".shared/words.work": `export const greet = (name) => "Chào " + name;`,
 	"localhost/router.work": `
-import { router } from "kitwork";
+import * as router from "kitwork/router";
 import { greet } from "../.shared/words.work";
 
 router.colors({ brand: "#c8742c" });
@@ -204,7 +204,7 @@ router.get((ctx) => {
 	"localhost/content.ui":  `<content><text heading="1">{{ greet("bạn") }}</text><list><item for="item of items"><text color="ink-30">{{ item.name }}</text></item></list><text>{{ count }} món, gấp đôi {{ twice(count) }}</text></content>`,
 	"localhost/notfound.ui": `<content><text>Không thấy trang</text></content>`,
 	"localhost/mon/{slug}/router.work": `
-import { router } from "kitwork";
+import * as router from "kitwork/router";
 router.get((ctx) => {
   if (ctx.params("slug") != "ca-phe") return ctx.notFound();
   return ctx.view({ name: "Cà phê sữa" });
@@ -360,11 +360,12 @@ func TestUISiteTransitionFollowsTheFolders(t *testing.T) {
 		t.Fatalf("a site with no router.transition must write nothing:\n%.400s", body)
 	}
 
-	files["localhost/router.work"] = strings.Replace(files["localhost/router.work"], `router.meta(`, `router.reload(false).transition("fade");
+	files["localhost/router.work"] = strings.Replace(files["localhost/router.work"], `router.meta(`, `router.reload(false);
+router.transition("fade");
 router.meta(`, 1)
 	files["localhost/mon/{slug}/router.work"] = strings.Replace(files["localhost/mon/{slug}/router.work"], `router.get(`, `router.transition("slide");
 router.get(`, 1)
-	files["localhost/tinh/router.work"] = `import { router } from "kitwork";
+	files["localhost/tinh/router.work"] = `import * as router from "kitwork/router";
 router.transition("none");`
 	tenant := buildUISite(t, files)
 	for target, want := range map[string]string{
@@ -407,7 +408,7 @@ func TestUISiteColorsDarkAndBranch(t *testing.T) {
 		`router.colors({ brand: "#c8742c", canvas: { light: "#f6f3ee", dark: "#141110" } });`,
 		map[string]string{
 			"localhost/content.ui": `<content background="canvas"><text color="brand+15">{{ count }}</text></content>`,
-			"localhost/quan-ly/router.work": `import { router } from "kitwork";
+			"localhost/quan-ly/router.work": `import * as router from "kitwork/router";
 router.colors({ brand: "#2563eb" });`,
 			"localhost/quan-ly/content.ui": `<content background="canvas"><text color="brand+15">Quản lý</text></content>`,
 		})
@@ -451,11 +452,11 @@ router.colors({ brand: "#c8742c" });
 router.colors({ "chart.muted": "#6b5d52" });`,
 		map[string]string{
 			"localhost/content.ui": content,
-			"localhost/quan-ly/router.work": `import { router } from "kitwork";
+			"localhost/quan-ly/router.work": `import * as router from "kitwork/router";
 router.fonts({ code: "Fira Code" });
 router.colors({ brand: "#2563eb" });`,
 			"localhost/quan-ly/content.ui": content,
-			"localhost/tinh/router.work": `import { router } from "kitwork";
+			"localhost/tinh/router.work": `import * as router from "kitwork/router";
 router.fonts({ body: "Inter" });`,
 			"localhost/tinh/content.ui": content,
 		})
@@ -502,7 +503,7 @@ router.fonts({ body: "Inter" });`,
 func TestUISiteDarkPairInABranchPrepaintsTheBranch(t *testing.T) {
 	files := withFiles(map[string]string{
 		"localhost/content.ui": `<content background="canvas"><text color="brand+15">{{ count }}</text></content>`,
-		"localhost/quan-ly/router.work": `import { router } from "kitwork";
+		"localhost/quan-ly/router.work": `import * as router from "kitwork/router";
 router.colors({ canvas: { light: "#f6f3ee", dark: "#141110" } });`,
 		"localhost/quan-ly/content.ui": `<content background="canvas"><text color="brand+15">Quản lý</text></content>`,
 	})
@@ -535,10 +536,10 @@ func TestUISiteAppearanceIsInheritedPerFolder(t *testing.T) {
 	}
 
 	files := withFiles(map[string]string{
-		"localhost/quan-ly/router.work": `import { router } from "kitwork";
+		"localhost/quan-ly/router.work": `import * as router from "kitwork/router";
 router.appearance("light");`,
 		"localhost/quan-ly/content.ui": `<content><text>Quản lý</text></content>`,
-		"localhost/tinh/router.work": `import { router } from "kitwork";
+		"localhost/tinh/router.work": `import * as router from "kitwork/router";
 router.appearance("system");`,
 	})
 	files["localhost/router.work"] = strings.Replace(files["localhost/router.work"], `router.meta(`, `router.appearance("dark");
@@ -628,52 +629,94 @@ func TestRouterColorsAndFontsTakeAnObject(t *testing.T) {
 	}
 }
 
-// router.theme() is the old name of router.colors() and router.fonts(): its colors and fonts still
-// apply, at the site root and in a branch (merged over the site's), and the boot names it once per file
-// that calls it — once however many calls the file makes, and never for a file written with
-// router.colors (the control branch, tinh/).
-func TestUISiteThemeIsTheDeprecatedColorsAndFonts(t *testing.T) {
-	files := withRootRouter(t,
-		`router.theme({ colors: { brand: "#c8742c", canvas: { light: "#f6f3ee", dark: "#141110" } }, fonts: { code: "Fira Code" } });`,
-		map[string]string{
-			"localhost/content.ui": `<content background="canvas"><text color="brand+15">{{ count }}</text><text font="code">1</text></content>`,
-			"localhost/quan-ly/router.work": `import { router } from "kitwork";
-router.theme({ colors: { brand: "#16a34a" } });
-router.theme({ colors: { brand: "#2563eb" } });`,
-			"localhost/quan-ly/content.ui": `<content background="canvas"><text color="brand+15">Quản lý</text></content>`,
-			"localhost/tinh/router.work": `import { router } from "kitwork";
-router.colors({ brand: "#9333ea" });`,
-			"localhost/tinh/content.ui": `<content background="canvas"><text color="brand+15">Trang tĩnh</text></content>`,
-		})
-	var tenant *Tenant
-	printed := captureBootOutput(t, func() { tenant = buildUISite(t, files) })
+// router.theme() was the old name of router.colors() and router.fonts(); in a router.work it is a compile
+// error naming the two (24/10/2026, KITWORK_ROUTER.md mục 4), at the site root and in a branch alike, where
+// it is written. A branch written with router.colors boots (the control). A template site's router.theme()
+// still applies with its boot line (renamedTheme, TestTemplateSiteThemeStillApplies).
+//
+// CONTROL (24/10/2026, -overlay with theme taken out of the compiler's removed words): both rows went red with
+// "router.work:5:8: router.theme không có; router có get, post, …", not the error naming colors and fonts.
+func TestUISiteThemeIsAnErrorNamingColorsAndFonts(t *testing.T) {
+	const removed = "router.theme đã bỏ: bảng màu là router.colors({ … }), phông chữ là router.fonts({ … })"
+	root := withRootRouter(t,
+		`router.theme({ colors: { brand: "#c8742c" }, fonts: { code: "Fira Code" } });`, nil)
+	if _, err := bootUISite(t, root, true); err == nil || !strings.Contains(err.Error(), "router.work:5:8: "+removed) {
+		t.Errorf("router.theme at the site root: %v, want router.work:5:8: %s", err, removed)
+	}
+	branch := withFiles(map[string]string{
+		"localhost/quan-ly/router.work": "import * as router from \"kitwork/router\";\nrouter.theme({ colors: { brand: \"#16a34a\" } });",
+		"localhost/quan-ly/content.ui":  `<content><text>Quản lý</text></content>`,
+	})
+	if _, err := bootUISite(t, branch, true); err == nil || !strings.Contains(err.Error(), "router.work:2:8: "+removed) {
+		t.Errorf("router.theme in a branch: %v, want router.work:2:8: %s", err, removed)
+	}
+	control := withFiles(map[string]string{
+		"localhost/tinh/router.work": "import * as router from \"kitwork/router\";\nrouter.colors({ brand: \"#9333ea\" });",
+	})
+	tenant, err := bootUISite(t, control, true)
+	if err != nil {
+		t.Fatalf("control: a branch written with router.colors boots: %v", err)
+	}
+	if page := pageWithStylesheet(t, tenant, "http://localhost/tinh"); !strings.Contains(page, "--brand:#9333ea") {
+		t.Error("control: the branch written with router.colors takes its own brand")
+	}
+}
 
-	home := pageWithStylesheet(t, tenant, "http://localhost/")
-	for _, want := range []string{"--brand:#c8742c", "--canvas:#141110", darkBlock, canonicalPrepaint(t), "--font-code:'Fira Code'", `<p class="font-code">1</p>`, "--font-body:Outfit"} {
-		if !strings.Contains(home, want) {
-			t.Errorf("router.theme() at the site root must apply its colors and fonts as router.colors() and router.fonts() do; / is missing %q", want)
-		}
-	}
-	branch := pageWithStylesheet(t, tenant, "http://localhost/quan-ly")
-	if !strings.Contains(branch, "--brand:#2563eb") || strings.Contains(branch, "--brand:#16a34a") {
-		t.Errorf("router.theme() in a branch must re-value its brand (the later call wins):\n%s", linesWith(branch, "--brand"))
-	}
-	if !strings.Contains(branch, "--canvas:#f6f3ee") || !strings.Contains(branch, "--canvas:#141110") {
-		t.Error("router.theme() in a branch merges over the site's: the canvas it did not write stays, light and dark")
-	}
-	if control := pageWithStylesheet(t, tenant, "http://localhost/tinh"); !strings.Contains(control, "--brand:#9333ea") {
-		t.Error("control: the branch written with router.colors must take its own brand")
-	}
-
+// A template site (router.kitwork.js) keeps router.theme(), the old name of router.colors() and
+// router.fonts(), as every old way of a template site stays (24/10/2026): its colours and fonts apply, at the
+// site root and in a branch, where a later call re-values what an earlier one wrote and keeps the rest, and the
+// boot names it once per file that calls it, however many calls. A branch written with router.colors says
+// nothing (the control). The compile error of router.theme is router.work's alone.
+//
+// CONTROL (24/10/2026, -overlay with FolderRouter.Theme returning before it does anything): "router.theme() at
+// a template's root must apply its brand: got \"invalid\"" (no value), the same for the fonts and the branch's
+// brand and ink, and "want the line … exactly once at boot, got 0" for both files.
+func TestTemplateSiteThemeStillApplies(t *testing.T) {
 	const said = "router.theme() is now router.colors() and router.fonts() — applied"
-	for _, file := range []string{"router.work", filepath.Join("quan-ly", "router.work")} {
+	tenant, site := writeTestSite(t, `router.theme({ colors: { brand: "#c8742c" }, fonts: { code: "Fira Code" } });`, `<main>home</main>`)
+	writeSiteFile(t, site, "docs/router.kitwork.js", `import { router } from "kitwork";`+
+		"\nrouter.theme({ colors: { brand: \"#16a34a\", ink: \"#111111\" } });\nrouter.theme({ colors: { brand: \"#2563eb\" } });")
+	writeSiteFile(t, site, "docs/page.kitwork.html", `<main>docs</main>`)
+	writeSiteFile(t, site, "tinh/router.kitwork.js", `import { router } from "kitwork";`+"\nrouter.colors({ brand: \"#9333ea\" });")
+	writeSiteFile(t, site, "tinh/page.kitwork.html", `<main>tinh</main>`)
+	var home, docs, still *FolderRouter
+	printed := captureBootOutput(t, func() {
+		if err := tenant.Run(); err != nil {
+			t.Fatal(err)
+		}
+		root := tenant.routeTree().root
+		home = root.ensureFolder(tenant)
+		for name, into := range map[string]**FolderRouter{"docs": &docs, "tinh": &still} {
+			node := root.child(name, map[string]string{}, false)
+			if node == nil {
+				t.Fatalf("the template site has no folder %s", name)
+			}
+			*into = node.ensureFolder(tenant)
+		}
+	})
+	if err := tenant.routeTree().root.compileError(); err != nil {
+		t.Fatalf("the template site's root router: %v", err)
+	}
+	if got := home.colors["brand"].Text(); got != "#c8742c" {
+		t.Errorf("router.theme() at a template's root must apply its brand: got %q", got)
+	}
+	if got := home.fonts["code"].Text(); got != "Fira Code" {
+		t.Errorf("router.theme() at a template's root must apply its fonts: got %q", got)
+	}
+	if brand, ink := docs.colors["brand"].Text(), docs.colors["ink"].Text(); brand != "#2563eb" || ink != "#111111" {
+		t.Errorf("router.theme() twice in a branch: the later brand wins and the ink stays, got brand %q, ink %q", brand, ink)
+	}
+	if got := still.colors["brand"].Text(); got != "#9333ea" {
+		t.Errorf("control: the branch written with router.colors takes its own brand, got %q", got)
+	}
+	for _, file := range []string{"router.kitwork.js", filepath.Join("docs", "router.kitwork.js")} {
 		line := "[router] " + file + ": " + said + "\n"
 		if got := strings.Count(printed, line); got != 1 {
 			t.Errorf("want the line %q exactly once at boot, got %d:\n%s", strings.TrimSpace(line), got, printed)
 		}
 	}
 	if got := strings.Count(printed, said); got != 2 {
-		t.Errorf("two files call router.theme(), so two lines, got %d (the router.colors branch must say nothing):\n%s", got, printed)
+		t.Errorf("two files call router.theme(), so two lines, got %d (the router.colors branch says nothing):\n%s", got, printed)
 	}
 }
 
@@ -804,7 +847,7 @@ func TestUISiteFavicon(t *testing.T) {
 router.meta(`, 1)
 	files["localhost/assets/favicon.svg"] = `<svg>gốc</svg>`
 	files["localhost/assets/favicon-quan-ly.svg"] = `<svg>quản lý</svg>`
-	files["localhost/quan-ly/router.work"] = `import { router } from "kitwork";
+	files["localhost/quan-ly/router.work"] = `import * as router from "kitwork/router";
 router.favicon("/assets/favicon-quan-ly.svg");`
 	files["localhost/quan-ly/content.ui"] = `<content><text>Quản lý</text></content>`
 	tenant := buildUISite(t, files)

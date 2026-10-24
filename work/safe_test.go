@@ -140,7 +140,7 @@ router.get((ctx) => {
 func TestViewKeepsItsStatusAndAFatalHelperEndsIt(t *testing.T) {
 	tenant := buildUISite(t, map[string]string{
 		"localhost/router.work": `
-import { router } from "kitwork";
+import * as router from "kitwork/router";
 router.get((ctx) => {
   const { value: product, error: productError } = safe(() => fail("chưa đọc được sản phẩm"));
   if (productError) ctx.status(503);
@@ -150,7 +150,7 @@ router.get((ctx) => {
 		"localhost/view.ui":    `<view><content /></view>`,
 		"localhost/content.ui": `<content><error>{{ productError.message }}</error><text>{{ productError.code }}</text></content>`,
 		"localhost/ok/router.work": `
-import { router } from "kitwork";
+import * as router from "kitwork/router";
 router.get((ctx) => {
   const greeting = "chào";
   return ctx.view({ greeting });
@@ -158,7 +158,7 @@ router.get((ctx) => {
 `,
 		"localhost/ok/content.ui": `<content><text>{{ greeting }}</text></content>`,
 		"localhost/spin/router.work": `
-import { router } from "kitwork";
+import * as router from "kitwork/router";
 router.get((ctx) => {
   const spin = () => { let n = 0; for (let i = 0; i < 100000000; i++) { n = n + 1; } return n; };
   return ctx.view({ spin });

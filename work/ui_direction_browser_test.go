@@ -10,7 +10,7 @@ import (
 // on one element and both bottom corners on one element.
 func directionFiles(language string) map[string]string {
 	return map[string]string{
-		"localhost/router.work": `import { router } from "kitwork";
+		"localhost/router.work": `import * as router from "kitwork/router";
 
 router.colors({ brand: "#c8742c" });
 router.language("` + language + `");

@@ -18,7 +18,7 @@ func TestRouterLanguageReachesTheCompiler(t *testing.T) {
 	files := withRootRouter(t, sitePalette+"\nrouter.language(\"ar\");", map[string]string{
 		"localhost/content.ui":      sides,
 		"localhost/tinh/content.ui": sides,
-		"localhost/tinh/router.work": `import { router } from "kitwork";
+		"localhost/tinh/router.work": `import * as router from "kitwork/router";
 router.language("vi");`,
 	})
 	var home, branch string

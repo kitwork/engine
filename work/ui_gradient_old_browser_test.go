@@ -27,7 +27,7 @@ func TestBrowserGradientTextWithoutColorMix(t *testing.T) {
 		t.Skip("Chrome, Chromium, or Edge is not installed")
 	}
 	tenant := buildUISite(t, map[string]string{
-		"localhost/router.work": `import { router } from "kitwork";
+		"localhost/router.work": `import * as router from "kitwork/router";
 
 router.colors({ brand: "#c8742c" });
 router.gradients({ ember: { type: "linear", direction: "to-right", stops: [ { color: "ink-10", at: 0 }, { color: "brand+15", at: 100 } ] } });

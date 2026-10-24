@@ -265,6 +265,13 @@ func (b *bundler) ensureModule(absPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if strings.HasSuffix(absPath, ".work") {
+		// a .work file bundled into another is never a router.work nor a site's config.work: it has no
+		// router (router_rules.go)
+		if err := refuseRouterImport(prog, src); err != nil {
+			return "", err
+		}
+	}
 	if b.exports == nil {
 		b.exports = map[string][]string{}
 	}

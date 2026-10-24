@@ -238,18 +238,24 @@ type compiler struct {
 	// (namedLikeATag)
 	hostTags   map[*Node]string
 	logicNamed map[string]string
-	// view is what the route's view declares (router.work): a name a component and the view both
-	// declare cannot be read inside the component's host
-	view map[string]bool
+	// view is what the page is given to read (given.go): the names of the route's context.view({ … }), nothing
+	// for notfound.ui, message for error.ui; nil when that is not known here. A name the page reads and is
+	// not given is an error (notGiven); a name a component and the view both declare cannot be read inside
+	// the component's host. given says where the names come from, for that error
+	view  map[string]bool
+	given pageGiven
 	// aliasUses are the $alias reads of the page, checked once every as is known
 	aliasUses []aliasUse
 	// wired are the aliases read by what is written for the kernel, checked once every as is known to
 	// name a component the browser runs (runtime.go, wiredAliases); strays are the bare names read
 	// outside every component that nothing around declares, checked once every component of the page
-	// is known (strayNames); called are the components the page calls, by name
-	wired  []aliasUse
-	strays []aliasUse
-	called map[string]*componentDef
+	// is known (strayNames); unowned are every bare name read that nothing around declares, inside
+	// components too (a name a component does not declare reaches the page), checked against what the page
+	// is given (notGiven); called are the components the page calls, by name
+	wired   []aliasUse
+	strays  []aliasUse
+	unowned []aliasUse
+	called  map[string]*componentDef
 	// anchors are the ids written on this page (view.ui, its regions, layouts, the content), each with
 	// where it was written: an id names one place, so a second one is an error
 	anchors map[string]string
@@ -342,17 +348,18 @@ const (
 // Compile prepares the page of the route folder routeDir: its content.ui, the nearest view.ui going
 // up, and every region and component those reach (KITWORK_UI §6, §13).
 func (s *Site) Compile(routeDir string) (*Page, error) {
-	return s.compile(routeDir, filepath.Join(routeDir, ContentFile))
+	return s.compile(routeDir, filepath.Join(routeDir, ContentFile), pageContent)
 }
 
 // CompileNotFound prepares the not-found page seen from routeDir: the nearest notfound.ui walking
-// up takes the place of content.ui inside the same frame. It returns nil when there is none.
+// up takes the place of content.ui inside the same frame. It returns nil when there is none. The page, its
+// frame and their regions are given no name (given.go).
 func (s *Site) CompileNotFound(routeDir string) (*Page, error) {
 	file := s.find(routeDir, "notfound")
 	if file == "" {
 		return nil, nil
 	}
-	return s.compile(routeDir, file)
+	return s.compile(routeDir, file, pageNotFound)
 }
 
 // HasContent reports whether routeDir has a page of its own (content.ui).
@@ -360,7 +367,7 @@ func (s *Site) HasContent(routeDir string) bool {
 	return s.exists(filepath.Join(routeDir, ContentFile))
 }
 
-func (s *Site) compile(routeDir, contentFile string) (*Page, error) {
+func (s *Site) compile(routeDir, contentFile, kind string) (*Page, error) {
 	switch s.Contrast {
 	case "", ContrastWarning, ContrastStrict:
 	default:
@@ -371,10 +378,10 @@ func (s *Site) compile(routeDir, contentFile string) (*Page, error) {
 		nearest: map[string]string{}, hostTags: map[*Node]string{}, logicNamed: map[string]string{},
 		table: stylesheet.NewTable(s.Palette), rules: &stylesheet.Rules{}, uses: map[string]bool{},
 		out: &Page{palette: s.Palette, rightToLeft: rightToLeft(s.Language)}}
-	view, viewFile := s.viewNames(routeDir)
-	c.view = view
-	if viewFile != "" {
-		c.files[viewFile] = true
+	c.given = s.given(routeDir, kind)
+	c.view = c.given.names
+	if c.given.file != "" {
+		c.files[c.given.file] = true
 	}
 
 	c.files[contentFile] = true
@@ -424,6 +431,9 @@ func (s *Site) compile(routeDir, contentFile string) (*Page, error) {
 		return nil, err
 	}
 	if err := c.strayNames(); err != nil { // a component's name read outside its host (copy())
+		return nil, err
+	}
+	if err := c.notGiven(); err != nil { // a name the page reads and is not given (given.go)
 		return nil, err
 	}
 	if err := c.wireTabs(); err != nil { // each tab and its panels, by name (tabs.go)

@@ -24,7 +24,7 @@ const (
 // its own); $partial persists another set (go+router); $shell and $console are two different sets kept
 // under one name the author chose (persist="shell"), $console with a tab $shell does not have (cmd).
 var tabsBrowserFiles = map[string]string{
-	"localhost/router.work": `import { router } from "kitwork";
+	"localhost/router.work": `import * as router from "kitwork/router";
 
 router.colors({ brand: "#c8742c" });
 router.language("vi");

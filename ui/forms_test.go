@@ -215,7 +215,7 @@ router.get((ctx) => {
 	// the cart's even though the view declares total too
 	html := mustCompile(t, map[string]string{
 		"/site/content.ui": `<content><dropdown><text>{{ user.name }}</text><button click="toggle()">x</button></dropdown><shop-cart /></content>`,
-		"/site/router.work": `import { router } from "kitwork";
+		"/site/router.work": `import * as router from "kitwork/router";
 router.get((ctx) => ctx.view({ user: { name: "Quốc" }, total: () => 1 }));`,
 		"/site/shop-cart.ui":   `<box><text>{{ total() }}</text></box>`,
 		"/site/shop-cart.work": cartLogic,

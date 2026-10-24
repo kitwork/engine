@@ -162,7 +162,18 @@ import (
 // imports such a schema compiled under 21, and the bump retires it. A config.work is compiled at each boot,
 // never cached. A program that writes none of these compiles as before, byte for byte. No opcode or operand
 // changed.
-const CompilerSchemaVersion uint16 = 22
+//
+// 23 (24/10/2026, KITWORK_ROUTER.md mục 3, 4, 11, the router's one import and closed words): a router.work and
+// a config.work of the app's folder, a site or a branch are read by the router's rules before anything is
+// bundled into them (router_rules.go): an import of the router other than import * as router from
+// "kitwork/router", the router read as a value or called anywhere but as a line of its own at the top level,
+// a word the router does not have or no longer has, a folder call chained or (nearest wins) called twice, a
+// door in a config.work, router.timezone outside the app's config.work, const get/post/put/patch at the top
+// level, and context.view handed anything but an object written in place (or view taken apart) are compile
+// errors; any other .work file that takes kitwork/router is refused. A cached artifact of schema 22 of a
+// router.work written in an old way would run until the router met it, or run it: the bump retires it. A
+// program that writes none of them compiles as before, byte for byte. No opcode or operand changed.
+const CompilerSchemaVersion uint16 = 23
 
 var currentCompilerFingerprint = compilerFingerprintFor(CompilerSchemaVersion)
 

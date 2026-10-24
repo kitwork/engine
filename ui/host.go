@@ -379,7 +379,7 @@ func (c *compiler) componentCall(n *Node, cx ctx) (op, error) {
 	}
 	// what the call reads is read where it stands, never the component's own names
 	for _, o := range outside {
-		if err := c.checkNames(n, o.attr, o.e, cx.scope, cx.aliases); err != nil {
+		if err := c.checkNames(n, o.attr, o.e, callScope(o, site, cx.scope), cx.aliases); err != nil {
 			return nil, err
 		}
 		for _, name := range usedNames(o.e.ir) {
@@ -520,6 +520,16 @@ type outsideExpr struct {
 	attr *Attr
 	word string // for, key, if, show, or the input's name
 	e    *expr
+}
+
+// callScope is where a word of a call reads: the row of the call's own for, for every word but that for's
+// list, which is read where the call stands. The page renders it so: if, show, the key and every input once a
+// row, the row's names bound (render.go, renderOne).
+func callScope(o outsideExpr, site *callSite, scope *frame) *frame {
+	if site.forEach == nil || o.word == "for" {
+		return scope
+	}
+	return rowFrame(site.forEach, scope)
 }
 
 func inputExprs(a *Attr, in *interpolation) []outsideExpr {
@@ -827,10 +837,14 @@ func (c *compiler) checkNames(n *Node, a *Attr, e *expr, scope *frame, aliases *
 			continue
 		}
 		owner := scope.declaring(name)
-		if owner == nil && !scope.inComponent() && !clientGlobals[name] {
-			// outside every component and declared by nothing around: the view's, or the name of a
-			// component on the page read outside its host (copy() beside a terminal): strayNames tells
-			c.strays = append(c.strays, aliasUse{name: name, node: n, attr: a})
+		if owner == nil && !clientGlobals[name] {
+			// declared by nothing around, in a component or not: what the page is given, or notGiven tells
+			// (given.go); outside every component it may be the name of a component on the page read
+			// outside its host (copy() beside a terminal): strayNames tells
+			c.unowned = append(c.unowned, aliasUse{name: name, node: readAt(n, a, e), attr: a})
+			if !scope.inComponent() {
+				c.strays = append(c.strays, aliasUse{name: name, node: n, attr: a})
+			}
 		}
 		if owner == nil || owner.component == nil || owner.file != "" && owner.file == n.File {
 			continue // the page's, a row's, or read inside the component's own .ui

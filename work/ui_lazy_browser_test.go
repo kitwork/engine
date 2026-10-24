@@ -18,7 +18,7 @@ import (
 // sections that write lazy (one estimating 500px by lazy="true", one 900px, one undone from medium on),
 // and a lazy box in a centred column whose content is 300px wide. A pinned header stands over it all.
 var lazyBrowserFiles = map[string]string{
-	"localhost/router.work": `import { router } from "kitwork";
+	"localhost/router.work": `import * as router from "kitwork/router";
 
 router.colors({ brand: "#c8742c", canvas: "#f6f3ee", paper: "#ffffff", ink: "#2b211b" });
 `,

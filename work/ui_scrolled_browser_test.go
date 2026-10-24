@@ -17,7 +17,7 @@ import (
 // the page scrolls (scrolled:shadow="small") beside a box that never does, and whose /khong carries no
 // scrolled: class at all. Every page is long enough to scroll 600px in a window 800px high.
 var scrolledBrowserFiles = map[string]string{
-	"localhost/router.work": `import { router } from "kitwork";
+	"localhost/router.work": `import * as router from "kitwork/router";
 
 router.colors({ brand: "#c8742c", canvas: "#f6f3ee", paper: "#ffffff", ink: "#2b211b" });
 router.reload(false);

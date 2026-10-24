@@ -16,7 +16,7 @@ import (
 // 13/10/2026) and a document 4000px tall, with an anchor in its middle a URL can scroll to, the text
 // in it padded away from the corners. Its colours have a dark look, and the page follows the device.
 var backdropBrowserFiles = map[string]string{
-	"localhost/router.work": `import { router } from "kitwork";
+	"localhost/router.work": `import * as router from "kitwork/router";
 
 router.colors({ brand: "#c8742c", canvas: { light: "#f6f9fc", dark: "#0f1822" } });
 `,

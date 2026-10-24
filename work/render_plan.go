@@ -98,6 +98,9 @@ func newRenderPlan(t *Tenant, tree *RouteTree) (*RenderPlan, error) {
 		renderers:      make(map[string]*plannedRenderer),
 	}
 	plan.ui.origin = "https://" + t.Domain()
+	// a Kitwork UI site's pages read only what their route gives them: a name read and not given is the
+	// page's compile error ("router.get không trả về x", ui/given.go)
+	plan.ui.site.RouterWork = tree.ui
 	complete := false
 	defer func() {
 		if !complete {

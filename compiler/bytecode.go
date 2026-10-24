@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // parseProgram lexes + parses source into an AST, returning the first parser
@@ -72,6 +73,20 @@ func prepareFile(appRoot string, paths ...string) (*Program, []string, map[strin
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	// the router's rules read the file as its author wrote it, before anything is bundled into it
+	// (router_rules.go): a router.work and a site's config.work by them, any other .work file refuses the router
+	routerKind := routerFileOf(appRoot, entryAbs)
+	var routerCalls *RouterCalls
+	switch {
+	case routerKind != notRouterFile:
+		if routerCalls, err = readRouterFile(prog, routerKind, routerDepth(appRoot, entryAbs), data); err != nil {
+			return nil, nil, nil, err
+		}
+	case strings.HasSuffix(sourceName, ".work"):
+		if err := refuseRouterImport(prog, data); err != nil {
+			return nil, nil, nil, err
+		}
+	}
 	files := []string{entryAbs}
 	sources := map[string]string{sourceName: content}
 	if hasRelativeImports(prog) {
@@ -87,7 +102,9 @@ func prepareFile(appRoot string, paths ...string) (*Program, []string, map[strin
 		}
 	}
 	prog.App = appRoot != ""
-	prog.Router = sourceName == RouterFile
+	prog.Router = routerKind == routerWorkFile
+	prog.RouterConfig = routerKind == routerConfigFile
+	prog.RouterCalls = routerCalls
 	return prog, files, sources, nil
 }
 

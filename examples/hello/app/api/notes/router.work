@@ -1,4 +1,4 @@
-import { router } from "kitwork";
+import * as router from "kitwork/router";
 import { asc } from "kitwork/database";
 import { db } from "app/.shared/schema/notes.work";
 

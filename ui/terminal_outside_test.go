@@ -126,7 +126,10 @@ func TestTerminalNamesOutsideItsHost(t *testing.T) {
 		"/site/router.work": "import { listNavigation } from \"./page.work\";\nrouter.get((context) => context.view({ navigation: listNavigation() }));",
 		"/site/page.work":   "export const listNavigation = () => [];",
 	}), "content.ui:1:", `copied là tên của terminal`)
-	mustCompile(t, site(`<content>`+terminal+`<text>{{ title }}</text><button click="track()">x</button></content>`, view))
+	// a name no component has is the page's, given by the view (24/10/2026: one the view does not give is an
+	// error, given_test.go)
+	mustCompile(t, site(`<content>`+terminal+`<text>{{ title }}</text><button click="track()">x</button></content>`,
+		map[string]string{"/site/router.work": `router.get((context) => context.view({ title: "Kitwork", track: () => null }));`}))
 	// an accordion's header writes click="toggle()", the accordion's own word (the browser opens
 	// <details>), beside a dropdown that declares toggle: no name of the dropdown's
 	mustCompile(t, site(`<content><accordion><box click="toggle()"><text>Câu hỏi</text></box><text>Trả lời</text></accordion>`+

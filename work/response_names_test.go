@@ -45,9 +45,12 @@ func TestReadingAMemberDoesNotAnswer(t *testing.T) {
 // In router.work the response shows a program only the names the spec lists (KITWORK_ROUTER §6: the
 // edits, the answers, the head names the engine has); every other name reads as a key the response does
 // not have — cache among them, the route's since 20/10/2026. A template site keeps every name it has.
+// view is not probed here: in router.work it is only ever called with an object written in place, and
+// typeof response.view, a read of it, is a compile error since 24/10/2026 (compiler/router_rules.go); every
+// page test calls it.
 func TestUIResponseShowsOnlyTheSpecNames(t *testing.T) {
 	listed := []string{"status", "type", "header", "headers", "cookie", "title", "description", "image", "meta",
-		"json", "view", "html", "text", "svg", "file", "redirect", "notFound", "error", "url", "language", "jsonld"}
+		"json", "html", "text", "svg", "file", "redirect", "notFound", "error", "url", "language", "jsonld"}
 	unlisted := []string{"cache", "persist", "bind", "send", "contentType", "isError", "isSend", "return", "errorString",
 		"directory", "layout", "template", "string", "bytes", "setCookie", "deleteCookie", "render", "helloWorld",
 		"data", "kind", "code", "css"}

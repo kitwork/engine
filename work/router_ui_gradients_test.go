@@ -20,11 +20,11 @@ func TestUISiteGradients(t *testing.T) {
 router.gradients({ hero: { type: "linear", direction: "to-bottom-right", stops: [ { color: "brand", at: 0 }, { color: "violet", at: 100 } ] } });`,
 		map[string]string{
 			"localhost/content.ui": `<content><box background="hero" padding="4"><text heading="1" color="headline">Quán</text></box></content>`,
-			"localhost/quan-ly/router.work": `import { router } from "kitwork";
+			"localhost/quan-ly/router.work": `import * as router from "kitwork/router";
 router.gradients({ hero: { type: "radial", position: "top-right", stops: [ { color: "brand-85", at: 0 }, { color: "brand-85/0", at: 70 } ] } });`,
 			"localhost/quan-ly/content.ui":          `<content><box background="hero" padding="4"><text>Quản lý</text></box></content>`,
 			"localhost/quan-ly/don-hang/content.ui": `<content><box background="hero" padding="4"><text>Đơn hàng</text></box></content>`,
-			"localhost/kho/router.work": `import { router } from "kitwork";
+			"localhost/kho/router.work": `import * as router from "kitwork/router";
 router.gradients({ shelf: { type: "linear", direction: "to-right", stops: [ { color: "brnad", at: 0 }, { color: "paper", at: 100 } ] } });`,
 			"localhost/kho/content.ui":  `<content><text>Kho</text></content>`,
 			"localhost/tinh/content.ui": `<content><box background="hero"><text>Tĩnh</text></box></content>`,

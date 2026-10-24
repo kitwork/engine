@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/kitwork/engine/site"
 )
 
 // uiRootFiles is the engine's catalog of files a site serves from its root.
@@ -21,6 +23,33 @@ var uiRootFiles = map[string]bool{
 // uiStaticAllowed reports whether a cleaned URL path is one a Kitwork UI site serves from disk.
 func uiStaticAllowed(clean string) bool {
 	return strings.HasPrefix(clean, "/assets/") || strings.HasPrefix(clean, "/.well-known/") || uiRootFiles[clean]
+}
+
+// assetMounted reports whether a cleaned URL path is under a public path router.assets(…) declared.
+func assetMounted(mounts []site.AssetMount, clean string) bool {
+	for _, mount := range mounts {
+		up := "/" + mount.URL
+		if clean == up || strings.HasPrefix(clean, up+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// uiDiskServed reports whether the file a Kitwork UI site's mount maps a URL to may be served (KITWORK_UI §5):
+// no dot folder or file but .well-known/ at the site's root, no source of the site (.work, .ui, *.kitwork.*),
+// whatever public path names it. router.assets(…) refuses such a folder at boot (assetDiskError); this is the
+// same rule where the file is read. diskClean is the cleaned path from the site's root, "/" first.
+func uiDiskServed(diskClean string) bool {
+	for i, segment := range strings.Split(diskClean, "/") {
+		if i == 1 && segment == ".well-known" {
+			continue
+		}
+		if strings.HasPrefix(segment, ".") {
+			return false
+		}
+	}
+	return !isUISource(diskClean) && !strings.Contains(strings.ToLower(diskClean), extension+".")
 }
 
 // uiSite reports whether the tenant is a Kitwork UI site: its root's router file is router.work.

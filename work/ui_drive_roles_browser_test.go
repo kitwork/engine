@@ -17,7 +17,7 @@ import (
 // router.bundle(false): every role a file, the delivery these moves trade (the default writes the CSS
 // in the page: TestBrowserDriveSwapsInlineCSS).
 var driveRolesFiles = map[string]string{
-	"localhost/router.work": `import { router } from "kitwork";
+	"localhost/router.work": `import * as router from "kitwork/router";
 
 router.colors({ brand: "#c8742c", canvas: "#f6f3ee", paper: "#ffffff", ink: "#2b211b", line: "#e6ded5" });
 router.fonts({ body: "Outfit" });
@@ -35,7 +35,7 @@ router.bundle(false);
   <icon value="coffee" alt="cà phê"></icon>
   <link id="next" value="/nhanh">Nhánh</link>
 </content>`,
-	"localhost/nhanh/router.work": `import { router } from "kitwork";
+	"localhost/nhanh/router.work": `import * as router from "kitwork/router";
 
 router.colors({ brand: "#2f6fde" });
 `,

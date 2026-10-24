@@ -9,7 +9,7 @@ import (
 // <list>, and whose slides each hold a caption placed over their picture (which makes a slide a
 // positioned box, painted after what comes before it).
 var carouselPlacedFiles = map[string]string{
-	"localhost/router.work": `import { router } from "kitwork";
+	"localhost/router.work": `import * as router from "kitwork/router";
 
 router.language("vi");
 `,

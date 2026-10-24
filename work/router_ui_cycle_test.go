@@ -57,7 +57,8 @@ func TestViewDataOfAValueThatHoldsItselfIsTheHandlersError(t *testing.T) {
 // The same through a site: a view's object that holds itself is the page's 500, saying where; and a
 // page that puts its scope into itself ({{ x = $ }}) and hands it to a function of the object gets the
 // failure as the argument, where until 14/10/2026 turning it into a value overflowed Go's stack and
-// stopped the host, every site on it.
+// stopped the host, every site on it. (x is a name of the object: since 24/10/2026 a page reads only what
+// its view gives, ui/given.go.)
 func TestUIPageOfAValueThatHoldsItself(t *testing.T) {
 	tenant := buildUISite(t, map[string]string{
 		"localhost/router.work": `
@@ -72,7 +73,7 @@ router.get((context) => {
 		"localhost/content.ui": `<content><text>{{ cart.a }}</text></content>`,
 		"localhost/scope/router.work": `
 import * as router from "kitwork/router";
-router.get((context) => context.view({ shown: (v) => "đã gọi" }));
+router.get((context) => context.view({ x: null, shown: (v) => "đã gọi" }));
 `,
 		"localhost/scope/content.ui": `<content><text>{{ x = $ }}</text><text>{{ shown(x) }}</text></content>`,
 	})

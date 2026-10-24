@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kitwork/engine/compiler"
 	requestscope "github.com/kitwork/engine/request"
 	"github.com/kitwork/engine/runtime"
 	httputil "github.com/kitwork/engine/utilities/http"
@@ -168,20 +169,26 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 		}
 	}
 
-	// Folder-level rate limits (router.ratelimit), outside-in: ONE bucket per client per rule for
-	// the folder's whole subtree — a root rule is a site-wide ceiling. Enforced before any guard
-	// or handler work.
+	// Folder-level rate limits (router.limit; router.ratelimit of a template), outside-in: ONE bucket per
+	// client per rule for the folder's whole subtree — a root rule is a site-wide ceiling, a branch's adds
+	// to it. Enforced before any guard or handler work.
 	for _, node := range match.Chain {
 		if node.folder == nil {
 			continue
 		}
-		for _, lim := range node.folder.limits {
-			if !t.limiter.Allow(limitKey(lim, "folder:"+node.relPath(), r), lim.Rate, lim.Per) {
-				w.Header().Set("Retry-After", fmt.Sprintf("%.0f", lim.Per.Seconds()))
-				reqRouter.response.Text(value.New("Too Many Requests"), 429)
-				finalize()
-				return
-			}
+		if t.overLimit(w, reqRouter, node.folder.limits, "folder:"+node.relPath()) {
+			finalize()
+			return
+		}
+	}
+	// A Kitwork UI route's own .limit() counts with the folders', before any guard (KITWORK_ROUTER.md mục 4,
+	// 12): a request over it never reaches a guard's work. A template's keeps its place after the folder
+	// guards.
+	if ui {
+		if route := routeMethod(match.Node.folder, generatedMethod, r.Method); route != nil &&
+			t.overLimit(w, reqRouter, route.limits, "path:"+normalizedPath(r.URL.Path)) {
+			finalize()
+			return
 		}
 	}
 
@@ -196,10 +203,12 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 	t.prepareExecutionVM(vm, t.vm.Globals, t.vm.Builtins, requestScope)
 	vm.MaxEnergy = t.MaxEnergy
 
-	// Folder before-chain, outside-in: each folder's guards run in order (guard subsumes middleware).
+	// Folder before-chain, outside-in: each folder's guards run in order (guard subsumes middleware). In a
+	// Kitwork UI folder config.work's come first, then router.work's; each runs with the bytecode of the
+	// file that wrote it (code), so a folder with a config.work and no router.work guards its subtree too.
 	for _, node := range match.Chain {
 		fr := node.folder
-		if fr == nil || fr.bytecode == nil {
+		if fr == nil {
 			continue
 		}
 		for _, g := range fr.guards {
@@ -255,14 +264,11 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 		return
 	}
 
-	// Method-level rate limits (.limit/.ratelimit) — before any handler work, keyed per URL path.
-	for _, lim := range method.limits {
-		if !t.limiter.Allow(limitKey(lim, "path:"+normalizedPath(r.URL.Path), r), lim.Rate, lim.Per) {
-			w.Header().Set("Retry-After", fmt.Sprintf("%.0f", lim.Per.Seconds()))
-			reqRouter.response.Text(value.New("Too Many Requests"), 429)
-			finalize()
-			return
-		}
+	// Method-level rate limits of a template (.limit/.ratelimit) — before any handler work, keyed per URL
+	// path. A Kitwork UI route's ran before the guards.
+	if !ui && t.overLimit(w, reqRouter, method.limits, "path:"+normalizedPath(r.URL.Path)) {
+		finalize()
+		return
 	}
 
 	// Method-level guards run after all folder guards, in order — and before the response cache: a
@@ -424,15 +430,60 @@ func limitKey(lim methodLimit, scope string, r *http.Request) string {
 	return lim.Dim + "|" + limitClient(lim.Dim, r) + "|" + scope + "|" + strconv.Itoa(lim.Rate) + "/" + lim.Per.String()
 }
 
+// overLimit counts the request against each rule of limits in scope (a folder's subtree, a route's path) and
+// answers 429 with Retry-After at the first it is over, reporting whether it did.
+func (t *Tenant) overLimit(w http.ResponseWriter, reqRouter *Router, limits []methodLimit, scope string) bool {
+	for _, lim := range limits {
+		if !t.limiter.Allow(limitKey(lim, scope, reqRouter.request), lim.Rate, lim.Per) {
+			w.Header().Set("Retry-After", fmt.Sprintf("%.0f", lim.Per.Seconds()))
+			reqRouter.response.Text(value.New("Too Many Requests"), 429)
+			return true
+		}
+	}
+	return false
+}
+
+// routeMethod is the route a request reaches in its folder before anything runs: a built-in door's, the
+// folder's method, or for HEAD the GET it runs as (a Kitwork UI site's, KITWORK_ROUTER.md mục 2).
+func routeMethod(leaf *FolderRouter, generated *FolderMethod, method string) *FolderMethod {
+	if generated != nil {
+		return generated
+	}
+	if leaf == nil {
+		return nil
+	}
+	if route := leaf.methods[method]; route != nil {
+		return route
+	}
+	if method == http.MethodHead {
+		return leaf.methods[http.MethodGet]
+	}
+	return nil
+}
+
+// code is the bytecode a function of the folder belongs to, the one it runs with: config.work's for what
+// config.work handed the router (router.guard), the router file's for everything else.
+func (f *FolderRouter) code(l *value.Lambda) *compiler.Bytecode {
+	if f == nil {
+		return nil
+	}
+	if f.configBytecode != nil && l != nil && l.Program != nil {
+		if program, ok := runtime.ProgramFromRef(l.Program); ok && program == f.configBytecode.Program {
+			return f.configBytecode
+		}
+	}
+	return f.bytecode
+}
+
 // execTree loads the folder's bytecode into the VM (its lambdas index THAT bytecode), then runs
 // one lambda of it with the arguments its folder's router file hands: by position for a router.work's,
 // by name for a router.kitwork.js's — the folder that wrote the function, not the request's leaf, so a
 // guard of a router.work over a template folder still takes its context (23/10/2026).
 func (t *Tenant) execTree(vm *runtime.VM, folder *FolderRouter, l *value.Lambda, ctxObj *Context) value.Value {
-	if l == nil || folder == nil || folder.bytecode == nil {
+	bc := folder.code(l)
+	if l == nil || bc == nil {
 		return value.Value{K: value.Nil}
 	}
-	bc := folder.bytecode
 	vm.FastResetPrepared(bc.Program)
 	started := time.Now()
 	var result value.Value
@@ -455,7 +506,7 @@ func (t *Tenant) execTree(vm *runtime.VM, folder *FolderRouter, l *value.Lambda,
 // runStage runs one guard/middleware lambda and reports whether the pipeline may continue.
 // A guard that returns data auto-sends it (like the flat lifecycle); middleware does not.
 func (t *Tenant) runStage(vm *runtime.VM, folder *FolderRouter, l *value.Lambda, ctxObj *Context, r *Router, isGuard bool) bool {
-	bc := folder.bytecode
+	bc := folder.code(l)
 	res := t.execTree(vm, folder, l, ctxObj)
 	if res.K == value.Invalid {
 		stage := "middleware"
@@ -528,10 +579,13 @@ func (t *Tenant) serveTreeStatic(w http.ResponseWriter, r *http.Request) bool {
 	if isUISource(clean) { // never expose Kitwork UI sources: *.ui (interface), *.work (logic)
 		return false
 	}
+	// Presentation declarations were collected before generation activation.
+	presentation := t.presentation().View()
+
 	ui := t.uiSite()
-	if ui && !uiStaticAllowed(clean) {
+	if ui && !uiStaticAllowed(clean) && !assetMounted(presentation.AssetMounts, clean) {
 		// a Kitwork UI site serves only its allowlist (KITWORK_UI §5): assets/, the catalog of root
-		// files, .well-known/; no other file under the app, whatever its name
+		// files, .well-known/, and what router.assets(…) adds; no other file under the app, whatever its name
 		return false
 	}
 	for i, seg := range strings.Split(clean, "/") { // any dot SEGMENT: .env, .persist/…, .git/…
@@ -542,9 +596,6 @@ func (t *Tenant) serveTreeStatic(w http.ResponseWriter, r *http.Request) bool {
 			return false
 		}
 	}
-
-	// Presentation declarations were collected before generation activation.
-	presentation := t.presentation().View()
 
 	// /favicon.ico: browsers request it unprompted; .favicon() names the file that answers.
 	if clean == "/favicon.ico" && presentation.FaviconFile != "" {
@@ -557,7 +608,9 @@ func (t *Tenant) serveTreeStatic(w http.ResponseWriter, r *http.Request) bool {
 
 	// Allowlist + alias mapping: once .assets() declared anything, only those URL prefixes are public,
 	// and each maps to its (possibly different, e.g. private "_assets/") disk dir. Zero-config (no
-	// mounts) leaves diskClean == clean so any safe file under the tenant auto-serves.
+	// mounts) leaves diskClean == clean so any safe file under the tenant auto-serves. A Kitwork UI
+	// site's router.assets(…) only adds to its allowlist (KITWORK_ROUTER.md mục 4, 24/10/2026): its
+	// assets/ is served at /assets/… whatever it declares.
 	diskClean := clean
 	if len(presentation.AssetMounts) > 0 {
 		matched := false
@@ -569,9 +622,12 @@ func (t *Tenant) serveTreeStatic(w http.ResponseWriter, r *http.Request) bool {
 				break
 			}
 		}
-		if !matched {
+		if !matched && !ui {
 			return false
 		}
+	}
+	if ui && diskClean != clean && !uiDiskServed(diskClean) {
+		return false // a mount never publishes a dot file or a source of the site under another name
 	}
 
 	base := t.resolve()

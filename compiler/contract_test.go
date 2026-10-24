@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestCompilerV22GoldenContract(t *testing.T) {
-	if CompilerSchemaVersion != 22 {
-		t.Fatalf("CompilerSchemaVersion = %d, want schema v22", CompilerSchemaVersion)
+func TestCompilerV23GoldenContract(t *testing.T) {
+	if CompilerSchemaVersion != 23 {
+		t.Fatalf("CompilerSchemaVersion = %d, want schema v23", CompilerSchemaVersion)
 	}
 	// Bytecode 3 (14/10/2026) moved the fingerprint and every checksum below with the version alone: each
 	// fixture's instructions, constants and debug table are those bytecode 2 wrote (none needs a wide
@@ -30,10 +30,17 @@ func TestCompilerV22GoldenContract(t *testing.T) {
 	// fixture writes router.view. Schema 21 (24/10/2026, a folder's config.work by calls) moved the fingerprint
 	// alone: no fixture is a config.work or calls queue.parallel, queue.keep or schedule.keep. Schema 22
 	// (24/10/2026, queue.database(db) checked where it is written) moved the fingerprint alone: no fixture is a
-	// config.work or calls queue.database.
-	const expectedFingerprint = "58dc706d807f0a7e734138dc99273ed41acc619d8ba98e1ca7904daf69a47b93"
+	// config.work or calls queue.database. Schema 23 (24/10/2026, the router's one import and closed words)
+	// moved the fingerprint alone: no fixture is a router.work or a config.work.
+	const expectedFingerprint = "345c9330b6456929f7a20527b254efe271a0d07d3aaf5db7389384875ced04e5"
 	if got := Fingerprint(); got != expectedFingerprint {
 		t.Fatalf("compiler fingerprint = %q, want %q", got, expectedFingerprint)
+	}
+	// schema 22 compiled a router.work written in the ways of before 24/10/2026 (import { router } from
+	// "kitwork", a chained folder call, router.ratelimit…): its artifacts are not reused
+	const schema22 = "58dc706d807f0a7e734138dc99273ed41acc619d8ba98e1ca7904daf69a47b93"
+	if stamped := compilerFingerprintFor(22); hex.EncodeToString(stamped[:]) != schema22 || Fingerprint() == schema22 {
+		t.Fatalf("schema 22 on bytecode 4 stamps %x, the current compiler %s: want %s and another", stamped, Fingerprint(), schema22)
 	}
 	// schema 21 compiled what a config.work handed queue.database(…) or schedule.database(…) unchecked: its
 	// artifacts are not reused

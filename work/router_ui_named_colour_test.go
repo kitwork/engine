@@ -16,7 +16,7 @@ func TestUISiteNamedColours(t *testing.T) {
 		`router.colors({ brand: "cerulean", canvas: { light: "ivory", dark: "#141110" } });`,
 		map[string]string{
 			"localhost/content.ui": `<content><box background="navy"><text color="gold">Cà phê</text></box><box background="burnt-orange/20"><text color="brand+15">Trà</text></box></content>`,
-			"localhost/quan-ly/router.work": `import { router } from "kitwork";
+			"localhost/quan-ly/router.work": `import * as router from "kitwork/router";
 router.colors({ brand: "navy-blue" });`,
 			"localhost/quan-ly/content.ui": `<content><text>Quản lý</text></content>`,
 		})

@@ -1,4 +1,4 @@
-import { router } from "kitwork";
+import * as router from "kitwork/router";
 
 router.language("en");
 

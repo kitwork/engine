@@ -34,6 +34,12 @@ type Site struct {
 	// A language written right to left (ar, he, fa, ur, and their regional forms) gives the page
 	// dir="rtl", so left and right mirror: the stylesheet writes them as logical CSS (page.go).
 	Language string
+	// RouterWork says the site is a Kitwork UI site, its routes router.work (KITWORK_ROUTER.md mục 2): what
+	// every page is given is known (given.go) — a folder with no router file gives its page nothing, a
+	// notfound.ui nothing, an error.ui its message —, and a page that reads a name it is not given is a
+	// compile error. False (a test's page and its Scope), only a folder's own router.work says what its page
+	// is given, and a page whose folder has none is told nothing.
+	RouterWork bool
 }
 
 func (s *Site) target() string {

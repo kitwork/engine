@@ -3,6 +3,7 @@ package work
 import (
 	"encoding/json"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -93,12 +94,12 @@ func TestEnvironmentAppTierWithSiteOverlayByKey(t *testing.T) {
 func TestEnvImportIsABootErrorNamingEnvironment(t *testing.T) {
 	root := environmentApp(t, map[string]string{
 		"acme/.env":                  "PORT=8080\n",
-		"acme/localhost/router.work": "import { router, env } from \"kitwork\";\nrouter.get((context) => context.json({ port: env.PORT }));\n",
+		"acme/localhost/router.work": "import * as router from \"kitwork/router\";\nimport { env } from \"kitwork\";\nrouter.get((context) => context.json({ port: env.PORT }));\n",
 	})
 	tenant := NewTenant(root, "localhost")
 	err := tenant.Run()
 	tenant.Close()
-	const want = "router.work:1:1: `env` đã đổi tên: import { environment } from \"kitwork\", rồi environment.KEY, environment.require(\"KEY\") (KITWORK_ENVIRONMENT.md mục 11)"
+	const want = "router.work:2:1: `env` đã đổi tên: import { environment } from \"kitwork\", rồi environment.KEY, environment.require(\"KEY\") (KITWORK_ENVIRONMENT.md mục 11)"
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("run = %v, want the error naming environment: %q", err, want)
 	}
@@ -290,23 +291,30 @@ func TestEnvironmentFileLinkedOutOfTheAppIsRefused(t *testing.T) {
 // A const of a router.work's top level that holds a key not named PUBLIC_… is the server's: a page reads
 // only the names of the object its context.view({ … }) is given (KITWORK_ROUTER.md, 23/10/2026), so the
 // page never reads it, while a PUBLIC_ key, and a yes/no made of the secret, handed in the object, are the
-// page's (mục 6). A handler of the file still uses the secret.
+// page's (mục 6). A handler of the file still uses the secret. A page that reads the const by its name is the
+// compile error "router.get không trả về stripe" at the read (24/10/2026, ui/given.go), answered while
+// developing with the names the page is given, never a value.
 //
 // CONTROL (22/10/2026, when router.view handed its page every name of the file): with convertViewScope not
 // leaving out EnvironmentServerOnly, the page printed the secret: "the page shows the secret: …sk-live-123…".
-// Since 23/10/2026 no code hands a page a name of the file.
+// Since 23/10/2026 no code hands a page a name of the file. CONTROL (24/10/2026, go test -overlay): with
+// ui's notGiven telling nothing, the page reading stripe answered 200 ("/ reading stripe = 200, want 500 …"),
+// stripe read as a name never given.
 func TestEnvironmentSecretOfTheFileIsNotPageData(t *testing.T) {
-	root := environmentApp(t, map[string]string{
+	saved := AllowLocal
+	AllowLocal = true
+	t.Cleanup(func() { AllowLocal = saved })
+	files := map[string]string{
 		"acme/.env":                 "STRIPE_SECRET=sk-live-123\nPUBLIC_GREETING=Xin chào\n",
 		"acme/localhost/view.ui":    "<view><content /></view>",
-		"acme/localhost/content.ui": "<content><text id=\"page\">[{{ greeting }}] [{{ stripe }}] [{{ apiKeyUnknown }}] [{{ secretSet }}]</text></content>",
+		"acme/localhost/content.ui": "<content><text id=\"page\">[{{ greeting }}] [{{ secretSet }}]</text></content>",
 		"acme/localhost/router.work": "import * as router from \"kitwork/router\";\nimport { environment } from \"kitwork\";\n" +
 			"const stripe = environment.require(\"STRIPE_SECRET\");\nconst greeting = environment.PUBLIC_GREETING || \"\";\n" +
 			"router.get((context) => context.view({ greeting, secretSet: stripe.length > 0 }));\n",
 		"acme/localhost/charge/router.work": "import * as router from \"kitwork/router\";\nimport { environment } from \"kitwork\";\n" +
 			"const stripe = environment.require(\"STRIPE_SECRET\");\nrouter.get((context) => context.json({ prefix: stripe.slice(0, 7) }));\n",
-	})
-	tenant := NewTenant(root, "localhost")
+	}
+	tenant := NewTenant(environmentApp(t, files), "localhost")
 	if err := tenant.Run(); err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -315,19 +323,29 @@ func TestEnvironmentSecretOfTheFileIsNotPageData(t *testing.T) {
 	if strings.Contains(page, "sk-live-123") {
 		t.Fatalf("the page shows the secret: %.1500s", page)
 	}
-	// stripe reads as a name the page was never given does
 	start := strings.Index(page, `<p id="page">`)
 	end := strings.Index(page[max(start, 0):], "</p>")
 	if start < 0 || end < 0 {
 		t.Fatalf("no page text: %.1500s", page)
 	}
-	text := page[start+len(`<p id="page">`) : start+end]
-	parts := strings.Split(text, "] [")
-	if len(parts) != 4 || parts[0] != "[Xin chào" || parts[1] != parts[2] || parts[3] != "true]" {
-		t.Fatalf("the page = %q, want the public key, stripe read as a name never given, and the yes/no", text)
+	if text := page[start+len(`<p id="page">`) : start+end]; text != "[Xin chào] [true]" {
+		t.Fatalf("the page = %q, want the public key and the yes/no", text)
 	}
 	if charge := serveIsolation(t, tenant, "http://localhost/charge").Body.String(); charge != `{"prefix":"sk-live"}` {
 		t.Fatalf("/charge = %s, want the handler to use the secret", charge)
+	}
+
+	// the page reading the const by its name: the error at the read, the names given, no value
+	files["acme/localhost/content.ui"] = "<content><text id=\"page\">[{{ greeting }}] [{{ stripe }}]</text></content>"
+	reading := NewTenant(environmentApp(t, files), "localhost")
+	if err := reading.Run(); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	defer reading.Close()
+	rec := serveIsolation(t, reading, "http://localhost/")
+	want := "content.ui:1:44: router.get không trả về stripe: trang đọc stripe mà object của context.view({ … }) trong router.work không có; tên có: greeting, secretSet"
+	if body := rec.Body.String(); rec.Code != http.StatusInternalServerError || !strings.Contains(body, want) || strings.Contains(body, "sk-live") {
+		t.Fatalf("/ reading stripe = %d, want 500 saying %q and no secret:\n%.1500s", rec.Code, want, body)
 	}
 }
 
@@ -335,21 +353,30 @@ func TestEnvironmentSecretOfTheFileIsNotPageData(t *testing.T) {
 // of the app that holds one, and a let of the file's top level, are the server's as a const of the file is,
 // while the PUBLIC_ key the module exports beside it is the page's when the object of context.view hands it;
 // an object of the file that holds a secret, handed to context.view by its name, stops the boot, naming the
-// key.
+// key. A page that reads the imported const or the let by its name is the compile error "router.get không trả
+// về x" at the read (24/10/2026, ui/given.go: an imported value handed to context.view is data, so what the
+// route gives is known), answered while developing with the names the page is given, never a value.
 //
 // CONTROL (23/10/2026): with holdEnvironment reading nothing once a declaration is resolved and a let held as
 // nothing, the page was handed them (when router.view handed its page every name of the file): "the page
 // shows a secret: <!doctype html>…"; with environmentView not following a name, the site booted: "run =
-// <nil>, want \"router.work:4:38: khoá `TOKEN` sẽ đi xuống trình duyệt\"".
+// <nil>, want \"router.work:4:38: khoá `TOKEN` sẽ đi xuống trình duyệt\"". (24/10/2026: the object handed
+// by its name moved into a page of .shared/, since router.work takes only an object written in place.)
+// CONTROL (24/10/2026, fix of the ui review, go test -overlay): with ui's viewNames not knowing a route that
+// reads an imported name anywhere (as it was for anything but a call with nothing), the page reading stripe
+// answered 200 ("/ reading stripe = 200, want 500 …"); with ui's notGiven telling nothing, the same.
 func TestEnvironmentSecretOfAModuleOrALetIsNotPageData(t *testing.T) {
-	root := environmentApp(t, map[string]string{
+	saved := AllowLocal
+	AllowLocal = true
+	t.Cleanup(func() { AllowLocal = saved })
+	files := map[string]string{
 		"acme/.env":                  "STRIPE_SECRET=sk-live-123\nTOKEN=tok-456\nPUBLIC_GREETING=Xin chào\n",
 		"acme/.shared/keys.work":     "import { environment } from \"kitwork\";\nexport const stripe = environment.STRIPE_SECRET;\nexport const greeting = environment.PUBLIC_GREETING || \"\";\n",
 		"acme/localhost/view.ui":     "<view><content /></view>",
-		"acme/localhost/content.ui":  "<content><text id=\"page\">[{{ greeting }}] [{{ stripe }}] [{{ token }}] [{{ apiKeyUnknown }}]</text></content>",
+		"acme/localhost/content.ui":  "<content><text id=\"page\">[{{ greeting }}]</text></content>",
 		"acme/localhost/router.work": "import * as router from \"kitwork/router\";\nimport { environment } from \"kitwork\";\nimport { stripe, greeting } from \"app/.shared/keys.work\";\nlet token = environment.TOKEN;\nrouter.get((context) => context.view({ greeting }));\n",
-	})
-	tenant := NewTenant(root, "localhost")
+	}
+	tenant := NewTenant(environmentApp(t, files), "localhost")
 	if err := tenant.Run(); err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -363,24 +390,41 @@ func TestEnvironmentSecretOfAModuleOrALetIsNotPageData(t *testing.T) {
 	if start < 0 || end < 0 {
 		t.Fatalf("no page text: %.1500s", page)
 	}
-	text := page[start+len(`<p id="page">`) : start+end]
-	parts := strings.Split(text, "] [")
-	// stripe and token read as apiKeyUnknown, a name the page was never given, does
-	if len(parts) != 4 || parts[0] != "[Xin chào" || parts[1] != parts[2] || parts[2]+"]" != parts[3] {
-		t.Fatalf("the page = %q, want the public key, then stripe and token read as names never given", text)
+	if text := page[start+len(`<p id="page">`) : start+end]; text != "[Xin chào]" {
+		t.Fatalf("the page = %q, want the public key", text)
+	}
+	// the page reading the imported const, or the let, by its name: the error at the read, the names given, no
+	// value
+	for _, name := range []string{"stripe", "token"} {
+		files["acme/localhost/content.ui"] = "<content><text id=\"page\">[{{ greeting }}] [{{ " + name + " }}]</text></content>"
+		reading := NewTenant(environmentApp(t, files), "localhost")
+		if err := reading.Run(); err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		rec := serveIsolation(t, reading, "http://localhost/")
+		reading.Close()
+		want := "content.ui:1:44: router.get không trả về " + name + ": trang đọc " + name + " mà object của context.view({ … }) trong router.work không có; tên có: greeting"
+		if body := rec.Body.String(); rec.Code != http.StatusInternalServerError || !strings.Contains(body, want) ||
+			strings.Contains(body, "sk-live") || strings.Contains(body, "tok-456") {
+			t.Fatalf("/ reading %s = %d, want 500 saying %q and no secret:\n%.1500s", name, rec.Code, want, body)
+		}
 	}
 
+	// context.view(data) is refused in router.work itself since 24/10/2026 (an object written in place); a page
+	// of .shared/ may still hand an object by its name, and is checked the same way
 	byName := environmentApp(t, map[string]string{
 		"acme/.env":                 "TOKEN=tok-456\n",
 		"acme/localhost/view.ui":    "<view><content /></view>",
 		"acme/localhost/content.ui": "<content><text>{{ data }}</text></content>",
-		"acme/localhost/router.work": "import * as router from \"kitwork/router\";\nimport { environment } from \"kitwork\";\n" +
-			"const data = { token: environment.TOKEN };\nrouter.get((context) => context.view(data));\n",
+		"acme/.shared/page.work": "import { environment } from \"kitwork\";\n" +
+			"const data = { token: environment.TOKEN };\nexport const page = (context) => context.view(data);\n",
+		"acme/localhost/router.work": "import * as router from \"kitwork/router\";\nimport { page } from \"app/.shared/page.work\";\n" +
+			"router.get((context) => page(context));\n",
 	})
 	tenant = NewTenant(byName, "localhost")
 	err := tenant.Run()
 	tenant.Close()
-	if want := "router.work:4:38: khoá `TOKEN` sẽ đi xuống trình duyệt"; err == nil || !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), "tok-456") {
+	if want := "page.work:3:47: khoá `TOKEN` sẽ đi xuống trình duyệt"; err == nil || !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), "tok-456") {
 		t.Fatalf("run = %v, want %q", err, want)
 	}
 }
