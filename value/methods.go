@@ -49,15 +49,17 @@ func (v Value) ToString(args ...Value) Value {
 			return NewString(fmt.Sprintf(format, v.Interface()))
 		}
 	}
-	v.V = v.Text()
-	v.K = String
-	return v
+	// a fresh string: the receiver's Raw mark never travels on (value.Value.Raw); the failure of a
+	// failed receiver still does
+	result := Value{K: String, V: v.Text()}
+	result.IsError, result.ErrorVal = v.IsError, v.ErrorVal
+	return result
 }
 
 // Integer is the number without its fraction; NaN and the infinities stay themselves (int64(n) made them
 // -9223372036854775808; 15/10/2026).
-func (v Value) Integer(_ ...Value) Value { v.N = math.Trunc(v.N) + 0; v.K = Number; return v }
-func (v Value) ToFloat(_ ...Value) Value { v.K = Number; return v }
+func (v Value) Integer(_ ...Value) Value { return Value{K: Number, N: math.Trunc(v.N) + 0} }
+func (v Value) ToFloat(_ ...Value) Value { return Value{K: Number, N: v.N} }
 func (v Value) Length(_ ...Value) Value {
 	// String đếm theo rune — đồng bộ với thuộc tính .length
 	if v.K == String {
@@ -65,9 +67,7 @@ func (v Value) Length(_ ...Value) Value {
 			return Value{K: Number, N: float64(utf8.RuneCountInString(s))}
 		}
 	}
-	v.N = float64(v.Len())
-	v.K = Number
-	return v
+	return Value{K: Number, N: float64(v.Len())}
 }
 
 func (v Value) ToJson(args ...Value) Value {
@@ -79,9 +79,7 @@ func (v Value) ToJson(args ...Value) Value {
 			if errors.As(err, &walk) {
 				return walk.Failure("json")
 			}
-			v.V = string(data)
-			v.K = String
-			return v
+			return New(string(data))
 		}
 	} else if v.K == String {
 		// If no args and it's a string, try to PARSE it
@@ -90,6 +88,8 @@ func (v Value) ToJson(args ...Value) Value {
 			return New(data)
 		}
 	}
+	// the receiver as it was, less its Raw mark (value.Value.Raw): no method's result keeps it
+	v.Raw = false
 	return v
 }
 
@@ -106,7 +106,7 @@ func (v Value) Lower(_ ...Value) Value {
 func (v Value) Capitalize(_ ...Value) Value {
 	s := v.String()
 	if len(s) == 0 {
-		return v
+		return New(s)
 	}
 	// Note: Strings in Go are UTF-8, but for simple capitalize, this works.
 	return New(strings.ToUpper(s[:1]) + s[1:])
@@ -156,19 +156,17 @@ func (v Value) Split(args ...Value) Value {
 // Muốn thay tất cả, dùng replaceAll.
 func (v Value) Replace(args ...Value) Value {
 	if len(args) < 2 {
-		return v
+		return New(v.String())
 	}
-	v.V = strings.Replace(v.String(), args[0].String(), args[1].String(), 1)
-	return v
+	return New(strings.Replace(v.String(), args[0].String(), args[1].String(), 1))
 }
 
 // ReplaceAll thay thế tất cả — chuẩn JS String.replaceAll.
 func (v Value) ReplaceAll(args ...Value) Value {
 	if len(args) < 2 {
-		return v
+		return New(v.String())
 	}
-	v.V = strings.ReplaceAll(v.String(), args[0].String(), args[1].String())
-	return v
+	return New(strings.ReplaceAll(v.String(), args[0].String(), args[1].String()))
 }
 
 /* ---------------------------------------------------------------------------
