@@ -11,8 +11,7 @@ import (
 // A Raw-marked value is trusted, already-safe HTML: it is emitted verbatim even when the template
 // would otherwise escape it — so an engine value like $.meta.jsonld needs no raw() wrapper.
 func TestWriteResolvedValueRawSkipsEscape(t *testing.T) {
-	raw := value.New(`{"a":"<b>&"}`)
-	raw.Raw = true
+	raw := value.Trusted(`{"a":"<b>&"}`)
 
 	var out strings.Builder
 	writeResolvedValue(&out, raw, true) // escape requested, but Raw wins

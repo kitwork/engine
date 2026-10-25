@@ -26,10 +26,7 @@ func NotAFunctionMessage(callee string, called Value) string {
 // NotAFunctionFrom gives the message of a NotAFunction failure, so a caller that knows more of the
 // call (the VM: the object, the place; a template: the path) can say it.
 func NotAFunctionFrom(result Value) (string, bool) {
-	if result.K != Invalid {
-		return "", false
-	}
-	failure, ok := result.ErrorVal.(Failure)
+	failure, ok := result.Failure()
 	if !ok || failure.Code != NotAFunctionCode {
 		return "", false
 	}

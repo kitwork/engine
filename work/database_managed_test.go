@@ -857,7 +857,7 @@ func TestManagedDatabaseSQLiteParity(t *testing.T) {
 	insert := `{"v":1,"action":"insert","table":"items","values":[{"column":"name","value":{"op":"hole","hole":0}},{"column":"n","value":{"op":"hole","hole":1}},{"column":"day","value":{"op":"hole","hole":2}},{"column":"note","value":{"op":"hole","hole":3}}],"holes":[{"site":"a"},{"site":"b"},{"site":"c"},{"site":"d"}]}`
 	for _, database := range []*ManagedDatabase{kitdb, sqlite} {
 		for _, row := range inserts {
-			if created := database.OnInvoke(statement.Method, append([]value.Value{value.New(insert)}, row...)...); created.IsError {
+			if created := database.OnInvoke(statement.Method, append([]value.Value{value.New(insert)}, row...)...); created.Failed() {
 				t.Fatalf("insert: %v", created)
 			}
 		}
@@ -885,7 +885,7 @@ func TestManagedDatabaseSQLiteParity(t *testing.T) {
 		results := make([]any, 0, 2)
 		for index, database := range []*ManagedDatabase{kitdb, sqlite} {
 			result := database.OnInvoke(statement.Method, append([]value.Value{value.New(test.template)}, test.holes...)...)
-			if result.IsError {
+			if result.Failed() {
 				t.Fatalf("%s: %v", test.template, result)
 			}
 			if got := namesOf(result.Interface()); got != test.want {

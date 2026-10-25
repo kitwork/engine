@@ -32,7 +32,7 @@ func TestInvokeOfANameThatIsNotAFunctionFails(t *testing.T) {
 	for _, c := range cases {
 		got := c.receiver.Invoke(c.name)
 		message, ok := NotAFunctionFrom(got)
-		if !ok || message != c.want || !got.IsError {
+		if !ok || message != c.want || !got.Failed() {
 			t.Errorf("%s: Invoke(%q) = %#v, want the NotAFunction failure %q", c.label, c.name, got, c.want)
 			continue
 		}

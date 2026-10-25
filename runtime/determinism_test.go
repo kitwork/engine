@@ -27,9 +27,8 @@ type executionFingerprint struct {
 }
 
 type valueFingerprint struct {
-	Kind    value.Kind
-	IsError bool
-	JSON    string
+	Kind value.Kind
+	JSON string
 }
 
 type variableFingerprint struct {
@@ -107,9 +106,8 @@ func fingerprintValue(item value.Value) valueFingerprint {
 		data = []byte("<json-error:" + err.Error() + ">")
 	}
 	return valueFingerprint{
-		Kind:    item.K,
-		IsError: item.IsError,
-		JSON:    string(data),
+		Kind: item.K,
+		JSON: string(data),
 	}
 }
 

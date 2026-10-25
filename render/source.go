@@ -41,9 +41,7 @@ func init() {
 	// kit identifier glows in the directive color to tie the JS to the behavior it
 	// defines. Safe by construction: every run is escaped, only spans are emitted.
 	value.String.Prototype("highlightScript", func(target value.Value, args ...value.Value) value.Value {
-		result := value.New(highlightScriptWith(target.String(), highlightPalette(args)))
-		result.Raw = true
-		return result
+		return value.Trusted(highlightScriptWith(target.String(), highlightPalette(args)))
 	})
 }
 

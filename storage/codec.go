@@ -132,7 +132,7 @@ func (e *encoder) write(v value.Value, path string, depth int) error {
 	case value.Duration:
 		return e.number(tagDuration, v.N)
 	case value.String:
-		text, _ := v.V.(string)
+		text, _ := v.AsString()
 		return e.text(tagString, []byte(text))
 	case value.Bytes:
 		return e.text(tagBytes, v.Bytes())

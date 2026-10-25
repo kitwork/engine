@@ -126,8 +126,7 @@ func assertReleasedVMOwners(t testing.TB, round int, vm *kitruntime.VM) {
 		t.Fatalf("round %d: pooled VM retained stack or root variables", round)
 	}
 	for index, item := range vm.Stack[:cap(vm.Stack)] {
-		if item.K != value.Invalid || item.N != 0 || item.V != nil ||
-			item.IsError || item.ErrorVal != nil || item.Raw {
+		if item != (value.Value{}) {
 			t.Fatalf("round %d: pooled VM stack storage retained slot %d", round, index)
 		}
 	}

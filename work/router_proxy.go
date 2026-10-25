@@ -41,7 +41,7 @@ func (t *Tenant) serveProxy(vm *runtime.VM, folder *FolderRouter, method *Folder
 	if target.K == value.Func {
 		target = t.execTree(vm, folder, lambdaOf(target), ctxObj)
 		if target.K == value.Invalid {
-			return &stageFailure{text: fmt.Sprintf("proxy target handler failed: %v", target.V), failure: target, run: true}
+			return &stageFailure{text: fmt.Sprintf("proxy target handler failed: %s", target.Text()), failure: target, run: true}
 		}
 	}
 	url := strings.TrimSpace(target.Text())

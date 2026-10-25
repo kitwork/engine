@@ -1385,7 +1385,7 @@ func (c *uiConverter) convert(v value.Value, depth int) (any, bool) {
 			}
 			out := c.vm.ExecuteLambda(lambda, in)
 			if out.K == value.Invalid {
-				if diagnostic, ok := runtime.DiagnosticFrom(out); ok && diagnostic.Code != runtime.DiagnosticRuntimeError && c.fatal.ErrorVal == nil {
+				if diagnostic, ok := runtime.DiagnosticFrom(out); ok && diagnostic.Code != runtime.DiagnosticRuntimeError && !c.fatal.Failed() {
 					c.fatal = out
 				}
 				return nil

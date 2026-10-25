@@ -19,7 +19,7 @@ func (t *Tenant) outputData(
 	if method.handle != nil {
 		data = t.execTree(vm, folder, method.handle, ctx)
 		if data.K == value.Invalid {
-			return data, &stageFailure{text: fmt.Sprintf("generated %s provider failed: %v", method.outputKind, data.V), failure: data, run: true}
+			return data, &stageFailure{text: fmt.Sprintf("generated %s provider failed: %s", method.outputKind, data.Text()), failure: data, run: true}
 		}
 	}
 	if !data.IsMap() {
@@ -38,7 +38,7 @@ func (t *Tenant) outputData(
 		}
 		result := t.execTree(vm, folder, lambdaOf(item), ctx)
 		if result.K == value.Invalid {
-			return result, &stageFailure{text: fmt.Sprintf("generated %s %s provider failed: %v", method.outputKind, key, result.V), failure: result, run: true}
+			return result, &stageFailure{text: fmt.Sprintf("generated %s %s provider failed: %s", method.outputKind, key, result.Text()), failure: result, run: true}
 		}
 		resolved[key] = result
 	}

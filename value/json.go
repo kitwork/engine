@@ -32,7 +32,8 @@ func (v Value) MarshalJSON() ([]byte, error) {
 		// has JavaScript's digits (2 ** 60 is 1152921504606847000), not every digit of the int64
 		return AppendNumber(nil, v.N), nil
 	case String:
-		return json.Marshal(v.V.(string))
+		s, _ := v.AsString()
+		return json.Marshal(s)
 	case Time:
 		return json.Marshal(time.Unix(0, int64(v.N)))
 	case Duration:
@@ -145,7 +146,7 @@ func (w *walk) appendJSONItem(dst []byte, item Value, key string, index int) ([]
 			return AppendNumber(dst, item.N), nil
 		}
 	case String:
-		if text, ok := item.V.(string); ok && plainJSONString(text) {
+		if text, ok := item.AsString(); ok && plainJSONString(text) {
 			dst = append(dst, '"')
 			dst = append(dst, text...)
 			return append(dst, '"'), nil

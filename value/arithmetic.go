@@ -180,6 +180,10 @@ func equalScalar(a, b Value) bool {
 		return a.N == b.N
 	case String:
 		return a.String() == b.String()
+	case Invalid:
+		// two failures are equal by what they say, as they were when the message was the payload (the
+		// payload is the failure itself since 25/10/2026, a pointer every copy shares)
+		return a.Text() == b.Text()
 	case Nil:
 		return true
 	case Bytes:

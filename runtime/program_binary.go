@@ -234,11 +234,9 @@ func UnmarshalProgram(data []byte) (*Program, error) {
 
 func appendBinaryConstant(data []byte, constant value.Value) ([]byte, error) {
 	data = append(data, byte(constant.K))
-	var flags byte
-	if constant.IsError {
-		flags |= 1
-	}
-	data = append(data, flags)
+	// a flags byte, once IsError: always 0 since 25/10/2026 (a constant is never a failure), kept so
+	// the encoding stays what it was
+	data = append(data, 0)
 	data = appendUint64(data, math.Float64bits(constant.N))
 
 	switch constant.K {
@@ -372,18 +370,14 @@ func (r *programBinaryReader) constant() (value.Value, error) {
 		return value.Value{}, err
 	}
 	kind := value.Kind(header[0])
-	if header[1]&^byte(1) != 0 {
+	if header[1] != 0 {
 		return value.Value{}, fmt.Errorf("unsupported flags 0x%x", header[1])
 	}
 	number, err := r.uint64()
 	if err != nil {
 		return value.Value{}, err
 	}
-	constant := value.Value{
-		K:       kind,
-		N:       math.Float64frombits(number),
-		IsError: header[1]&1 != 0,
-	}
+	constant := value.Value{K: kind, N: math.Float64frombits(number)}
 
 	switch kind {
 	case value.Nil, value.Number, value.Bool, value.Time, value.Duration:

@@ -244,13 +244,13 @@ func (j *QueueJob) OnInvoke(method string, args ...value.Value) value.Value {
 		return j.send(args)
 	case "runs", "status", "where":
 		name, _, _, _, _, problem := j.declared()
-		if failure := jobUsable(name, problem); failure.IsError {
+		if failure := jobUsable(name, problem); failure.Failed() {
 			return failure
 		}
 		return (&queueQuery{tenant: j.tenant, who: name, job: name}).OnInvoke(method, args...)
 	case "cancel", "replay":
 		name, _, _, _, _, problem := j.declared()
-		if failure := jobUsable(name, problem); failure.IsError {
+		if failure := jobUsable(name, problem); failure.Failed() {
 			return failure
 		}
 		if method == "cancel" {
@@ -326,7 +326,7 @@ func (j *QueueJob) setTimeout(args []value.Value) value.Value {
 // the handler never runs in the caller's call.
 func (j *QueueJob) send(args []value.Value) value.Value {
 	name, _, retry, timeout, _, problem := j.declared()
-	if failure := jobUsable(name, problem); failure.IsError {
+	if failure := jobUsable(name, problem); failure.Failed() {
 		return failure
 	}
 	if len(args) > 2 {
@@ -354,7 +354,7 @@ func (j *QueueJob) send(args []value.Value) value.Value {
 	key := ""
 	if len(args) > 1 {
 		var failure value.Value
-		if delay, key, failure = sendOptions(name, args[1]); failure.IsError {
+		if delay, key, failure = sendOptions(name, args[1]); failure.Failed() {
 			return failure
 		}
 	}
@@ -612,7 +612,7 @@ func queuePage(word string, args []value.Value) (int, int, value.Value) {
 // runs reads the runs, newest first.
 func (r *queueQuery) runs(args []value.Value) value.Value {
 	limit, offset, failure := queuePage("runs", args)
-	if failure.IsError {
+	if failure.Failed() {
 		return failure
 	}
 	runs, err := r.tenant.queueStore().Runs(queuestore.Filter{Name: r.job, Status: r.status}, limit, offset)
@@ -636,7 +636,7 @@ func (r *queueQuery) list(args []value.Value) value.Value {
 		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf(`queue.status("%s").list() không có: trạng thái chỉ có ở lần chạy, viết queue.status("%s").runs()`, r.status, r.status))
 	}
 	limit, offset, failure := queuePage("list", args)
-	if failure.IsError {
+	if failure.Failed() {
 		return failure
 	}
 	if r.tenant.queueWorker() == nil {
@@ -721,7 +721,7 @@ func runIDArgument(word string, args []value.Value) (string, value.Value) {
 func queueCancel(tenant *Tenant, who, job string, args []value.Value) value.Value {
 	word := who + ".cancel"
 	id, failure := runIDArgument(word, args)
-	if failure.IsError {
+	if failure.Failed() {
 		return failure
 	}
 	run, err := tenant.queueStore().Cancel(id, job, time.Now())
@@ -745,7 +745,7 @@ func queueCancel(tenant *Tenant, who, job string, args []value.Value) value.Valu
 func queueReplay(tenant *Tenant, who, job string, args []value.Value) value.Value {
 	word := who + ".replay"
 	id, failure := runIDArgument(word, args)
-	if failure.IsError {
+	if failure.Failed() {
 		if len(args) > 0 && args[0].K == value.String && !strings.HasPrefix(args[0].Text(), "r_") {
 			return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf(`%s(%q): replay nhận id của một lần chạy và tạo một lần chạy mới; chạy lại mọi lần thất bại của một job là đọc %s.status("failed").runs() rồi replay(id) từng lần`, word, args[0].Text(), args[0].Text()))
 		}

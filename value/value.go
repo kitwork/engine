@@ -11,25 +11,34 @@ var (
 	FALSE = NewBool(false)
 )
 
+// Value is the one slot of the VM: three fields, 32 bytes, under the line Go keeps a struct in
+// registers (at most 4 words and 4 fields; past it every push, pop and store goes through memory
+// with bulk write barriers). What a value is is K; what it holds is N for the immediate kinds
+// (Number, Bool as 1/0, Time, Duration) and V for the rest. A failure is K == Invalid with what failed
+// in V: a *Failure for an application failure, the run's *runtime.Diagnostic for the VM's own; the
+// zero Value (K == Invalid, V == nil) is nothing, never a failure (Failed). A String the engine made
+// already-safe HTML holds a TrustedHTML in V (Trusted): the trust is the payload's type, so no
+// operation carries it on. Nothing else rides on a Value: until 25/10/2026 IsError, ErrorVal and Raw
+// were three more fields saying what K and V already said, and the struct was 56 bytes.
 type Value struct {
 	N float64
 	V any
 	K Kind
-
-	IsError bool
-	// ErrorVal contains a Failure for application errors or a runtime-owned
-	// diagnostic for terminal VM failures. New host code should use
-	// InvalidFailure (or PartialFailure) instead of assigning this field directly.
-	ErrorVal any
-	// Raw marks a string as ALREADY-safe trusted HTML: templates emit it verbatim without escaping,
-	// so an engine-produced value (e.g. serialized+escaped JSON-LD) needs no raw() in the template.
-	// Only the engine sets this — the JS subset has no way to mark data trusted, so it adds no XSS
-	// surface. It does not propagate: any operation on the value produces a fresh, non-Raw result.
-	Raw bool
 }
 
 func (v Value) Prototype(name string, fn Method)  { v.K.Prototype(name, fn) }
 func (v Value) Method(name string) (Method, bool) { return v.K.Method(name) }
+
+// Failed reports whether v is a failure: K == Invalid carrying what failed. The zero Value is not one.
+func (v Value) Failed() bool { return v.K == Invalid && v.V != nil }
+
+// Failure is the application failure v carries, by pointer: read it, never write it, since every copy
+// of v shares it (FailureFrom gives a copy). false for a run's diagnostic, for the zero Value and for
+// every other kind.
+func (v Value) Failure() (*Failure, bool) {
+	failure, ok := v.V.(*Failure)
+	return failure, ok && failure != nil && v.K == Invalid
+}
 
 // Invoke calls the method `name` of v: v.name(args…), the call after a dot. A method of null is null,
 // as every member of null is (null.trim() is null, the receiver chain never fails). A name that is

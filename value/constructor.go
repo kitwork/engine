@@ -21,6 +21,8 @@ func New(i any) Value {
 		return v
 	case string:
 		return Value{K: String, V: v}
+	case TrustedHTML:
+		return Value{K: String, V: v}
 	case []byte:
 		return Value{K: Bytes, V: v}
 	case bool:

@@ -176,7 +176,7 @@ func ToNumber(v Value) Value {
 		}
 		return Value{K: Number, N: 0}
 	case String:
-		text, _ := v.V.(string)
+		text, _ := v.AsString()
 		return Value{K: Number, N: StringToNumber(text)}
 	case Time:
 		return Value{K: Number, N: float64(time.Unix(0, int64(v.N)).UnixMilli())}
@@ -320,7 +320,7 @@ func ToInt32(n float64) int32 {
 func ParseText(v Value) string {
 	switch v.K {
 	case String:
-		text, _ := v.V.(string)
+		text, _ := v.AsString()
 		return text
 	case Array:
 		return arrayParseText(v)

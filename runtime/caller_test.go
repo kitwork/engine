@@ -113,7 +113,7 @@ func TestWrapFailureGivesTheCause(t *testing.T) {
 		t.Fatalf("cause = %v", cause.Text())
 	}
 	limit := (&runtime.Diagnostic{Code: runtime.DiagnosticEnergyLimit, Message: "Energy Limit Exceeded"}).Failure()
-	if wrapped := runtime.WrapFailure(nil, "nhóm", limit); wrapped.ErrorVal != limit.ErrorVal {
+	if wrapped := runtime.WrapFailure(nil, "nhóm", limit); wrapped.V != limit.V {
 		t.Fatalf("a failure nothing catches was wrapped: %v", wrapped.Text())
 	}
 }

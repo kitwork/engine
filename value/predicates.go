@@ -51,7 +51,8 @@ func (v Value) Truthy() bool {
 		return v.N > 0
 	}
 	if v.K == String {
-		return v.V != nil && v.V.(string) != ""
+		s, _ := v.AsString()
+		return s != ""
 	}
 	return v.IsObject()
 }

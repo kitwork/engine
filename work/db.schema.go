@@ -1352,7 +1352,7 @@ func (t *SchemaTable) failWith(failure value.Value) *SchemaTable {
 // failVal is the chain's failure: a lambda's as it was, or a use of the table it does not take
 // (a column it has not, a search with no text), INVALID_ARGUMENT.
 func (t *SchemaTable) failVal() value.Value {
-	if t.failure.IsError {
+	if t.failure.Failed() {
 		return t.failure
 	}
 	return value.InvalidFailure(value.InvalidArgumentCode, t.failMsg)

@@ -114,8 +114,8 @@ midway. They construct it through `value.InvalidFailure` (or
 data (`value.WithFailure` is gone): a failed database statement is `DATABASE`,
 `createMany` stopping midway `PARTIAL`, an HTTP request that got no answer
 `NETWORK`, `TIMEOUT` or `DENIED`, a query of a `connect()` database `DATABASE`,
-`TIMEOUT`, `UNAVAILABLE`, `DENIED`, `TOO_LARGE` or `INVALID_ARGUMENT`. New capability code must not assign `Value.ErrorVal`
-directly.
+`TIMEOUT`, `UNAVAILABLE`, `DENIED`, `TOO_LARGE` or `INVALID_ARGUMENT`. New capability code builds a failure with `value.InvalidFailure` (the
+`*Failure` is the payload of `K == Invalid`; since 25/10/2026 a `Value` is three fields, `N`, `V`, `K`).
 
 The closed set is `FAIL` (`fail("…")`, the only code a program can raise),
 `NOT_A_FUNCTION`, `TYPE`, `INVALID_ARGUMENT`, `INVALID_INPUT`, `UNAVAILABLE`,

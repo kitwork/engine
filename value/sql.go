@@ -20,7 +20,8 @@ func (v Value) Value() (driver.Value, error) {
 	case Number:
 		return v.N, nil
 	case String:
-		return v.V.(string), nil
+		s, _ := v.AsString()
+		return s, nil
 	case Time:
 		return time.Unix(0, int64(v.N)), nil
 	case Duration: // Duration as int64 nanoseconds in DB? Or string? Usually int64.

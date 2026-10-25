@@ -514,7 +514,7 @@ func (c *jobContext) OnInvoke(method string, args ...value.Value) value.Value {
 		return decodeJobData(c.data)
 	}
 	read := c.OnGet(method)
-	if read.IsError {
+	if read.Failed() {
 		return read
 	}
 	return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("context.%s không phải hàm: context của job có data() và job", method))

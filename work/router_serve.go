@@ -528,9 +528,9 @@ func (t *Tenant) runStage(vm *runtime.VM, folder *FolderRouter, l *value.Lambda,
 		stage := "middleware"
 		if isGuard {
 			stage = "guard"
-			r.err = uncaught(fmt.Sprintf("guard error: %v", res.V))
+			r.err = uncaught(fmt.Sprintf("guard error: %s", res.Text()))
 		} else {
-			r.err = uncaught(fmt.Sprintf("middleware error: %v", res.V))
+			r.err = uncaught(fmt.Sprintf("middleware error: %s", res.Text()))
 		}
 		t.recordRuntimeFailure(r, bc, stage, res)
 		if uiGuard {

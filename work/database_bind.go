@@ -38,7 +38,7 @@ func (m *ManagedDatabase) run(prepared *preparedStatement, holes []value.Value) 
 	binder := &statementBinder{s: s, holes: holes, columns: prepared.columns}
 	if s.Action == statement.ActionInsert {
 		row, failure := binder.row()
-		if failure.IsError {
+		if failure.Failed() {
 			return failure
 		}
 		table, failure := m.proxy.table(s.Table)
@@ -48,13 +48,13 @@ func (m *ManagedDatabase) run(prepared *preparedStatement, holes []value.Value) 
 		return table.Create(value.New(row))
 	}
 	predicate, truth, failure := binder.predicate(s.Where)
-	if failure.IsError {
+	if failure.Failed() {
 		return failure
 	}
 	limit, offset := statementDefaultLimit, 0
 	if s.Action == statement.ActionList {
 		limit, offset, failure = binder.bounds()
-		if failure.IsError {
+		if failure.Failed() {
 			return failure
 		}
 	}
@@ -140,7 +140,7 @@ func (b *statementBinder) predicate(node *statement.Node) (*query.Predicate, bin
 	case statement.OpNot:
 		child, truth, failure := b.predicate(node.Args[0])
 		switch {
-		case failure.IsError:
+		case failure.Failed():
 			return nil, bindOpen, failure
 		case truth == bindTrue:
 			return nil, bindFalse, value.Value{}
@@ -150,11 +150,11 @@ func (b *statementBinder) predicate(node *statement.Node) (*query.Predicate, bin
 		return &query.Predicate{Kind: query.PredicateNot, Children: []query.Predicate{*child}}, bindOpen, value.Value{}
 	case statement.OpAnd, statement.OpOr:
 		left, leftTruth, failure := b.predicate(node.Args[0])
-		if failure.IsError {
+		if failure.Failed() {
 			return nil, bindOpen, failure
 		}
 		right, rightTruth, failure := b.predicate(node.Args[1])
-		if failure.IsError {
+		if failure.Failed() {
 			return nil, bindOpen, failure
 		}
 		// a side true or false whatever the row decides, or drops out (KitDB wants two children)
@@ -210,7 +210,7 @@ func (b *statementBinder) comparison(node *statement.Node) (*query.Predicate, bi
 				continue
 			}
 			coerced, failure := bindValue(column, spec, item, site)
-			if failure.IsError {
+			if failure.Failed() {
 				return nil, bindOpen, failure
 			}
 			bound = append(bound, coerced)
@@ -227,7 +227,7 @@ func (b *statementBinder) comparison(node *statement.Node) (*query.Predicate, bi
 		// in the lambda means IS NULL)
 		if !item.IsNil() {
 			coerced, failure := bindValue(column, spec, item, site)
-			if failure.IsError {
+			if failure.Failed() {
 				return nil, bindOpen, failure
 			}
 			condition.Value = coerced
@@ -331,7 +331,7 @@ func (b *statementBinder) row() (map[string]value.Value, value.Value) {
 			continue
 		}
 		coerced, failure := bindValue(field.Column, spec, item, site)
-		if failure.IsError {
+		if failure.Failed() {
 			return nil, failure
 		}
 		row[field.Column] = coerced
@@ -375,11 +375,11 @@ func (b *statementBinder) bounds() (int, int, value.Value) {
 
 func pageBounds(page, limit value.Value, pageSite, limitSite string) (int, int, value.Value) {
 	pageNumber, failure := boundNumber("page", page, pageSite, 1)
-	if failure.IsError {
+	if failure.Failed() {
 		return 0, 0, failure
 	}
 	size, failure := boundNumber("limit", limit, limitSite, 0)
-	if failure.IsError {
+	if failure.Failed() {
 		return 0, 0, failure
 	}
 	// the rows before the page are read and skipped: past what an int32 counts, the page is refused
@@ -408,7 +408,7 @@ func checkLiterals(s *statement.Statement, columns map[string]*ColumnSpec) value
 	var failure value.Value
 	var walk func(*statement.Node)
 	walk = func(node *statement.Node) {
-		if node == nil || failure.IsError {
+		if node == nil || failure.Failed() {
 			return
 		}
 		switch node.Op {
@@ -425,7 +425,7 @@ func checkLiterals(s *statement.Statement, columns map[string]*ColumnSpec) value
 	}
 	walk(s.Where)
 	for _, field := range s.Values {
-		if failure.IsError {
+		if failure.Failed() {
 			break
 		}
 		if field.Value.Op == statement.OpLiteral {
@@ -433,7 +433,7 @@ func checkLiterals(s *statement.Statement, columns map[string]*ColumnSpec) value
 		}
 	}
 	for _, bound := range []*statement.Node{s.Limit, s.Page} {
-		if bound != nil && bound.Op == statement.OpLiteral && !failure.IsError {
+		if bound != nil && bound.Op == statement.OpLiteral && !failure.Failed() {
 			_, failure = boundNumber("list(n)", literalValue(bound), "trong câu", 0)
 		}
 	}

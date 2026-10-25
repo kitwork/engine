@@ -1784,8 +1784,8 @@ func layoutFailed(failed func(expression, message string), output *strings.Build
 }
 
 func writeResolvedValue(output *strings.Builder, resolved value.Value, escape bool) {
-	escape = escape && !resolved.Raw // a Raw-marked (already-safe) value is never re-escaped
-	if text, ok := resolved.V.(string); ok {
+	escape = escape && !resolved.IsTrusted() // a String the engine trusts (value.Trusted) is never re-escaped
+	if text, ok := resolved.AsString(); ok {
 		if escape {
 			writeEscapedString(output, text)
 		} else {

@@ -41,7 +41,7 @@ router.get((ctx) => ctx.text("ok"));`), 0o644); err != nil {
 		{"name": value.New("Binh"), "age": value.New(30)},
 		{"name": value.New("Cu"), "age": value.New(10)},
 	} {
-		if created := users.Table("users").Create(value.New(row)); created.IsError {
+		if created := users.Table("users").Create(value.New(row)); created.Failed() {
 			t.Fatalf("create %v: %v", row, created)
 		}
 	}

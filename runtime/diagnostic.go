@@ -113,8 +113,8 @@ func (d *Diagnostic) Error() string {
 // DiagnosticFrom extracts structured runtime information while callers that
 // only read Value.Text continue to receive the formatted compatibility string.
 func DiagnosticFrom(result value.Value) (*Diagnostic, bool) {
-	diagnostic, ok := result.ErrorVal.(*Diagnostic)
-	return diagnostic, ok && diagnostic != nil
+	diagnostic, ok := result.V.(*Diagnostic)
+	return diagnostic, ok && diagnostic != nil && result.K == value.Invalid
 }
 
 type runtimeFault struct {
@@ -138,12 +138,7 @@ func (vm *VM) diagnosticValue(code DiagnosticCode, message string, ip int) value
 // the stack) is written only when something reads it (value.Text): a failure safe(() => …) catches is
 // never printed, so it never pays for the formatting (14/10/2026).
 func diagnosticResult(diagnostic *Diagnostic) value.Value {
-	return value.Value{
-		K:        value.Invalid,
-		V:        diagnostic,
-		IsError:  true,
-		ErrorVal: diagnostic,
-	}
+	return value.Value{K: value.Invalid, V: diagnostic}
 }
 
 func mergeFailures(primary, secondary value.Value) value.Value {

@@ -107,21 +107,6 @@ func TestOwnErrorLengthAndIsErrorOnAPlainObject(t *testing.T) {
 		t.Fatalf("{ …, length: 5 }.length() = %s %v, want the builtin's 4", got.K, got.Text())
 	}
 
-	// A value marked as carrying an error (no producer makes one since 14/10/2026) answers with its
-	// own keys too: the rule has no exception left.
-	marked := New(keys())
-	marked.IsError = true
-	marked.ErrorVal = NewFailure("E_CODE", "it failed")
-	if got := marked.Get("error"); got.Text() != "x" {
-		t.Fatalf("a value marked IsError: .error = %s %v, want its own \"x\"", got.K, got.Text())
-	}
-	if got := marked.Get("length"); got.K != Number || got.N != 5 {
-		t.Fatalf("a value marked IsError: .length = %s %v, want its own 5", got.K, got.Text())
-	}
-	if got := marked.Get("isError"); got.Text() != "I" {
-		t.Fatalf("a value marked IsError: .isError = %s %v, want its own \"I\"", got.K, got.Text())
-	}
-
 	// Control: an object without those keys answers as before.
 	bare := New(map[string]Value{"a": New(1), "b": New(2)})
 	if got := bare.Get("error"); got.K != Nil {

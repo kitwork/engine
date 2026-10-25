@@ -325,7 +325,7 @@ func (h *ScheduleHandle) OnInvoke(method string, args ...value.Value) value.Valu
 	switch method {
 	case "runs", "status", "where":
 		name, failure := h.declaration.usable()
-		if failure.IsError {
+		if failure.Failed() {
 			return failure
 		}
 		return (&scheduleQuery{tenant: h.declaration.tenant, who: name, name: name}).OnInvoke(method, args...)
@@ -334,7 +334,7 @@ func (h *ScheduleHandle) OnInvoke(method string, args ...value.Value) value.Valu
 		return value.InvalidFailure(value.InvalidArgumentCode, message+", các lần chạy của lịch bằng .runs()")
 	case "now":
 		name, failure := h.declaration.usable()
-		if failure.IsError {
+		if failure.Failed() {
 			return failure
 		}
 		if len(args) != 0 {
@@ -466,7 +466,7 @@ func (c *scheduleRunContext) OnCompare(_ string, _ value.Value) value.Value { re
 
 func (c *scheduleRunContext) OnInvoke(method string, args ...value.Value) value.Value {
 	read := c.OnGet(method)
-	if read.IsError {
+	if read.Failed() {
 		return read
 	}
 	return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("context.%s không phải hàm: context của lịch có job", method))
@@ -528,7 +528,7 @@ func (r *scheduleQuery) OnInvoke(method string, args ...value.Value) value.Value
 // runs reads the runs, newest first.
 func (r *scheduleQuery) runs(args []value.Value) value.Value {
 	limit, offset, failure := queuePage("runs", args)
-	if failure.IsError {
+	if failure.Failed() {
 		return failure
 	}
 	runs, err := r.tenant.scheduleStore().Runs(queuestore.Filter{Name: r.name, Status: r.status}, limit, offset)
@@ -552,7 +552,7 @@ func (r *scheduleQuery) list(args []value.Value) value.Value {
 		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf(`schedule.status("%s").list() không có: trạng thái chỉ có ở lần chạy, viết schedule.status("%s").runs()`, r.status, r.status))
 	}
 	limit, offset, failure := queuePage("list", args)
-	if failure.IsError {
+	if failure.Failed() {
 		return failure
 	}
 	listed := r.tenant.scheduleWorker().listSchedules(scheduleNow())

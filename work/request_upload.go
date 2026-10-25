@@ -43,7 +43,7 @@ func (c *Context) SaveFile() value.Value {
 // File is request.file(tên): the first upload of the field, null when the body has none.
 func (r *Request) File(name string) value.Value {
 	uploads, failure := r.uploadsOf(name)
-	if failure.IsError {
+	if failure.Failed() {
 		return failure
 	}
 	if len(uploads) == 0 {
@@ -55,7 +55,7 @@ func (r *Request) File(name string) value.Value {
 // Files is request.files(tên): every upload of the field, [] when the body has none.
 func (r *Request) Files(name string) value.Value {
 	uploads, failure := r.uploadsOf(name)
-	if failure.IsError {
+	if failure.Failed() {
 		return failure
 	}
 	if uploads == nil {

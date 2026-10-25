@@ -116,7 +116,7 @@ func (t *Tenant) serveUIAnswer(vm *runtime.VM, ctxObj *Context, reqRouter *Route
 		return
 	}
 	t.respondUI(reqRouter, node, scope)
-	if failure := converter.fatal; failure.K == value.Invalid && failure.IsError {
+	if failure := converter.fatal; failure.Failed() {
 		// a function of the page that hit what nothing catches (energy, cancellation) ends the request,
 		// whatever the page wrote
 		t.recordRuntimeFailure(reqRouter, nearestFolder(node).bytecode, "view", failure)

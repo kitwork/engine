@@ -24,9 +24,7 @@ import (
 // styles the code — no separate stylesheet.
 func init() {
 	value.String.Prototype("highlight", func(target value.Value, args ...value.Value) value.Value {
-		result := value.New(highlightWith(target.String(), highlightPalette(args)))
-		result.Raw = true
-		return result
+		return value.Trusted(highlightWith(target.String(), highlightPalette(args)))
 	})
 }
 

@@ -22,10 +22,7 @@ func TestRuntimeHealthSnapshot(t *testing.T) {
 		Instructions:   20,
 		Energy:         55,
 		PeakFrameDepth: 4,
-	}, value.Value{
-		K:        value.Invalid,
-		ErrorVal: &runtime.Diagnostic{Code: runtime.DiagnosticEnergyLimit},
-	})
+	}, (&runtime.Diagnostic{Code: runtime.DiagnosticEnergyLimit}).Failure())
 	// Equivalent immutable Programs share one value identity without retaining
 	// either Program pointer.
 	health.Record(runtime.EmptyProgram(), runtime.VMStats{}, value.New("ok"))

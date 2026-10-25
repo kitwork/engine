@@ -29,7 +29,7 @@ func (vm *VM) commit(v value.Value) value.Value {
 	}); failure.K == value.Invalid {
 		return failure
 	}
-	if committed.Failure.K == value.Invalid && committed.Failure.IsError {
+	if committed.Failure.Failed() {
 		return committed.Failure
 	}
 	if committed.Handler != nil {

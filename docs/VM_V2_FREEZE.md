@@ -177,7 +177,7 @@ the `INVOKE` fast path and `value.Invoke`): `{ greet: f }.greet()` calls `f`, wh
 an own key holding data (anything `request.json()`, `JSON.parse` or a row can
 carry) leaves `body.pick(…)`, `has`, `keys`, `text`, `json` and the rest to the
 builtin, so data cannot replace a builtin call. And on a plain object (no error
-attached: `ErrorVal` nil, `IsError` false) an own `error`, `length` or `isError`
+attached: `K` not `Invalid`) an own `error`, `length` or `isError`
 key is read as data, so `{ ok: false, error: "x" }.error` is `"x"` where it was
 `null`; a value carrying an error kept the engine's answers until 14/10/2026, when
 no value carries one any more and the own key always wins. Through a bracket,

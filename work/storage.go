@@ -270,7 +270,7 @@ func (h *storageHandle) call(caller *runtime.VM, method string, args []value.Val
 // written as text (segment(123) is "123", mục 4).
 func (h *storageHandle) segment(args []value.Value) value.Value {
 	segments, failure := segmentWords(args, `users.segment("123"), users.segment(id, "profile")`, `dựng khoá bằng từng đoạn, users.segment(id, "profile")`)
-	if failure.IsError {
+	if failure.Failed() {
 		return failure
 	}
 	size := len(h.key.Human())
@@ -369,7 +369,7 @@ func (h *storageHandle) get(caller *runtime.VM, args []value.Value) value.Value 
 		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("%s.get nhận không gì hay một hàm: get() đọc, get(() => …) đọc hoặc tính; hạn đặt trước bằng expire(\"5m\")", h.spelling()))
 	}
 	app, place, failure := h.place()
-	if failure.IsError {
+	if failure.Failed() {
 		return failure
 	}
 	key := h.key.Encoded()
@@ -482,7 +482,7 @@ func (h *storageHandle) compute(caller *runtime.VM, place storagePlace, key stri
 	if result.K == value.Invalid {
 		return result
 	}
-	if failure := h.write(place, key, result); failure.IsError {
+	if failure := h.write(place, key, result); failure.Failed() {
 		return failure
 	}
 	return result
@@ -494,10 +494,10 @@ func (h *storageHandle) set(args []value.Value) value.Value {
 		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("%s.set nhận một giá trị; hạn đặt trước bằng expire(): %s(%q).expire(\"5m\").set(giá_trị)", h.spelling(), h.key.Place, h.key.Name))
 	}
 	_, place, failure := h.place()
-	if failure.IsError {
+	if failure.Failed() {
 		return failure
 	}
-	if failure := h.write(place, h.key.Encoded(), args[0]); failure.IsError {
+	if failure := h.write(place, h.key.Encoded(), args[0]); failure.Failed() {
 		return failure
 	}
 	return value.Value{K: value.Nil}
@@ -517,11 +517,11 @@ func (h *storageHandle) write(place storagePlace, key string, item value.Value) 
 
 // exists() tells "no value" from "null kept" (mục 5).
 func (h *storageHandle) exists(args []value.Value) value.Value {
-	if failure := h.noArguments("exists", args); failure.IsError {
+	if failure := h.noArguments("exists", args); failure.Failed() {
 		return failure
 	}
 	_, place, failure := h.place()
-	if failure.IsError {
+	if failure.Failed() {
 		return failure
 	}
 	_, found, err := place.expiry(h.key.Encoded())
@@ -533,11 +533,11 @@ func (h *storageHandle) exists(args []value.Value) value.Value {
 
 // ttl() is how long the value has left, in milliseconds; null when it has no expiry or there is none.
 func (h *storageHandle) ttl(args []value.Value) value.Value {
-	if failure := h.noArguments("ttl", args); failure.IsError {
+	if failure := h.noArguments("ttl", args); failure.Failed() {
 		return failure
 	}
 	_, place, failure := h.place()
-	if failure.IsError {
+	if failure.Failed() {
 		return failure
 	}
 	expireAt, found, err := place.expiry(h.key.Encoded())
@@ -553,11 +553,11 @@ func (h *storageHandle) ttl(args []value.Value) value.Value {
 
 // delete() drops the value; true when there was one (mục 5).
 func (h *storageHandle) remove(args []value.Value) value.Value {
-	if failure := h.noArguments("delete", args); failure.IsError {
+	if failure := h.noArguments("delete", args); failure.Failed() {
 		return failure
 	}
 	_, place, failure := h.place()
-	if failure.IsError {
+	if failure.Failed() {
 		return failure
 	}
 	removed, err := place.remove(h.key.Encoded())
@@ -571,7 +571,7 @@ func (h *storageHandle) remove(args []value.Value) value.Value {
 // given back (mục 7). Only this process's observers hear it.
 func (h *storageHandle) send(args []value.Value) value.Value {
 	message, failure := storageEnvelope("send", args)
-	if failure.IsError {
+	if failure.Failed() {
 		return failure
 	}
 	app, err := h.tenant.storage()

@@ -17,7 +17,8 @@ func (v Value) Len() int {
 	}
 	switch v.K {
 	case String:
-		return len(v.V.(string))
+		s, _ := v.AsString()
+		return len(s)
 	case Bytes:
 		return len(v.V.([]byte))
 	case Array:
@@ -69,7 +70,7 @@ func (v Value) Index(i int) Value {
 			return Value{K: Number, N: float64(b[i])}
 		}
 	case String:
-		s := v.V.(string)
+		s, _ := v.AsString()
 		if i >= 0 && i < len(s) {
 			return Value{K: String, V: string(s[i])}
 		}
@@ -210,12 +211,15 @@ func (v Value) Get(key string) Value { return v.member(key, true) }
 // once: only a method read without its call is a BoundMethod (BindMethods).
 func (v Value) member(key string, bind bool) Value {
 	if v.K == Invalid {
-		// A failure (a failed db query, fail("…")) is K==Invalid carrying its message in .V. A program
-		// never holds one: it ends the run the instruction that made it (safe(() => …) is how a program
-		// reads a failure). A host reading one finds .message and .isError; every OTHER access stays
-		// the failure, so it keeps bubbling.
+		// A failure (a failed db query, fail("…")) is K==Invalid carrying what failed in .V (a *Failure;
+		// a string in a failure a test built by hand). A program never holds one: it ends the run the
+		// instruction that made it (safe(() => …) is how a program reads a failure). A host reading one
+		// finds .message and .isError; every OTHER access stays the failure, so it keeps bubbling.
 		switch key {
 		case "message":
+			if failure, ok := v.Failure(); ok {
+				return New(failure.Message)
+			}
 			if s, ok := v.V.(string); ok {
 				return New(s)
 			}
@@ -241,7 +245,8 @@ func (v Value) member(key string, bind bool) Value {
 		// Với String, đếm theo KÝ TỰ (rune) — "Phường".length == 6,
 		// khớp trực giác JS thay vì số byte UTF-8.
 		if v.K == String {
-			return New(utf8.RuneCountInString(v.V.(string)))
+			s, _ := v.AsString()
+			return New(utf8.RuneCountInString(s))
 		}
 		return New(v.Len())
 	}

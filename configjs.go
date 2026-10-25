@@ -1222,7 +1222,7 @@ func evalServerBuilder(file string) (*ServerBuilder, error) {
 
 	res := vm.Run()
 	if res.K == value.Invalid {
-		return nil, fmt.Errorf("config runtime error: %v", res.V)
+		return nil, fmt.Errorf("config runtime error: %s", res.Text())
 	}
 	if len(fileEnvErrors) > 0 {
 		return nil, fmt.Errorf("%s", strings.Join(fileEnvErrors, "; "))

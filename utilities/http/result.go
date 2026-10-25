@@ -88,7 +88,7 @@ func (r *Result) headers() value.Value {
 // INVALID_INPUT: data from outside that cannot be read. JSON never makes up a value.
 func (r *Result) JSON() value.Value {
 	body, failure := r.body("json")
-	if failure.IsError {
+	if failure.Failed() {
 		return failure
 	}
 	if len(body) == 0 {
@@ -105,7 +105,7 @@ func (r *Result) JSON() value.Value {
 // Text reads the body as text.
 func (r *Result) Text() value.Value {
 	body, failure := r.body("text")
-	if failure.IsError {
+	if failure.Failed() {
 		return failure
 	}
 	return value.New(string(body))
@@ -114,7 +114,7 @@ func (r *Result) Text() value.Value {
 // Bytes is the body's bytes as they came.
 func (r *Result) Bytes() value.Value {
 	body, failure := r.body("bytes")
-	if failure.IsError {
+	if failure.Failed() {
 		return failure
 	}
 	if body == nil {

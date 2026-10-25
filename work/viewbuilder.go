@@ -114,9 +114,8 @@ func (vb *ViewBuilder) flush() {
 	// meta({ jsonld }) path stays working.
 	if nodes := append(append([]value.Value{}, r.chainJsonld...), vb.jsonld...); len(nodes) > 0 {
 		if blocks := renderJSONLD(nodes); blocks != "" {
-			jv := value.New(blocks)
-			jv.Raw = true // already HTML-safe → the head can write {{ $.meta.jsonld }} without raw()
-			meta["jsonld"] = jv
+			// already HTML-safe → the head can write {{ $.meta.jsonld }} without raw()
+			meta["jsonld"] = value.Trusted(blocks)
 		}
 	}
 

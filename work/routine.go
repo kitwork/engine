@@ -167,11 +167,11 @@ func (r *Routine) rules() routineRules {
 
 // start is go(fn…): each function starts now, and the call gives its handle (an array for several).
 func (r *Routine) start(caller *runtime.VM, args []value.Value) value.Value {
-	if failure := routineLoading(caller, "go"); failure.IsError {
+	if failure := routineLoading(caller, "go"); failure.Failed() {
 		return failure
 	}
 	functions, failure := routineFunctions("go", args)
-	if failure.IsError {
+	if failure.Failed() {
 		return failure
 	}
 	tenant := r.tenant
@@ -229,7 +229,7 @@ func (r *Routine) start(caller *runtime.VM, args []value.Value) value.Value {
 // wait is wait(fn…), which starts every function then waits for all of them, or wait(handle…), which waits
 // for what go started. Not both in one call (mục 4).
 func (r *Routine) wait(caller *runtime.VM, args []value.Value) value.Value {
-	if failure := routineLoading(caller, "wait"); failure.IsError {
+	if failure := routineLoading(caller, "wait"); failure.Failed() {
 		return failure
 	}
 	if len(args) == 0 {

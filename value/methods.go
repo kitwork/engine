@@ -49,11 +49,12 @@ func (v Value) ToString(args ...Value) Value {
 			return NewString(fmt.Sprintf(format, v.Interface()))
 		}
 	}
-	// a fresh string: the receiver's Raw mark never travels on (value.Value.Raw); the failure of a
-	// failed receiver still does
-	result := Value{K: String, V: v.Text()}
-	result.IsError, result.ErrorVal = v.IsError, v.ErrorVal
-	return result
+	// a fresh, plain string: the receiver's trust never travels on (value.TrustedHTML); a failed
+	// receiver stays the failure it is, as every other access on a failure does
+	if v.K == Invalid {
+		return v
+	}
+	return Value{K: String, V: v.Text()}
 }
 
 // Integer is the number without its fraction; NaN and the infinities stay themselves (int64(n) made them
@@ -63,7 +64,7 @@ func (v Value) ToFloat(_ ...Value) Value { return Value{K: Number, N: v.N} }
 func (v Value) Length(_ ...Value) Value {
 	// String đếm theo rune — đồng bộ với thuộc tính .length
 	if v.K == String {
-		if s, ok := v.V.(string); ok {
+		if s, ok := v.AsString(); ok {
 			return Value{K: Number, N: float64(utf8.RuneCountInString(s))}
 		}
 	}
@@ -88,8 +89,11 @@ func (v Value) ToJson(args ...Value) Value {
 			return New(data)
 		}
 	}
-	// the receiver as it was, less its Raw mark (value.Value.Raw): no method's result keeps it
-	v.Raw = false
+	// the receiver as it was, as a plain string: no method's result keeps the receiver's trust
+	// (value.TrustedHTML)
+	if trusted, ok := v.V.(TrustedHTML); ok {
+		v.V = string(trusted)
+	}
 	return v
 }
 

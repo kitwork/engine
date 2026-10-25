@@ -142,7 +142,7 @@ func (t *Tenant) ExecuteContext(ctx context.Context, program *runtime.Program, f
 	t.recordVMExecution(program, vm, res, time.Since(started))
 	gas = vm.Energy
 	if res.K == value.Invalid {
-		runErr = fmt.Errorf("%v", res.V)
+		runErr = fmt.Errorf("%s", res.Text())
 		if diagnostic, ok := runtime.DiagnosticFrom(res); ok {
 			// the run's own diagnostic, so a caller that makes a failure of it keeps its code
 			runErr = diagnostic

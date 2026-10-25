@@ -86,7 +86,7 @@ func (r *Request) Header(args ...value.Value) value.Value {
 		return invalid(".header() cần tên và giá trị: .header(\"Accept\", \"application/json\")")
 	}
 	next := r.clone()
-	if failure := next.setHeader("header", args[0], args[1]); failure.IsError {
+	if failure := next.setHeader("header", args[0], args[1]); failure.Failed() {
 		return failure
 	}
 	return value.New(next)
@@ -100,7 +100,7 @@ func (r *Request) Headers(args ...value.Value) value.Value {
 	next := r.clone()
 	fields := args[0].Map()
 	for _, name := range sortedNames(fields) {
-		if failure := next.setHeader("headers", value.New(name), fields[name]); failure.IsError {
+		if failure := next.setHeader("headers", value.New(name), fields[name]); failure.Failed() {
 			return failure
 		}
 	}
@@ -231,7 +231,7 @@ func (r *Request) store(modifier string, args []value.Value) value.Value {
 			modifier, modifier, strings.ToLower(r.method)))
 	}
 	ttl, failure := ttlOf(modifier, args)
-	if failure.IsError {
+	if failure.Failed() {
 		return failure
 	}
 	next := r.clone()
@@ -267,7 +267,7 @@ func (r *Request) Send(args ...value.Value) value.Value {
 			r.method))
 	}
 	body, contentType, failure := encodeBody(data)
-	if failure.IsError {
+	if failure.Failed() {
 		return failure
 	}
 	outcome := r.run(context.Background(), body, contentType)

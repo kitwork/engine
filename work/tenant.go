@@ -1035,7 +1035,7 @@ func (t *Tenant) CompileDynamicRoute(filePath string) error {
 	res := vm.Run()
 	t.recordVMExecution(bytecode.Program, vm, res, time.Since(started))
 	if res.K == value.Invalid {
-		return fmt.Errorf("dynamic runtime error: %v", res.V)
+		return fmt.Errorf("dynamic runtime error: %s", res.Text())
 	}
 	return nil
 }

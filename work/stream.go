@@ -313,7 +313,7 @@ func (r *Router) openStream() (*eventStream, value.Value) {
 // Sse is context.sse (KITWORK_SSE.md mục 1), read without a call: the stream the handler returns.
 func (c *Context) Sse() value.Value {
 	stream, failure := c.router().openStream()
-	if failure.IsError {
+	if failure.Failed() {
 		return failure
 	}
 	return value.Value{K: value.Proxy, V: stream}
@@ -363,7 +363,7 @@ func (s *eventStream) call(caller *runtime.VM, method string, args []value.Value
 	switch method {
 	case "send":
 		message, failure := storageEnvelope("stream.send", args)
-		if failure.IsError {
+		if failure.Failed() {
 			return failure
 		}
 		return s.sendMessage(message)

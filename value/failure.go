@@ -103,6 +103,16 @@ type Failure struct {
 	Progress Value `json:"-"`
 }
 
+// Error is the failure's message, so a *Failure in V reads as a Go error wherever a payload is
+// written (Text, Append, Interface, fmt's %v). A pointer receiver on purpose: a Failure by value is
+// not an error, so nothing boxes one by accident.
+func (f *Failure) Error() string {
+	if f == nil {
+		return ""
+	}
+	return f.Message
+}
+
 func NewFailure(code, message string) Failure {
 	code = strings.TrimSpace(code)
 	if code == "" {
@@ -114,27 +124,19 @@ func NewFailure(code, message string) Failure {
 	return Failure{Code: code, Message: message}
 }
 
-// InvalidFailure creates a hard application failure. The message is kept in V
-// for compatibility with existing Invalid formatting and in Failure so safe()
-// can preserve the machine-readable code.
+// InvalidFailure is a hard application failure: K == Invalid with the Failure itself in V, one
+// allocation, read back by Failure() and FailureFrom (its message by Text).
 func InvalidFailure(code, message string) Value {
 	failure := NewFailure(code, message)
-	return Value{
-		K:        Invalid,
-		V:        failure.Message,
-		IsError:  true,
-		ErrorVal: failure,
-	}
+	return Value{K: Invalid, V: &failure}
 }
 
 // PartialFailure is the failure of a bulk write that stopped midway: PartialCode, with progress (what
 // was written durably) for safe(() => …) to hand on as error.progress.
 func PartialFailure(message string, progress Value) Value {
-	failure := InvalidFailure(PartialCode, message)
-	attached := failure.ErrorVal.(Failure)
-	attached.Progress = progress
-	failure.ErrorVal = attached
-	return failure
+	failure := NewFailure(PartialCode, message)
+	failure.Progress = progress
+	return Value{K: Invalid, V: &failure}
 }
 
 // FailureOfError is the failure of a Go error a host call returned, led by what failed ("call
@@ -165,39 +167,24 @@ func nameOrAnonymous(name string) string {
 	return name
 }
 
-// FailureFrom extracts the typed application failure attached to a Value.
+// FailureFrom is the application failure result carries, as a copy of its own (the *Failure in V is
+// shared by every copy of the Value). A run's diagnostic reads as DefaultFailureCode with its text;
+// false for a value that is no failure, for the zero Value, and for a failure built by hand around a
+// string (tests), which has no code.
 func FailureFrom(result Value) (Failure, bool) {
-	if !result.IsError {
+	if result.K != Invalid {
 		return Failure{}, false
 	}
-	if failure, ok := failureFromPayload(result.ErrorVal); ok {
-		return failure, true
-	}
-	if result.K == Invalid {
-		if message, ok := result.V.(string); ok {
-			return NewFailure(DefaultFailureCode, message), true
-		}
-		if failure, ok := result.V.(error); ok {
-			return NewFailure(DefaultFailureCode, failure.Error()), true
-		}
-	}
-	return NewFailure(DefaultFailureCode, "error"), true
-}
-
-func failureFromPayload(payload any) (Failure, bool) {
-	switch current := payload.(type) {
-	case Failure:
-		failure := NewFailure(current.Code, current.Message)
-		failure.Progress = current.Progress
-		return failure, true
+	switch payload := result.V.(type) {
 	case *Failure:
-		if current == nil {
+		if payload == nil {
 			return Failure{}, false
 		}
-		failure := NewFailure(current.Code, current.Message)
-		failure.Progress = current.Progress
+		failure := NewFailure(payload.Code, payload.Message)
+		failure.Progress = payload.Progress
 		return failure, true
-	default:
-		return Failure{}, false
+	case error:
+		return NewFailure(DefaultFailureCode, payload.Error()), true
 	}
+	return Failure{}, false
 }

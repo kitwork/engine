@@ -12,12 +12,12 @@ import (
 // failuresWithoutACode is how many places of the engine still make a failure without a code of the
 // set, which error.code reads as ERROR (14/10/2026): a ratchet. It may only go down, to zero, when
 // ERROR has no reason left to exist. Today they are the fallbacks for what tells nothing: a Go error a
-// host function returned (FailureOfError), a raw failure without a payload (FailureFrom, twice, and
+// host function returned (FailureOfError), a run's diagnostic read as a failure (FailureFrom, and
 // runtime/safe.go, twice), and an answer the engine could not write that ends a request
 // (work/router.go errorObject). What it cannot see: FailureOfError counts once for every Go method a
 // program reaches that returns a bare error, so such a method must name its code itself, with a
 // FailureCode() string method on its error (work.codedError; napas was one, 14/10/2026).
-const failuresWithoutACode = 7
+const failuresWithoutACode = 5
 
 var (
 	// a failure built by hand: value.Value{K: value.Invalid, V: …}, Value{K: Invalid…}

@@ -14,7 +14,7 @@ func (v Value) Text() string {
 	// String values already own their canonical text. Returning the payload
 	// directly keeps property names and method names allocation-free in the VM.
 	if v.K == String {
-		s, _ := v.V.(string)
+		s, _ := v.AsString()
 		return s
 	}
 	if v.K == Invalid {
@@ -34,7 +34,7 @@ func (v Value) Text() string {
 }
 
 func (v Value) String() string {
-	if s, ok := v.V.(string); ok {
+	if s, ok := v.AsString(); ok {
 		return s
 	}
 	// Fallback to Text() for Time, Duration, Map, Array, Nil, etc.
@@ -128,7 +128,7 @@ func (v Value) appendScalar(b []byte) []byte {
 	case String:
 		// the payload itself, as String() gives it: calling String() here would make Append part of
 		// its own recursion (String → Text → Append) and send every caller's buffer to the heap
-		s, _ := v.V.(string)
+		s, _ := v.AsString()
 		return append(b, s...)
 	case Number:
 		return AppendNumber(b, v.N)
@@ -202,7 +202,8 @@ func (v Value) interfaceScalar() any {
 	case Number:
 		return v.N
 	case String:
-		return v.V.(string)
+		s, _ := v.AsString()
+		return s
 	case Time:
 		return time.Unix(0, int64(v.N))
 	case Duration:

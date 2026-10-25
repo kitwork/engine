@@ -237,11 +237,8 @@ func cloneConstant(constant value.Value) value.Value {
 
 func validateProgramConstants(constants []value.Value) error {
 	for index, constant := range constants {
-		if constant.ErrorVal != nil {
-			return fmt.Errorf(
-				"program constant %d contains mutable error metadata",
-				index,
-			)
+		if constant.Failed() {
+			return fmt.Errorf("program constant %d is a failure", index)
 		}
 		switch constant.K {
 		case value.Nil, value.Number, value.Bool, value.Time, value.Duration:
@@ -312,11 +309,9 @@ func programChecksum(program *Program) [sha256.Size]byte {
 func writeConstant(h hash.Hash, constant value.Value) {
 	h.Write([]byte{byte(constant.K)})
 	writeUint64(h, math.Float64bits(constant.N))
-	if constant.IsError {
-		h.Write([]byte{1})
-	} else {
-		h.Write([]byte{0})
-	}
+	// a flags byte, once IsError: always 0 since 25/10/2026 (a constant is never a failure), kept so
+	// every checksum stays what it was
+	h.Write([]byte{0})
 
 	switch payload := constant.V.(type) {
 	case nil:

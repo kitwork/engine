@@ -58,7 +58,7 @@ func (m *ManagedDatabase) OnInvoke(method string, args ...value.Value) value.Val
 		return value.InvalidFailure(value.InvalidArgumentCode, "câu database không có template: dịch lại")
 	}
 	prepared := m.prepare(args[0].Text())
-	if prepared.failure.IsError {
+	if prepared.failure.Failed() {
 		return prepared.failure
 	}
 	return m.run(prepared, args[1:])
@@ -83,7 +83,7 @@ func (m *ManagedDatabase) prepare(template string) *preparedStatement {
 		tables, _ := m.proxy.schemaSnapshot()
 		prepared.statement = decoded
 		prepared.columns = tables[decoded.Table]
-		if failure := checkLiterals(decoded, prepared.columns); failure.IsError {
+		if failure := checkLiterals(decoded, prepared.columns); failure.Failed() {
 			prepared.statement, prepared.failure = nil, failure
 		}
 	}

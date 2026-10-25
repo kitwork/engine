@@ -78,7 +78,7 @@ func fileModuleWord(word string) value.Value {
 }
 
 func (m *fileModule) OnGet(key string) value.Value {
-	if failure := fileModuleWord(key); failure.IsError {
+	if failure := fileModuleWord(key); failure.Failed() {
 		return failure
 	}
 	// read by name (const { json } = file): called alone it is still handed its caller
@@ -101,7 +101,7 @@ func (m *fileModule) InvokeFrom(caller *runtime.VM, method string, args []value.
 }
 
 func (m *fileModule) call(caller *runtime.VM, method string, args []value.Value) value.Value {
-	if failure := fileModuleWord(method); failure.IsError {
+	if failure := fileModuleWord(method); failure.Failed() {
 		return failure
 	}
 	if len(args) != 1 || args[0].K != value.String {
@@ -211,7 +211,7 @@ func (h *fileHandle) call(caller *runtime.VM, method string, args []value.Value)
 	case "write":
 		return h.write(args)
 	}
-	if failure := h.noArguments(method, args); failure.IsError {
+	if failure := h.noArguments(method, args); failure.Failed() {
 		return failure
 	}
 	switch method {
@@ -257,7 +257,7 @@ func (h *fileHandle) call(caller *runtime.VM, method string, args []value.Value)
 // as segment() of storage reads them, so a value from outside never leaves the folder.
 func (h *fileHandle) segment(args []value.Value) value.Value {
 	names, failure := segmentWords(args, `file.open("uploads/").segment(id, "avatar.png")`, `dựng đường dẫn bằng từng đoạn, file.open("uploads/").segment(id, "avatar.png")`)
-	if failure.IsError {
+	if failure.Failed() {
 		return failure
 	}
 	path, failed := h.path.Segment(names)
@@ -367,7 +367,7 @@ func (h *fileHandle) write(args []value.Value) value.Value {
 		return value.InvalidFailure(value.ConflictCode, fmt.Sprintf(`%q là thư mục; write() ghi một file, đường dẫn không có "/" cuối: file.open("notes.txt").write(…)`, h.path.String()))
 	}
 	source, closeSource, failure := h.source(args[0])
-	if failure.IsError {
+	if failure.Failed() {
 		return failure
 	}
 	defer closeSource()
@@ -524,7 +524,7 @@ func (h *fileHandle) target(word string, args []value.Value) (filehelper.Path, v
 // copy(đích) copies the file or the folder (mục 8); from the code zone into the data zone too.
 func (h *fileHandle) copy(caller *runtime.VM, args []value.Value) value.Value {
 	target, failure := h.target("copy", args)
-	if failure.IsError {
+	if failure.Failed() {
 		return failure
 	}
 	data := h.tenant.fileZone(false)
@@ -541,7 +541,7 @@ func (h *fileHandle) copy(caller *runtime.VM, args []value.Value) value.Value {
 // move(đích) moves the file or the folder inside the data zone (mục 8); this handle keeps its path.
 func (h *fileHandle) move(args []value.Value) value.Value {
 	target, failure := h.target("move", args)
-	if failure.IsError {
+	if failure.Failed() {
 		return failure
 	}
 	if target.Code {

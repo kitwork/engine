@@ -371,7 +371,7 @@ func (e *ExternalDatabase) query(args []value.Value) value.Value {
 		}
 	}
 	pool, failure := e.open()
-	if failure.IsError {
+	if failure.Failed() {
 		return failure
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), externalQueryTimeout)

@@ -589,8 +589,7 @@ func valuePressureReleasedOwners(vm *kitruntime.VM) error {
 		return fmt.Errorf("pooled VM retained stack or root variables")
 	}
 	for index, item := range vm.Stack[:cap(vm.Stack)] {
-		if item.K != value.Invalid || item.N != 0 || item.V != nil ||
-			item.IsError || item.ErrorVal != nil || item.Raw {
+		if item != (value.Value{}) {
 			return fmt.Errorf("pooled VM stack storage retained slot %d", index)
 		}
 	}
