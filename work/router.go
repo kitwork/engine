@@ -86,6 +86,9 @@ type Router struct {
 	method   *FolderMethod
 	handling bool
 	events   *requestEvents
+	// guarding is true while a guard of a router.work or a router config.work runs: it draws no page
+	// (refuseGuardView).
+	guarding bool
 
 	// Cache configuration
 	cacheTTL       time.Duration

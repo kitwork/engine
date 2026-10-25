@@ -243,6 +243,11 @@ func (r *Response) HelloWorld() *Response {
 }
 
 func (r *Response) View(data value.Value, options ...any) (*Response, error) {
+	if r.ctx != nil && r.ctx.request != nil {
+		if err := r.ctx.router().refuseGuardView(); err != nil {
+			return r, err
+		}
+	}
 	if err := r.answering("view"); err != nil {
 		return r, err
 	}

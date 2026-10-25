@@ -507,7 +507,11 @@ func (t *Tenant) execTree(vm *runtime.VM, folder *FolderRouter, l *value.Lambda,
 // A guard that returns data auto-sends it (like the flat lifecycle); middleware does not.
 func (t *Tenant) runStage(vm *runtime.VM, folder *FolderRouter, l *value.Lambda, ctxObj *Context, r *Router, isGuard bool) bool {
 	bc := folder.code(l)
+	// a guard of a router.work or a router config.work draws no page (KITWORK_ROUTER.md mục 4, 25/10/2026)
+	uiGuard := isGuard && folder != nil && folder.ui
+	r.guarding = uiGuard
 	res := t.execTree(vm, folder, l, ctxObj)
+	r.guarding = false
 	if res.K == value.Invalid {
 		stage := "middleware"
 		if isGuard {
@@ -517,6 +521,13 @@ func (t *Tenant) runStage(vm *runtime.VM, folder *FolderRouter, l *value.Lambda,
 			r.err = uncaught(fmt.Sprintf("middleware error: %v", res.V))
 		}
 		t.recordRuntimeFailure(r, bc, stage, res)
+		if uiGuard {
+			// what the guard began is not the answer, its failure is: the page text it wrote
+			// (context.title(…)) never reaches the template renderer at finalize, as a handler's does not
+			r.response.data = value.Value{K: value.Nil}
+			r.response.kind = ""
+			r.viewBuilder = nil
+		}
 		return false
 	}
 	if r.response.IsSend() {
@@ -527,6 +538,9 @@ func (t *Tenant) runStage(vm *runtime.VM, folder *FolderRouter, l *value.Lambda,
 		r.err = errRequestRejected
 		if r.response.code == 0 {
 			r.response.code = http.StatusForbidden
+		}
+		if uiGuard {
+			r.viewBuilder = nil // the answer is 403, not the page text the guard wrote before it said no
 		}
 		return false
 	}

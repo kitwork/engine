@@ -173,7 +173,14 @@ import (
 // errors; any other .work file that takes kitwork/router is refused. A cached artifact of schema 22 of a
 // router.work written in an old way would run until the router met it, or run it: the bump retires it. A
 // program that writes none of them compiles as before, byte for byte. No opcode or operand changed.
-const CompilerSchemaVersion uint16 = 23
+//
+// 24 (25/10/2026, KITWORK_ROUTER.md mục 4, a guard draws no page): context.view in what a guard of a router.work
+// or a router config.work runs is a compile error, followed into the files the guard is imported from
+// (router_guard.go); the view-taken-apart rule no longer follows a call through a name declared where it is
+// written, nor a name the file assigns again. A cached artifact of schema 23 of a router.work whose guard draws a
+// page would run until the engine refused it: the bump retires it. A program that writes none of them compiles
+// as before, byte for byte. No opcode or operand changed.
+const CompilerSchemaVersion uint16 = 24
 
 var currentCompilerFingerprint = compilerFingerprintFor(CompilerSchemaVersion)
 

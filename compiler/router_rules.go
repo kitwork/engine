@@ -16,7 +16,9 @@ import (
 //     a door chaining only guard, limit, cache, persist; a folder call chaining nothing, a call whose nearest
 //     folder wins once per file; no door in a config.work, no router.timezone outside the app's config.work;
 //   - in router.work, no const get, post, put or patch at the top level, and context.view handed an object
-//     written in place, never view taken apart.
+//     written in place, never view taken apart;
+//   - a guard draws no page: context.view in what a guard runs, the files it is imported from included, is
+//     refused (router_guard.go, 25/10/2026).
 //
 // The resolver then refuses the router anywhere but at the head of one of these lines (router.go). Any other
 // .work file refuses kitwork/router altogether (refuseRouterImport). A template site's router.kitwork.js, and
@@ -149,8 +151,11 @@ func routerDepth(appRoot, absolute string) int {
 }
 
 // routerFailure is an error found in a router file, kept with its place until the first in the file is chosen.
+// where is the place the error gives when it stands in another file (a guard's, router_guard.go); at is then
+// the place in the router file it is told from.
 type routerFailure struct {
 	at      Token
+	where   string
 	message string
 }
 
@@ -190,16 +195,20 @@ func firstFailure(failures []routerFailure, text []byte) error {
 			first = failure
 		}
 	}
-	return fmt.Errorf("%s: %s", textLocation(text, first.at), first.message)
+	where := first.where
+	if where == "" {
+		where = textLocation(text, first.at)
+	}
+	return fmt.Errorf("%s: %s", where, first.message)
 }
 
 // readRouterFile reads the top level of a router.work or a router config.work, before any import is bundled
 // into it: the router's import line, each line that calls the router, the const of a door (in a router.work),
-// and every context.view (in both: the two files are two halves of one folder's scope, KITWORK_ROUTER.md mục 4,
-// so a guard of config.work hands view an object written in place as one of router.work does). depth is
-// routerDepth's; text is the file's source, for the places errors give. The first error in the file is the one
-// returned.
-func readRouterFile(prog *Program, kind routerFileKind, depth int, text []byte) (*RouterCalls, error) {
+// every context.view (in both: the two files are two halves of one folder's scope, KITWORK_ROUTER.md mục 4),
+// and every guard, which draws no page (router_guard.go). depth is routerDepth's; text is the file's source, for
+// the places errors give; place is where the file stands, so a guard imported from another file is read there.
+// The first error in the file is the one returned.
+func readRouterFile(prog *Program, kind routerFileKind, depth int, text []byte, place routerPlace) (*RouterCalls, error) {
 	reader := &routerReader{kind: kind, depth: depth, text: text, calls: &RouterCalls{Heads: map[*MethodCallExpression]bool{}}}
 	statements := topLevelStatements(prog.Statements)
 	reader.declared = map[string]bool{}
@@ -213,6 +222,7 @@ func readRouterFile(prog *Program, kind routerFileKind, depth int, text []byte) 
 	reader.imports(statements)
 	reader.lines(statements)
 	reader.views(prog.Statements)
+	reader.guardViews(prog, place)
 	if err := firstFailure(reader.failures, text); err != nil {
 		return nil, err
 	}
@@ -561,56 +571,86 @@ type routerHanded struct {
 func (reader *routerReader) contextViews(statements []Statement) {
 	top := topLevelStatements(statements)
 	functions := map[string]*FunctionLiteral{}
+	assigned := reassigned(statements)
 	for _, statement := range top {
 		node, ok := statement.(*VarStatement)
-		if !ok || node.Import != ImportNone || node.Pattern != nil || len(node.Names) != 1 {
+		if !ok || node.Import != ImportNone || node.Pattern != nil || len(node.Names) != 1 || assigned[node.Names[0].Value] {
 			continue
 		}
 		if function, isFunction := node.Value.(*FunctionLiteral); isFunction {
 			functions[node.Names[0].Value] = function
 		}
 	}
-	var pending []routerHanded
+	// each function handed the context, with the names the function that handed it declares when it is written
+	// in place there (a call through one of them is not the file's function of the name, router_guard.go)
+	type step struct {
+		handed routerHanded
+		outer  map[string]bool
+	}
+	var pending []step
 	seen := map[routerHanded]bool{}
-	hand := func(argument Expression, index int) {
+	hand := func(argument Expression, index int, outer map[string]bool) {
 		var function *FunctionLiteral
+		inherited := map[string]bool(nil)
 		switch node := argument.(type) {
 		case *FunctionLiteral:
-			function = node
+			function, inherited = node, copyNames(outer)
 		case *Identifier:
+			if outer[node.Value] {
+				return
+			}
 			function = functions[node.Value]
 		}
-		if function == nil || index >= len(function.Parameters) {
+		// a parameter the parser could not read (function gate(a.b)) is left for the compiler to refuse
+		if function == nil || index >= len(function.Parameters) || function.Parameters[index] == nil {
 			return
 		}
 		each := routerHanded{function: function, index: index}
 		if !seen[each] {
 			seen[each] = true
-			pending = append(pending, each)
+			pending = append(pending, step{handed: each, outer: inherited})
 		}
 	}
 	for _, statement := range top {
 		if line, ok := statement.(*ExpressionStatement); ok {
 			for _, call := range reader.lineCalls(line.Expression) {
 				for _, argument := range call.Arguments {
-					hand(argument, 0)
+					hand(argument, 0, nil)
 				}
 			}
 		}
 	}
-	// a call that hands the context on: render(context), ((c) => …)(context)
-	called := func(call *CallExpression, names map[string]bool) {
-		for index, argument := range call.Arguments {
-			if contextRooted(argument, names) {
-				hand(call.Function, index)
+	visit := func(node Node, names, declared map[string]bool) {
+		switch n := node.(type) {
+		case *VarStatement:
+			if n.Pattern != nil && contextRooted(n.Value, names) {
+				if element := contextPatternView(n.Pattern); element != nil {
+					reader.fail(element.KeyToken, ContextViewApart("{ view }"))
+				}
+			}
+		case *MemberExpression:
+			if n.Property != nil && n.Property.Value == "view" && contextRooted(n.Object, names) {
+				reader.fail(n.Property.Token, ContextViewApart(receiverText(n.Object)+".view"))
+			}
+		case *IndexExpression:
+			if literal, isLiteral := n.Index.(*Literal); isLiteral && literal.Value.IsString() && literal.Value.Text() == "view" &&
+				contextRooted(n.Left, names) {
+				reader.fail(literal.Token, ContextViewApart(receiverText(n.Left)+`["view"]`))
+			}
+		case *CallExpression:
+			// a call that hands the context on: render(context), ((c) => …)(context)
+			for index, argument := range n.Arguments {
+				if contextRooted(argument, names) {
+					hand(n.Function, index, declared)
+				}
 			}
 		}
 	}
 	for len(pending) > 0 {
 		each := pending[0]
 		pending = pending[1:]
-		names := map[string]bool{each.function.Parameters[each.index].Value: true}
-		reader.contextWalk(each.function.Body, names, called)
+		names := map[string]bool{each.handed.function.Parameters[each.handed.index].Value: true}
+		contextWalk(each.handed.function.Body, names, withParameters(each.outer, each.handed.function), visit)
 	}
 }
 
@@ -641,10 +681,13 @@ func (reader *routerReader) lineCalls(expression Expression) []*MethodCallExpres
 	}
 }
 
-// contextWalk reads node where names are the names that hold the context, refusing view taken apart from
-// them; called hears each call, so the context is followed into the function it is handed to. A function's
-// parameter of the same name is the function's own; a const or let of it, its own from there on.
-func (reader *routerReader) contextWalk(node Node, names map[string]bool, called func(*CallExpression, map[string]bool)) {
+// contextWalk reads node where names are the names that hold the context, and declared the names declared around
+// it: the parameters of the functions it is written in, and each const, let, function and loop name of the blocks
+// that hold it, written before it (a function declaration from its block's start). It hands visit each node with
+// both as they stand there. A function's parameter of the same name as the context is the function's own; a const
+// or let of it, its own from there on; a name bound to the context (const c = context, the response taken apart
+// from it) holds it too. A call through a declared name is not the file's function of that name.
+func contextWalk(node Node, names, declared map[string]bool, visit func(node Node, names, declared map[string]bool)) {
 	switch n := node.(type) {
 	case *FunctionLiteral:
 		inner := map[string]bool{}
@@ -652,25 +695,62 @@ func (reader *routerReader) contextWalk(node Node, names map[string]bool, called
 			inner[name] = true
 		}
 		for _, parameter := range n.Parameters {
-			delete(inner, parameter.Value)
+			if parameter != nil {
+				delete(inner, parameter.Value)
+			}
 		}
 		if len(inner) > 0 && n.Body != nil {
-			reader.contextWalk(n.Body, inner, called)
+			contextWalk(n.Body, inner, withParameters(declared, n), visit)
+		}
+		return
+	case *BlockStatement:
+		block := copyNames(declared)
+		for _, statement := range n.Statements {
+			if declaration, isDeclaration := statement.(*VarStatement); isDeclaration && declaration.Function {
+				for _, name := range declaration.Names {
+					block[name.Value] = true
+				}
+			}
+		}
+		for _, statement := range n.Statements {
+			if statement != nil {
+				contextWalk(statement, names, block, visit)
+			}
+		}
+		return
+	case *ForStatement:
+		visit(n, names, declared)
+		if n.Iterable != nil {
+			contextWalk(n.Iterable, names, declared, visit)
+		}
+		loop := copyNames(declared)
+		if n.Item != nil {
+			loop[n.Item.Value] = true
+		}
+		if n.Body != nil {
+			contextWalk(n.Body, names, loop, visit)
+		}
+		return
+	case *ForRangeStatement:
+		visit(n, names, declared)
+		loop := copyNames(declared)
+		loop[n.Counter] = true
+		for _, child := range nodeChildren(n) {
+			contextWalk(child, names, loop, visit)
 		}
 		return
 	case *VarStatement:
 		if n.Import != ImportNone {
 			return
 		}
+		visit(n, names, declared)
 		rooted := contextRooted(n.Value, names)
 		for _, name := range n.Names {
 			delete(names, name.Value)
+			declared[name.Value] = true
 		}
 		switch {
 		case n.Pattern != nil && rooted:
-			if element := contextPatternView(n.Pattern); element != nil {
-				reader.fail(element.KeyToken, ContextViewApart("{ view }"))
-			}
 			for _, element := range n.Pattern.Elements {
 				if element.Key == "response" && element.Name != nil {
 					names[element.Name.Value] = true
@@ -679,21 +759,47 @@ func (reader *routerReader) contextWalk(node Node, names map[string]bool, called
 		case n.Pattern == nil && rooted && len(n.Names) == 1:
 			names[n.Names[0].Value] = true
 		}
-	case *MemberExpression:
-		if n.Property != nil && n.Property.Value == "view" && contextRooted(n.Object, names) {
-			reader.fail(n.Property.Token, ContextViewApart(receiverText(n.Object)+".view"))
-		}
-	case *IndexExpression:
-		if literal, isLiteral := n.Index.(*Literal); isLiteral && literal.Value.IsString() && literal.Value.Text() == "view" &&
-			contextRooted(n.Left, names) {
-			reader.fail(literal.Token, ContextViewApart(receiverText(n.Left)+`["view"]`))
-		}
-	case *CallExpression:
-		called(n, names)
+	default:
+		visit(node, names, declared)
 	}
 	for _, child := range nodeChildren(node) {
-		reader.contextWalk(child, names, called)
+		contextWalk(child, names, declared, visit)
 	}
+}
+
+// copyNames is a copy of a set of names, empty for nil.
+func copyNames(names map[string]bool) map[string]bool {
+	copied := make(map[string]bool, len(names))
+	for name := range names {
+		copied[name] = true
+	}
+	return copied
+}
+
+// withParameters is a copy of declared with function's parameters added.
+func withParameters(declared map[string]bool, function *FunctionLiteral) map[string]bool {
+	inner := copyNames(declared)
+	for _, parameter := range function.Parameters {
+		if parameter != nil {
+			inner[parameter.Value] = true
+		}
+	}
+	return inner
+}
+
+// reassigned are the names a program assigns anywhere (gate = …, gate++, var gate = … in a function): such a
+// name's first value is not surely the function a line hands the router, so it is not followed.
+func reassigned(statements []Statement) map[string]bool {
+	names := map[string]bool{}
+	eachNode(statements, func(node Node) bool {
+		if assignment, isAssignment := node.(*AssignmentExpression); isAssignment {
+			if name, isName := assignment.Name.(*Identifier); isName {
+				names[name.Value] = true
+			}
+		}
+		return true
+	})
+	return names
 }
 
 // contextRooted reports e as the context: a name that holds it, its response (context.response), or what a

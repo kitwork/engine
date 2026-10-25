@@ -43,7 +43,7 @@ func CompileConfigFileInApp(appRoot, path string) (*Bytecode, error) {
 	routerKind := routerFileOf(appRoot, absolute)
 	var routerCalls *RouterCalls
 	if routerKind == routerConfigFile {
-		if routerCalls, err = readRouterFile(prog, routerConfigFile, routerDepth(appRoot, absolute), data); err != nil {
+		if routerCalls, err = readRouterFile(prog, routerConfigFile, routerDepth(appRoot, absolute), data, routerPlace{appRoot: appRoot, file: absolute}); err != nil {
 			return nil, err
 		}
 	} else if err := refuseRouterImport(prog, data); err != nil {

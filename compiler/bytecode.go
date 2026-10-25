@@ -79,7 +79,7 @@ func prepareFile(appRoot string, paths ...string) (*Program, []string, map[strin
 	var routerCalls *RouterCalls
 	switch {
 	case routerKind != notRouterFile:
-		if routerCalls, err = readRouterFile(prog, routerKind, routerDepth(appRoot, entryAbs), data); err != nil {
+		if routerCalls, err = readRouterFile(prog, routerKind, routerDepth(appRoot, entryAbs), data, routerPlace{appRoot: appRoot, file: entryAbs}); err != nil {
 			return nil, nil, nil, err
 		}
 	case strings.HasSuffix(sourceName, ".work"):

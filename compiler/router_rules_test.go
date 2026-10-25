@@ -486,7 +486,12 @@ func TestRouterWorkConstOfADoor(t *testing.T) {
 // "context.view(data, { b })" said router.work:3:44 "context.view({ … }, …)", not 3:38 "context.view(data)".
 // (24/10/2026, final fix) With readRouterFile reading views in a router.work only, as before, the four rows of
 // config.work compiled, in a site's and in a branch's ("a guard's context.view(data): got <nil>", "a guard by
-// name, ({ view }): got <nil>").
+// name, ({ view }): got <nil>"). (25/10/2026, through a copy of router_rules.go) With a call through a name the
+// handler declares followed (outer not checked), the three rows of the handler's own draw went red at the file's
+// draw ("router.work:3:11: { view }: view tách khỏi context"); with a function written in place not seeing the
+// names around it, its row did; with a name the file assigns again followed, the let draw row did; with a block's
+// names not its own, "render(context) beside a const of another block: got <nil>"; with a function's parameters
+// added to the names around it, "render(context) beside a callback's parameter: got <nil>".
 func TestContextViewTakesAnObjectWrittenInPlace(t *testing.T) {
 	expectRouterErrors(t, "shop.com/router.work", []routerRow{
 		{"context.view(data)", routerImport + "router.get((context) => {\n  const data = { a: 1 };\n  return context.view(data);\n});\n", "data);", 0,
@@ -537,6 +542,12 @@ func TestContextViewTakesAnObjectWrittenInPlace(t *testing.T) {
 			ContextViewApart("context[\"view\"]")},
 		{"in a callback of the handler", routerImport + "router.get((context) => context.json([1].map((n) => typeof context.view)));\n", "view)", 0,
 			ContextViewApart("context.view")},
+		// a name declared in a block that does not hold the call, or by a callback beside it, is not the call's:
+		// render(context) is the file's render
+		{"render(context) beside a const of another block", routerImport + "const render = (context) => {\n  const { view } = context;\n  return view({ a: \"given\" });\n};\nrouter.get((context) => {\n  if (context.request.method === \"HEAD\") {\n    const render = 1;\n  }\n  return render(context);\n});\n", "view }", 0,
+			ContextViewApart("{ view }")},
+		{"render(context) beside a callback's parameter", routerImport + "const render = (context) => (context.view)({ a: 1 });\nrouter.get((context) => {\n  const names = [\"a\"].map((render) => render);\n  return render(context);\n});\n", "view)", 0,
+			ContextViewApart("context.view")},
 	})
 	expectRouterCompiles(t, "shop.com/router.work", []string{
 		routerImport + "router.get((context) => context.view());\n",
@@ -550,6 +561,12 @@ func TestContextViewTakesAnObjectWrittenInPlace(t *testing.T) {
 		routerImport + "const items = [{ view: 1 }];\nrouter.get((context) => context.json(items.map((context) => context.view)));\n",
 		// a function the file never hands the context to is not read for it
 		routerImport + "const label = (item) => item.view;\nrouter.get((context) => context.json({ n: label({ view: 2 }) }));\n",
+		// a call through a name the handler declares is not the file's function of that name: its own const, in a
+		// function written in place, a parameter; nor through a name the file assigns again
+		routerImport + "const draw = (c) => {\n  const { view } = c;\n  return view({ a: 1 });\n};\nrouter.get((context) => {\n  const draw = (c) => c.request.method;\n  return context.text(draw(context));\n});\n",
+		routerImport + "const draw = (c) => {\n  const { view } = c;\n  return view({ a: 1 });\n};\nrouter.get((context) => {\n  const draw = (c) => c.request.method;\n  return context.text(((c) => draw(c))(context));\n});\n",
+		routerImport + "const draw = (c) => {\n  const { view } = c;\n  return view({ a: 1 });\n};\nconst run = (context, draw) => draw(context);\nrouter.get((context) => context.text(run(context, (c) => \"x\")));\n",
+		routerImport + "let draw = (c) => {\n  const { view } = c;\n  return view({ a: 1 });\n};\ndraw = (c) => \"x\";\nrouter.get((context) => context.text(draw(context)));\n",
 	})
 	if _, err := compileRouterApp(t, map[string]string{
 		".shared/page.work":    "export const page = (context, data) => context.view(data);\n",
@@ -559,21 +576,20 @@ func TestContextViewTakesAnObjectWrittenInPlace(t *testing.T) {
 	}
 	expectRouterCompiles(t, "shop.com/router.kitwork.js", []string{"import { router } from \"kitwork\";\nconst data = { a: 1 };\nrouter.get((ctx) => ctx.view(data));\n"})
 
-	// config.work is the other half of the folder's scope (KITWORK_ROUTER.md mục 4): a guard of it that answers
-	// with context.view hands it an object written in place too, and never takes view apart from the context
+	// config.work is the other half of the folder's scope (KITWORK_ROUTER.md mục 4): a .view(…) in it hands an
+	// object written in place too, and view is never taken apart from the context (its guards draw no page at
+	// all, TestGuardDrawsNoPage)
 	for _, relative := range []string{"shop.com/config.work", "shop.com/a/config.work"} {
 		expectRouterErrors(t, relative, []routerRow{
-			{"a guard's context.view(data)", routerImport + "const data = { login: true };\nrouter.guard((context) => context.view(data));\n", "data))", 0,
-				ContextViewObject("context.view(data)")},
-			{"a guard's context.view({ ...data })", routerImport + "const data = { login: true };\nrouter.guard((context) => context.view({ ...data }));\n", "data }", 0,
-				ContextViewObject("context.view({ ...data })")},
+			{"a function's .view(data)", routerImport + "const data = { login: true };\nconst draw = (page) => page.view(data);\nrouter.guard((context) => draw !== null);\n", "data);", 0,
+				ContextViewObject("page.view(data)")},
 			{"a guard's (context.view)(…)", routerImport + "router.guard((context) => (context.view)({ login: true }));\n", "view)", 0,
 				ContextViewApart("context.view")},
 			{"a guard by name, ({ view })", routerImport + "const gate = ({ view }) => view({ login: true });\nrouter.guard(gate);\n", "view }", 0,
 				ContextViewApart("{ view }")},
 		})
 		expectRouterCompiles(t, relative, []string{
-			routerImport + "router.guard((context) => context.view({ login: true }));\n",
+			routerImport + "router.guard((context) => context.redirect(\"/login\"));\n",
 			routerImport + "const settings = { view: \"grid\" };\nrouter.guard((context) => settings.view === \"grid\");\n",
 		})
 	}

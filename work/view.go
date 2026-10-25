@@ -1,6 +1,11 @@
 package work
 
-import "github.com/kitwork/engine/value"
+import (
+	"errors"
+
+	"github.com/kitwork/engine/compiler"
+	"github.com/kitwork/engine/value"
+)
 
 // Bind / Data / Meta / Notfound return the DEFERRED ViewBuilder a filesystem-routed handler
 // accumulates binding + meta on; the tree lifecycle renders it once at the end of the request (see
@@ -14,6 +19,9 @@ import "github.com/kitwork/engine/value"
 // answer of a page, after its edits (20/10/2026): context.title("Quán Cà Phê").view({ menu }).
 func (c *Context) View(args ...value.Value) (*Response, error) {
 	response := c.Response()
+	if err := c.router().refuseGuardView(); err != nil {
+		return response, err
+	}
 	if response.inUISite() {
 		// router.work: the answer of the folder's .ui page, drawn with the names of the object
 		// (serveUIAnswer); no page name, no deferred template view
@@ -31,6 +39,18 @@ func (c *Context) View(args ...value.Value) (*Response, error) {
 	c.viewBuilder().apply(args...)
 	return response, nil
 }
+
+// refuseGuardView refuses a page drawn by a guard of a router.work or a router config.work (KITWORK_ROUTER.md
+// mục 4, 25/10/2026): the compiler refuses one where it can follow the guard (compiler/router_guard.go), this
+// one where it cannot (a guard a call makes, one read off an object, a view taken apart), whether it is reached
+// as context.view, context.title(…).view or context.response.view. A template site's guard is not refused.
+func (r *Router) refuseGuardView() error {
+	if r != nil && r.guarding {
+		return errors.New(compiler.ContextViewInGuard("context.view(…)"))
+	}
+	return nil
+}
+
 func (c *Context) Bind(v value.Value) *ViewBuilder { return c.viewBuilder().Bind(v) }
 func (c *Context) Data(v value.Value) *ViewBuilder { return c.viewBuilder().Data(v) }
 
