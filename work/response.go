@@ -204,8 +204,11 @@ func (r *Response) SVG(data value.Value, options ...any) (*Response, error) {
 
 // CSS responds with Content-Type: text/css — pair with render.css() to serve a stylesheet
 // from a handler: res.css(render.css()). Works with .cache()/.static() like any response.
-func (r *Response) CSS(data value.Value, options ...any) *Response {
-	return r.answer(data, "css", options)
+func (r *Response) CSS(data value.Value, options ...any) (*Response, error) {
+	if err := r.answering("css"); err != nil {
+		return r, err
+	}
+	return r.answer(data, "css", options), nil
 }
 
 func (r *Response) Bytes(data []byte, options ...any) *Response {
@@ -243,11 +246,6 @@ func (r *Response) HelloWorld() *Response {
 }
 
 func (r *Response) View(data value.Value, options ...any) (*Response, error) {
-	if r.ctx != nil && r.ctx.request != nil {
-		if err := r.ctx.router().refuseGuardView(); err != nil {
-			return r, err
-		}
-	}
 	if err := r.answering("view"); err != nil {
 		return r, err
 	}
@@ -268,6 +266,12 @@ func (r *Response) Status(code int) (*Response, error) {
 		return r, err
 	}
 	r.code = code
+	if r.ctx != nil && r.ctx.request != nil {
+		// a guard's json stands on a status it wrote itself (refuseGuardAnswer)
+		if router := r.ctx.router(); router != nil && router.guarding {
+			router.guardStatus = true
+		}
+	}
 	return r, nil
 }
 
@@ -411,7 +415,7 @@ func (r *Response) Cookie(name string, args ...value.Value) (*Response, error) {
 	if len(args) == 0 {
 		return r, nil
 	}
-	if r.inUISite() {
+	if r.routerWork() {
 		if err := r.checkCookieOptions(name, args[1:]); err != nil {
 			return r, err
 		}

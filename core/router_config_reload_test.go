@@ -45,18 +45,18 @@ func TestEngineReloadsConfigWork(t *testing.T) {
 	wait := func() { time.Sleep(1100 * time.Millisecond) } // the engine reads the sources at most once a second
 	request("a")
 
-	write("acme/localhost/a/config.work", routerImport+"router.guard((context) => context.status(403).text(\"đóng\"));\n")
+	write("acme/localhost/a/config.work", routerImport+"router.guard((context) => context.status(403).json({ guard: \"đóng\" }));\n")
 	wait()
-	request("đóng")
+	request(`{"guard":"đóng"}`)
 
-	write("acme/localhost/a/config.work", routerImport+"router.guard((context) => context.status(403).text(\"sửa\"));\n")
+	write("acme/localhost/a/config.work", routerImport+"router.guard((context) => context.status(403).json({ guard: \"sửa\" }));\n")
 	wait()
-	request("sửa")
+	request(`{"guard":"sửa"}`)
 	serving := engine.cache["localhost"].current()
 
 	write("acme/localhost/a/config.work", routerImport+"router.transition(\"zoom\");\n")
 	wait()
-	request("sửa") // the new generation did not boot: the old keeps serving
+	request(`{"guard":"sửa"}`) // the new generation did not boot: the old keeps serving
 	if engine.cache["localhost"].current() != serving {
 		t.Fatal("a config.work that does not run replaced the generation that serves")
 	}

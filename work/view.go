@@ -19,9 +19,6 @@ import (
 // answer of a page, after its edits (20/10/2026): context.title("Quán Cà Phê").view({ menu }).
 func (c *Context) View(args ...value.Value) (*Response, error) {
 	response := c.Response()
-	if err := c.router().refuseGuardView(); err != nil {
-		return response, err
-	}
 	if response.inUISite() {
 		// router.work: the answer of the folder's .ui page, drawn with the names of the object
 		// (serveUIAnswer); no page name, no deferred template view
@@ -40,15 +37,24 @@ func (c *Context) View(args ...value.Value) (*Response, error) {
 	return response, nil
 }
 
-// refuseGuardView refuses a page drawn by a guard of a router.work or a router config.work (KITWORK_ROUTER.md
-// mục 4, 25/10/2026): the compiler refuses one where it can follow the guard (compiler/router_guard.go), this
-// one where it cannot (a guard a call makes, one read off an object, a view taken apart), whether it is reached
-// as context.view, context.title(…).view or context.response.view. A template site's guard is not refused.
-func (r *Router) refuseGuardView() error {
-	if r != nil && r.guarding {
-		return errors.New(compiler.ContextViewInGuard("context.view(…)"))
+// refuseGuardAnswer refuses what a guard of a router.work or a router config.work may not answer
+// (KITWORK_ROUTER.md mục 4, 25/10/2026): anything but context.redirect(…) and context.status(…).json(…), a page
+// least of all. The compiler refuses it where it can follow the guard (compiler/router_guard.go); this, where it
+// cannot (a guard a call makes, one read off an object, a view taken apart), however it is reached
+// (context.view, context.title(…).view, context.response.text). A template site's guard is not refused.
+func (r *Router) refuseGuardAnswer(answer string) error {
+	if r == nil || !r.guarding {
+		return nil
 	}
-	return nil
+	switch {
+	case answer == "redirect", answer == "json" && r.guardStatus:
+		return nil
+	case answer == "view":
+		return errors.New(compiler.ContextViewInGuard("context.view(…)"))
+	case answer == "json":
+		return errors.New(compiler.ContextAnswerInGuard("context.json(…) không có status"))
+	}
+	return errors.New(compiler.ContextAnswerInGuard("context." + answer + "(…)"))
 }
 
 func (c *Context) Bind(v value.Value) *ViewBuilder { return c.viewBuilder().Bind(v) }
@@ -57,32 +63,34 @@ func (c *Context) Data(v value.Value) *ViewBuilder { return c.viewBuilder().Data
 // The page's text from the context. In router.work each is the response's edit, before the answer:
 // context.title("x").description("y").view({ … }) (response_order.go). A template site keeps the
 // deferred builder they give there, chain and all: ctx.bind({ note }).title(note.title).type("article").
+// A guard of a router.work edits the router.work way over a template's folder too (guarding): the function
+// takes the way of the file that wrote it.
 func (c *Context) Meta(v value.Value) (any, error) {
-	if response := c.Response(); response.inUISite() {
+	if response := c.Response(); response.inUISite() || c.router().guarding {
 		return response.Meta(v)
 	}
 	return c.viewBuilder().Meta(v), nil
 }
 func (c *Context) Jsonld(args ...value.Value) (any, error) {
-	if response := c.Response(); response.inUISite() {
+	if response := c.Response(); response.inUISite() || c.router().guarding {
 		return response.Jsonld(args...)
 	}
 	return c.viewBuilder().Jsonld(args...), nil
 }
 func (c *Context) Title(v value.Value) (any, error) {
-	if response := c.Response(); response.inUISite() {
+	if response := c.Response(); response.inUISite() || c.router().guarding {
 		return response.Title(v)
 	}
 	return c.viewBuilder().Title(v), nil
 }
 func (c *Context) Description(v value.Value) (any, error) {
-	if response := c.Response(); response.inUISite() {
+	if response := c.Response(); response.inUISite() || c.router().guarding {
 		return response.Description(v)
 	}
 	return c.viewBuilder().Description(v), nil
 }
 func (c *Context) Image(v value.Value) (any, error) {
-	if response := c.Response(); response.inUISite() {
+	if response := c.Response(); response.inUISite() || c.router().guarding {
 		return response.Image(v)
 	}
 	return c.viewBuilder().Image(v), nil
@@ -93,7 +101,7 @@ func (c *Context) Image(v value.Value) (any, error) {
 // Variadic so the reflection layer does not auto-invoke it as a 0-arg getter — it must stay callable as
 // ctx.notfound().
 func (c *Context) Notfound(args ...value.Value) (any, error) {
-	if response := c.Response(); response.inUISite() {
+	if response := c.Response(); response.inUISite() || c.router().guarding {
 		if err := response.answering("notFound"); err != nil {
 			return response, err
 		}

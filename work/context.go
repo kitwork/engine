@@ -46,7 +46,7 @@ func (c *Context) Text(v value.Value, options ...any) (*Response, error) {
 func (c *Context) SVG(v value.Value, options ...any) (*Response, error) {
 	return c.Response().SVG(v, options...)
 }
-func (c *Context) CSS(v value.Value, options ...any) *Response {
+func (c *Context) CSS(v value.Value, options ...any) (*Response, error) {
 	return c.Response().CSS(v, options...)
 }
 func (c *Context) Status(code int) (*Response, error) { return c.Response().Status(code) }
@@ -123,7 +123,8 @@ func (c *Context) Cookie(name string, args ...value.Value) (any, error) {
 		return c.request.Cookie(name), nil
 	}
 	response := c.Response()
-	if response.inUISite() {
+	if response.inUISite() || c.router().guarding {
+		// a guard of a router.work edits as router.work does, whatever folder the request reaches
 		return response.Cookie(name, args...)
 	}
 	data := args[0]

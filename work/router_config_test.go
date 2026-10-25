@@ -44,18 +44,18 @@ func serveAt(tenant *Tenant, method, target string) *httptest.ResponseRecorder {
 // too, and a folder that has a config.work and no router.work guards everything below it.
 //
 // CONTROL (go test -overlay, 24/10/2026): with compileUIFolder not running config.work, /a?stop=yes answered
-// 403 "router" and /khoa/trong 200; with code() always giving the router file's bytecode, /a and /a?stop=yes
+// 403 {"guard":"router"} and /khoa/trong 200; with code() always giving the router file's bytecode, /a and /a?stop=yes
 // answered 500 "guard error: lambda belongs to a different program", and /khoa/trong 200 (a folder with no
 // router.work had no bytecode to run its guard with).
 func TestConfigWorkRunsBeforeRouterWork(t *testing.T) {
 	root := t.TempDir()
 	tenant, err := bootAppSite(t, root, map[string]string{
-		"acme/.shared/rules.work":    "export const closed = (context) => context.status(403).text(\"đóng\");\n",
+		"acme/.shared/rules.work":    "export const closed = (context) => context.status(403).json({ guard: \"đóng\" });\n",
 		"acme/localhost/router.work": routerImport + "router.get((context) => context.text(\"root\"));\n",
 		"acme/localhost/a/config.work": routerImport +
-			"router.guard((context) => {\n  if (context.query(\"stop\") === \"yes\") {\n    return context.status(403).text(\"config\");\n  }\n});\n",
+			"router.guard((context) => {\n  if (context.query(\"stop\") === \"yes\") {\n    return context.status(403).json({ guard: \"config\" });\n  }\n});\n",
 		"acme/localhost/a/router.work": routerImport +
-			"router.guard((context) => {\n  if (context.query(\"stop\") === \"yes\") {\n    return context.status(403).text(\"router\");\n  }\n});\n" +
+			"router.guard((context) => {\n  if (context.query(\"stop\") === \"yes\") {\n    return context.status(403).json({ guard: \"router\" });\n  }\n});\n" +
 			"router.get((context) => context.text(\"a\"));\n",
 		"acme/localhost/khoa/config.work":       routerImport + "import { closed } from \"app/.shared/rules.work\";\nrouter.guard(closed);\n",
 		"acme/localhost/khoa/trong/router.work": routerImport + "router.get((context) => context.text(\"trong\"));\n",
@@ -68,8 +68,8 @@ func TestConfigWorkRunsBeforeRouterWork(t *testing.T) {
 		code         int
 	}{
 		{"http://localhost/a", "a", http.StatusOK},
-		{"http://localhost/a?stop=yes", "config", http.StatusForbidden}, // config.work's guard first
-		{"http://localhost/khoa/trong", "đóng", http.StatusForbidden},   // a folder with only a config.work
+		{"http://localhost/a?stop=yes", `{"guard":"config"}`, http.StatusForbidden}, // config.work's guard first
+		{"http://localhost/khoa/trong", `{"guard":"đóng"}`, http.StatusForbidden},   // a folder with only a config.work
 		{"http://localhost/", "root", http.StatusOK},
 	} {
 		rec := serveAt(tenant, http.MethodGet, c.target)

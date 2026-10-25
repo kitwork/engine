@@ -23,7 +23,7 @@ func TestResponseAnswersReturnTheResponse(t *testing.T) {
 		"json":       two(r.JSON(data)),
 		"text":       two(r.Text(data)),
 		"html":       two(r.HTML(data)),
-		"css":        r.CSS(data),
+		"css":        two(r.CSS(data)),
 		"svg":        two(r.SVG(data)),
 		"file":       two(r.File(value.Value{K: value.Proxy, V: &fileHandle{}})),
 		"file bytes": two(r.File(value.New([]byte("x")))),

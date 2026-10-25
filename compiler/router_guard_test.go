@@ -250,3 +250,148 @@ func TestGuardDrawsNoPage(t *testing.T) {
 		t.Errorf("a chain of seventeen files:\n  got  %v\n  want %s", err, want)
 	}
 }
+
+// A guard answers only so (25/10/2026, KITWORK_ROUTER.md mục 4): it returns nothing, true or false, or answers with
+// context.redirect(…) or context.status(…).json(…). Any other answer of the context in what it runs (html, text,
+// svg, css, file, notFound, notfound, error, a template response's send…, and json with no status before it in its
+// own chain), under any name of the context, in any case, and in a function it hands the context to, is a compile
+// error at the answer. A status outside the json's chain (on a line of its own, bound to a name, written by a
+// function the guard calls, in an argument) is no compile-time status: whether it runs before the json is what only
+// the run tells, and the engine takes it then (work). A value the guard function itself returns as written (a
+// string, a number, a template, an object, an array, a function, arithmetic, typeof, also behind ?:, ||, &&, ??) is
+// an error at the value. A function written in the guard returns to it, not to the router; a name or a call it
+// returns is read as it runs.
+//
+// CONTROL (25/10/2026, through a copy of router_guard.go or router_rules.go): with guardRefusedAnswers empty, the 17
+// rows of html, text, svg, css, file, notFound, notfound, error, send, in router.work, both config.work and imported,
+// compiled ("text: got <nil>"); with a json taken whatever its chain, the 15 rows of json compiled ("json with no
+// status: got <nil>"); with returns reading nothing, the 26 rows of a value compiled ("a string: got <nil>"); with
+// the returns read after the parameter and the seen check, the five rows of a guard with no parameter and of one first
+// read as a helper compiled; with returnedKind reading only a bare literal, the eight rows of a ternary, ||, &&, ??, a
+// sign, a product, typeof and + compiled; with a helper's returns read as a guard's, the role helper's "admin" went
+// red; with the method's name not folded, the four rows in capitals (notFound among them) compiled; with res not the
+// response, "text of context.res: got <nil>".
+func TestGuardAnswersOnlySo(t *testing.T) {
+	const handler = "router.get((context) => context.text(\"x\"));\n"
+	answer := func(written string) string { return ContextAnswerInGuard(written) }
+	expectRouterErrors(t, "shop.com/router.work", []routerRow{
+		{"html", routerImport + "router.guard((context) => context.html(\"<h1>Đăng nhập</h1>\"));\n" + handler, "html(", 0, answer("context.html(…)")},
+		{"text", routerImport + "router.guard((context) => context.text(\"đóng\"));\n" + handler, "text(\"đóng", 0, answer("context.text(…)")},
+		{"text after a status", routerImport + "router.guard((context) => context.status(403).text(\"đóng\"));\n" + handler, "text(\"đóng", 0, answer("….text(…)")},
+		{"svg", routerImport + "router.guard((context) => context.svg(\"<svg></svg>\"));\n" + handler, "svg(", 0, answer("context.svg(…)")},
+		{"file", routerImport + "router.guard((context) => context.file(\"app/shop.com/assets/a.pdf\"));\n" + handler, "file(", 0, answer("context.file(…)")},
+		{"notFound", routerImport + "router.guard((context) => context.notFound());\n" + handler, "notFound(", 0, answer("context.notFound(…)")},
+		{"error", routerImport + "router.guard((context) => context.error(\"cấm\"));\n" + handler, "error(", 0, answer("context.error(…)")},
+		{"json with no status", routerImport + "router.guard((context) => context.json({ error: \"login\" }));\n" + handler, "json(", 0, answer("context.json(…) không có status trong chuỗi")},
+		{"json after a header, no status", routerImport + "router.guard((context) => context.header(\"x-a\", \"b\").json({ error: \"login\" }));\n" + handler, "json(", 0, answer("….json(…) không có status trong chuỗi")},
+		{"json of the response taken apart", routerImport + "router.guard(({ response }) => response.json({ error: \"login\" }));\n" + handler, "json(", 0, answer("response.json(…) không có status trong chuỗi")},
+		{"text of a route's guard, as a statement", routerImport + "router.get((context) => context.text(\"x\")).guard((context) => {\n  context.status(403).text(\"đóng\");\n});\n", "text(\"đóng", 0, answer("….text(…)")},
+		{"text in a function the guard hands the context to", routerImport + "const deny = (context) => context.status(403).text(\"đóng\");\nrouter.guard((context) => deny(context));\n" + handler, "text(\"đóng", 0, answer("….text(…)")},
+		// a value the guard returns as written
+		{"a string", routerImport + "router.guard((context) => \"đóng\");\n" + handler, "\"đóng\"", 0, GuardReturnsValue("một chuỗi")},
+		{"a number", routerImport + "router.guard((context) => 403);\n" + handler, "403)", 0, GuardReturnsValue("một số")},
+		{"a template", routerImport + "router.guard((context) => `đóng`);\n" + handler, "`đóng`", 0, GuardReturnsValue("một chuỗi")},
+		{"an object", routerImport + "router.guard((context) => ({ error: \"login\" }));\n" + handler, "{ error", 0, GuardReturnsValue("một object")},
+		{"an array", routerImport + "router.guard((context) => [1]);\n" + handler, "[1]", 0, GuardReturnsValue("một mảng")},
+		{"a function", routerImport + "router.guard((context) => (c) => true);\n" + handler, "=> true", 0, GuardReturnsValue("một hàm")},
+		{"a string in a branch", routerImport + "router.guard((context) => {\n  if (context.request.method === \"POST\") {\n    return \"đóng\";\n  }\n});\n" + handler, "\"đóng\"", 0, GuardReturnsValue("một chuỗi")},
+		{"a string of a guard by name", routerImport + "const gate = (context) => \"đóng\";\nrouter.guard(gate);\n" + handler, "\"đóng\"", 0, GuardReturnsValue("một chuỗi")},
+		// css, the lowercase notfound, a template's response word
+		{"css", routerImport + "router.guard((context) => context.css(\"body{}\"));\n" + handler, "css(", 0, answer("context.css(…)")},
+		{"notfound", routerImport + "router.guard((context) => context.notfound());\n" + handler, "notfound(", 0, answer("context.notfound(…)")},
+		{"send of the response", routerImport + "router.guard((context) => context.response.send(\"x\"));\n" + handler, "send(", 0, answer("….send(…)")},
+		// a json with no status before it, in a function the guard hands the context to, whichever guard comes first
+		{"json of a helper with no status", routerImport + "const unauthorized = (context) => context.json({ error: \"login\" });\nrouter.guard((context) => {\n  context.status(401);\n  return unauthorized(context);\n});\nrouter.guard((context) => unauthorized(context));\n" + handler, "json(", 0,
+			answer("context.json(…) không có status trong chuỗi")},
+		// a status chained into one answer is that answer's, and one written in a block counts in that block only
+		{"json after an answer's status", routerImport + "router.guard((context) => {\n  if (context.query(\"a\") === \"1\") {\n    return context.status(401).json({ error: \"login\" });\n  }\n  return context.json({ error: \"forbidden\" });\n});\n" + handler, "json({ error: \"forbidden\"", 0,
+			answer("context.json(…) không có status trong chuỗi")},
+		{"json beside an answer's status in a ternary", routerImport + "router.guard((context) => context.query(\"a\") === \"1\" ? context.status(401).json({ a: 1 }) : context.json({ b: 1 }));\n" + handler, "json({ b", 0,
+			answer("context.json(…) không có status trong chuỗi")},
+		{"json after a redirect's status", routerImport + "router.guard((context) => {\n  if (context.query(\"a\") === \"1\") {\n    return context.status(302).redirect(\"/login\");\n  }\n  return context.json({ b: 1 });\n});\n" + handler, "json({ b", 0,
+			answer("context.json(…) không có status trong chuỗi")},
+		{"a helper after an answer's status", routerImport + "const forbid = (c) => c.json({ b: 1 });\nrouter.guard((context) => {\n  if (context.query(\"a\") === \"1\") {\n    return context.status(401).json({ a: 1 });\n  }\n  return forbid(context);\n});\n" + handler, "json({ b", 0,
+			answer("c.json(…) không có status trong chuỗi")},
+		{"json after a status of another block", routerImport + "router.guard((context) => {\n  if (context.query(\"a\") === \"1\") {\n    context.status(401);\n  }\n  return context.json({ b: 1 });\n});\n" + handler, "json({ b", 0,
+			answer("context.json(…) không có status trong chuỗi")},
+		// the status outside the json's chain is no compile-time status, wherever it stands: on a line of its own, bound
+		// to a name, written by a function the guard calls, in an argument (only the run tells whether it runs first)
+		{"json after a status of its own line", routerImport + "router.guard((context) => {\n  context.status(401);\n  return context.json({ b: 1 });\n});\n" + handler, "json({ b", 0,
+			answer("context.json(…) không có status trong chuỗi")},
+		{"json of a name bound to a status", routerImport + "router.guard((context) => {\n  const answer = context.status(401);\n  return answer.json({ b: 1 });\n});\n" + handler, "json({ b", 0,
+			answer("answer.json(…) không có status trong chuỗi")},
+		{"json after a helper's status", routerImport + "const unauthorized = (c) => {\n  c.status(401);\n};\nrouter.guard((context) => {\n  unauthorized(context);\n  return context.json({ b: 1 });\n});\n" + handler, "json({ b", 0,
+			answer("context.json(…) không có status trong chuỗi")},
+		{"json of a helper handed a status", routerImport + "const deny = (c) => c.json({ b: 1 });\nrouter.guard((context) => deny(context.status(401)));\n" + handler, "json({ b", 0,
+			answer("c.json(…) không có status trong chuỗi")},
+		{"json of a closure before a status", routerImport + "router.guard((context) => {\n  const refuse = () => context.json({ b: 1 });\n  context.status(401);\n  return refuse();\n});\n" + handler, "json({ b", 0,
+			answer("context.json(…) không có status trong chuỗi")},
+		// a name of the context in any case (the VM reads it so), and res, the response's other name
+		{"Text in capitals", routerImport + "router.guard((context) => context.Text(\"đóng\"));\n" + handler, "Text(", 0, answer("context.Text(…)")},
+		{"JSON with no status, in capitals", routerImport + "router.guard((context) => context.JSON({ a: 1 }));\n" + handler, "JSON(", 0, answer("context.JSON(…) không có status trong chuỗi")},
+		{"View in capitals", routerImport + "router.guard((context) => context.View({ a: 1 }));\n" + handler, "View(", 0, ContextViewInGuard("context.View(…)")},
+		{"text of context.res", routerImport + "router.guard((context) => context.res.text(\"đóng\"));\n" + handler, "text(\"đóng", 0, answer("….text(…)")},
+		// a number or a string built in the return
+		{"a sum", routerImport + "router.guard((context) => 1 + 2);\n" + handler, "1 + 2", 0, GuardReturnsValue("một số")},
+		{"a product", routerImport + "router.guard((context) => 2 * 3);\n" + handler, "2 * 3", 0, GuardReturnsValue("một số")},
+		{"typeof", routerImport + "router.guard((context) => typeof context);\n" + handler, "typeof", 0, GuardReturnsValue("một chuỗi")},
+		{"a + of two calls", routerImport + "router.guard((context) => context.query(\"a\") + context.query(\"b\"));\n" + handler, "context.query(\"a\") +", 0, GuardReturnsValue("một số hay một chuỗi")},
+		// a guard that takes no context, and one first read as a helper
+		{"a guard with no parameter", routerImport + "router.guard(() => \"đóng\");\n" + handler, "\"đóng\"", 0, GuardReturnsValue("một chuỗi")},
+		{"a route's guard with no parameter", routerImport + "router.get((context) => context.text(\"x\")).guard(() => ({ a: 1 }));\n", "{ a", 0, GuardReturnsValue("một object")},
+		{"one of an array with no parameter", routerImport + "router.guard([() => \"x\"]);\n" + handler, "\"x\"", 0, GuardReturnsValue("một chuỗi")},
+		{"a const with no parameter", routerImport + "const gate = () => 403;\nrouter.guard(gate);\n" + handler, "403", 0, GuardReturnsValue("một số")},
+		{"a guard first read as a helper", routerImport + "const check = (context) => \"đóng\";\nrouter.guard((context) => check(context) === \"x\");\nrouter.guard(check);\n" + handler, "\"đóng\"", 0, GuardReturnsValue("một chuỗi")},
+		// a value a ternary, a logical operator, a sign or a + may give
+		{"a ternary", routerImport + "router.guard((context) => context.request.method === \"POST\" ? \"đóng\" : true);\n" + handler, "\"đóng\"", 0, GuardReturnsValue("một chuỗi")},
+		{"||", routerImport + "router.guard((context) => context.request.method === \"GET\" || \"đóng\");\n" + handler, "\"đóng\"", 0, GuardReturnsValue("một chuỗi")},
+		{"&&", routerImport + "router.guard((context) => context.request.method === \"GET\" && ({ a: 1 }));\n" + handler, "{ a", 0, GuardReturnsValue("một object")},
+		{"??", routerImport + "router.guard((context) => null ?? \"x\");\n" + handler, "\"x\"", 0, GuardReturnsValue("một chuỗi")},
+		{"a signed number", routerImport + "router.guard((context) => -1);\n" + handler, "-1", 0, GuardReturnsValue("một số")},
+		{"a string joined", routerImport + "router.guard((context) => \"a\" + context.request.method);\n" + handler, "\"a\" +", 0, GuardReturnsValue("một chuỗi")},
+	})
+	expectRouterCompiles(t, "shop.com/router.work", []string{
+		routerImport + "router.guard((context) => true);\n" + handler,
+		routerImport + "router.guard((context) => null);\n" + handler,
+		routerImport + "router.guard((context) => {\n  return;\n});\n" + handler,
+		routerImport + "router.guard((context) => context.redirect(\"/login\"));\n" + handler,
+		routerImport + "router.guard((context) => context.status(302).redirect(\"/login\"));\n" + handler,
+		routerImport + "router.guard((context) => context.status(401).header(\"www-authenticate\", \"Bearer\").json({ error: \"login\" }));\n" + handler,
+		routerImport + "router.guard((context) => context.header(\"x-a\", \"b\").status(401).json({ error: \"login\" }));\n" + handler,
+		routerImport + "router.guard((context) => {\n  context.status(401).json({ error: \"login\" });\n});\n" + handler,
+		// what a function written in the guard returns is its own; a name or a call the guard returns is read as it runs
+		routerImport + "router.guard((context) => [1].map((n) => \"x\").length > 0);\n" + handler,
+		routerImport + "const label = () => \"x\";\nrouter.guard((context) => label() === \"x\");\n" + handler,
+		routerImport + "const allowed = (context) => context.request.method === \"GET\";\nrouter.guard((context) => allowed(context));\n" + handler,
+		// the status in the json's own chain, in any case, through the response's names, in a function the guard hands
+		// the context to
+		routerImport + "router.guard((context) => context.Status(401).Json({ error: \"login\" }));\n" + handler,
+		routerImport + "router.guard((context) => context.res.status(401).json({ error: \"login\" }));\n" + handler,
+		routerImport + "router.guard(({ response }) => response.status(401).json({ error: \"login\" }));\n" + handler,
+		routerImport + "const unauthorized = (c) => c.status(401).json({ error: \"login\" });\nrouter.guard((context) => unauthorized(context));\n" + handler,
+		// a function the guard hands the context to returns to the guard, a string included
+		routerImport + "const role = (context) => \"admin\";\nrouter.guard((context) => role(context) === \"admin\");\n" + handler,
+		routerImport + "router.guard(() => true);\n" + handler,
+		routerImport + "router.guard((context) => context.request.method === \"GET\" ? true : false);\n" + handler,
+		// the handler answers as it likes
+		routerImport + "router.get((context) => context.status(200).html(\"<p>x</p>\")).guard((context) => true);\n",
+	})
+	for _, relative := range []string{"shop.com/config.work", "shop.com/a/config.work"} {
+		expectRouterErrors(t, relative, []routerRow{
+			{"text", routerImport + "router.guard((context) => context.status(403).text(\"đóng\"));\n", "text(", 0, answer("….text(…)")},
+			{"a string", routerImport + "router.guard((context) => \"đóng\");\n", "\"đóng\"", 0, GuardReturnsValue("một chuỗi")},
+		})
+	}
+	// a guard imported from another file: the error stands there, told from the guard
+	for name, row := range map[string]struct{ library, marker, want string }{
+		"text":     {"export const closed = (context) => context.status(403).text(\"đóng\");\n", "text(", answer("….text(…)")},
+		"a string": {"export const closed = (context) => \"đóng\";\n", "\"đóng\"", GuardReturnsValue("một chuỗi")},
+	} {
+		source := routerImport + "import { closed } from \"app/.shared/rules.work\";\nrouter.guard(closed);\n" + handler
+		_, err := compileRouterApp(t, map[string]string{".shared/rules.work": row.library, "shop.com/router.work": source}, "shop.com/router.work")
+		want := placeIn("../.shared/rules.work", row.library, row.marker, 0) + ": " + row.want + " (guard ở " + placeIn("router.work", source, "closed);", 0) + ")"
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("an imported guard, %s:\n  got  %v\n  want %s", name, err, want)
+		}
+	}
+}

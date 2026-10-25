@@ -86,9 +86,11 @@ type Router struct {
 	method   *FolderMethod
 	handling bool
 	events   *requestEvents
-	// guarding is true while a guard of a router.work or a router config.work runs: it draws no page
-	// (refuseGuardView).
-	guarding bool
+	// guarding is true while a guard of a router.work or a router config.work runs: it answers only with
+	// context.redirect(…) and context.status(…).json(…) (refuseGuardAnswer); guardStatus, once that guard wrote a
+	// status itself (an earlier guard's does not count).
+	guarding    bool
+	guardStatus bool
 
 	// Cache configuration
 	cacheTTL       time.Duration

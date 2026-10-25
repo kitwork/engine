@@ -39,7 +39,17 @@ var ownMediaType = map[string]bool{"json": true, "view": true, "sse": true}
 
 // ordered reports whether the order is checked: the site is router.work and its program is running.
 func (r *Response) ordered() bool {
-	return r.order.inProgram && r.inUISite()
+	return r.order.inProgram && r.routerWork()
+}
+
+// routerWork reports whether the response is a router.work's: the request reaches a Kitwork UI folder, or a guard
+// of a router.work or a router config.work is running over a template's folder (the function takes the way of the
+// file that wrote it, KITWORK_ROUTER.md mục 4).
+func (r *Response) routerWork() bool {
+	if r.inUISite() {
+		return true
+	}
+	return r.ctx != nil && r.ctx.request != nil && r.ctx.request.router != nil && r.ctx.request.router.guarding
 }
 
 // editing checks an edit: before the answer.
@@ -65,6 +75,12 @@ func (r *Response) editing(edit string) error {
 
 // answering checks an answer: one, last, matching the edits before it.
 func (r *Response) answering(answer string) error {
+	if r.ctx != nil && r.ctx.request != nil {
+		// a guard of a router.work answers only so, whatever folder the request reaches (routerWork counts its run)
+		if err := r.ctx.router().refuseGuardAnswer(answer); err != nil {
+			return err
+		}
+	}
 	if !r.ordered() {
 		return nil
 	}

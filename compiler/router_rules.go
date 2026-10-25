@@ -629,11 +629,11 @@ func (reader *routerReader) contextViews(statements []Statement) {
 				}
 			}
 		case *MemberExpression:
-			if n.Property != nil && n.Property.Value == "view" && contextRooted(n.Object, names) {
+			if n.Property != nil && strings.EqualFold(n.Property.Value, "view") && contextRooted(n.Object, names) {
 				reader.fail(n.Property.Token, ContextViewApart(receiverText(n.Object)+".view"))
 			}
 		case *IndexExpression:
-			if literal, isLiteral := n.Index.(*Literal); isLiteral && literal.Value.IsString() && literal.Value.Text() == "view" &&
+			if literal, isLiteral := n.Index.(*Literal); isLiteral && literal.Value.IsString() && strings.EqualFold(literal.Value.Text(), "view") &&
 				contextRooted(n.Left, names) {
 				reader.fail(literal.Token, ContextViewApart(receiverText(n.Left)+`["view"]`))
 			}
@@ -752,7 +752,7 @@ func contextWalk(node Node, names, declared map[string]bool, visit func(node Nod
 		switch {
 		case n.Pattern != nil && rooted:
 			for _, element := range n.Pattern.Elements {
-				if element.Key == "response" && element.Name != nil {
+				if contextResponse(element.Key) && element.Name != nil {
 					names[element.Name.Value] = true
 				}
 			}
@@ -811,11 +811,17 @@ func contextRooted(e Expression, names map[string]bool) bool {
 	case *ChainExpression:
 		return contextRooted(node.Expression, names)
 	case *MemberExpression:
-		return node.Property != nil && node.Property.Value == "response" && contextRooted(node.Object, names)
+		return node.Property != nil && contextResponse(node.Property.Value) && contextRooted(node.Object, names)
 	case *MethodCallExpression:
-		return node.Method != nil && contextModifiers[node.Method.Value] && contextRooted(node.Object, names)
+		return node.Method != nil && contextModifiers[strings.ToLower(node.Method.Value)] && contextRooted(node.Object, names)
 	}
 	return false
+}
+
+// contextResponse reports a name of the context's response: response, and res, its other name, in any case (the
+// VM reads a member's name in any case).
+func contextResponse(name string) bool {
+	return strings.EqualFold(name, "response") || strings.EqualFold(name, "res")
 }
 
 // contextPatternView is the element of a pattern taking the context apart that reads view: { view }, or
@@ -826,12 +832,12 @@ func contextPatternView(pattern *BindingPattern) *BindingElement {
 	}
 	for i := range pattern.Elements {
 		element := &pattern.Elements[i]
-		if element.Key == "view" {
+		if strings.EqualFold(element.Key, "view") {
 			return element
 		}
-		if element.Key == "response" && element.Pattern != nil && !element.Pattern.Array {
+		if contextResponse(element.Key) && element.Pattern != nil && !element.Pattern.Array {
 			for j := range element.Pattern.Elements {
-				if element.Pattern.Elements[j].Key == "view" {
+				if strings.EqualFold(element.Pattern.Elements[j].Key, "view") {
 					return &element.Pattern.Elements[j]
 				}
 			}

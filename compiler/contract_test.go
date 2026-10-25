@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestCompilerV24GoldenContract(t *testing.T) {
-	if CompilerSchemaVersion != 24 {
-		t.Fatalf("CompilerSchemaVersion = %d, want schema v24", CompilerSchemaVersion)
+func TestCompilerV25GoldenContract(t *testing.T) {
+	if CompilerSchemaVersion != 25 {
+		t.Fatalf("CompilerSchemaVersion = %d, want schema v25", CompilerSchemaVersion)
 	}
 	// Bytecode 3 (14/10/2026) moved the fingerprint and every checksum below with the version alone: each
 	// fixture's instructions, constants and debug table are those bytecode 2 wrote (none needs a wide
@@ -32,10 +32,17 @@ func TestCompilerV24GoldenContract(t *testing.T) {
 	// (24/10/2026, queue.database(db) checked where it is written) moved the fingerprint alone: no fixture is a
 	// config.work or calls queue.database. Schema 23 (24/10/2026, the router's one import and closed words)
 	// moved the fingerprint alone: no fixture is a router.work or a config.work. Schema 24 (25/10/2026, a guard
-	// draws no page) moved the fingerprint alone: no fixture is a router.work or a config.work.
-	const expectedFingerprint = "0b0c54dee09c760953745511f58e7be74fa3c50f9826f980c9e9c38c7f54b595"
+	// draws no page) moved the fingerprint alone: no fixture is a router.work or a config.work. Schema 25 (25/10/2026,
+	// a guard answers four ways only) moved the fingerprint alone: no fixture is a router.work or a config.work.
+	const expectedFingerprint = "97201c004ddc3f8aa1a5852822d801df3c04cf656e280733cf4cf24248702218"
 	if got := Fingerprint(); got != expectedFingerprint {
 		t.Fatalf("compiler fingerprint = %q, want %q", got, expectedFingerprint)
+	}
+	// schema 24 compiled a router.work whose guard answers with text, html, json with no status or a value: its
+	// artifacts are not reused
+	const schema24 = "0b0c54dee09c760953745511f58e7be74fa3c50f9826f980c9e9c38c7f54b595"
+	if stamped := compilerFingerprintFor(24); hex.EncodeToString(stamped[:]) != schema24 || Fingerprint() == schema24 {
+		t.Fatalf("schema 24 on bytecode 4 stamps %x, the current compiler %s: want %s and another", stamped, Fingerprint(), schema24)
 	}
 	// schema 23 compiled a router.work whose guard draws a page: its artifacts are not reused
 	const schema23 = "345c9330b6456929f7a20527b254efe271a0d07d3aaf5db7389384875ced04e5"

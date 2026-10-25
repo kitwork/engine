@@ -180,7 +180,15 @@ import (
 // written, nor a name the file assigns again. A cached artifact of schema 23 of a router.work whose guard draws a
 // page would run until the engine refused it: the bump retires it. A program that writes none of them compiles
 // as before, byte for byte. No opcode or operand changed.
-const CompilerSchemaVersion uint16 = 24
+//
+// 25 (25/10/2026, KITWORK_ROUTER.md mục 4, a guard answers four ways only): any other answer of the context in what
+// a guard runs (html, text, svg, css, file, notFound, error, a template response's words, json with no status the
+// guard wrote before it) and a value the guard function returns as written (a string, a number, a template, an
+// object, an array, a function, arithmetic) are compile errors (router_guard.go); the view rules read a name in
+// any case, and res as the context's response. A cached artifact of schema 24 of a router.work whose guard answers so would run until the
+// engine refused it: the bump retires it. A program that writes none of them compiles as before, byte for byte. No
+// opcode or operand changed.
+const CompilerSchemaVersion uint16 = 25
 
 var currentCompilerFingerprint = compilerFingerprintFor(CompilerSchemaVersion)
 

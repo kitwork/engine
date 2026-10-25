@@ -509,9 +509,21 @@ func (t *Tenant) runStage(vm *runtime.VM, folder *FolderRouter, l *value.Lambda,
 	bc := folder.code(l)
 	// a guard of a router.work or a router config.work draws no page (KITWORK_ROUTER.md mục 4, 25/10/2026)
 	uiGuard := isGuard && folder != nil && folder.ui
-	r.guarding = uiGuard
+	r.guarding, r.guardStatus = uiGuard, false
 	res := t.execTree(vm, folder, l, ctxObj)
 	r.guarding = false
+	switch {
+	case !uiGuard || res.K == value.Invalid:
+	case !res.IsBlank() && !res.IsBool():
+		// it answers with context.redirect(…) or context.status(…).json(…), never with a value it returns: the
+		// compiler refuses one written in the return (compiler/router_guard.go), this one any other, told from
+		// the guard's own place
+		res = value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("%s:%d:%d: %s", l.SourceFile, l.SourceLine,
+			l.SourceColumn, compiler.GuardReturnsValue(returnedKind(res))))
+	case r.response.IsSend() && r.response.kind != "redirect" && (r.response.kind != "json" || !r.guardStatus):
+		// an answer no answer function refused (a template's response over its folder: send, string, bytes…)
+		res = value.InvalidFailure(value.InvalidArgumentCode, compiler.ContextAnswerInGuard(sentAnswer(r.response.kind)))
+	}
 	if res.K == value.Invalid {
 		stage := "middleware"
 		if isGuard {
@@ -549,6 +561,36 @@ func (t *Tenant) runStage(vm *runtime.VM, folder *FolderRouter, l *value.Lambda,
 		return false
 	}
 	return r.err == nil
+}
+
+// sentAnswer is an answer a response holds, as a guard's error says it.
+func sentAnswer(kind string) string {
+	switch kind {
+	case "json":
+		return "context.json(…) không có status"
+	case "render":
+		return "context.view(…)"
+	case "", "typed":
+		return "context.response.send(…)"
+	}
+	return "context." + kind + "(…)"
+}
+
+// returnedKind is what a guard returned, as its error says it.
+func returnedKind(v value.Value) string {
+	switch v.K {
+	case value.String:
+		return "một chuỗi"
+	case value.Number:
+		return "một số"
+	case value.Map:
+		return "một object"
+	case value.Array:
+		return "một mảng"
+	case value.Func:
+		return "một hàm"
+	}
+	return "một giá trị"
 }
 
 // treeRender points the render engine at a folder: page = <folder>/page.kitwork.html, while the
