@@ -17,15 +17,15 @@ function click(target) {
   kit.render();
 }
 
-var host = el("div", { "data-kit-scope": "{ screen: 'workspace', rows: [1, 2, 3], " +
-  "isWorkspace: () => screen === 'workspace', " +
-  "title: () => isWorkspace() ? 'Workspace' : 'Library', " +
-  "plural: (n) => n + (n === 1 ? ' row' : ' rows') }" });
-var flag = el("b", { "data-kit-text": "isWorkspace() ? 'yes' : 'no'" });
-var name = el("h1", { "data-kit-text": "title()" });
-var count = el("small", { "data-kit-text": "plural(rows.length)" });
-var one = el("em", { "data-kit-text": "plural(1)" });
-var go = el("button", { "data-kit-click": "screen = 'library'" });
+var host = el("div", { "data-kitwork-scope": "screen: 'workspace'; rows: [1, 2, 3]; " +
+  "isWorkspace: () => screen === 'workspace'; " +
+  "title: () => isWorkspace() ? 'Workspace' : 'Library'; " +
+  "plural: (n) => n + (n === 1 ? ' row' : ' rows')" });
+var flag = el("b", { "data-kitwork-bind": "text: isWorkspace() ? 'yes' : 'no'" });
+var name = el("h1", { "data-kitwork-bind": "text: title()" });
+var count = el("small", { "data-kitwork-bind": "text: plural(rows.length)" });
+var one = el("em", { "data-kitwork-bind": "text: plural(1)" });
+var go = el("button", { "data-kitwork-event": "click: screen = 'library'" });
 host.appendChild(flag); host.appendChild(name); host.appendChild(count); host.appendChild(one); host.appendChild(go);
 document.body.appendChild(host);
 kit.render();
@@ -52,10 +52,10 @@ console.log("computed values in a scope literal: read live, take arguments, comp
 func TestComputedValueResolvesInTheCallingScope(t *testing.T) {
 	const assertions = `
 var kit = window.kit;
-var outer = el("div", { "data-kit-scope": "{ screen: 'workspace', isWorkspace: () => screen === 'workspace' }" });
-var here = el("b", { "data-kit-text": "isWorkspace() ? 'yes' : 'no'" });
-var inner = el("div", { "data-kit-scope": "{ screen: 'library' }" });
-var there = el("i", { "data-kit-text": "isWorkspace() ? 'yes' : 'no'" });
+var outer = el("div", { "data-kitwork-scope": "screen: 'workspace'; isWorkspace: () => screen === 'workspace'" });
+var here = el("b", { "data-kitwork-bind": "text: isWorkspace() ? 'yes' : 'no'" });
+var inner = el("div", { "data-kitwork-scope": "screen: 'library'" });
+var there = el("i", { "data-kitwork-bind": "text: isWorkspace() ? 'yes' : 'no'" });
 inner.appendChild(there);
 outer.appendChild(here); outer.appendChild(inner);
 document.body.appendChild(outer);

@@ -28,46 +28,6 @@ window.matchMedia = global.matchMedia = function (query) {
 };
 `
 
-// router.theme() became router.appearance() (11/10/2026), and the light/dark service with it:
-// kit.appearance. kit.theme is not a second service that could drift from it — it is the same object,
-// so a page written for kit.theme, and the theme component, read and change the one choice.
-func TestAppearanceServiceIsKitThemeItself(t *testing.T) {
-	const assertions = appearanceShim + `
-if (!kit.appearance || typeof kit.appearance.toggle !== "function") throw new Error("kit.appearance is missing");
-if (kit.theme !== kit.appearance) throw new Error("kit.theme must be the same object as kit.appearance, not a copy");
-if (kit.service("theme") !== kit.service("appearance")) throw new Error("the service registry must hold one object under both names");
-
-// One choice, seen through either name.
-kit.theme.set("dark");
-if (kit.appearance.mode !== "dark" || kit.appearance.dark !== true) {
-  throw new Error("a choice made through kit.theme must be kit.appearance's: " + kit.appearance.mode + "/" + kit.appearance.dark);
-}
-kit.appearance.set("light");
-if (kit.theme.mode !== "light" || kit.theme.resolved !== "light") {
-  throw new Error("a choice made through kit.appearance must be kit.theme's: " + kit.theme.mode + "/" + kit.theme.resolved);
-}
-// toggleTheme(), the oldest spelling, still flips the same choice.
-kit.toggleTheme();
-if (kit.appearance.mode !== "dark") throw new Error("toggleTheme() must flip kit.appearance, got " + kit.appearance.mode);
-
-// The service answers for its own name in capabilities, without asking a native shell.
-Promise.all([
-  kit.capabilities.supports("appearance.toggle"),
-  kit.capabilities.supports("appearance.dark"),
-  kit.capabilities.supports("theme.toggle"),
-  kit.capabilities.supports("appearance.nope")
-]).then(function (answers) {
-  if (answers[0] !== true || answers[1] !== true || answers[2] !== true) {
-    throw new Error("capabilities must know the service under both names: " + answers.join(","));
-  }
-  // control: an id nobody declared is still refused, so the yeses above are not a blanket yes
-  if (answers[3] !== false) throw new Error("an undeclared capability id must answer false");
-  console.log("kit.theme is kit.appearance");
-}).catch(function (error) { console.error(error && error.message || error); process.exit(1); });
-`
-	runNodeDOMScript(t, "appearance_is_theme.test.js", assertions)
-}
-
 // dark is what the page SHOWS, not what was chosen: under "system" it is the operating system's
 // answer, and it agrees with the dark class on <html> — the class the pre-paint and the stylesheet
 // both go by.

@@ -8,13 +8,16 @@ import (
 	"github.com/kitwork/engine/jit/internal/htmlattr"
 )
 
-// Directives whose machinery stays out of the kernel. The kernel knows the attribute's name and runs
-// its expression through the event pipeline; the part that watches the browser is a file of its own,
-// delivered only to a page that writes the directive — like a component, but named by the grammar.
+// Directives whose machinery stays out of the kernel. The kernel knows the event's name and runs its
+// expression through the event pipeline; the part that watches the browser is a file of its own,
+// delivered only to a page that asks for it — like a component, but named by the grammar.
 //
-//	data-kit-intersect[:leave][:once][:half|:full][:margin(x)]  → directives/intersect.js
-//	data-kit-drag="true" | "false"                              → directives/drag.js
-var directiveMarkers = map[string]string{"intersect": "data-kit-intersect", "drag": "data-kit-drag"}
+//	data-kitwork-event="intersect-enter[.once][.half|.full][.margin(x)]: …; intersect-leave: …"
+//	                                       → directives/intersect.js
+//	data-kit-drag="true" | "false"         → directives/drag.js (a desktop window's own title bar)
+//
+// (data-kit-intersect, the hand-written form of template pages, went on 26/10/2026.)
+var directiveMarkers = map[string]string{"intersect": "intersect-", "drag": "data-kit-drag"}
 
 func directiveSource(name string) string {
 	if _, known := directiveMarkers[name]; !known {
@@ -42,13 +45,12 @@ func directiveAsset(name string) *Asset {
 }
 
 // directiveAssets is the directive files a page needs, in a fixed order. The page is read without
-// its examples, so a docs page that prints data-kit-intersect gets no observer. In the engine's
-// grouped form the observer is asked for by an event — intersect-enter or intersect-leave in a
-// data-kitwork-event — so that brings it too.
+// its examples, so a docs page that prints an intersect-enter gets no observer. The observer is asked
+// for by an event — intersect-enter or intersect-leave in a data-kitwork-event.
 func directiveAssets(html string) []*Asset {
 	var out []*Asset
 	for _, name := range []string{"intersect", "drag"} {
-		if strings.Contains(html, directiveMarkers[name]) || name == "intersect" && groupedIntersect(html) {
+		if name == "intersect" && groupedIntersect(html) || name == "drag" && strings.Contains(html, directiveMarkers[name]) {
 			if asset := directiveAsset(name); asset != nil {
 				out = append(out, asset)
 			}

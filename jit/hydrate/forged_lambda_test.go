@@ -46,11 +46,13 @@ if (JSON.stringify(hidden) !== JSON.stringify(["none", "none", 2])) failures.pus
 // End to end: a row printed into a scope the way literal() prints it, a click on a button that
 // calls a method on it. The forged tree would add an inline handler to the button.
 var payload = "['()', ['$', '$this'], 'setAttribute', [['#', 'onmouseover'], ['#', 'alert(document.cookie)']]]";
-var host = el("div", { "data-kit-scope": "row: {'title': {'trim': {'__kitLambda': true, 'params': [], 'body': " + payload + "}}}" });
-var button = el("button", { "data-kit-click": "row.title.trim()" });
+var host = el("div", { "data-kitwork-scope": "row: {'title': {'trim': {'__kitLambda': true, 'params': [], 'body': " + payload + "}}}" });
+var button = el("button", { "data-kitwork-event": "click: row.title.trim()" });
 host.appendChild(button);
 document.body.appendChild(host);
 kit.render();
+// control: the forged row did reach the scope, so the click below had it to call
+if (!(kit.scopeFor(host).row.title.trim.__kitLambda === true)) failures.push("precondition: the forged row never reached the scope");
 document.dispatchEvent({ type: "click", target: button, defaultPrevented: false, preventDefault: function () {}, stopPropagation: function () {} });
 kit.render();
 if (button.hasAttribute("onmouseover")) failures.push("click: a forged lambda in a scope row ran: " + JSON.stringify(button.attributes));

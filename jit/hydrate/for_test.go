@@ -2,25 +2,27 @@ package hydrate
 
 import "testing"
 
-// data-kit-for proves the three things the feature has to get right:
+// data-kitwork-for proves the three things the feature has to get right:
 //
 //  1. rows materialise from the array, each bound to its own item (content via the ordinary text pass);
 //  2. add/remove reconcile the right rows;
 //  3. KEYED IDENTITY — a surviving row is the SAME DOM node before and after a mutation, never rebuilt,
-//     which is the whole reason for data-kit-key (focus/cursor/input on a row survive a re-render).
+//     which is the whole reason for its "; key: …" (focus/cursor/input on a row survive a re-render).
 //
-// The DOM shim + node runner it drives live in blocks_dom_test.go, shared with the data-kit-if test.
+// Each row the kernel makes carries its own data-kitwork-item (the list's id) and data-kitwork-key
+// markers (data-kit-item / data-kit-key until 26/10/2026). The DOM shim + node runner it drives live
+// in blocks_dom_test.go, shared with the data-kitwork-if test.
 func TestKitForRendersAndReconcilesByKey(t *testing.T) {
 	const assertions = `
 var kit = window.kit;
 
 // Build the cart list: <section component=cart> <ul> <li for=... key=item.id> <span text=item.name> <b text=item.price> </li> </ul> </section>
-var section = el("section", { "data-kit-component": "cart" });
+var section = el("section", { "data-kitwork-component": "cart" });
 var ul = el("ul");
-var li = el("li", { "data-kit-for": "item, i of items", "data-kit-key": "item.id" });
-li.appendChild(el("span", { "data-kit-text": "item.name" }));
-li.appendChild(el("b", { "data-kit-text": "item.price" }));
-li.appendChild(el("i", { "data-kit-text": "i + '/' + count + (first ? ' first' : '') + (last ? ' last' : '') + (even ? ' even' : ' odd')" }));
+var li = el("li", { "data-kitwork-for": "item, i of items; key: item.id" });
+li.appendChild(el("span", { "data-kitwork-bind": "text: item.name" }));
+li.appendChild(el("b", { "data-kitwork-bind": "text: item.price" }));
+li.appendChild(el("i", { "data-kitwork-bind": "text: i + '/' + count + (first ? ' first' : '') + (last ? ' last' : '') + (even ? ' even' : ' odd')" }));
 ul.appendChild(li);
 section.appendChild(ul);
 document.body.appendChild(section);
@@ -34,9 +36,9 @@ kit.component("cart", {
 });
 kit.render();
 
-function rows() { return document.querySelectorAll("[data-kit-item]"); }
-function rowByKey(k) { var rs = rows(); for (var i = 0; i < rs.length; i++) if (rs[i].getAttribute("data-kit-key") === k) return rs[i]; return null; }
-function nameOf(row) { return row.querySelector("[data-kit-text]").textContent; }
+function rows() { return document.querySelectorAll("[data-kitwork-item]"); }
+function rowByKey(k) { var rs = rows(); for (var i = 0; i < rs.length; i++) if (rs[i].getAttribute("data-kitwork-key") === k) return rs[i]; return null; }
+function nameOf(row) { return row.querySelector("[data-kitwork-bind]").textContent; }
 
 var r = rows();
 if (r.length !== 2) throw new Error("initial: expected 2 rows, got " + r.length);
@@ -45,9 +47,9 @@ var start = ul.childNodes[0], end = ul.childNodes[ul.childNodes.length - 1];
 if (start.nodeType !== 8 || !/^kit-for:start id=\S+$/.test(start._text)) throw new Error("the list should begin with <!--kit-for:start id=…-->, got " + start._text);
 if (end.nodeType !== 8 || end._text !== "kit-for:end") throw new Error("the list should end with <!--kit-for:end-->, got " + end._text);
 var listId = start._text.slice("kit-for:start id=".length);
-if (r[0].getAttribute("data-kit-item") !== listId) throw new Error("each row should carry the list id in data-kit-item, got " + r[0].getAttribute("data-kit-item"));
+if (r[0].getAttribute("data-kitwork-item") !== listId) throw new Error("each row should carry the list id in data-kitwork-item, got " + r[0].getAttribute("data-kitwork-item"));
 // The row overlay: index, count, first/last, even/odd — beside the authored item/index names.
-function overlayOf(row) { return row.querySelectorAll("[data-kit-text]")[2].textContent; }
+function overlayOf(row) { return row.querySelectorAll("[data-kitwork-bind]")[2].textContent; }
 if (overlayOf(rowByKey("1")) !== "0/2 first even") throw new Error("overlay on the first row = " + JSON.stringify(overlayOf(rowByKey("1"))));
 if (overlayOf(rowByKey("2")) !== "1/2 last odd") throw new Error("overlay on the last row = " + JSON.stringify(overlayOf(rowByKey("2"))));
 if (nameOf(rowByKey("1")) !== "Ban phim") throw new Error("initial: row 1 name = " + nameOf(rowByKey("1")));
@@ -73,7 +75,7 @@ if (rowByKey("1") !== null) throw new Error("after remove: row 1 still present")
 if (rowByKey("2") !== row2) throw new Error("after remove: row 2 was rebuilt — keyed identity lost");
 if (nameOf(rowByKey("3")) !== "Moi") throw new Error("after remove: row 3 name = " + nameOf(rowByKey("3")));
 
-console.log("data-kit-for: render + keyed reconcile OK (2 -> 3 -> 2, node identity preserved)");
+console.log("data-kitwork-for: render + keyed reconcile OK (2 -> 3 -> 2, node identity preserved)");
 `
 	runNodeDOMScript(t, "for.test.js", assertions)
 }

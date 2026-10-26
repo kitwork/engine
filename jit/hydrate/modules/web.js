@@ -20,9 +20,6 @@
 
   [
     "capabilities.supports",
-    "dialog.alert",
-    "dialog.confirm",
-    "dialog.prompt",
     "share.open",
     "clipboard.writeText",
     "clipboard.readText",
@@ -34,10 +31,6 @@
     "appearance.set",
     "appearance.toggle",
     "appearance.system",
-    "theme.mode",
-    "theme.resolved",
-    "theme.set",
-    "theme.toggle",
     "navigation.back",
     "navigation.forward",
     "navigation.reload",
@@ -108,12 +101,6 @@
     switch (id) {
       case "capabilities.supports":
         return true;
-      case "dialog.alert":
-        return typeof window.alert === "function";
-      case "dialog.confirm":
-        return typeof window.confirm === "function";
-      case "dialog.prompt":
-        return typeof window.prompt === "function";
       case "share.open":
         return typeof navigator.share === "function";
       case "clipboard.writeText":
@@ -138,10 +125,6 @@
       case "appearance.set":
       case "appearance.toggle":
       case "appearance.system":
-      case "theme.mode":
-      case "theme.resolved":
-      case "theme.set":
-      case "theme.toggle":
         return !!document.documentElement;
       case "navigation.back":
       case "navigation.forward":
@@ -165,7 +148,6 @@
       if (
         id === "capabilities.supports" ||
         id.indexOf("appearance.") === 0 ||
-        id.indexOf("theme.") === 0 ||
         id.indexOf("navigation.") === 0
       ) {
         return Promise.resolve(browserSupports(id));
@@ -179,49 +161,8 @@
     }
   };
 
-  function dialogMessage(options) {
-    if (options && typeof options === "object") {
-      return options.message == null ? "" : String(options.message);
-    }
-    return options == null ? "" : String(options);
-  }
-
-  var dialog = {
-    alert: function (options) {
-      if (native.available) return native.call("dialog.alert", options);
-      if (typeof window.alert !== "function") {
-        return Promise.reject(unsupported("dialog", "alert"));
-      }
-      return Promise.resolve().then(function () {
-        window.alert(dialogMessage(options));
-        return true;
-      });
-    },
-    confirm: function (options) {
-      if (native.available) return native.call("dialog.confirm", options);
-      if (typeof window.confirm !== "function") {
-        return Promise.reject(unsupported("dialog", "confirm"));
-      }
-      return Promise.resolve().then(function () {
-        return window.confirm(dialogMessage(options));
-      });
-    },
-    prompt: function (options) {
-      if (native.available) return native.call("dialog.prompt", options);
-      if (typeof window.prompt !== "function") {
-        return Promise.reject(unsupported("dialog", "prompt"));
-      }
-      return Promise.resolve().then(function () {
-        var title = options && typeof options === "object" ?
-          (options.title || options.message || "") :
-          (options || "");
-        var placeholder = options && typeof options === "object" ?
-          (options.placeholder || options.default || "") :
-          "";
-        return window.prompt(String(title), String(placeholder));
-      });
-    }
-  };
+  // (kit.dialog — alert, confirm and prompt from logic — went on 26/10/2026: asking before acting is
+  // $dialog.open({ …, confirm }), a dialog the page draws; docs/components/dialog.md.)
 
   var share = {
     open: function (options) {
@@ -327,10 +268,10 @@
   //   mode       "light" | "dark" | "system": what was chosen; with no choice stored, the mode the
   //              site shows before the visitor chooses (router.appearance, below); then "system"
   //   dark       true while the page shows dark (system resolved) — what an icon follows
-  //   resolved   "light" | "dark", the same fact as a word (the theme component reads it)
+  //   resolved   "light" | "dark", the same fact as a word
   //   toggle()   flip what is shown;  set(mode);  system() — hand the choice back to the OS
-  // The light/dark service was kit.theme until 11/10/2026; kit.theme is still this same object, so a
-  // page written for it, and the theme component, keep working.
+  // The light/dark service was kit.theme until 11/10/2026; that name, kept for template pages and the
+  // theme component, went with them on 26/10/2026.
   //
   // The choice is stored under "appearance". It was stored under "theme" before, so a choice found
   // only there is still the visitor's: "appearance" is read first, and "theme" only when
@@ -553,12 +494,10 @@
   kit.service("reader", reader);
 
   kit.service("capabilities", capabilities);
-  kit.service("dialog", dialog);
   kit.service("share", share);
   kit.service("clipboard", clipboard);
   kit.service("camera", camera);
   kit.service("appearance", appearance);
-  kit.service("theme", appearance); // the name before 11/10/2026: the same object, not a copy
   kit.service("navigation", navigation);
 
   function compatibility(name, value) {
@@ -577,9 +516,6 @@
   });
   compatibility("supports", function (id) {
     return capabilities.supports(id);
-  });
-  compatibility("toggleTheme", function () {
-    return appearance.toggle();
   });
   compatibility("back", function () {
     return navigation.back();

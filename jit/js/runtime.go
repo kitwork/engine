@@ -1,14 +1,12 @@
 // Package js is Kitwork's JIT JavaScript runtime — "jitjs", a sibling of jit/css and jit/icons.
-// A page that uses a kernel component (`data-kit-component="dialog"`) gets the kernel plus ONLY the
-// components it names. No framework, no full-library payload — the jitcss model applied to JS.
+// A page that uses a kernel component (`data-kitwork-component="tabs: $files"`, what the engine
+// writes for <tabs as="$files">) gets the kernel plus ONLY the components it names. No framework, no
+// full-library payload — the jitcss model applied to JS.
 //
 // Each component is a file in ./components/<name>/<version>.js registering a `kit.component`
-// blueprint under its bare name — never a versioned one (11/10/2026): which version's source ships
-// is the engine's business, the latest unless a template page's markup names one. The verb system
-// that used to live beside them (`data-kit-action="copy"` + `data-kit-target`, ./lib) is gone
-// (22/09): behaviour is a component or an expression, transport is Drive. The optional capability
-// modules (data-kit-api, -live, -remember) went on 02/10: nothing used them, and a site that keeps
-// something in the browser does it in a component of its own.
+// blueprint under its bare name — never a versioned one (11/10/2026): the latest version ships. The
+// catalogue is what Kitwork UI's tags deliver; the components only template pages used, their older
+// versions and a site's own _components/<name>.js went with template pages' client on 26/10/2026.
 //
 // THE CORE IS the kernel behind the canonical window.kit root (window.kitwork remains a
 // compatibility alias) and one delegated event system. Deliver (delivery.go) gives a page the
@@ -40,10 +38,6 @@ const coreName = "core"
 // "js"), so Kitwork Drive's mergeHead re-runs it on navigation alongside the css/icons blocks.
 const runtimeMarker = `data-kitwork-generated="runtime"`
 
-// legacyRuntimeMarker is the same tag under its name before 10/10/2026 (data-kitwork-jit): a page
-// rendered then, and still in a cache, already carries the kernel and must not get a second one.
-const legacyRuntimeMarker = `data-kitwork-jit="runtime"`
-
 var (
 	// slugRe validates a module slug; anchored, so a name can never escape the embedded dirs.
 	slugRe = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
@@ -52,25 +46,11 @@ var (
 	// componentVersionRe validates a component version suffix.
 	componentVersionRe = regexp.MustCompile(`^v[0-9]+(\.[0-9]+)*$`)
 
-	// componentAttrRe extracts the component name and optional version suffix. The alias is its own
-	// attribute (data-kit-alias, a runtime concern the kernel registers); the server only needs
-	// (name, version) to pick which module to emit.
-	componentAttrRe = regexp.MustCompile(`data-kit-component="([a-z][a-z0-9-]*)(?:@([v0-9.]+))?"`)
-
 	// groupedComponentAttrRe finds the engine's form, data-kitwork-component="name[: $alias]"
 	// (KITWORK_UI.md §11). Its value is read by hydrate.ComponentValue, the reader the kernel's twin
-	// is held to; the alias goes. The .ui engine never writes a version there, but the reader takes
-	// "name@version" (with or without its "v") from a template page that writes one.
+	// is held to; the alias goes. The engine never writes a version there.
 	groupedComponentAttrRe = regexp.MustCompile(`data-kitwork-component="([^"]*)"`)
 )
-
-// templateVersions are the catalogue components whose newest version speaks another grammar than the
-// one template pages were written in, each with the version a template page's host (data-kit-component,
-// no version written) still gets. The editor of .ui (v2.0.0, 20/10/2026: toggle('bold'), link(), its
-// parts found by the engine) took the place of the template editor's run('bold'), beginLink() and
-// data-kit-element="area"; a .kitwork.html page that writes data-kit-component="editor" keeps v1.0.0.
-// The engine's own host, data-kitwork-component, always gets the newest.
-var templateVersions = map[string]string{"editor": "v1.0.0"}
 
 // parseVersion converts a string like "v1.2.3.js" or "v1.2.3" into major, minor, patch ints.
 func parseVersion(s string) (major, minor, patch int) {
@@ -176,104 +156,44 @@ func ComponentSource(name, version string) string {
 	return readComponent(name + "@" + version)
 }
 
-// scanComponents collects the distinct components used that resolve to a module — embedded, or
-// the site's own (site.go). It returns their cache keys (e.g. "component:dialog",
-// "component:copy@v1.0.0", "component:bid-stepper"). What a <pre>/<code> block prints is an
-// example, not a host: a docs page must not download the component it documents.
-func scanComponents(html string, site Site) []string {
+// scanComponents collects the distinct catalogue components a page's hosts name, as cache keys
+// ("component:tabs"). What a <pre>/<code> block prints is an example, not a host: a docs page must
+// not download the component it documents. A name the catalogue does not have is left out (the
+// kernel reports the host).
+func scanComponents(html string) []string {
 	html = hydrate.WithoutExamples(html)
+	if !strings.Contains(html, "data-kitwork-component=") {
+		return nil
+	}
 	seen := make(map[string]bool)
 	var out []string
-
-	found := componentAttrRe.FindAllStringSubmatch(html, -1)
-	for _, m := range found {
-		// A template page may write the version with or without its "v" (dialog@2.0.0), as the
-		// grouped form may: both mean the catalogue's v2.0.0.
-		if m[2] != "" {
-			m[2] = "v" + strings.TrimPrefix(m[2], "v")
-		} else if pinned := templateVersions[m[1]]; pinned != "" {
-			m[2] = pinned // a template page's component that kept its grammar when .ui's changed it
+	for _, m := range groupedComponentAttrRe.FindAllStringSubmatch(html, -1) {
+		name, _, err := hydrate.ComponentValue(htmlattr.Decode(m[1]))
+		if err != nil || !componentNameRe.MatchString(name) || !HasComponent(name) {
+			continue // Check names a value that does not read
+		}
+		if key := "component:" + name; !seen[key] {
+			seen[key] = true
+			out = append(out, key)
 		}
 	}
-	var grouped [][]string
-	if strings.Contains(html, "data-kitwork-component=") {
-		grouped = groupedComponentAttrRe.FindAllStringSubmatch(html, -1)
-	}
-	for _, m := range grouped {
-		named, _, err := hydrate.ComponentValue(htmlattr.Decode(m[1]))
-		if err != nil {
-			continue // Check names it
-		}
-		name, version, _ := strings.Cut(named, "@")
-		if version != "" {
-			version = "v" + strings.TrimPrefix(version, "v")
-		}
-		found = append(found, []string{m[0], name, version})
-	}
-	for _, m := range found {
-		name := m[1]
-		version := m[2]
-
-		var nameWithVersion string
-		if version != "" {
-			nameWithVersion = name + "@" + version
-			if !componentVersionRe.MatchString(version) {
-				continue
-			}
-		} else {
-			nameWithVersion = name
-		}
-
-		if !componentNameRe.MatchString(name) {
-			continue
-		}
-
-		key := "component:" + nameWithVersion
-		if seen[key] || !hasComponent(nameWithVersion, site) {
-			continue
-		}
-		seen[key] = true
-		out = append(out, key)
-	}
-
 	sort.Strings(out)
 	return out
 }
 
-func moduleKeys(names []string, site Site) []string {
+// ModuleKeys returns canonical component:<name> keys for the names given (bare, or already keys).
+// Unknown names are omitted, so arbitrary input cannot create arbitrary asset variants.
+func ModuleKeys(names []string) []string {
 	seen := make(map[string]bool)
 	var keys []string
 	for _, n := range names {
-		var key string
-		if strings.Contains(n, ":") {
-			parts := strings.SplitN(n, ":", 2)
-			if parts[0] == "component" {
-				name := strings.SplitN(parts[1], "@", 2)[0]
-				if componentNameRe.MatchString(name) && hasComponent(parts[1], site) {
-					key = n
-				}
-			}
-		} else if hasComponent(n, site) {
-			key = "component:" + n
+		name := strings.TrimPrefix(n, "component:")
+		if !componentNameRe.MatchString(name) || !HasComponent(name) || seen[name] {
+			continue
 		}
-
-		if key != "" && !seen[key] {
-			seen[key] = true
-			keys = append(keys, key)
-		}
+		seen[name] = true
+		keys = append(keys, "component:"+name)
 	}
-
-	if len(keys) == 0 {
-		return nil
-	}
-
 	sort.Strings(keys)
 	return keys
 }
-
-// ModuleKeys returns canonical component:<name> keys for the runtime route.
-// Unknown names are omitted, so arbitrary query strings cannot create arbitrary asset variants.
-func ModuleKeys(names []string) []string { return moduleKeys(names, nil) }
-
-// ModuleKeysFor is ModuleKeys for one tenant: its own _components count as known names.
-func ModuleKeysFor(names []string, site Site) []string { return moduleKeys(names, site) }

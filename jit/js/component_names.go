@@ -11,7 +11,7 @@ import (
 )
 
 // What a component's scope holds, read off its source — so the server can tell an author, at render,
-// that `data-kit-click="close()"` inside a sidebar calls a method the sidebar does not have.
+// that `click="paus()"` inside a countdown calls a method the countdown does not have.
 //
 // The kernel seeds a component's scope with its blueprint's own keys (state, methods, getters) and
 // adds a key whenever the component's code assigns one (`this.hideTimer = …` writes to the nearest
@@ -30,11 +30,10 @@ import (
 //     not a Symbol constant of the file, `scope[TREE] = …`, which is a private slot no markup reads;
 //   - JavaScript the scanner does not follow (an unclosed string, comment or bracket).
 
-// ComponentNames is hydrate.ComponentNames for one site: its own _components, and the catalogue.
-// It takes a component as either form writes it — "dialog", "dialog@v2.0.0" (a template page may
-// still name a version), or a data-kitwork-component value with its alias, "theme: $theme" — and
-// answers for the component, never the alias.
-func ComponentNames(site Site) hydrate.ComponentNames {
+// ComponentNames is hydrate.ComponentNames for the catalogue. It takes a component as the engine
+// writes it — "tabs", or a data-kitwork-component value with its alias, "tabs: $files" — and answers
+// for the component, never the alias.
+func ComponentNames() hydrate.ComponentNames {
 	return func(component string) ([]string, bool) {
 		if strings.Contains(component, ":") {
 			named, _, err := hydrate.ComponentValue(component)
@@ -43,27 +42,13 @@ func ComponentNames(site Site) hydrate.ComponentNames {
 			}
 			component = named
 		}
-		name, version, _ := strings.Cut(strings.TrimSpace(component), "@")
+		name := strings.TrimSpace(component)
 		if !componentNameRe.MatchString(name) {
 			return nil, false
 		}
-		key := name
-		if version != "" {
-			key = name + "@v" + strings.TrimPrefix(version, "v")
-		}
-		source := componentSource(key, site)
+		source := readComponent(name)
 		if source == "" {
 			return nil, false
-		}
-		if pinned := templateVersions[name]; pinned != "" && version == "" {
-			// a template page's host gets the pinned version, the engine's the newest, and the name alone
-			// does not say which host asked: both versions' names, the direction that never invents a report
-			names, ok := declaredNamesOf(source)
-			older, known := declaredNamesOf(componentSource(name+"@"+pinned, site))
-			if !ok || !known {
-				return nil, false
-			}
-			return unionNames(names, older), true
 		}
 		return declaredNamesOf(source)
 	}
@@ -75,22 +60,6 @@ type namesResult struct {
 }
 
 var namesCache sync.Map // sha256 of a source → namesResult
-
-// unionNames are the names of two lists, each once, sorted.
-func unionNames(a, b []string) []string {
-	seen := make(map[string]bool, len(a)+len(b))
-	out := make([]string, 0, len(a)+len(b))
-	for _, list := range [][]string{a, b} {
-		for _, name := range list {
-			if !seen[name] {
-				seen[name] = true
-				out = append(out, name)
-			}
-		}
-	}
-	sort.Strings(out)
-	return out
-}
 
 func declaredNamesOf(source string) ([]string, bool) {
 	sum := sha256.Sum256([]byte(source))

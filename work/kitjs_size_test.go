@@ -12,11 +12,10 @@ import (
 	jitjs "github.com/kitwork/engine/jit/js"
 )
 
-var kitScriptRe = regexp.MustCompile(`src="?(/(?:kit|_kitwork)/[^"\s>]+)`)
+var kitScriptRe = regexp.MustCompile(`src="?(/_kitwork/[^"\s>]+)`)
 
-// pageJavaScript is every script the home page asks for under the engine's prefix (/_kitwork/, or the
-// older /kit/), fetched through the tenant and joined: what a visitor's browser actually downloads
-// for that page.
+// pageJavaScript is every script the home page asks for under the engine's prefix, /_kitwork/,
+// fetched through the tenant and joined: what a visitor's browser actually downloads for that page.
 func pageJavaScript(t *testing.T, tenant *Tenant) string {
 	t.Helper()
 	get := func(path string) *httptest.ResponseRecorder {
@@ -45,7 +44,7 @@ func pageJavaScript(t *testing.T, tenant *Tenant) string {
 func TestDriveIsNotShippedToSitesThatDidNotAskForIt(t *testing.T) {
 	serve := func(t *testing.T, router string) string {
 		t.Helper()
-		tenant, _ := writeTestSite(t, router, `<main><b data-kit-text="'x'">x</b></main>`)
+		tenant, _ := writeTestSite(t, router, `<main><b data-kitwork-bind="text: 'x'">x</b></main>`)
 		if err := tenant.Run(); err != nil {
 			t.Fatal(err)
 		}
@@ -77,7 +76,7 @@ func TestDriveIsNotShippedToSitesThatDidNotAskForIt(t *testing.T) {
 	}
 
 	// The kernel itself must be there either way — this is about the navigator, not the runtime.
-	for _, mark := range []string{"data-kit-scope", "DOMContentLoaded"} {
+	for _, mark := range []string{"data-kitwork-scope", "DOMContentLoaded"} {
 		if !strings.Contains(without, mark) || !strings.Contains(with, mark) {
 			t.Fatalf("the kernel and boot must be in both assets (%q)", mark)
 		}
@@ -96,7 +95,7 @@ func TestDriveIsNotShippedToSitesThatDidNotAskForIt(t *testing.T) {
 func TestNativeBridgeGoesOnlyToAppsWithAShell(t *testing.T) {
 	serve := func(t *testing.T) string {
 		t.Helper()
-		tenant, _ := writeTestSite(t, "", `<main><b data-kit-text="'x'">x</b></main>`)
+		tenant, _ := writeTestSite(t, "", `<main><b data-kitwork-bind="text: 'x'">x</b></main>`)
 		if err := tenant.Run(); err != nil {
 			t.Fatal(err)
 		}

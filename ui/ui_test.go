@@ -360,10 +360,11 @@ func TestKeptLinksAreMarkedForTheClient(t *testing.T) {
 	mustContain(t, html, `<a href="/san-pham">Sản phẩm</a>`, `<a href="https://example.com" rel="external noopener">Ngoài</a>`)
 }
 
-// reload="true" on one link loads the next page whole; Drive reads data-kit-reload="true".
+// reload="true" on one link loads the next page whole; Drive reads data-kitwork-reload="true"
+// (data-kit-reload until 26/10/2026).
 func TestLinkReload(t *testing.T) {
 	html := render(t, `<content><link value="/thanh-toan" reload="true">Thanh toán</link><link value="/menu" reload="false">Thực đơn</link><link value="/gio-hang">Giỏ</link></content>`, nil)
-	mustContain(t, html, `<a data-kit-reload="true" href="/thanh-toan">Thanh toán</a>`)
+	mustContain(t, html, `<a data-kitwork-reload="true" href="/thanh-toan">Thanh toán</a>`)
 	// control: reload="false" and no reload write nothing
 	mustContain(t, html, `<a href="/menu">Thực đơn</a>`, `<a href="/gio-hang">Giỏ</a>`)
 	for _, source := range []string{

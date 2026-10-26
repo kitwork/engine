@@ -71,7 +71,7 @@ var firstPaint = (document.documentElement.classList.contains("dark") ? "dark" :
   var icon = function () { return byId("icon").className; };
   var first = "` + load.first + `", mode = "` + load.mode + `";
   assert(firstPaint === first + "/" + first, "the pre-paint's first frame: " + firstPaint + ", want " + first);
-  assert(window.kit.theme === window.kit.appearance, "kit.theme must be the same object as kit.appearance");
+  assert(window.kit.theme === undefined && window.kit.appearance, "kit.appearance, and no kit.theme (the alias went on 26/10/2026)");
   assert(byId("mode").textContent === mode, "mode after the kernel started: " + byId("mode").textContent + ", want " + mode);
   assert(icon() === (first === "dark" ? "icon icon-sun" : "icon icon-moon") && window.kit.appearance.dark === (first === "dark"),
     "the component shows what the pre-paint painted: " + icon() + " / dark " + window.kit.appearance.dark);` + systemStep + `
@@ -83,7 +83,7 @@ var firstPaint = (document.documentElement.classList.contains("dark") ? "dark" :
 			t.Fatalf("%s: the pre-paint did not fill its marker:\n%s", load.name, page)
 		}
 		page = strings.Replace(page, "<script>", "<script>"+proofScriptHead, 1)
-		delivered := deliverTestPage(t, page, nil, nil)
+		delivered := deliverTestPage(t, page, nil)
 		output, err := serveAppearancePage(t, browser, delivered)
 		if bytes.Contains(output, []byte(`data-kit-test="passed"`)) {
 			continue
@@ -127,8 +127,8 @@ func serveAppearancePage(t *testing.T, browser string, delivered *testPage) ([]b
 
 // component="appearance" as the engine writes it (grouped data-kitwork-* attributes): the icon swaps on dark,
 // a second host reached through its alias agrees, and under "system" dark is what the operating
-// system shows. The theme component on the same page still reads resolved off kit.theme — the same
-// object as kit.appearance — so both views always agree.
+// system shows. (The theme component, which read resolved off kit.theme beside it, went with template
+// pages on 26/10/2026, and kit.theme with it.)
 func TestBrowserAppearanceComponentShowsDark(t *testing.T) {
 	runBrowserProof(t, "appearance", nil, `
 <div id="host" data-kitwork-component="appearance">
@@ -142,7 +142,6 @@ func TestBrowserAppearanceComponentShowsDark(t *testing.T) {
 </div>
 <button id="dark" data-kitwork-event="click: $look.set('dark')">dark</button>
 <button id="system" data-kitwork-event="click: $look.system()">system</button>
-<b id="legacy" data-kit-component="theme" data-kit-text="resolved"></b>
 <script>
 (async function () {
   await wait(150);
@@ -150,21 +149,19 @@ func TestBrowserAppearanceComponentShowsDark(t *testing.T) {
   var html = document.documentElement;
   var icon = function () { return byId("icon").className; };
 
-  assert(window.kit.theme === window.kit.appearance, "kit.theme must be the same object as kit.appearance");
+  assert(window.kit.theme === undefined && window.kit.appearance, "kit.appearance, and no kit.theme (the alias went on 26/10/2026)");
   // Nothing stored, a light OS (headless default): system, and not dark.
   assert(byId("mode").textContent === "system" && icon() === "icon icon-moon" && byId("shown").textContent === "light",
     "first paint: " + byId("mode").textContent + " / " + icon() + " / " + byId("shown").textContent);
-  // resolved is not the appearance component's (it is the theme component's)
+  // resolved is not the appearance component's (it was the theme component's)
   var scope = window.kit.scopeFor(byId("icon"));
   assert(scope.dark === false && typeof scope.mode === "string" && typeof scope.resolved !== "string",
     "the appearance scope holds mode and dark, not resolved: " + typeof scope.resolved);
-  assert(byId("legacy").textContent === "light", "control: the theme component still reads resolved: " + byId("legacy").textContent);
 
   byId("dark").click(); await wait(30);
   assert(html.classList.contains("dark") && icon() === "icon icon-sun" && byId("mode").textContent === "dark" && byId("shown").textContent === "dark",
     "set('dark') through the alias: " + icon() + " " + byId("mode").textContent + " " + byId("shown").textContent);
   assert(localStorage.getItem("appearance") === "dark", "the choice is stored under appearance: " + localStorage.getItem("appearance"));
-  assert(byId("legacy").textContent === "dark", "the theme component agrees: " + byId("legacy").textContent);
 
   byId("toggle").click(); await wait(30);
   assert(!html.classList.contains("dark") && icon() === "icon icon-moon" && byId("mode").textContent === "light" && byId("shown").textContent === "light",
@@ -191,7 +188,7 @@ func TestBrowserAppearanceComponentShowsDark(t *testing.T) {
 // What the server's dev check knows the appearance component holds — read off its source. A page
 // that still writes {{ resolved }} inside component="appearance" is told, because resolved is not in the list.
 func TestAppearanceComponentDeclaresModeAndDark(t *testing.T) {
-	names, ok := ComponentNames(nil)("appearance")
+	names, ok := ComponentNames()("appearance")
 	if !ok {
 		t.Fatal("the appearance component's names could not be read")
 	}
@@ -203,9 +200,9 @@ func TestAppearanceComponentDeclaresModeAndDark(t *testing.T) {
 	if slices.Contains(names, "resolved") {
 		t.Errorf("resolved is gone from appearance, got %v", names)
 	}
-	// control: the theme component keeps the older contract
-	legacy, ok := ComponentNames(nil)("theme")
-	if !ok || !slices.Contains(legacy, "resolved") || !slices.Contains(legacy, "mode") {
-		t.Errorf("the theme component must keep mode and resolved, got %v (%v)", legacy, ok)
+	// The theme component, which kept the older contract (mode, resolved), went with template pages on
+	// 26/10/2026: its name reads nothing now.
+	if legacy, ok := ComponentNames()("theme"); ok {
+		t.Errorf("the theme component is gone, yet its names read %v", legacy)
 	}
 }

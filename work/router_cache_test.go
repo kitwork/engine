@@ -169,7 +169,7 @@ router.get((ctx) => ctx.text("page=" + (ctx.query("page") || "") + ";category=" 
 router.get((ctx) => ctx.text("page=" + (ctx.query("page") || "") + ";noise=" + (ctx.query("noise") || ""))).cache("1h", { page: true }).persist("1h");`)
 	write("drive/router.kitwork.js", `import { router } from "kitwork";
 router.get((ctx) => {
-    if (ctx.header("X-KitJS-Drive") == "1") return ctx.text("drive");
+    if (ctx.header("X-Kitwork-Hydrate") == "1") return ctx.text("drive");
     return ctx.text("document");
 }).cache("1h", []);`)
 	write("dynamic/router.kitwork.js", `import { router } from "kitwork";
@@ -184,7 +184,7 @@ router.get((ctx) => ctx.text("dynamic-body")).cache("1h", []);`)
 	hit := func(tn *Tenant, target string, drive bool) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodGet, "http://localhost"+target, nil)
 		if drive {
-			req.Header.Set("X-KitJS-Drive", "1")
+			req.Header.Set("X-Kitwork-Hydrate", "1")
 		}
 		rec := httptest.NewRecorder()
 		tn.Serve(rec, req)
@@ -236,6 +236,12 @@ router.get((ctx) => ctx.text("dynamic-body")).cache("1h", []);`)
 	assertMiss(t, hit(tenant, "/drive", true), "drive")
 	assertHit(t, hit(tenant, "/drive", false), "document")
 	assertHit(t, hit(tenant, "/drive", true), "drive")
+	// the old KitJS header is not read since 26/10/2026: a request with only it is the load of the page
+	oldDrive := httptest.NewRequest(http.MethodGet, "http://localhost/drive", nil)
+	oldDrive.Header.Set("X-KitJS-Drive", "1")
+	oldResponse := httptest.NewRecorder()
+	tenant.Serve(oldResponse, oldDrive)
+	assertHit(t, oldResponse, "document")
 
 	firstDynamic := hit(tenant, "/dynamic?guard=first", false)
 	assertMiss(t, firstDynamic, "dynamic-body")

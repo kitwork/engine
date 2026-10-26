@@ -2,15 +2,17 @@ package hydrate
 
 import "testing"
 
-// data-kit-bind:<name> in the kernel: the three groups of ideaship-final §5, driven through the
-// node DOM shim. A reflected boolean writes property + attribute; a live property writes the
-// property only; aria-* is spelled out; a data-* boolean is present or absent.
+// The pairs of data-kitwork-bind in the kernel: the three groups of ideaship-final §5, driven
+// through the node DOM shim. A reflected boolean writes property + attribute; a live property
+// writes the property only; aria-* is spelled out; a data-* boolean is present or absent. (The
+// checkbox's value is an expression, not a bare name: `checked: open` on a field would be the
+// two-way form, which grouped_dom_test.go covers, and would not reach the live-property write.)
 func TestKernelBindingGroups(t *testing.T) {
 	runNodeDOMScript(t, "bind_groups.js", `
 var kit = window.kit;
-var section = el("section", { "data-kit-component": "panel" });
-var button = el("button", { "data-kit-bind:disabled": "busy", "data-kit-bind:aria-expanded": "open", "data-kit-bind:data-lit": "open", "data-kit-bind:title": "label" });
-var check = el("input", { "type": "checkbox", "data-kit-bind:checked": "open" });
+var section = el("section", { "data-kitwork-component": "panel" });
+var button = el("button", { "data-kitwork-bind": "disabled: busy; aria-expanded: open; data-lit: open; title: label" });
+var check = el("input", { "type": "checkbox", "data-kitwork-bind": "checked: !busy" });
 section.appendChild(button); section.appendChild(check);
 document.body.appendChild(section);
 

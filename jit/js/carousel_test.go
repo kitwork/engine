@@ -6,7 +6,7 @@ import (
 )
 
 func TestCarouselIsShippedWhenUsed(t *testing.T) {
-	out := deliver(`<div data-kit-component="carousel"><div data-kit-element="track"></div></div>`)
+	out := deliver(`<div data-kitwork-component="carousel" role="region"><ul class="carousel-track" tabindex="0"></ul></div>`)
 	if !strings.Contains(out, `/_kitwork/components/carousel.`) {
 		t.Fatalf("carousel was not injected for markup that uses it:\n%s", out)
 	}
@@ -17,30 +17,33 @@ func TestCarouselIsShippedWhenUsed(t *testing.T) {
 
 // The browser moves the track; the component answers which slide is showing and scrolls to one on
 // request. The proof moves the track BY HAND (as a swipe would) and checks the dots follow, then
-// drives the buttons and checks the track follows.
+// drives the buttons and checks the track follows. The markup is what ui/carousel.go writes (26/10/2026:
+// the template contract — data-kit-element="track" and "slide", the page's own dots, active — went):
+// the track is the host's .carousel-track, its slides the children marked aria-roledescription, and a
+// dot a button with its place as value and the track in aria-controls, which the component marks
+// aria-current.
 func TestBrowserCarouselAnswersWhichSlideIsShowing(t *testing.T) {
-	slide := func(n, label string) string {
-		return `<div data-kit-element="slide" role="group" aria-roledescription="slide" aria-label="` + label +
-			`" style="flex:0 0 100%;height:120px;scroll-snap-align:start">slide ` + n + `</div>`
+	slide := func(n string) string {
+		return `<li aria-roledescription="slide" style="flex:0 0 100%;height:120px;scroll-snap-align:start">slide ` + n + `</li>`
 	}
 	dot := func(n string) string {
-		return `<button id="dot` + n + `" role="tab" data-kit-click="go(` + n + `)" data-kit-bind:aria-selected="active === ` + n + ` ? 'true' : 'false'">` + n + `</button>`
+		return `<button id="dot` + n + `" type="button" value="` + n + `" aria-controls="track" data-kitwork-event="click: go(Number($this.value))">` + n + `</button>`
 	}
 	runBrowserProof(t, "carousel", []string{"carousel"}, `
-<div data-kit-component="carousel" role="group" aria-roledescription="carousel" aria-label="Highlights" style="width:400px">
-  <div id="track" data-kit-element="track" tabindex="0" style="display:flex;overflow-x:auto;scroll-snap-type:x mandatory;width:400px">
-    `+slide("0", "1 of 3")+slide("1", "2 of 3")+slide("2", "3 of 3")+`
-  </div>
-  <button id="prev" data-kit-click="previous()">prev</button>
+<div data-kitwork-component="carousel" role="region" aria-roledescription="carousel" aria-label="Highlights" style="width:400px">
+  <ul id="track" class="carousel-track" tabindex="0" aria-live="polite" style="display:flex;overflow-x:auto;scroll-snap-type:x mandatory;width:400px;margin:0;padding:0;list-style:none">
+    `+slide("0")+slide("1")+slide("2")+`
+  </ul>
+  <button id="prev" type="button" data-kitwork-event="click: previous()">prev</button>
   `+dot("0")+dot("1")+dot("2")+`
-  <button id="next" data-kit-click="next()">next</button>
-  <output id="label" data-kit-text="(active + 1) + ' of ' + count"></output>
+  <button id="next" type="button" data-kitwork-event="click: next()">next</button>
+  <output id="label" data-kitwork-bind="text: (current + 1) + ' of ' + count"></output>
 </div>
 <script>
 (async function () {
   await wait(80);
   var track = document.getElementById("track"), label = document.getElementById("label");
-  var selected = function () { return [0, 1, 2].filter(function (n) { return document.getElementById("dot" + n).getAttribute("aria-selected") === "true"; }).join(","); };
+  var selected = function () { return [0, 1, 2].filter(function (n) { return document.getElementById("dot" + n).getAttribute("aria-current") === "true"; }).join(","); };
 
   assert(label.textContent === "1 of 3" && selected() === "0", "starts on the first slide, got " + label.textContent + " / dot " + selected());
 

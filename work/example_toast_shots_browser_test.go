@@ -25,7 +25,7 @@ const exampleToastSay = `(function (labels) {
     var buttons = Array.prototype.slice.call(document.querySelectorAll("#toast button"));
     labels.forEach(function (label) { buttons.filter(function (b) { return b.textContent.trim() === label; })[0].click(); });
     setTimeout(function () { requestAnimationFrame(function () { requestAnimationFrame(function () {
-      var rows = Array.prototype.filter.call(host.children, function (c) { return c.hasAttribute("data-kit-key"); });
+      var rows = Array.prototype.filter.call(host.children, function (c) { return c.hasAttribute("data-kitwork-key"); });
       var shown = function (el) { return !!el && !el.hidden; };
       var box = null;
       rows.forEach(function (row) {
@@ -60,7 +60,7 @@ const exampleToastLong = `(function () {
   return new Promise(function (done) { setTimeout(function () {
     kit.scope.$toast.danger("Could not open https://example.com/uploads/2026/10/17/a-very-long-file-name-without-any-break-points-abcdefghijklmnopqrstuvwxyz.jpg", { title: "Upload failed" });
     setTimeout(function () { requestAnimationFrame(function () { requestAnimationFrame(function () {
-      var row = host.querySelector(":scope > [data-kit-key]"), card = row.getBoundingClientRect();
+      var row = host.querySelector(":scope > [data-kitwork-key]"), card = row.getBoundingClientRect();
       var x = row.querySelector('button[data-kitwork-event^="click: dismiss"]').getBoundingClientRect();
       var left = Math.max(0, card.left - 12), top = Math.max(0, card.top - 12);
       done(JSON.stringify({
@@ -83,7 +83,7 @@ const exampleToastTall = `(function () {
     kit.scope.$toast.success("The photo is on the page of the dish.", { title: "Photo uploaded", action: { label: "Open the dish", link: "#toast" } });
     kit.scope.$toast.danger("The order is still in the cart: try again.", { title: "Order not saved", action: { label: "Open the cart", link: "#toast" } });
     setTimeout(function () { requestAnimationFrame(function () { requestAnimationFrame(function () {
-      var rows = Array.prototype.filter.call(host.children, function (c) { return c.hasAttribute("data-kit-key"); });
+      var rows = Array.prototype.filter.call(host.children, function (c) { return c.hasAttribute("data-kitwork-key"); });
       var newest = rows[rows.length - 1].getBoundingClientRect();
       done(JSON.stringify({ count: rows.length, newest: newest.top >= 0 && newest.bottom <= innerHeight, scrolls: host.scrollHeight > host.clientHeight }));
     }); }); }, 350);
@@ -273,7 +273,7 @@ func TestBrowserExampleToastShots(t *testing.T) {
 	scheme("light")
 	before := say("Start saving")
 	shoot("saving-before", before)
-	node := d.evaluate(`(function () { window.__saving = document.querySelector('[data-kitwork-component^="toast"] > [data-kit-key="save"]'); return String(!!window.__saving); })()`)
+	node := d.evaluate(`(function () { window.__saving = document.querySelector('[data-kitwork-component^="toast"] > [data-kitwork-key="save"]'); return String(!!window.__saving); })()`)
 	got := d.evaluate(`(function () {
   Array.prototype.filter.call(document.querySelectorAll("#toast button"), function (b) { return b.textContent.trim() === "Finish saving"; })[0].click();
   return new Promise(function (done) { setTimeout(function () { done(""); }, 350); });
@@ -281,7 +281,7 @@ func TestBrowserExampleToastShots(t *testing.T) {
 	_ = got
 	after := say() // nothing pressed: what is on screen now
 	shoot("saving-after", after)
-	same := d.evaluate(`String(document.querySelector('[data-kitwork-component^="toast"] > [data-kit-key="save"]') === window.__saving)`)
+	same := d.evaluate(`String(document.querySelector('[data-kitwork-component^="toast"] > [data-kitwork-key="save"]') === window.__saving)`)
 	if before.Notices != "loader-2:Loading||Saving…||" || after.Notices != "circle-check:Success||Saved.||" || node != "true" || same != "true" {
 		t.Errorf("saving: before %q after %q, one node %s %s", before.Notices, after.Notices, node, same)
 	}
@@ -305,7 +305,7 @@ func TestBrowserExampleToastShots(t *testing.T) {
   var button = document.querySelector('[data-kitwork-component^="toast"] [data-kitwork-event^="click: act"]:not([hidden])');
   button.click();
   return new Promise(function (done) { setTimeout(function () {
-    var rows = document.querySelectorAll('[data-kitwork-component^="toast"] > [data-kit-key]').length;
+    var rows = document.querySelectorAll('[data-kitwork-component^="toast"] > [data-kitwork-key]').length;
     done(kit.scope.$files.selected + " " + rows);
   }, 300); });
 })()`)

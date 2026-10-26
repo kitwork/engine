@@ -3,7 +3,6 @@ package work
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -211,11 +210,11 @@ router.get((context) => {
 }
 
 // carouselProbe reads the carousels of a page, installed once it has loaded. A carousel is named by its
-// alias ("" for a template page's, which has none). read(alias) is what a person and a screen reader
-// have of it now: the instance's current (active on a template page), count and playing, the track's
-// scroll position and width, the first slide's width, each slide's aria-current ("0100") and name, each
-// dot's aria-current, the counter's words (#<alias>-counter, or a template page's live line), the
-// track's aria-live, each slide's computed opacity ("h" when it is visibility: hidden), the slides
+// alias (a template page's carousel, which had none, went with template pages' client on 26/10/2026).
+// read(alias) is what a person and a screen reader have of it now: the instance's current, count and
+// playing, the track's scroll position and width, the first slide's width, each slide's aria-current
+// ("0100") and name, each dot's aria-current, the counter's words (#<alias>-counter), the track's
+// aria-live, each slide's computed opacity ("h" when it is visibility: hidden), the slides
 // that have a CSS order ("0:1", "" for none) and what the screen shows: the slide under the middle of
 // the track (elementFromPoint; its place among the slides as written, -1 for none) and how far its left
 // edge is from the track's.
@@ -232,12 +231,12 @@ router.get((context) => {
 const carouselProbe = `(function () {
   if (window.__carousel) return "ready";
   var host = function (alias) {
-    return alias ? document.querySelector('[data-kitwork-component="carousel: $' + alias + '"]') : document.querySelector('[data-kit-component="carousel"]');
+    return document.querySelector('[data-kitwork-component="carousel: $' + alias + '"]');
   };
   var partsOf = function (h) {
-    var track = h.querySelector('.carousel-track, [data-kit-element="track"]');
+    var track = h.querySelector('.carousel-track');
     return { host: h, track: track, slides: Array.prototype.slice.call(track.children),
-      dots: Array.prototype.slice.call(h.querySelectorAll('button[aria-controls], button[data-kit-click^="go("]')) };
+      dots: Array.prototype.slice.call(h.querySelectorAll('button[aria-controls]')) };
   };
   var parts = function (alias) { return partsOf(host(alias)); };
   var marks = function (list) { return list.map(function (el) { return el.getAttribute("aria-current") === "true" ? "1" : "0"; }).join(""); };
@@ -249,8 +248,8 @@ const carouselProbe = `(function () {
   var orders = function (p) { return p.slides.map(function (s, i) { return s.style.order ? i + ":" + s.style.order : ""; }).filter(Boolean).join(","); };
   var read = function (alias) {
     var p = parts(alias), scope = kit.scopeFor(p.host), screen = seen(p);
-    var counter = alias ? document.getElementById(alias + "-counter") : p.host.querySelector("p[aria-live]");
-    return { current: alias ? scope.current : scope.active, count: scope.count, playing: !!scope.playing, left: Math.round(p.track.scrollLeft),
+    var counter = document.getElementById(alias + "-counter");
+    return { current: scope.current, count: scope.count, playing: !!scope.playing, left: Math.round(p.track.scrollLeft),
       width: p.track.clientWidth, slide: Math.round(p.slides[0].getBoundingClientRect().width),
       slides: marks(p.slides), dots: marks(p.dots), counter: counter ? counter.textContent : "",
       live: p.track.getAttribute("aria-live") || "", labels: p.slides.map(function (s) { return s.getAttribute("aria-label"); }).join("|"),
@@ -261,7 +260,7 @@ const carouselProbe = `(function () {
   // each slide's style is its own declaration seen through a proxy, whose order keeps the record (the
   // browser's declaration answers its properties itself: they cannot be redefined on it)
   var kept = [], inline = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "style");
-  Array.prototype.forEach.call(document.querySelectorAll('[data-kitwork-component^="carousel"], [data-kit-component="carousel"]'), function (h) {
+  Array.prototype.forEach.call(document.querySelectorAll('[data-kitwork-component^="carousel"]'), function (h) {
     var alias = (h.getAttribute("data-kitwork-component") || "").replace(/^carousel: \$/, "");
     partsOf(h).slides.forEach(function (slide, index) {
       var declaration = inline.get.call(slide);
@@ -751,7 +750,7 @@ func carouselVisit(d *devtools, url, motion string) {
 //     middle: the last, then the first, never the ones between), current is the first from the press
 //     on, and once the track rests the order is gone, the track at 0, the same slide in the same place
 //     just before and just after (one task); previous() from the first is the mirror (order -1, only
-//     back, the last's own place); written-out slides and a template page's do the same;
+//     back, the last's own place); written-out slides do the same;
 //   - what else meets a round: a dot from the last to the first runs back across (a place chosen); a
 //     hand that takes the track mid-round leaves current on the slide it left in view, which stays where
 //     it is when the slide goes home; next(), previous() or a dot pressed again while the round still
@@ -1332,128 +1331,4 @@ setTimeout(function () { `+dot(2)+` }, 240);`,
 		move(t, d, "previous()", "start", `document.getElementById("start-previous").click();`,
 			"current 0 | slides 100 | dots 100 | counter 1 / 3 | 640 → 0 smoothly, rests by its scrollend")
 	})
-}
-
-// carouselTemplatePage is the carousel of a template page as the kitwork.io site writes it
-// (components/carousel/page.kitwork.html): the track and the slides marked with data-kit-element, its
-// own names on the slides ("1 of 3"), dots that read active (current's old name) for aria-current and
-// their look, and a live line.
-const carouselTemplatePage = `<main class="p-4">
-<div data-kit-component="carousel" role="group" aria-roledescription="carousel" aria-label="Highlights" class="w-full max-w-sm">
-  <div class="overflow-hidden rounded-2xl">
-    <div data-kit-element="track" tabindex="0" aria-label="Slides — swipe, scroll or use the arrow keys" class="flex snap-x snap-mandatory overflow-x-auto scroll-smooth [scrollbar-width:none] motion-reduce:scroll-auto">
-      <div data-kit-element="slide" role="group" aria-roledescription="slide" aria-label="1 of 3" class="flex h-40 w-full shrink-0 snap-start items-center justify-center">Slide one</div>
-      <div data-kit-element="slide" role="group" aria-roledescription="slide" aria-label="2 of 3" class="flex h-40 w-full shrink-0 snap-start items-center justify-center">Slide two</div>
-      <div data-kit-element="slide" role="group" aria-roledescription="slide" aria-label="3 of 3" class="flex h-40 w-full shrink-0 snap-start items-center justify-center">Slide three</div>
-    </div>
-  </div>
-  <div class="mt-4 flex items-center justify-between">
-    <button id="previous" type="button" data-kit-click="previous()" aria-label="Previous slide" class="inline-flex h-11 w-11 items-center justify-center rounded-full">‹</button>
-    <div class="flex gap-2" role="group" aria-label="Choose a slide">
-      <button type="button" data-kit-click="go(0)" aria-label="Slide 1" data-kit-bind:aria-current="active === 0 ? 'true' : 'false'" data-kit-class="active === 0 ? 'w-6 bg-brand' : 'w-2.5 bg-line'" class="h-2.5 rounded-full"></button>
-      <button type="button" data-kit-click="go(1)" aria-label="Slide 2" data-kit-bind:aria-current="active === 1 ? 'true' : 'false'" data-kit-class="active === 1 ? 'w-6 bg-brand' : 'w-2.5 bg-line'" class="h-2.5 rounded-full"></button>
-      <button type="button" data-kit-click="go(2)" aria-label="Slide 3" data-kit-bind:aria-current="active === 2 ? 'true' : 'false'" data-kit-class="active === 2 ? 'w-6 bg-brand' : 'w-2.5 bg-line'" class="h-2.5 rounded-full"></button>
-    </div>
-    <button id="next" type="button" data-kit-click="next()" aria-label="Next slide" class="inline-flex h-11 w-11 items-center justify-center rounded-full">›</button>
-  </div>
-  <p class="sr-only" aria-live="polite" data-kit-text="'Slide ' + (active + 1) + ' of ' + count"></p>
-</div>
-</main>`
-
-// carouselComponentFile finds the carousel's file on a page: /_kitwork/components/carousel.<hash>.js.
-var carouselComponentFile = regexp.MustCompile(`src="?(/_kitwork/components/carousel\.[0-9a-f]+\.js)`)
-
-// TestBrowserCarouselTemplatePage proves the latest carousel (what every page gets) still serves the
-// template pages written before Kitwork UI, as the kitwork.io site's: the page loads the file whose
-// instance plays (v1.1.0), and in a real browser
-//   - it starts on the first slide: the live line says "Slide 1 of 3", the first dot is aria-current
-//     and drawn wide, through active, the old name of current;
-//   - a dot moves the track smoothly to its slide, and active goes straight there in every frame (from
-//     the last to the first it runs back across, nothing comes round);
-//   - next() from the last goes on to the first, previous() from the first back to the last, the way
-//     each always goes: the slide comes round (order) with nothing moving on the screen, the track
-//     slides only forward (only back), active goes straight there, and once the track rests the slide
-//     goes home, the same slide in the same place just before and just after (carouselRound);
-//   - a scroll by hand and the arrow keys on the focused track move active;
-//   - the slides keep the names the page gave them ("1 of 3") and no aria-current: the template page
-//     draws its own.
-func TestBrowserCarouselTemplatePage(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping the carousel template page proof in short mode")
-	}
-	browser := findHeadlessBrowserForGate()
-	if browser == "" {
-		t.Skip("Chrome, Chromium, or Edge is not installed")
-	}
-	tenant, _ := writeTestSite(t, `router.css({});`, carouselTemplatePage)
-	if err := tenant.Run(); err != nil {
-		t.Fatal(err)
-	}
-	page := serveUI(t, tenant, "http://localhost/").Body.String()
-	file := carouselComponentFile.FindStringSubmatch(page)
-	if file == nil {
-		t.Fatalf("the template page does not load the carousel:\n%.3000s", page)
-	}
-	served := serveUI(t, tenant, "http://localhost"+file[1])
-	body, _ := io.ReadAll(served.Body)
-	if served.Code != http.StatusOK || !strings.Contains(string(body), "playing") || !strings.Contains(string(body), `"carousel"`) {
-		t.Fatalf("%s = %d, want the latest carousel (the one that plays, v1.1.0):\n%.600s", file[1], served.Code, body)
-	}
-	server := carouselServer(tenant)
-	defer server.Close()
-	d := openDevtools(t, browser, server.URL+"/", 1280, 800, "")
-	d.loaded(exampleSettle)
-	carouselVisit(d, server.URL+"/", "no-preference")
-	check := func(step, got, want string) {
-		t.Helper()
-		if got != want {
-			t.Errorf("%s:\n got  %s\n want %s", step, got, want)
-		}
-	}
-	move := func(step, act, want string) {
-		t.Helper()
-		w := carouselWatch(t, d, "", act)
-		if got := carouselMove(w); got != want {
-			t.Errorf("%s:\n got  %s\n want %s\n frames %s", step, got, want, carouselTrace(w))
-		}
-		if len(w.Orders) > 0 {
-			t.Errorf("%s: a slide came round on a move that goes straight there\n frames %s", step, carouselTrace(w))
-		}
-	}
-	round := func(step, act, want string) {
-		t.Helper()
-		w := carouselWatch(t, d, "", act)
-		if got := carouselRound(w); got != want {
-			t.Errorf("%s:\n got  %s\n want %s\n frames %s", step, got, want, carouselTrace(w))
-		}
-	}
-	wide := func() string {
-		return d.evaluate(`window.__carousel.parts("").dots.map(function (dot) { return dot.classList.contains("w-6") ? "wide" : "narrow"; }).join(" ")`)
-	}
-	start := carouselState(t, d, "")
-	if start.Width < 300 || start.Slide != start.Width {
-		t.Fatalf("the track is %gpx wide and a slide %gpx: the page's own classes did not lay it out as a row of whole slides", start.Width, start.Slide)
-	}
-	w := start.Width
-	check("at the start", carouselSays(start)+" | "+start.Labels+" | "+wide(),
-		"current 0 of 3, playing false | slides 000 | dots 100 | counter Slide 1 of 3 | live  | 1 of 3|2 of 3|3 of 3 | wide narrow narrow")
-	dot := func(n int) string { return fmt.Sprintf(`window.__carousel.parts("").dots[%d].click();`, n) }
-	move("dot 3 (go(2))", dot(2), fmt.Sprintf("current 2 | slides 000 | dots 001 | counter Slide 3 of 3 | 0 → %g smoothly, rests by its scrollend", 2*w))
-	check("the dot drawn", wide(), "narrow narrow wide")
-	round("next() from the last: the first comes round after it", `document.getElementById("next").click();`, fmt.Sprintf(
-		"current 0 | slides 000 | dots 100 | counter Slide 1 of 3 | seen 2 0 | slide 0 comes round (order 1): slide 2 at 0 → slide 2 at 0, left %g → %g | "+
-			"while round %g → %g only forward, smoothly | home: slide 0 at 0 → slide 0 at 0, left %g → 0 | rests at 0, order none, slide 0 seen at 0, by its scrollend", 2*w, w, w, 2*w, 2*w))
-	round("previous() from the first: the last comes round before it", `document.getElementById("previous").click();`, fmt.Sprintf(
-		"current 2 | slides 000 | dots 001 | counter Slide 3 of 3 | seen 0 2 | slide 2 comes round (order -1): slide 0 at 0 → slide 0 at 0, left 0 → %g | "+
-			"while round %g → 0 only back, smoothly | home: slide 2 at 0 → slide 2 at 0, left 0 → %g | rests at %g, order none, slide 2 seen at 0, by its scrollend", w, w, 2*w, 2*w))
-	// a dot from the last to the first is a place chosen: it runs back across, nothing comes round
-	move("dot 1 (go(0)) from the last", dot(0), fmt.Sprintf("current 0 | slides 000 | dots 100 | counter Slide 1 of 3 | %g → 0 smoothly, rests by its scrollend", 2*w))
-	move("dot 3 (go(2))", dot(2), fmt.Sprintf("current 2 | slides 000 | dots 001 | counter Slide 3 of 3 | 0 → %g smoothly, rests by its scrollend", 2*w))
-	move("a scroll by hand", fmt.Sprintf(`window.__carousel.parts("").track.scrollTo({ left: %g, behavior: "instant" });`, w),
-		fmt.Sprintf("current 1 | slides 000 | dots 010 | counter Slide 2 of 3 | %g → %g at once, rests by its scrollend", 2*w, w))
-	d.evaluate(`window.__carousel.parts("").track.focus(); window.__pending = window.__carousel.watch("", function () {}); ""`)
-	toastKey(d, "ArrowRight", 39)
-	move("ArrowRight on the focused track", "pending", fmt.Sprintf("current 1 2 | slides 000 | dots 010 001 | counter Slide 2 of 3 Slide 3 of 3 | %g → %g smoothly, rests by its scrollend", w, 2*w))
-	end := carouselState(t, d, "")
-	check("the slides keep their own names", end.Labels, "1 of 3|2 of 3|3 of 3")
 }

@@ -92,7 +92,7 @@ const exampleNetworkSay = `(function (want) {
           out.contrast = { title: contrast(texts[0]), words: contrast(texts[1]), icon: contrast(icon), close: contrast(closeIcon) };
           // the toast's notices on screen, and how much of them the network notice covers (px²)
           var toast = document.querySelector('[data-kitwork-component^="toast"]');
-          var rows = toast ? Array.prototype.filter.call(toast.children, function (c) { return c.hasAttribute("data-kit-key") && !c.hasAttribute("data-leaving"); }) : [];
+          var rows = toast ? Array.prototype.filter.call(toast.children, function (c) { return c.hasAttribute("data-kitwork-key") && !c.hasAttribute("data-leaving"); }) : [];
           out.toasts = rows.length;
           out.toast = rows.map(box).join(" ; ");
           out.covered = rows.reduce(function (sum, row) {

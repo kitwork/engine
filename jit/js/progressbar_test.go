@@ -7,12 +7,12 @@ import "testing"
 // calling kit.progress, or the page driving it through the alias — and nothing is copied.
 func TestBrowserProgressbarShowsKitProgress(t *testing.T) {
 	runBrowserProof(t, "progressbar", nil, `
-<div id="bar" data-kit-component="progressbar" data-kit-alias="$progress" data-kit-show="active" hidden
-     role="progressbar" aria-label="Loading" aria-valuemin="0" aria-valuemax="100" data-kit-bind:aria-valuenow="value">
-  <div id="fill" data-kit-style:width="value + '%'"></div>
+<div id="bar" data-kitwork-component="progressbar: $progress" data-kitwork-bind="show: active; aria-valuenow: value" hidden
+     role="progressbar" aria-label="Loading" aria-valuemin="0" aria-valuemax="100">
+  <div id="fill" data-kitwork-style="width: value + '%'"></div>
 </div>
-<button id="upload" data-kit-click="$progress.update(40)">40%</button>
-<button id="done" data-kit-click="$progress.finish()">done</button>
+<button id="upload" data-kitwork-event="click: $progress.update(40)">40%</button>
+<button id="done" data-kitwork-event="click: $progress.finish()">done</button>
 <script>
 (async function () {
   await wait(150);

@@ -18,21 +18,8 @@
  * the name the choice is kept under — for persist="true" the set of the tab names, sorted and joined
  * by "+" ('bash+powershell'), for persist="shell" that name.
  *
- * A template page (frozen, written before Kitwork UI) writes it all itself and reads `current`:
- *
- *   <div data-kit-component="tabs" data-kit-alias="$docs">
- *     <div role="tablist" data-kit-element="list" aria-label="Documentation">
- *       <button role="tab" id="tab-guide" data-kit-element="tab" data-tab="guide" aria-controls="panel-guide"
- *               data-kit-click="select('guide')"
- *               data-kit-bind:aria-selected="current === 'guide'"
- *               data-kit-bind:tabindex="current === 'guide' ? 0 : -1">Guide</button>
- *     </div>
- *     <section role="tabpanel" id="panel-guide" aria-labelledby="tab-guide" data-kit-show="current === 'guide'">…</section>
- *   </div>
- *
  *   selected   the name of the chosen tab: the host's literal (selected: 'router'), else the first tab;
  *              then what the name it persists under keeps, once the store answers
- *   current    the same name, under the word template pages read
  *   persist    the name the choice is kept under, "" for none. Every tabs of the page with the same
  *              name follows a choice made in any of them (when it has a tab of that name), and the
  *              choice goes to kit.storage under "tabs:<name>" — in a browser localStorage
@@ -45,7 +32,8 @@
  *   select(name)                     choose a tab
  *   next() previous() first() last() move along the tabs, focus with them
  *
- * Add aria-orientation="vertical" to a template page's tablist and ↑↓ drive it instead of ←→.
+ * A tablist with aria-orientation="vertical" is driven by ↑↓ instead of ←→. (A template page's
+ * tabs — data-kit-element="tab" with the name in data-tab, and `current` — went on 26/10/2026.)
  *
  * WHY THIS IS A COMPONENT. Showing one panel is the grammar: a value, a click, a show. What markup
  * cannot say: ← → wrap along the tablist, Home and End jump to its ends, the tab they reach takes FOCUS
@@ -67,22 +55,16 @@ var WEB = "kitwork:";
 // choice does not undo it
 var SHARED = {};
 
-// tabElements is every tab this instance owns, in document order, read live. A template page names
-// its tabs (data-kit-element="tab", the name in data-tab: one without is an authoring mistake,
-// reported once by context.require and then skipped); on a Kitwork UI page the engine marks them
+// tabElements is every tab this instance owns, in document order, read live: the engine marks them
 // (role="tab", the name in value).
 function tabElements(scope) {
   var own = scope[TABS];
   if (!own) return [];
-  var marked = own.context.elements("tab");
-  if (marked.length) {
-    return marked.filter(function (element) { return !!element.getAttribute("data-tab"); });
-  }
   return own.context.owned('[role="tab"]').filter(function (element) { return !!element.value; });
 }
 
 function nameOf(element) {
-  return element ? element.getAttribute("data-tab") || element.value || "" : "";
+  return element ? element.value || "" : "";
 }
 
 function named(scope, name) {
@@ -113,13 +95,12 @@ function keep(persist, name) {
 // follow gives an instance a name kept or chosen elsewhere, when it has a tab of that name
 function follow(scope, name) {
   if (typeof name === "string" && name && scope.selected !== name && named(scope, name)) {
-    scope.selected = scope.current = name;
+    scope.selected = name;
   }
 }
 
 var tabsDef = {
   selected: "",
-  current: "",
   persist: "",
 
   // select() does NOT move focus: a click already put focus where the person meant it. Only the
@@ -128,7 +109,7 @@ var tabsDef = {
     if (!name) return;
     var self = this;
     name = String(name);
-    this.selected = this.current = name;
+    this.selected = name;
     var persist = persistOf(this);
     if (!persist) return;
     var shared = SHARED[persist];
@@ -149,15 +130,11 @@ var tabsDef = {
     var scope = this;
     var own = this[TABS] = { context: context };
 
-    // A template page's tab with no data-tab cannot be selected, so the keyboard skips it — and the
-    // kernel says so. A Kitwork UI page's tabs are the engine's, checked when the page compiles.
-    if (context.host.hasAttribute("data-kit-component")) context.require("tab", "data-tab");
-
-    // What opens: what the page chose (the host's literal, a seed), with neither the first tab; then
-    // what the store keeps, when it answers.
-    var chosen = String(this.selected || this.current || "");
+    // What opens: what the page chose (the host's literal), without one the first tab; then what the
+    // store keeps, when it answers. (The tabs are the engine's, checked when the page compiles.)
+    var chosen = String(this.selected || "");
     if (!chosen) chosen = nameOf(tabElements(this)[0]);
-    this.selected = this.current = chosen;
+    this.selected = chosen;
 
     var persist = persistOf(this);
     if (persist) {
@@ -188,7 +165,7 @@ var tabsDef = {
       });
     }
 
-    var tablist = context.element("list") || context.host;
+    var tablist = context.host;
     own.vertical = function () { return tablist.getAttribute("aria-orientation") === "vertical"; };
 
     context.listen(tablist, "keydown", function (event) {

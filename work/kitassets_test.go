@@ -18,13 +18,12 @@ var (
 )
 
 // enginePage is a template page that needs every kind of file the engine serves for a page: the
-// kernel, a directive, a catalogue component written with the version a template page may still
-// name, a site's own component that calls a native service (which brings the service and its
-// assembly), and a vendored font.
+// kernel, a directive, a catalogue component, a native service its markup names (which brings the
+// service and its assembly), and a vendored font. It writes the grouped data-kitwork-* attributes, the
+// only ones the client reads since 26/10/2026 (before, it named menu@1.0.0 with data-kit-*, and a
+// site's own _components file that called the service).
 func enginePage() map[string]string {
-	files := componentPage(`<nav data-kit-component="menu@1.0.0"></nav><b data-kit-intersect="seen = true">x</b><div data-kit-component="workbench"></div><p class="font-outfit">x</p>`)
-	files["localhost/_components/workbench.js"] = `kit.component("workbench", { init: function () { kit.studioState.clearHistory(); } });`
-	return files
+	return templatePage(`<nav data-kitwork-component="tabs"></nav><b data-kitwork-event="intersect-enter: seen = true">x</b><button data-kitwork-event="click: kit.studioState.clearHistory()">x</button><p class="font-outfit">x</p>`)
 }
 
 func serveEngine(tenant *Tenant, method, path string, header ...string) *httptest.ResponseRecorder {
@@ -40,17 +39,18 @@ func serveEngine(tenant *Tenant, method, path string, header ...string) *httptes
 
 // Everything a page asks of the engine is under /_kitwork/, grouped by role, each name
 // <role>.<hash>.<ext> with no version in it — scripts and fonts alike — and each such name is the
-// file itself, kept for a year. Every name written before still answers with today's file, marked
-// no-cache: the /kit/ prefix, a component's or a service's versioned name, an old hash, /jitfonts/
-// and the unhashed /_kitwork/fonts/<family>/<weight>-<subset>.woff2.
+// file itself, kept for a year. A name written before that still means something answers with
+// today's file, marked no-cache: an old hash, /jitfonts/ and the unhashed
+// /_kitwork/fonts/<family>/<weight>-<subset>.woff2. The /kit/ prefix and the names with a version
+// (menu@1.0.0, studioState@1.0.0) were template pages' and answer nothing since 26/10/2026.
 func TestEngineFilesLiveUnderOnePrefixByRole(t *testing.T) {
-	tenant := componentFixture(t, enginePage())
+	tenant := identitySite(t, enginePage())
 	page := serveEngine(tenant, http.MethodGet, "/").Body.String()
 
 	scripts := engineScriptRe.FindAllStringSubmatch(page, -1)
 	fonts := engineFontRe.FindAllStringSubmatch(page, -1)
-	if len(scripts) != 6 || len(fonts) < 2 {
-		t.Fatalf("want the kernel, a directive, the assembly, a service and two components, and the font files; got %d scripts, %d fonts:\n%s", len(scripts), len(fonts), page)
+	if len(scripts) != 5 || len(fonts) < 2 {
+		t.Fatalf("want the kernel, a directive, the assembly, a service and a component, and the font files; got %d scripts, %d fonts:\n%s", len(scripts), len(fonts), page)
 	}
 	scriptName := regexp.MustCompile(`^/_kitwork/(?:kernel|drive|(?:components|services|directives)/[a-zA-Z][a-zA-Z0-9-]*)\.[0-9a-f]{16}\.js$`)
 	fontName := regexp.MustCompile(`^/_kitwork/fonts/[a-z0-9-]+-[0-9]+-[a-z-]+\.[0-9a-f]{16}\.woff2$`)
@@ -89,19 +89,17 @@ func TestEngineFilesLiveUnderOnePrefixByRole(t *testing.T) {
 		t.Fatalf("the page asked for nothing under %s", prefix)
 		return ""
 	}
-	menu, service, outfit := byPrefix("/_kitwork/components/menu."), byPrefix("/_kitwork/services/studioState."), byPrefix("/_kitwork/fonts/outfit-400-latin.")
+	tabs, service, outfit := byPrefix("/_kitwork/components/tabs."), byPrefix("/_kitwork/services/studioState."), byPrefix("/_kitwork/fonts/outfit-400-latin.")
+	kernel, intersect := byPrefix("/_kitwork/kernel."), byPrefix("/_kitwork/directives/intersect.")
 	stale := strings.Repeat("0", 16)
 	old := map[string]string{
-		"/kit/" + strings.TrimPrefix(menu, "/_kitwork/"):                                        menu,
-		"/kit/components/menu@1.0.0." + stale + ".js":                                           menu,
-		"/_kitwork/components/menu." + stale + ".js":                                            menu,
-		"/kit/services/studioState@1.0.0." + stale + ".js":                                      service,
-		"/_kitwork/services/studioState@1.0.0." + stale + ".js":                                 service,
-		"/jitfonts/outfit/400-latin.woff2":                                                      outfit,
-		"/_kitwork/fonts/outfit/400-latin.woff2":                                                outfit,
-		"/_kitwork/fonts/outfit-400-latin." + stale + ".woff2":                                  outfit,
-		"/kit/kernel." + stale + ".js":                                                          byPrefix("/_kitwork/kernel."),
-		"/kit/" + strings.TrimPrefix(byPrefix("/_kitwork/directives/intersect."), "/_kitwork/"): byPrefix("/_kitwork/directives/intersect."),
+		"/_kitwork/components/tabs." + stale + ".js":           tabs,
+		"/_kitwork/services/studioState." + stale + ".js":      service,
+		"/_kitwork/kernel." + stale + ".js":                    kernel,
+		"/_kitwork/directives/intersect." + stale + ".js":      intersect,
+		"/jitfonts/outfit/400-latin.woff2":                     outfit,
+		"/_kitwork/fonts/outfit/400-latin.woff2":               outfit,
+		"/_kitwork/fonts/outfit-400-latin." + stale + ".woff2": outfit,
 	}
 	for path, current := range old {
 		response := serveEngine(tenant, http.MethodGet, path)
@@ -121,7 +119,8 @@ func TestEngineFilesLiveUnderOnePrefixByRole(t *testing.T) {
 		"/_kitwork/javascript/kernel." + stale + ".js",
 		"/_kitwork/fonts/nonesuch-400-latin." + stale + ".woff2",
 		"/jitfonts/nonesuch/400-latin.woff2",
-		"/kit/components/menu@9.9.9." + stale + ".js",
+		"/_kitwork/components/tabs@1.1.0." + stale + ".js", // a version in the name: answered until 26/10/2026
+		"/_kitwork/services/studioState@1.0.0." + stale + ".js",
 		"/_kitwork/",
 		"/_kitwork",
 	} {
@@ -129,8 +128,15 @@ func TestEngineFilesLiveUnderOnePrefixByRole(t *testing.T) {
 			t.Errorf("%s: status %d, Cache-Control %q — want the engine's 404, not kept", path, response.Code, response.Header().Get("Cache-Control"))
 		}
 	}
-	if response := serveEngine(tenant, http.MethodPost, menu); response.Code != http.StatusNotFound {
-		t.Errorf("POST %s: status %d, want 404", menu, response.Code)
+	// the /kit/ prefix is no longer the engine's (26/10/2026): it is a path of the site's like any
+	// other, and the site has none, so it is a 404, never the file
+	for _, path := range []string{"/kit/" + strings.TrimPrefix(tabs, "/_kitwork/"), "/kit/kernel." + stale + ".js"} {
+		if response := serveEngine(tenant, http.MethodGet, path); response.Code != http.StatusNotFound || strings.Contains(response.Body.String(), "kit.component") {
+			t.Errorf("%s: status %d — want a 404, not today's file", path, response.Code)
+		}
+	}
+	if response := serveEngine(tenant, http.MethodPost, tabs); response.Code != http.StatusNotFound {
+		t.Errorf("POST %s: status %d, want 404", tabs, response.Code)
 	}
 	if strings.Contains(page, "/kit/") || strings.Contains(page, "/jitfonts/") {
 		t.Errorf("the page still writes an old name:\n%s", page)
@@ -149,7 +155,7 @@ func TestATenantFolderNamedKitworkIsNeverServed(t *testing.T) {
 	files["localhost/_kitwork/fonts/secret.txt"] = "TENANT-SECRET"
 	files["localhost/"+strings.TrimPrefix(kernel.Path, "/")] = "TENANT-SECRET kernel"
 	files["localhost/_kitworks/secret.txt"] = "TENANT-SECRET control"
-	tenant := componentFixture(t, files)
+	tenant := identitySite(t, files)
 
 	for _, path := range []string{
 		"/_kitwork/secret.txt",

@@ -144,7 +144,7 @@ func runBrowserDump(t *testing.T, label, body string) string {
 	body = strings.Replace(body, "<script>", "<script>"+editorScript, 1)
 	page := "<!doctype html><html><head></head><body>" + editorStyle + editorPastePart() + body + "</body></html>"
 	page = strings.Replace(page, "<script>", "<script>"+proofScriptHead, 1)
-	delivered := deliverTestPage(t, page, nil, nil)
+	delivered := deliverTestPage(t, page, nil)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if delivered.serveFiles(response, request) {
 			return
@@ -719,7 +719,7 @@ func runDriveHold(t *testing.T, held, arrived string) {
 })().catch(function (error) { var root = document.documentElement; if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.stack || error)); } }); });
 </script>`
 	page := func(main string) string {
-		return Deliver(`<!doctype html><html><head></head><body>`+editorStyle+`<main>`+main+`</main>`+script+`</body></html>`, nil, Options{Drive: true})
+		return Deliver(`<!doctype html><html><head></head><body>`+editorStyle+`<main>`+main+`</main>`+script+`</body></html>`, Options{Drive: true})
 	}
 	pages := map[string]string{
 		"/": page(`<a id="to-editor" href="/editor">editor</a>`),
@@ -731,7 +731,7 @@ func runDriveHold(t *testing.T, held, arrived string) {
 	var visits []string // what the browser asked for, in order (1: Drive's fetch): where a run that failed stopped
 	var visitsMu sync.Mutex
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if asset, _ := AssetAt(request.URL.Path, nil); asset != nil {
+		if asset, _ := AssetAt(request.URL.Path); asset != nil {
 			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = response.Write(asset.Body)
 			return

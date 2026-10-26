@@ -290,7 +290,7 @@ func TestCompileHouseStyleIsAWarning(t *testing.T) {
 		{"wrap false on a heading", `<content><text heading="1" wrap="false">Title</text></content>`, `wrap=`,
 			"wrap=\"false\" giữ một cụm chữ", `<h1 class="wrap-false">Title</h1>`},
 		{"a bare reload", `<content><link value="/x" reload>X</link></content>`, `reload`,
-			`thuộc tính đúng/sai luôn có giá trị: viết reload="true"`, `<a data-kit-reload="true" href="/x">X</a>`},
+			`thuộc tính đúng/sai luôn có giá trị: viết reload="true"`, `<a data-kitwork-reload="true" href="/x">X</a>`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -16,7 +16,6 @@ import (
 type testPage struct {
 	html  string
 	files map[string]string // a page's own scripts, as files
-	site  Site
 }
 
 // The tag hand-written pages used to load the composed runtime with. Scripts BEFORE it ran before
@@ -31,8 +30,9 @@ var pageExternalScript = regexp.MustCompile(`<script src="(/[^"]+)"></script>`)
 // the markup does not name it (a component a script inserts later); everything the markup names
 // comes through Deliver like on a real page. The kernel carries the native bridge, as it does in a
 // desktop or mobile shell, and Drive's file is there but not switched on — what the composed
-// runtime used to give every proof.
-func deliverTestPage(t *testing.T, page string, components []string, site Site) *testPage {
+// runtime used to give every proof. (A site's own _components/ went on 26/10/2026, and with it the
+// site this took.)
+func deliverTestPage(t *testing.T, page string, components []string) *testPage {
 	t.Helper()
 	previous := Native
 	Native = true
@@ -49,7 +49,7 @@ func deliverTestPage(t *testing.T, page string, components []string, site Site) 
 	if at := legacyRuntimeTag.FindStringIndex(page); at != nil {
 		before, after = page[:at[0]], page[at[1]:]
 	}
-	p := &testPage{files: make(map[string]string), site: site}
+	p := &testPage{files: make(map[string]string)}
 	after = pageInlineScript.ReplaceAllStringFunc(after, func(tag string) string {
 		path := fmt.Sprintf("/test-scripts/%d.js", len(p.files))
 		p.files[path] = pageInlineScript.FindStringSubmatch(tag)[1]
@@ -57,7 +57,7 @@ func deliverTestPage(t *testing.T, page string, components []string, site Site) 
 	})
 	after = pageExternalScript.ReplaceAllString(after, `<script src="$1" defer></script>`)
 
-	html := Deliver(before+after, site, Options{})
+	html := Deliver(before+after, Options{})
 	tag := func(asset *Asset) string { return `<script src="` + asset.Path + `" defer></script>` }
 	kernel := KernelAsset()
 	if !strings.Contains(html, kernel.Path) {
@@ -67,9 +67,9 @@ func deliverTestPage(t *testing.T, page string, components []string, site Site) 
 	kernelEnd := strings.Index(html, kernel.Path)
 	kernelEnd += strings.Index(html[kernelEnd:], "</script>") + len("</script>")
 	html = html[:kernelEnd] + tag(DriveAsset()) + html[kernelEnd:]
-	for _, key := range ModuleKeysFor(components, site) {
+	for _, key := range ModuleKeys(components) {
 		_, name, _ := strings.Cut(key, ":")
-		if asset := componentAsset(name, site); asset != nil && !strings.Contains(html, asset.Path) {
+		if asset := componentAsset(name); asset != nil && !strings.Contains(html, asset.Path) {
 			html = strings.Replace(html, "</head>", tag(asset)+"</head>", 1)
 		}
 	}
@@ -88,7 +88,7 @@ func (p *testPage) serveFiles(response http.ResponseWriter, request *http.Reques
 	if !strings.HasPrefix(request.URL.Path, AssetPrefix) {
 		return false
 	}
-	asset, _ := AssetAt(request.URL.Path, p.site)
+	asset, _ := AssetAt(request.URL.Path)
 	if asset == nil {
 		http.NotFound(response, request)
 		return true
@@ -102,12 +102,12 @@ func (p *testPage) serveFiles(response http.ResponseWriter, request *http.Reques
 // under /_kitwork/components/. Tests read registrations out of it.
 func ModulesJS(names []string) string {
 	var b strings.Builder
-	for _, key := range moduleKeys(names, nil) {
+	for _, key := range ModuleKeys(names) {
 		_, name, _ := strings.Cut(key, ":")
 		if b.Len() > 0 {
 			b.WriteByte('\n')
 		}
-		b.WriteString(wrapComponent(componentSource(name, nil)))
+		b.WriteString(wrapComponent(readComponent(name)))
 	}
 	return b.String()
 }

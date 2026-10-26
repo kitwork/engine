@@ -12,7 +12,7 @@
   // other page, so being loaded is the answer and there is no flag to read. It activates at boot
   // unless a drive is already running: kit.hydrate is the two-way lock, so a page still carrying the
   // legacy standalone file keeps it and the two never double-drive.
-  // Contract unchanged: intercept same-origin links + GET forms (unless data-kit-reload="true"),
+  // Contract unchanged: intercept same-origin links + GET forms (unless data-kitwork-reload="true"),
   // fetch with X-Kitwork-Hydrate, swap <main> (fallback <body>), morph, mergeHead swaps
   // data-kitwork-generated blocks — each of the page's stylesheets that changes is loaded before the
   // swap, which waits for it —,
@@ -52,8 +52,7 @@
     // browser makes for a link to that same address replaces it (see popstate).
     var address = location.href;
     function progressHost() {
-      return document.querySelector('[data-kit-component="progressbar"],[data-kit-component^="progressbar@"],' +
-        '[data-kitwork-component="progressbar"],[data-kitwork-component^="progressbar@"],[data-kitwork-component^="progressbar:"]');
+      return document.querySelector('[data-kitwork-component="progressbar"],[data-kitwork-component^="progressbar:"]');
     }
     // How long a move may take before it counts as slow and the bar shows: 120ms, or what the page's
     // progressbar says (<progressbar delay="0" /> → data-kitwork-delay). Read at each move, since
@@ -130,11 +129,11 @@
       if (!a || !a.href) return false;
       if (e && (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)) return false;
       if (a.target === "_blank" || a.hasAttribute("download") || a.getAttribute("rel") === "external") return false;
-      // The author's own opt-out: data-kit-reload="true" means "load this the ordinary way".
-      // It is read on the link and on any ancestor, so a whole region can step out at once.
-      if (a.getAttribute("data-kit-reload") === "true") return false;
-      if (a.closest && a.closest('[data-kit-reload="true"]')) return false;
-      if (a.getAttribute("data-kit-click") || clicks(a)) return false; // an expression link does not navigate
+      // The author's own opt-out: reload="true" (.ui), written as data-kitwork-reload="true", means
+      // "load this the ordinary way". It is read on the link and on any ancestor, so a whole region
+      // can step out at once. (data-kit-reload until 26/10/2026.)
+      if (a.closest && a.closest('[data-kitwork-reload="true"]')) return false;
+      if (clicks(a)) return false; // an expression link does not navigate
       if (a.isContentEditable) return false; // a link in words being written (an editor's area) is text, never a move
       if (!sameOrigin(a.href)) return false;
       if (inPage(a)) return false; // in-page #anchor
@@ -638,7 +637,7 @@
       if (e.defaultPrevented) return;
       var f = e.target;
       if (!(f instanceof HTMLFormElement) || formMethod.call(f) !== "get") return;
-      if (Element.prototype.closest.call(f, '[data-kit-reload="true"]') || holds.size) return;
+      if (Element.prototype.closest.call(f, '[data-kitwork-reload="true"]') || holds.size) return;
       var u; try { u = new URL(formAction.call(f) || location.href, location.href); } catch (x) { return; }
       if (!sameOrigin(u.href)) return;
       try { u.search = new URLSearchParams(new FormData(f)).toString(); } catch (x) { return; }

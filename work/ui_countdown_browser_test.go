@@ -116,7 +116,7 @@ const countdownProbe = `(function () {
     },
     toast: function () {
       var toast = document.querySelector('[data-kitwork-component^="toast"]');
-      var rows = Array.prototype.filter.call(toast.children, function (c) { return c.hasAttribute("data-kit-key") && !c.hasAttribute("data-leaving"); });
+      var rows = Array.prototype.filter.call(toast.children, function (c) { return c.hasAttribute("data-kitwork-key") && !c.hasAttribute("data-leaving"); });
       return rows.map(function (row) { return row.querySelectorAll("p")[1].textContent; }).join(" ; ") || "no notice";
     },
     clear: function () { kit.scope.$toast.clear(); return C.wait(250); }

@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-// <box component="progressbar" delay="…" /> says how long a move may take before it counts as slow and the bar shows;
+// <progressbar delay="…" /> says how long a move may take before it counts as slow and the bar shows;
 // it reaches Drive as data-kitwork-delay on the progressbar host. Each case is paired with a CONTROL:
 // the same move with Drive's own 120ms, which must answer the other way, so the test fails if Drive
 // ignored the attribute. Real Chrome; the next page is answered late by a fetch on the virtual clock.
@@ -27,9 +27,9 @@ func TestBrowserDriveProgressDelay(t *testing.T) {
 	}
 	host := func(delay string) string {
 		if delay == "" {
-			return `<div data-kit-component="progressbar"></div>`
+			return `<div data-kitwork-component="progressbar"></div>`
 		}
-		return `<div data-kit-component="progressbar" data-kitwork-delay="` + delay + `"></div>`
+		return `<div data-kitwork-component="progressbar" data-kitwork-delay="` + delay + `"></div>`
 	}
 	cases := []struct {
 		name    string

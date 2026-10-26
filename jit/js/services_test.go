@@ -15,59 +15,57 @@ import (
 
 // A native service is delivered like a component: only where something on the page names it — in
 // the markup or in a component the page uses — after the kernel, before the components that call
-// it, with the assembly first. A name that is the kernel's own (kit.theme) or nothing (kit.nope)
-// brings no service: the control.
+// it, with the assembly first. A name that is the kernel's own (kit.appearance) or nothing (kit.nope)
+// brings no service: the control. (No catalogue component calls a service; the one that did was a
+// site's own, and _components/ went on 26/10/2026 — a component's source is read by scanServices.)
 func TestServicesAreDeliveredWhereTheyAreNamed(t *testing.T) {
-	site := fakeSite{"workbench": `kit.component("workbench", { init: function () { kit.studioState.clearHistory(); } });`}
+	workbench := `kit.component("workbench", { init: function () { kit.studioState.clearHistory(); } });`
+	if named := scanServices(`<div data-kitwork-component="workbench"></div>`, workbench); strings.Join(named, ",") != "studioState" {
+		t.Errorf("named from a component's source: %v", named)
+	}
 
-	page := `<html><head></head><body><div data-kit-component="workbench"></div></body></html>`
-	roles, paths := deliveredFiles(t, Deliver(page, site, Options{}))
+	page := `<html><head></head><body><div data-kitwork-component="toast"></div><button data-kitwork-event="click: kit.studioState.clearHistory()">x</button></body></html>`
+	roles, paths := deliveredFiles(t, Deliver(page, Options{}))
 	if strings.Join(roles, ",") != "runtime,service,service,component" ||
 		!strings.HasPrefix(paths[1], "/_kitwork/services/assembly.") || !strings.HasPrefix(paths[2], "/_kitwork/services/studioState.") {
-		t.Fatalf("named from a component: roles %v paths %v", roles, paths)
+		t.Fatalf("after the kernel, before the components: roles %v paths %v", roles, paths)
 	}
 	for _, path := range paths[1:3] {
-		if asset, exact := AssetAt(path, site); asset == nil || !exact {
+		if asset, exact := AssetAt(path); asset == nil || !exact {
 			t.Errorf("%s does not round-trip through AssetAt", path)
 		}
 	}
 	stale := paths[2][:strings.LastIndexByte(paths[2][:len(paths[2])-3], '.')+1] + strings.Repeat("0", hashLength) + ".js"
-	if asset, exact := AssetAt(stale, nil); asset == nil || exact {
+	if asset, exact := AssetAt(stale); asset == nil || exact {
 		t.Errorf("an old hash of a known service must still answer, uncached: %s", stale)
 	}
 	// A service's name on the wire carries no version (11/10/2026). The name a page carried before
-	// spelled the version the engine had then; the engine carries one version of each service, so
-	// that name — under either prefix, whatever version it spelled — answers today's file, never as
-	// its own name. CONTROL: a service the engine does not carry, or a version that is no version,
-	// names nothing.
-	for _, old := range []string{
+	// spelled the version the engine had then, and was answered with today's file until 26/10/2026,
+	// when the /kit/ prefix and the versioned names went with template pages: they name nothing now,
+	// like a service the engine does not carry, or a version that is no version.
+	for _, nothing := range []string{
 		"/_kitwork/services/studioState@" + serviceVersion("studioState") + "." + strings.Repeat("0", hashLength) + ".js",
 		"/kit/services/studioState@" + serviceVersion("studioState") + "." + strings.Repeat("0", hashLength) + ".js",
 		"/kit/services/studioState@0.9.0." + strings.Repeat("0", hashLength) + ".js",
-	} {
-		if asset, exact := AssetAt(old, nil); asset == nil || exact || asset.Path != paths[2] {
-			t.Errorf("%s: want today's file %s, not exact; got %v exact=%t", old, paths[2], assetPath(asset), exact)
-		}
-	}
-	for _, nothing := range []string{
+		"/kit/services/studioState." + strings.Repeat("0", hashLength) + ".js",
 		"/_kitwork/services/nonesuch@1.0.0." + strings.Repeat("0", hashLength) + ".js",
 		"/_kitwork/services/nonesuch." + strings.Repeat("0", hashLength) + ".js",
 		"/_kitwork/services/studioState@latest." + strings.Repeat("0", hashLength) + ".js",
 		"/_kitwork/services/assembly@1.0.0." + strings.Repeat("0", hashLength) + ".js",
 	} {
-		if asset, _ := AssetAt(nothing, nil); asset != nil {
+		if asset, _ := AssetAt(nothing); asset != nil {
 			t.Errorf("%s must not resolve, got %s", nothing, asset.Path)
 		}
 	}
 
-	markup := `<html><head></head><body><button data-kit-click="kit.studioSqlite.close('x')">x</button></body></html>`
-	if roles, paths := deliveredFiles(t, Deliver(markup, nil, Options{})); strings.Join(roles, ",") != "runtime,service,service" ||
+	markup := `<html><head></head><body><button data-kitwork-event="click: kit.studioSqlite.close('x')">x</button></body></html>`
+	if roles, paths := deliveredFiles(t, Deliver(markup, Options{})); strings.Join(roles, ",") != "runtime,service,service" ||
 		!strings.HasPrefix(paths[2], "/_kitwork/services/studioSqlite.") {
 		t.Errorf("named in markup: roles %v paths %v", roles, paths)
 	}
 
-	control := `<html><head></head><body><button data-kit-click="kit.theme.toggle(); kit.nope.x()">x</button></body></html>`
-	if roles, _ := deliveredFiles(t, Deliver(control, nil, Options{})); strings.Join(roles, ",") != "runtime" {
+	control := `<html><head></head><body><button data-kitwork-event="click: kit.appearance.toggle(); kit.nope.x()">x</button></body></html>`
+	if roles, _ := deliveredFiles(t, Deliver(control, Options{})); strings.Join(roles, ",") != "runtime" {
 		t.Errorf("CONTROL: the kernel's own service and an unknown name bring nothing, got %v", roles)
 	}
 }
@@ -75,7 +73,9 @@ func TestServicesAreDeliveredWhereTheyAreNamed(t *testing.T) {
 // The whole road in a real browser: the shell's seeded host (faked here, as native/bridge seeds it
 // at document-start) → the assembly → studioState → a component calling it. Answers come back
 // through the host, and the kernel adopted the same host as its bridge. The second page has no host,
-// as in a plain browser: the service answers UNAVAILABLE instead of hanging — the control.
+// as in a plain browser: the service answers UNAVAILABLE instead of hanging — the control. The
+// component is the page's own, registered as the kernel starts (a site's own file until 26/10/2026),
+// and its source on the page is what names the service.
 func TestBrowserNativeServiceReachesTheShellsHost(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping service browser proof in short mode")
@@ -88,13 +88,17 @@ func TestBrowserNativeServiceReachesTheShellsHost(t *testing.T) {
 	Native = true
 	defer func() { Native = previous }()
 
-	site := fakeSite{"workbench": `kit.component("workbench", {
-  result: "", failure: "",
-  init: function () {
-    var self = this;
-    kit.studioState.clearHistory().then(function (value) { self.result = String(value); }, function (error) { self.failure = error.code || String(error); });
-  }
-});`}
+	workbench := `<script>
+document.addEventListener("DOMContentLoaded", function () {
+  kit.component("workbench", {
+    result: "", failure: "",
+    init: function () {
+      var self = this;
+      kit.studioState.clearHistory().then(function (value) { self.result = String(value); }, function (error) { self.failure = error.code || String(error); });
+    }
+  });
+});
+</script>`
 	seed := `<script>
 window.__calls = [];
 document[Symbol.for("kitwork:native:host:v1")] = {
@@ -102,7 +106,7 @@ document[Symbol.for("kitwork:native:host:v1")] = {
   call: function (action, params) { window.__calls.push(action); return Promise.resolve(action === "studioState.clearHistory" ? true : false); }
 };
 </script>`
-	body := `<div id="bench" data-kit-component="workbench"></div><script>
+	body := `<div id="bench" data-kitwork-component="workbench"></div>` + workbench + `<script>
 document.addEventListener("DOMContentLoaded", function () { (async function () {
 ` + proofScriptHead + `
   await wait(200);
@@ -114,13 +118,18 @@ document.addEventListener("DOMContentLoaded", function () { (async function () {
 	withHost := Deliver(`<!doctype html><html><head>`+seed+`</head><body>`+strings.Replace(body, "RESULT", `
   assert(bench.result === "true", "the service answered through the shell's host, got " + JSON.stringify(bench.result) + " / " + bench.failure);
   assert(window.__calls.join(",") === "studioState.clearHistory", "one call reached the host: " + window.__calls.join(","));
-  assert(window.kit.bridge === document[Symbol.for("kitwork:native:host:v1")], "the kernel adopted the same host as its bridge");`, 1)+`</body></html>`, site, Options{})
+  assert(window.kit.bridge === document[Symbol.for("kitwork:native:host:v1")], "the kernel adopted the same host as its bridge");`, 1)+`</body></html>`, Options{})
 	withoutHost := Deliver(`<!doctype html><html><head></head><body>`+strings.Replace(body, "RESULT", `
-  assert(bench.failure === "UNAVAILABLE" && bench.result === "", "with no host the service says UNAVAILABLE, got " + JSON.stringify(bench.failure));`, 1)+`</body></html>`, site, Options{})
+  assert(bench.failure === "UNAVAILABLE" && bench.result === "", "with no host the service says UNAVAILABLE, got " + JSON.stringify(bench.failure));`, 1)+`</body></html>`, Options{})
+	for _, page := range []string{withHost, withoutHost} {
+		if !strings.Contains(page, `src="/_kitwork/services/studioState.`) {
+			t.Fatalf("the page's component names studioState, so the page gets its file:\n%s", page)
+		}
+	}
 
 	for label, page := range map[string]string{"with the shell's host": withHost, "CONTROL, no host": withoutHost} {
 		server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-			if asset, _ := AssetAt(request.URL.Path, site); asset != nil {
+			if asset, _ := AssetAt(request.URL.Path); asset != nil {
 				response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 				_, _ = response.Write(asset.Body)
 				return
@@ -166,7 +175,7 @@ func TestBrowserEveryServiceLoadsInOrder(t *testing.T) {
 	defer func() { Native = previous }()
 	var markup, checks strings.Builder
 	for _, name := range names {
-		markup.WriteString(`<button data-kit-click="kit.` + name + `.x()">x</button>`)
+		markup.WriteString(`<button data-kitwork-event="click: kit.` + name + `.x()">x</button>`)
 	}
 	members := map[string]string{"files": "importBlob", "media": "pickImage", "network": "request", "camera": "capture",
 		"notifications": "schedule", "biometric": "authenticate", "geolocation": "getCurrentPosition", "nfc": "scan",
@@ -183,7 +192,7 @@ document.addEventListener("DOMContentLoaded", function () { (async function () {
   assert(typeof window.kit.files.read !== "function", "on this page files is the KitJS one, not the kernel's");
   root.setAttribute("data-kit-test", "passed");
 })().catch(function (error) { var root = document.documentElement; if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } }); });
-</script></body></html>`, nil, Options{})
+</script></body></html>`, Options{})
 	_, paths := deliveredFiles(t, page)
 	order := strings.Join(paths, " ")
 	index := func(name string) int { return strings.Index(order, "/_kitwork/services/"+name+".") }
@@ -201,7 +210,7 @@ document.addEventListener("DOMContentLoaded", function () { (async function () {
 		t.Skip("no browser")
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if asset, _ := AssetAt(request.URL.Path, nil); asset != nil {
+		if asset, _ := AssetAt(request.URL.Path); asset != nil {
 			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = response.Write(asset.Body)
 			return

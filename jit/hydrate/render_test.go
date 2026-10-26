@@ -255,11 +255,25 @@ func TestRuntimeEmbedded(t *testing.T) {
 	}
 	for _, gone := range []string{
 		`[data-kitwork-model]`, `data-kitwork-debounce`, `data-kitwork-text`, `data-kitwork-show`,
-		`data-kitwork-click`, `data-kitwork-key`, `data-kitwork-alias`, `data-kitwork-seed`, `data-kitwork-item`,
+		`data-kitwork-click`, `data-kitwork-alias`, `data-kitwork-seed`,
 		`data-kitwork-generated`, `data-kitwork-layout`, `data-kitwork-current`, `data-kitwork-delay`, `data-kitwork-transition`,
 	} {
 		if strings.Contains(kernelJS, gone) {
 			t.Errorf("the kernel reads %s — only the eight grouped data-kitwork-* attributes are directives", gone)
+		}
+	}
+	// data-kitwork-item / data-kitwork-key are not an author's: they are the markers a live for writes
+	// on each row it makes, and reads back to reconcile (data-kit-item / data-kit-key until 26/10/2026).
+	for _, marker := range []string{`node.setAttribute("data-kitwork-item"`, `node.setAttribute("data-kitwork-key"`} {
+		if !strings.Contains(kernelJS, marker) {
+			t.Errorf("the kernel no longer marks the rows of a for: %s is missing", marker)
+		}
+	}
+	// The hand-written data-kit-* directives of template pages left the client on 26/10/2026: no part
+	// of the runtime selects or reads one (a comment may still name it).
+	for _, gone := range []string{`[data-kit-`, `"data-kit-`, `'data-kit-`} {
+		if strings.Contains(rt, gone) {
+			t.Errorf("the runtime still reads a hand-written directive: found %s", gone)
 		}
 	}
 	// class.<name> left data-kitwork-bind for data-kitwork-class: the bind reader must not keep a
@@ -279,11 +293,11 @@ func TestRuntimeEmbedded(t *testing.T) {
 		// remembered in memory (clientOwned), not by an attribute
 		"clientOwned", "kernelUI",
 		// scopes: the boundary attribute, the resolver, and the page-scope opcode
-		"data-kit-scope", "scopeFor", `"=$"`,
+		"data-kitwork-scope", "scopeFor", `"=$"`,
 		// blueprint grammar: object/array/lambda/sequence/call ops + tools + boundary modes
 		`"{}"`, `"[]"`, `"=>"`, `"call"`, "function lambda(x, s)", "tryArrowParams", "boundaryScope", "kit.run",
 		// registered components: register fn, activation attr, blueprint registry, method this-bind
-		"kit.component", "data-kit-component", "seedComponent", ".test(fn) ? undefined : s, fargs)",
+		"kit.component", "data-kitwork-component", "seedComponent", ".test(fn) ? undefined : s, fargs)",
 		// a lambda is a function a native method calls back, walking its tree in the calling scope; every
 		// call counts against one depth (16/10/2026: the lambda was an object wrapped at each native call)
 		"function call(fn, self, args)", "function invokeLambda", "calling || s",
@@ -292,12 +306,12 @@ func TestRuntimeEmbedded(t *testing.T) {
 		"kit.platform", "kit.bridge", `Object.defineProperty(kit, "isNative"`,
 		"Bridge.prototype.receive", "BRIDGE_TIMEOUT", "kit.destroy", "removeEventListener",
 		// kit services (Native Bridge RFC): exact namespace grants, bridge-first with web fallback
-		"kit.service", `kit.service("theme"`, `kit.service("clipboard"`,
+		"kit.service", `kit.service("appearance"`, `kit.service("clipboard"`,
 		`native.call("clipboard.writeText"`, "navigator.clipboard",
 		`kit.service("camera"`, `native.call("camera.capture"`, "readAsDataURL",
 		`kit.service("navigation"`, `kit.service("window"`, `kit.service("capabilities"`,
-		// data-kit-bind: object expression → attributes (grammar-safe registry directive)
-		`data-kit-bind:`, `function writeBinding`,
+		// data-kitwork-bind: each pair's value → its attribute or property (writeBinding)
+		`[data-kitwork-bind]`, `function writeBinding`,
 		// component init() lifecycle hook stays in core
 		"function runInit", "st.scope.init",
 		// sandbox: the blocklist that seals the Function-constructor / prototype-pollution escape
@@ -321,6 +335,9 @@ func TestRuntimeEmbedded(t *testing.T) {
 		"[data-kit-api]", "reconcileHooks", "onReconcile", "onDestroy",
 		// data-kit-error went on 02/10 the same way: nothing used it.
 		"[data-kit-error]", "handlingError",
+		// kit.dialog, and kit.theme / toggleTheme (the light/dark service's names before kit.appearance),
+		// went on 26/10/2026 with the template pages' client.
+		`kit.service("dialog"`, `kit.service("theme"`, `compatibility("toggleTheme"`,
 	} {
 		if strings.Contains(rt, forbid) {
 			t.Errorf("a removed capability is back in the core runtime: found %q", forbid)

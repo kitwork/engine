@@ -13,30 +13,32 @@ import (
 	"time"
 )
 
-// data-kit-intersect is delivered like a component: a page that writes it gets the kernel and one
-// directive file; a page that only prints it in an example gets neither the file nor, for that
-// reason alone, the kernel.
+// intersect-enter (and intersect-leave) in a data-kitwork-event is delivered like a component: a page
+// that writes it gets the kernel and one directive file; a page that only prints it in an example gets
+// neither the file nor, for that reason alone, the kernel. (data-kit-intersect, its hand-written form,
+// went on 26/10/2026.)
 func TestIntersectIsDeliveredWhereWritten(t *testing.T) {
-	roles, paths := deliveredFiles(t, Deliver(`<html><head></head><body><section data-kit-intersect:once="n++"></section></body></html>`, nil, Options{}))
+	roles, paths := deliveredFiles(t, Deliver(`<html><head></head><body><section data-kitwork-event="intersect-enter.once: n++"></section></body></html>`, Options{}))
 	if strings.Join(roles, ",") != "runtime,directive" || !strings.HasPrefix(paths[1], "/_kitwork/directives/intersect.") {
-		t.Fatalf("a page with data-kit-intersect: roles %v paths %v", roles, paths)
+		t.Fatalf("a page with intersect-enter: roles %v paths %v", roles, paths)
 	}
-	if asset, exact := AssetAt(paths[1], nil); asset == nil || !exact {
+	if asset, exact := AssetAt(paths[1]); asset == nil || !exact {
 		t.Errorf("%s does not round-trip through AssetAt", paths[1])
 	}
-	if asset, _ := AssetAt("/_kitwork/directives/nope."+strings.Repeat("0", hashLength)+".js", nil); asset != nil {
+	if asset, _ := AssetAt("/_kitwork/directives/nope." + strings.Repeat("0", hashLength) + ".js"); asset != nil {
 		t.Error("an unknown directive must not resolve")
 	}
-	if out := Deliver(`<html><head></head><body><pre><code>data-kit-intersect="n++"</code></pre></body></html>`, nil, Options{}); strings.Contains(out, "<script") {
+	if out := Deliver(`<html><head></head><body><pre><code>data-kitwork-event="intersect-enter: n++"</code></pre></body></html>`, Options{}); strings.Contains(out, "<script") {
 		t.Errorf("CONTROL: a page that only prints the directive gets no script:\n%s", out)
 	}
 }
 
-// The directive in a real browser, with an IntersectionObserver the test drives: :once runs once;
-// a plain one runs each time the element enters and :leave each time it is off screen, the first
-// report included; :half waits for half, :margin reaches the observer; a parent never answers its
-// child's report; the safe reveal hides only what is known unseen; an element a later paint adds is
-// watched too. #quiet is never reported: the control.
+// The directive in a real browser, with an IntersectionObserver the test drives: .once runs once;
+// a plain intersect-enter runs each time the element enters and intersect-leave each time it is off
+// screen, the first report included; .half waits for half, .margin reaches the observer (a length: a
+// pair's name holds no '%', in the kernel as on the server); a parent never answers its child's report;
+// the safe reveal hides only what is known unseen; an element a later paint adds is watched too. #quiet
+// is never reported: the control.
 func TestBrowserIntersectRunsOnTheScreenEdge(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping intersect browser proof in short mode")
@@ -55,16 +57,16 @@ window.IntersectionObserver = function (callback, options) {
   this.disconnect = function () { record.live = false; };
 };
 </script></head><body>
-<div id="page" data-kit-scope="onceRuns: 0, enters: 0, leaves: 0, halfRuns: 0, outerRuns: 0, innerRuns: 0, added: 0, quietRuns: 0">
-  <section id="once" data-kit-intersect:once="onceRuns++"></section>
-  <section id="each" data-kit-intersect="enters++" data-kit-intersect:leave="leaves++"></section>
-  <section id="half" data-kit-intersect:half="halfRuns++"></section>
-  <section id="margin" data-kit-intersect:margin(-20%)="quietRuns = quietRuns"></section>
-  <section id="outer" data-kit-intersect="outerRuns++"><div id="inner" data-kit-intersect="innerRuns++"></div></section>
-  <section id="quiet" data-kit-intersect="quietRuns++"></section>
+<div id="page" data-kitwork-scope="onceRuns: 0; enters: 0; leaves: 0; halfRuns: 0; outerRuns: 0; innerRuns: 0; added: 0; quietRuns: 0">
+  <section id="once" data-kitwork-event="intersect-enter.once: onceRuns++"></section>
+  <section id="each" data-kitwork-event="intersect-enter: enters++; intersect-leave: leaves++"></section>
+  <section id="half" data-kitwork-event="intersect-enter.half: halfRuns++"></section>
+  <section id="margin" data-kitwork-event="intersect-enter.margin(-1.5rem): quietRuns = quietRuns"></section>
+  <section id="outer" data-kitwork-event="intersect-enter: outerRuns++"><div id="inner" data-kitwork-event="intersect-enter: innerRuns++"></div></section>
+  <section id="quiet" data-kitwork-event="intersect-enter: quietRuns++"></section>
   <div id="slot"></div>
 </div>
-<section id="reveal" data-kit-scope="seen: null" data-kit-intersect:once="seen = true" data-kit-intersect:leave="seen = seen || false" data-kit-bind:data-unseen="seen === false"></section>
+<section id="reveal" data-kitwork-scope="seen: null" data-kitwork-event="intersect-enter.once: seen = true; intersect-leave: seen = seen || false" data-kitwork-bind="data-unseen: seen === false"></section>
 <script>
 document.addEventListener("DOMContentLoaded", function () { (async function () {
 `+proofScriptHead+`
@@ -89,7 +91,7 @@ document.addEventListener("DOMContentLoaded", function () { (async function () {
   report(byId("once"), true); await wait(30);
   report(byId("once"), false); await wait(30);
   report(byId("once"), true); await wait(30);
-  assert(page().onceRuns === 1, ":once runs once, got " + page().onceRuns);
+  assert(page().onceRuns === 1, ".once runs once, got " + page().onceRuns);
 
   var each = byId("each");
   report(each, false); await wait(30);
@@ -101,21 +103,21 @@ document.addEventListener("DOMContentLoaded", function () { (async function () {
 
   var half = byId("half");
   var halfOptions = window.__observers.filter(function (o) { return o.targets.indexOf(half) >= 0; })[0].options;
-  assert(halfOptions.threshold === 0.5, ":half asks the observer for 0.5, got " + JSON.stringify(halfOptions));
+  assert(halfOptions.threshold === 0.5, ".half asks the observer for 0.5, got " + JSON.stringify(halfOptions));
   report(half, true, 0.3); await wait(30);
   assert(page().halfRuns === 0, "under half is not enough");
   report(half, true, 0.6); await wait(30);
   assert(page().halfRuns === 1, "past half runs it");
 
   var marginOptions = window.__observers.filter(function (o) { return o.targets.indexOf(byId("margin")) >= 0; })[0].options;
-  assert(marginOptions.rootMargin === "-20%", ":margin(-20%) reaches the observer, got " + JSON.stringify(marginOptions));
+  assert(marginOptions.rootMargin === "-1.5rem", ".margin(-1.5rem) reaches the observer, got " + JSON.stringify(marginOptions));
 
   report(byId("inner"), true); await wait(30);
   assert(page().innerRuns === 1 && page().outerRuns === 0, "a parent never answers its child's report: " + page().innerRuns + "/" + page().outerRuns);
 
   var late = document.createElement("section");
   late.id = "late";
-  late.setAttribute("data-kit-intersect", "added++");
+  late.setAttribute("data-kitwork-event", "intersect-enter: added++");
   byId("slot").appendChild(late);
   window.kit.render(); await wait(80);
   report(late, true); await wait(30);
@@ -124,10 +126,10 @@ document.addEventListener("DOMContentLoaded", function () { (async function () {
   assert(page().quietRuns === 0, "the control was never reported, got " + page().quietRuns);
   root.setAttribute("data-kit-test", "passed");
 })().catch(function (error) { var root = document.documentElement; if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } }); });
-</script></body></html>`, nil, Options{})
+</script></body></html>`, Options{})
 
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if asset, _ := AssetAt(request.URL.Path, nil); asset != nil {
+		if asset, _ := AssetAt(request.URL.Path); asset != nil {
 			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = response.Write(asset.Body)
 			return

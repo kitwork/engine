@@ -13,8 +13,8 @@ var errors = [];
 var realError = console.error;
 console.error = function () { errors.push(Array.prototype.join.call(arguments, " ")); };
 
-var host = el("div", { "data-kit-component": "definitely-not-registered" });
-host.appendChild(el("b", { "data-kit-text": "'x'" }));
+var host = el("div", { "data-kitwork-component": "definitely-not-registered" });
+host.appendChild(el("b", { "data-kitwork-bind": "text: 'x'" }));
 document.body.appendChild(host);
 kit.render();
 kit.render();
@@ -34,8 +34,8 @@ if (named.length !== 1) {
 errors = [];
 console.error = function () { errors.push(Array.prototype.join.call(arguments, " ")); };
 kit.component("actually-registered", { label: "here" });
-var ok = el("div", { "data-kit-component": "actually-registered" });
-var text = el("b", { "data-kit-text": "label" });
+var ok = el("div", { "data-kitwork-component": "actually-registered" });
+var text = el("b", { "data-kitwork-bind": "text: label" });
 ok.appendChild(text);
 document.body.appendChild(ok);
 kit.render();

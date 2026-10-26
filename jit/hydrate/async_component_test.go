@@ -25,11 +25,11 @@ kit.component("native-demo", {
   }
 });
 
-var app = el("section", { "data-kit-component": "native-demo" });
-var capture = el("button", { "data-kit-click": "capture()" });
-var fail = el("button", { "data-kit-click": "fail()" });
-var photo = el("b", { "data-kit-text": "photo" });
-var error = el("i", { "data-kit-text": "error" });
+var app = el("section", { "data-kitwork-component": "native-demo" });
+var capture = el("button", { "data-kitwork-event": "click: capture()" });
+var fail = el("button", { "data-kitwork-event": "click: fail()" });
+var photo = el("b", { "data-kitwork-bind": "text: photo" });
+var error = el("i", { "data-kitwork-bind": "text: error" });
 app.appendChild(capture);
 app.appendChild(fail);
 app.appendChild(photo);
@@ -75,11 +75,11 @@ kit.component("async-init-fail", {
   }
 });
 
-var ok = el("section", { "data-kit-component": "async-init-ok" });
-var status = el("b", { "data-kit-text": "status" });
+var ok = el("section", { "data-kitwork-component": "async-init-ok" });
+var status = el("b", { "data-kitwork-bind": "text: status" });
 ok.appendChild(status);
-var failed = el("section", { "data-kit-component": "async-init-fail" });
-var error = el("i", { "data-kit-text": "error" });
+var failed = el("section", { "data-kitwork-component": "async-init-fail" });
+var error = el("i", { "data-kitwork-bind": "text: error" });
 failed.appendChild(error);
 document.body.appendChild(ok);
 document.body.appendChild(failed);

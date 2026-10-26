@@ -5,7 +5,7 @@ import "testing"
 // A component method that writes state later — from a timer, a callback, a .then it did not
 // return — still paints: a scope write outside a pass schedules one coalesced repaint. Inside a
 // pass nothing is scheduled (the click below paints once, synchronously, and the timer paints
-// once more). This is what lets clipboard's `copied` reset itself two seconds later.
+// once more). This is what lets a component's `copied` flag reset itself two seconds later.
 func TestScopeWriteOutsideAPassRepaints(t *testing.T) {
 	const assertions = `
 var kit = window.kit;
@@ -19,9 +19,9 @@ kit.component("flash", {
   }
 });
 
-var host = el("section", { "data-kit-component": "flash" });
-var button = el("button", { "data-kit-click": "copy()" });
-var label = el("b", { "data-kit-text": "copied ? 'yes' : 'no'" });
+var host = el("section", { "data-kitwork-component": "flash" });
+var button = el("button", { "data-kitwork-event": "click: copy()" });
+var label = el("b", { "data-kitwork-bind": "text: copied ? 'yes' : 'no'" });
 host.appendChild(button);
 host.appendChild(label);
 document.body.appendChild(host);
@@ -47,16 +47,16 @@ setTimeout(function () {
 func TestScopeWriteInsideAPassDoesNotQueueAnotherPaint(t *testing.T) {
 	const assertions = `
 var kit = window.kit;
-var host = el("section", { "data-kit-scope": "count: 0, paints: 0" });
-var button = el("button", { "data-kit-click": "count = count + 1" });
-var label = el("b", { "data-kit-text": "count" });
+var host = el("section", { "data-kitwork-scope": "count: 0; paints: 0" });
+var button = el("button", { "data-kitwork-event": "click: count = count + 1" });
+var label = el("b", { "data-kitwork-bind": "text: count" });
 host.appendChild(button);
 host.appendChild(label);
 document.body.appendChild(host);
 kit.render();
 
 var paints = 0;
-var probe = el("i", { "data-kit-text": "tick()" });
+var probe = el("i", { "data-kitwork-bind": "text: tick()" });
 kit.scope.$.tick = function () { paints++; return ""; }; // raw page scope: the probe itself must not schedule a paint
 document.body.appendChild(probe);
 kit.render();

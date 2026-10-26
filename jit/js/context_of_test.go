@@ -3,27 +3,29 @@ package js
 import "testing"
 
 // kit.context(this): a component method reaches the context its init received — the same object —
-// without stashing it in a Symbol slot of its own. In a real browser:
+// without stashing it in a Symbol slot of its own. In a real browser (the page hears each changed in
+// one write, the hosts it came from in order: a pair runs one expression):
 //
-//	· from a click inside the host, from a nested data-kit-scope inside it (the call falls through
+//	· from a click inside the host, from a nested data-kitwork-scope inside it (the call falls through
 //	  to the component's method), and through the alias from outside the host — all reach the host;
-//	· it is the very context init got, so emit/element/listen behave the same from anywhere;
+//	· it is the very context init got, so emit/owned/listen behave the same from anywhere (element went
+//	  with data-kit-element on 26/10/2026);
 //	· two instances never share one: each call answers for its own host;
 //	· anything that is not a component's this — the page's scope, a plain scope, a stray object —
 //	  is refused by name.
 func TestBrowserKitContextFromAMethod(t *testing.T) {
 	runBrowserProof(t, "kit.context", nil, `
-<div id="page" data-kit-scope="heard: 0, heardFrom: ''">
-  <div id="one" data-kit-component="counter" data-kit-alias="$one" data-kit-event:changed="heard++; heardFrom = $event.target.id">
-    <button id="inside" data-kit-click="increment()">+</button>
-    <div data-kit-scope="label: 'nested'">
-      <button id="nested" data-kit-click="increment()">+</button>
+<div id="page" data-kitwork-scope="heard: ''">
+  <div id="one" data-kitwork-component="counter: $one" data-kitwork-event="changed: heard = heard + $event.target.id + ','">
+    <button id="inside" data-kitwork-event="click: increment()">+</button>
+    <div data-kitwork-scope="label: 'nested'">
+      <button id="nested" data-kitwork-event="click: increment()">+</button>
     </div>
-    <span data-kit-element="value" data-kit-text="count">0</span>
+    <span class="value" data-kitwork-bind="text: count">0</span>
   </div>
-  <div id="two" data-kit-component="counter"></div>
-  <button id="outside" data-kit-click="$one.increment()">+ from outside</button>
-  <div id="plain" data-kit-scope="x: 1"></div>
+  <div id="two" data-kitwork-component="counter"></div>
+  <button id="outside" data-kitwork-event="click: $one.increment()">+ from outside</button>
+  <div id="plain" data-kitwork-scope="x: 1"></div>
 </div>
 <script>
 kit.component("counter", {
@@ -36,7 +38,7 @@ kit.component("counter", {
     this.count++;
     context.emit("changed", { count: this.count });
   },
-  valueText: function () { return kit.context(this).element("value").textContent; }
+  valueText: function () { return kit.context(this).owned(".value")[0].textContent; }
 });
 (async function () {
   await wait(150);
@@ -44,20 +46,20 @@ kit.component("counter", {
   var one = function () { return window.kit.scopeFor(document.getElementById("one")); };
 
   document.getElementById("inside").click(); await wait(40);
-  assert(one().count === 1 && page().heard === 1 && page().heardFrom === "one", "a click inside the host: " + one().count + " " + page().heard + " " + page().heardFrom);
+  assert(one().count === 1 && page().heard === "one,", "a click inside the host: " + one().count + " " + page().heard);
 
   document.getElementById("nested").click(); await wait(40);
-  assert(one().count === 2 && page().heard === 2 && page().heardFrom === "one", "from a nested scope inside the host: " + one().count + " " + page().heard + " " + page().heardFrom);
+  assert(one().count === 2 && page().heard === "one,one,", "from a nested scope inside the host: " + one().count + " " + page().heard);
 
   document.getElementById("outside").click(); await wait(40);
-  assert(one().count === 3 && page().heard === 3 && page().heardFrom === "one", "through the alias from outside: " + one().count + " " + page().heard + " " + page().heardFrom);
+  assert(one().count === 3 && page().heard === "one,one,one,", "through the alias from outside: " + one().count + " " + page().heard);
 
   assert(one().same === 3, "every call answered with the context init received, got " + one().same + " of 3");
-  assert(one().valueText() === "3", "context.element from a method finds the host's own part, got " + one().valueText());
+  assert(one().valueText() === "3", "context.owned from a method finds the host's own part, got " + one().valueText());
 
   var two = window.kit.scopeFor(document.getElementById("two"));
   two.increment(); await wait(40);
-  assert(two.count === 1 && one().count === 3 && page().heardFrom === "one", "the second instance answers for itself (its event has no listener): " + two.count + " " + one().count + " " + page().heardFrom);
+  assert(two.count === 1 && one().count === 3 && page().heard === "one,one,one,", "the second instance answers for itself (its event has no listener): " + two.count + " " + one().count + " " + page().heard);
   assert(kit.context(two) !== kit.context(one()), "two instances, two contexts");
   assert(kit.context(two).host === document.getElementById("two"), "the context's host is the instance's own host");
 

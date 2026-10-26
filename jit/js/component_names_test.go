@@ -71,88 +71,107 @@ window.kit.component("a", aDef); window.kit.component("a@v1.0.0", aDef);`,
 }
 
 // The catalogue is the component set the engine owns: every one must be readable, or the markup
-// mistakes made against it go unreported. The sidebar's list is the one that mattered: open()/close()
-// left it on 23/09, and a page kept calling close().
+// mistakes made against it go unreported. (The sidebar's list was the one that mattered: open()/close()
+// left it on 23/09, and a page kept calling close(). The sidebar went with template pages on
+// 26/10/2026.)
 func TestEveryCatalogueComponentIsReadable(t *testing.T) {
 	entries, err := jsFS.ReadDir("components")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, entry := range entries {
-		if names, ok := ComponentNames(nil)(entry.Name()); !ok || len(names) == 0 {
+		if names, ok := ComponentNames()(entry.Name()); !ok || len(names) == 0 {
 			t.Errorf("%s: its names cannot be read, so nothing written against it is checked", entry.Name())
 		}
 	}
-	sidebar, _ := ComponentNames(nil)("sidebar")
-	if !contains(sidebar, "closeDrawer") || contains(sidebar, "close") {
-		t.Errorf("sidebar names = %v", sidebar)
+	dropdown, _ := ComponentNames()("dropdown")
+	if !contains(dropdown, "close") || contains(dropdown, "hide") {
+		t.Errorf("dropdown names = %v", dropdown)
 	}
 }
 
 // End to end, the way render calls it: a call to a method the component does not have is named at
-// render, with what the component does have.
+// render, with what the component does have. (A seed's state and a site's own component went on
+// 26/10/2026; a component whose source cannot be read is given to the check by namesWith.)
 func TestACallToAMissingMethodIsReportedAtRender(t *testing.T) {
 	page := func(inside string) string {
-		return `<html><body><div data-kit-scope="theme: 'dark'"><header data-kit-component="sidebar">` + inside + `</header></div></body></html>`
-	}
-	site := fakeSite{
-		"workbench": `kit.component("workbench", { init: function () { var k = "x"; this[k] = 1; } });`,
-		"stepper":   `kit.component("stepper", { amount: 0, add: function () { this.amount++; } });`,
+		return `<html><body><div data-kitwork-scope="theme: 'dark'"><header data-kitwork-component="dropdown">` + inside + `</header></div></body></html>`
 	}
 	check := func(html string) string {
-		return capturedCheck(t, html, ComponentNames(site))
+		return capturedCheck(t, html, namesWith(map[string]string{
+			"workbench": `kit.component("workbench", { init: function () { var k = "x"; this[k] = 1; } });`,
+		}))
 	}
 
-	report := check(page(`<button data-kit-click="close()">x</button>`))
-	if !strings.Contains(report, `reads "close", which component sidebar does not have`) || !strings.Contains(report, "closeDrawer") {
-		t.Fatalf("close() inside the sidebar should be reported with the sidebar's names, got:\n%s", report)
+	report := check(page(`<button data-kitwork-event="click: hide()">x</button>`))
+	if !strings.Contains(report, `reads "hide", which component dropdown does not have`) || !strings.Contains(report, "toggle") {
+		t.Fatalf("hide() inside the dropdown should be reported with the dropdown's names, got:\n%s", report)
 	}
 	for label, html := range map[string]string{
-		"CONTROL: a method it has":           page(`<button data-kit-click="closeDrawer()">x</button>`),
-		"a name an outer scope declares":     page(`<b data-kit-text="theme">x</b>`),
-		"state a seed writes in the host":    page(`<h1 data-kit-seed="title">t</h1><b data-kit-text="title"></b>`),
-		"a component it cannot read":         `<html><body><div data-kit-component="workbench"><b data-kit-text="anything">x</b></div></body></html>`,
-		"a site component's own method":      `<html><body><div data-kit-component="stepper"><button data-kit-click="add()">+</button></div></body></html>`,
-		"a component nothing ships (kernel)": `<html><body><div data-kit-component="nonesuch"><b data-kit-text="x">x</b></div></body></html>`,
+		"CONTROL: a method it has":           page(`<button data-kitwork-event="click: close()">x</button>`),
+		"a name an outer scope declares":     page(`<b data-kitwork-bind="text: theme">x</b>`),
+		"a component it cannot read":         `<html><body><div data-kitwork-component="workbench"><b data-kitwork-bind="text: anything">x</b></div></body></html>`,
+		"a component nothing ships (kernel)": `<html><body><div data-kitwork-component="nonesuch"><b data-kitwork-bind="text: x">x</b></div></body></html>`,
 	} {
 		if report := check(html); report != "" {
 			t.Errorf("%s: nothing should be reported, got:\n%s", label, report)
 		}
-	}
-	if report := check(`<html><body><div data-kit-component="stepper"><button data-kit-click="ad()">+</button></div></body></html>`); !strings.Contains(report, "component stepper does not have") {
-		t.Errorf("a typo against a site's own component should be reported, got:\n%s", report)
 	}
 }
 
-// From outside the host, through the alias: `$sidebar.close()` in a navbar is looked up along the
-// sidebar host's chain — the component, then the scopes around the host, then the page.
+// From outside the host, through the alias: `$menu.hide()` in a navbar is looked up along the
+// dropdown host's chain — the component, then the scopes around the host, then the page.
 func TestACallThroughAnAliasIsCheckedAgainstItsHost(t *testing.T) {
 	page := func(outside string) string {
-		return `<html><body><div data-kit-scope="theme: 'dark'"><aside data-kit-component="sidebar" data-kit-alias="$sidebar"></aside></div>` +
+		return `<html><body><div data-kitwork-scope="theme: 'dark'"><aside data-kitwork-component="dropdown: $menu"></aside></div>` +
 			`<nav>` + outside + `</nav></body></html>`
 	}
-	site := fakeSite{"workbench": `kit.component("workbench", { init: function () { var k = "x"; this[k] = 1; } });`}
-	check := func(html string) string { return capturedCheck(t, html, ComponentNames(site)) }
+	check := func(html string) string {
+		return capturedCheck(t, html, namesWith(map[string]string{
+			"workbench": `kit.component("workbench", { init: function () { var k = "x"; this[k] = 1; } });`,
+		}))
+	}
 
-	for _, call := range []string{`$sidebar.close()`, `open ? $sidebar.close() : 0`, `$sidebar . close()`, `$sidebar?.close()`} {
-		report := check(page(`<button data-kit-click="` + call + `">x</button>`))
-		if !strings.Contains(report, `reads $sidebar.close, which component sidebar does not have`) || !strings.Contains(report, "closeDrawer") {
-			t.Errorf("%s should be reported against the sidebar, got:\n%s", call, report)
+	for _, call := range []string{`$menu.hide()`, `open ? $menu.hide() : 0`, `$menu . hide()`, `$menu?.hide()`} {
+		report := check(page(`<button data-kitwork-event="click: ` + call + `">x</button>`))
+		if !strings.Contains(report, `reads $menu.hide, which component dropdown does not have`) || !strings.Contains(report, "toggle") {
+			t.Errorf("%s should be reported against the dropdown, got:\n%s", call, report)
 		}
 	}
 	for label, html := range map[string]string{
-		"CONTROL: a method it has":                page(`<button data-kit-click="$sidebar.closeDrawer()">x</button>`),
-		"state it has":                            page(`<b data-kit-show="$sidebar.drawer">x</b>`),
-		"a name a scope around the host declares": page(`<b data-kit-text="$sidebar.theme">x</b>`),
-		"inside a string":                         page(`<b data-kit-text="'$sidebar.close'">x</b>`),
-		"an alias the page never declares":        page(`<button data-kit-click="$nobody.close()">x</button>`),
-		"an alias two hosts claim":                page(`<aside data-kit-component="sidebar" data-kit-alias="$sidebar"></aside><button data-kit-click="$sidebar.close()">x</button>`),
-		"the alias of a component it cannot read": `<html><body><div data-kit-component="workbench" data-kit-alias="$bench"></div><button data-kit-click="$bench.anything()">x</button></body></html>`,
-		"a reserved handle":                       page(`<button data-kit-click="$this.blur()">x</button>`),
+		"CONTROL: a method it has":                page(`<button data-kitwork-event="click: $menu.close()">x</button>`),
+		"state it has":                            page(`<b data-kitwork-bind="show: $menu.open">x</b>`),
+		"a name a scope around the host declares": page(`<b data-kitwork-bind="text: $menu.theme">x</b>`),
+		"inside a string":                         page(`<b data-kitwork-bind="text: '$menu.hide'">x</b>`),
+		"an alias the page never declares":        page(`<button data-kitwork-event="click: $nobody.hide()">x</button>`),
+		"an alias two hosts claim":                page(`<aside data-kitwork-component="dropdown: $menu"></aside><button data-kitwork-event="click: $menu.hide()">x</button>`),
+		"the alias of a component it cannot read": `<html><body><div data-kitwork-component="workbench: $bench"></div><button data-kitwork-event="click: $bench.anything()">x</button></body></html>`,
+		"a reserved handle":                       page(`<button data-kitwork-event="click: $this.blur()">x</button>`),
 	} {
 		if report := check(html); report != "" {
 			t.Errorf("%s: nothing should be reported, got:\n%s", label, report)
 		}
+	}
+}
+
+// namesWith is ComponentNames, with the names of a few components given by their source — the reader
+// at work on a component the catalogue does not hold (one it cannot read, a counter of a browser
+// proof). A site's own _components/, which gave the check such sources, went on 26/10/2026.
+func namesWith(sources map[string]string) hydrate.ComponentNames {
+	catalogue := ComponentNames()
+	return func(component string) ([]string, bool) {
+		name := component
+		if strings.Contains(component, ":") {
+			named, _, err := hydrate.ComponentValue(component)
+			if err != nil {
+				return nil, false
+			}
+			name = named
+		}
+		if source, ok := sources[strings.TrimSpace(name)]; ok {
+			return declaredNamesOf(source)
+		}
+		return catalogue(component)
 	}
 }
 

@@ -357,9 +357,9 @@
      back when the toast is empty. :has() in a forgiving :where(): a browser without it keeps both at
      the edge. */
   @media (max-width: 51.99rem) {
-    :where(html:has(:is(.toast-bottom-right, .toast-bottom, .toast-bottom-left) > [data-kit-key]:not([data-leaving])))
+    :where(html:has(:is(.toast-bottom-right, .toast-bottom, .toast-bottom-left) > [data-kitwork-key]:not([data-leaving])))
       :where(.network-bottom-right, .network-bottom, .network-bottom-left) { inset-block: 0 auto; }
-    :where(html:has(:is(.toast-top-right, .toast-top, .toast-top-left) > [data-kit-key]:not([data-leaving])))
+    :where(html:has(:is(.toast-top-right, .toast-top, .toast-top-left) > [data-kitwork-key]:not([data-leaving])))
       :where(.network-top-right, .network-top, .network-top-left) { inset-block: auto 0; }
   }
   /* A notice: it takes the click, a finger dragged across it is the toast's (up and down still scrolls),

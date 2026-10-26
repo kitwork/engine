@@ -34,7 +34,7 @@ func TestCountdownIsShippedWhenUsed(t *testing.T) {
 // blueprint, the stray-parameter warning fired on data-kitwork-scope (the test failed); with the private
 // slot `from` renamed `left`, "left" was read as a name and $tea.left went unreported (the test failed).
 func TestCountdownAnswersItsNamesAndOnlyThose(t *testing.T) {
-	names, ok := ComponentNames(nil)("countdown: $tea")
+	names, ok := ComponentNames()("countdown: $tea")
 	if !ok {
 		t.Fatal("countdown's names cannot be read, so nothing written against it is checked")
 	}
@@ -52,7 +52,7 @@ func TestCountdownAnswersItsNamesAndOnlyThose(t *testing.T) {
 	page := func(inside, outside string) string {
 		return `<html><body>` + countdownHost + inside + `</div>` + outside + `</body></html>`
 	}
-	check := func(html string) string { return capturedCheck(t, html, ComponentNames(nil)) }
+	check := func(html string) string { return capturedCheck(t, html, ComponentNames()) }
 	if report := check(page(
 		`<button data-kitwork-event="click: toggle()" data-kitwork-bind="text: playing ? 'Tạm dừng' : 'Chạy'"></button><button data-kitwork-event="click: stop()">Dừng</button>`,
 		`<button data-kitwork-event="click: $tea.pause()">Tạm dừng</button><b data-kitwork-bind="text: $tea.remaining / 1000"></b>`)); report != "" {

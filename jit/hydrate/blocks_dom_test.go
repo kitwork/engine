@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// The structural block directives (data-kit-for, data-kit-if) are verified against a small hand-built
-// DOM in node — no jsdom, no browser. The shim implements exactly the tree operations the kernel's
+// The structural block directives (data-kitwork-for, data-kitwork-if) are verified against a small
+// hand-built DOM in node — no jsdom, no browser. The shim implements exactly the tree operations the kernel's
 // render pass uses (attribute-selector querySelectorAll/closest, deep cloneNode, insertBefore/
 // removeChild ordering, nextSibling, comment anchors), so these are real integration tests of the
 // runtime, not mocks. Both for_test.go and if_test.go share this one shim + runner.
@@ -34,7 +34,7 @@ function makeNode(nodeType) {
   var node = {
     nodeType: nodeType, tagName: "", attributes: {}, childNodes: [], parentNode: null, _text: "",
     hidden: false, value: "", __kitClass: null,
-    // A small CSSStyleDeclaration: enough for data-kit-style, which writes a property, reads a
+    // A small CSSStyleDeclaration: enough for data-kitwork-style, which writes a property, reads a
     // baseline back and removes what it invented.
     style: {
       _values: {}, _priorities: {},

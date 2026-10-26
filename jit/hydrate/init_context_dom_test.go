@@ -2,10 +2,11 @@ package hydrate
 
 import "testing"
 
-// init(context) on the kernel — nine keys: the seven the component runtime handed out, so a
-// component written for one runs on the other (B9, one kernel). Each key is checked for the thing
-// that would silently break a ported body: the owned() fence, element() by name, listen/cleanup
-// released when morph removes the host, afterRender running once after the paint.
+// init(context) on the kernel — six keys: host, owned, listen, cleanup, afterRender and emit (B9, one
+// kernel). Each key is checked for the thing that would silently break a ported body: the owned()
+// fence, listen/cleanup released when morph removes the host, afterRender running once after the
+// paint. (element, elements and require read data-kit-element, which only template pages wrote: they
+// went with them on 26/10/2026.)
 func TestInitContextShapeAndOwnedFence(t *testing.T) {
 	const assertions = `
 var kit = window.kit;
@@ -18,27 +19,21 @@ kit.component("gallery", {
     seen.thisIsScope = (this.count === 0);
     this.count = 7; // this = the scope: a write here is state, visible to bindings
     seen.owned = context.owned("[data-id]").map(function (el) { return el.getAttribute("data-id"); }).join(",");
-    seen.ownedIncludesHost = context.owned("[data-kit-component]").indexOf(context.host) === 0;
-    seen.track = context.element("track");
-    seen.slides = context.elements("slide").map(function (el) { return el.getAttribute("data-id"); }).join(",");
-    seen.missing = context.element("nothing");
-    seen.missingAll = context.elements("nothing").length;
-    seen.badName = null;
-    try { context.elements("not an identifier"); } catch (error) { seen.badName = error.message; }
+    seen.ownedIncludesHost = context.owned("[data-kitwork-component]").indexOf(context.host) === 0;
   }
 });
 kit.component("inner", { init: function (context) { seen.innerOwned = context.owned("[data-id]").length; } });
 
-var host = el("section", { "data-kit-component": "gallery" });
-var track = el("ul", { "data-kit-element": "track" });
-var own1 = el("li", { "data-id": "own-1", "data-kit-element": "slide" });
-var own2 = el("li", { "data-id": "own-2", "data-kit-element": "slide" });
-var nested = el("div", { "data-kit-component": "inner" });
-var nestedTrack = el("ul", { "data-kit-element": "track" });
-var nestedLi = el("li", { "data-id": "nested", "data-kit-element": "slide" });
-var scoped = el("div", { "data-kit-scope": "open: false" });
+var host = el("section", { "data-kitwork-component": "gallery" });
+var track = el("ul", {});
+var own1 = el("li", { "data-id": "own-1" });
+var own2 = el("li", { "data-id": "own-2" });
+var nested = el("div", { "data-kitwork-component": "inner" });
+var nestedTrack = el("ul", {});
+var nestedLi = el("li", { "data-id": "nested" });
+var scoped = el("div", { "data-kitwork-scope": "open: false" });
 var scopedLi = el("li", { "data-id": "scoped" });
-var label = el("b", { "data-kit-text": "count" });
+var label = el("b", { "data-kitwork-bind": "text: count" });
 track.appendChild(own1); track.appendChild(own2);
 nestedTrack.appendChild(nestedLi); nested.appendChild(nestedTrack);
 scoped.appendChild(scopedLi);
@@ -46,18 +41,14 @@ host.appendChild(track); host.appendChild(nested); host.appendChild(scoped); hos
 document.body.appendChild(host);
 kit.render();
 
-if (seen.keys !== "host,owned,element,elements,listen,cleanup,afterRender,require,emit") throw new Error("context keys: " + seen.keys);
+if (seen.keys !== "host,owned,listen,cleanup,afterRender,emit") throw new Error("context keys: " + seen.keys);
 if (seen.host !== host) throw new Error("context.host must be the host element");
 if (!seen.thisIsScope) throw new Error("this inside init must be the component scope");
 if (label.textContent !== "7") throw new Error("a write to this inside init must be state the paint reads: " + label.textContent);
 if (seen.owned !== "own-1,own-2") throw new Error("owned() must fence out a nested component's and a nested scope's elements, got: " + seen.owned);
 if (!seen.ownedIncludesHost) throw new Error("owned() includes the host itself when it matches");
-if (seen.track !== track) throw new Error("element('track') must be the host's own track, not the nested one");
-if (seen.slides !== "own-1,own-2") throw new Error("elements('slide') must list only owned slides, got: " + seen.slides);
-if (seen.missing !== null || seen.missingAll !== 0) throw new Error("a missing name is null / an empty list");
-if (!seen.badName) throw new Error("elements() must reject a non-identifier");
 if (seen.innerOwned !== 1) throw new Error("the nested host owns its own li: " + seen.innerOwned);
-console.log("init(context): 9 keys, host, this = scope, owned fence, element(s) by name");
+console.log("init(context): 6 keys, host, this = scope, owned fence");
 `
 	runNodeDOMScript(t, "init_context_shape.test.js", assertions)
 }
@@ -77,7 +68,7 @@ kit.component("widget", {
 });
 
 var parent = el("div", {});
-var host = el("section", { "data-kit-component": "widget" }); // no directive inside: mounts anyway
+var host = el("section", { "data-kitwork-component": "widget" }); // no directive inside: mounts anyway
 parent.appendChild(host);
 document.body.appendChild(parent);
 kit.render();
@@ -115,8 +106,8 @@ kit.component("measure", {
     });
   }
 });
-var host = el("section", { "data-kit-component": "measure" });
-var label = el("b", { "data-kit-text": "width" });
+var host = el("section", { "data-kitwork-component": "measure" });
+var label = el("b", { "data-kitwork-bind": "text: width" });
 host.appendChild(label);
 document.body.appendChild(host);
 kit.render();
@@ -136,22 +127,24 @@ setTimeout(function () {
 func TestInitContextAfterRenderSkipsARemovedHost(t *testing.T) {
 	const assertions = `
 var kit = window.kit;
-var ran = 0, cancelled = 0;
+var ran = 0, cancelled = 0, inits = 0;
 kit.component("late", {
   init: function (context) {
+    inits++;
     var cancel = context.afterRender(function () { cancelled++; });
     cancel();
     context.afterRender(function () { ran++; });
   }
 });
 var parent = el("div", {});
-var host = el("section", { "data-kit-component": "late" });
+var host = el("section", { "data-kitwork-component": "late" });
 parent.appendChild(host);
 document.body.appendChild(parent);
 // mount without painting: seed + init through scopeFor, then remove the host before any render
 kit.scopeFor(host);
 kit.morph(parent, el("div", {}));
 kit.render();
+if (inits !== 1) throw new Error("control: the host must have mounted (init ran " + inits + " times), or nothing below is tested");
 if (cancelled !== 0) throw new Error("a cancelled afterRender must not run");
 if (ran !== 0) throw new Error("afterRender must not run for a host morph removed before the paint");
 console.log("init(context): afterRender cancel + removed host skipped");
@@ -171,8 +164,8 @@ kit.component("broken", {
   ready: "seeded",
   init: function () { throw new Error("no camera"); }
 });
-var host = el("section", { "data-kit-component": "broken" });
-var label = el("b", { "data-kit-text": "ready" });
+var host = el("section", { "data-kitwork-component": "broken" });
+var label = el("b", { "data-kitwork-bind": "text: ready" });
 host.appendChild(label);
 document.body.appendChild(host);
 kit.render();

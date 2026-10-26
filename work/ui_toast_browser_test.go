@@ -83,11 +83,11 @@ const toastProbe = `(function () {
   var warn = console.warn;
   console.warn = function () { window.__warned.push(Array.prototype.join.call(arguments, " ")); return warn.apply(console, arguments); };
   var shown = function (el) { return !!el && !el.hidden; };
-  var rows = function () { return Array.prototype.filter.call(host.children, function (c) { return c.hasAttribute("data-kit-key"); }); };
+  var rows = function () { return Array.prototype.filter.call(host.children, function (c) { return c.hasAttribute("data-kitwork-key"); }); };
   var describe = function (row) {
     var icons = Array.prototype.filter.call(row.querySelectorAll(":scope > i"), shown).map(function (i) { return (i.className.match(/icon-([a-z0-9-]+)/) || [])[1]; });
     var p = row.querySelectorAll("p"), act = row.querySelector('button[data-kitwork-event^="click: act"]'), link = row.querySelector("a");
-    return [row.getAttribute("data-kit-key"), icons.join("+"), shown(p[0]) ? p[0].textContent : "", p[1].textContent, shown(p[2]) ? p[2].textContent : "",
+    return [row.getAttribute("data-kitwork-key"), icons.join("+"), shown(p[0]) ? p[0].textContent : "", p[1].textContent, shown(p[2]) ? p[2].textContent : "",
       shown(act) ? act.textContent : "", shown(link) ? link.textContent + ">" + link.getAttribute("href") : "", row.hasAttribute("data-leaving") ? "leaving" : ""].join("|");
   };
   var said = function (role) {
@@ -125,10 +125,10 @@ const toastProbe = `(function () {
     // focus: where the keyboard is, as key:name inside a notice (its words, else its icon's name), the
     // element's id or tag outside one
     focus: function () {
-      var at = document.activeElement, row = at && at.closest ? at.closest("[data-kit-key]") : null;
+      var at = document.activeElement, row = at && at.closest ? at.closest("[data-kitwork-key]") : null;
       if (!row || row.parentElement !== host) return at ? at.id || at.tagName : "none";
       var icon = at.querySelector("i[aria-label]");
-      return row.getAttribute("data-kit-key") + ":" + (at.textContent.trim() || (icon ? icon.getAttribute("aria-label") : at.tagName));
+      return row.getAttribute("data-kitwork-key") + ":" + (at.textContent.trim() || (icon ? icon.getAttribute("aria-label") : at.tagName));
     },
     clear: function () { kit.scope.$toast.clear(); return new Promise(function (done) { start(done, 250); }); }
   };
@@ -372,7 +372,7 @@ func TestBrowserToast(t *testing.T) {
 	toastKey(d, "F8", 119)
 	check("F8 reaches the stack", toastStep(d, `return (document.activeElement === T.host) + " " + kit.scope.$toast.paused;`), "true true")
 	toastKey(d, "Tab", 9)
-	check("Tab reaches a notice", d.evaluate(`document.activeElement.closest("[data-kit-key]").getAttribute("data-kit-key") + " " + document.activeElement.querySelector("i").getAttribute("aria-label")`), "10 Đóng thông báo")
+	check("Tab reaches a notice", d.evaluate(`document.activeElement.closest("[data-kitwork-key]").getAttribute("data-kitwork-key") + " " + document.activeElement.querySelector("i").getAttribute("aria-label")`), "10 Đóng thông báo")
 	toastKey(d, "Escape", 27)
 	// and keeps it once the notice closed has gone (150ms): the kernel moves the row after it then
 	check("Escape closes it and the next notice has the focus", toastStep(d, `
@@ -415,7 +415,7 @@ func TestBrowserToast(t *testing.T) {
 	check("less motion", toastStep(d, `
   T.click("stay");
   await T.frames();
-  kit.scope.$toast.dismiss(T.rows()[0].getAttribute("data-kit-key"));
+  kit.scope.$toast.dismiss(T.rows()[0].getAttribute("data-kitwork-key"));
   await T.frames();
   return String(T.rows().length);`), "0")
 	d.call("Emulation.setEmulatedMedia", map[string]any{"features": []map[string]string{{"name": "prefers-reduced-motion", "value": "no-preference"}}})
@@ -558,7 +558,7 @@ func TestBrowserToast(t *testing.T) {
   var two = kit.scope.$toast.info("Tự đánh số hai.", { duration: 0 });
   var gone = kit.scope.$toast.dismiss(two);
   await T.wait(250);
-  var rows = T.rows().map(function (row) { return (Number(row.getAttribute("data-kit-key")) - n) + ":" + row.querySelectorAll("p")[1].textContent; });
+  var rows = T.rows().map(function (row) { return (Number(row.getAttribute("data-kitwork-key")) - n) + ":" + row.querySelectorAll("p")[1].textContent; });
   var warned = window.__warned.join(" + ").replace(String(n + 2), "N");
   window.__warned = [];
   await T.clear();

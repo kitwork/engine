@@ -70,11 +70,8 @@
  * and the translate of a notice while a finger drags it, given back when it lets go. What it cannot
  * use of a call from data is one console line each, in the compiler's words.
  *
- * A template page (frozen, written before Kitwork UI: a data-kit-component="toast" host) keeps the
- * contract of v1.0.0 exactly: visible, message, show(message) — one message, three seconds, a second
- * show starts the three seconds again, "Notification" when empty — and hide(). No stack, no pause on
- * hover (its host wraps the very button that says it), no F8, no regions (the page writes its own
- * role="status").
+ * (A template page's toast — v1.0.0's visible, message, show(message) for three seconds and hide() —
+ * went on 26/10/2026.)
  */
 var TOAST = Symbol("kit:toast");
 
@@ -89,7 +86,6 @@ var BEAT = 100; // a region speaks a change: the sentence lands this long after 
 var SPOKEN = 1000; // how long a sentence stays in its region: said by then, and not heard twice after
 var SWIPE_SHARE = 0.4; // of the notice's width, a drag that closes it
 var SWIPE_SPEED = 0.5; // px/ms, a flick that closes it
-var TEMPLATE_PAGE = 3000; // v1.0.0: one message, three seconds
 var EDGES = { "bottom-right": true, "bottom": true, "bottom-left": true, "top-right": true, "top": true, "top-left": true };
 var NAME = /^[A-Za-z][A-Za-z0-9_-]*$/; // an author's id; the toast's own are numbers
 var DURATION = /^([0-9]+(?:\.[0-9]+)?)(ms|s)$/;
@@ -105,14 +101,9 @@ var toastDef = {
   paused: false,
   place: "bottom-right",
   limit: 3,
-  // a template page's (v1.0.0)
-  visible: false,
-  message: "",
 
   show: function (message, options) {
-    var own = ownOf(this);
-    if (own.templatePage) return templateShow(own, message);
-    return say(own, message, options, "");
+    return say(ownOf(this), message, options, "");
   },
   info: function (message, options) { return say(ownOf(this), message, options, "info"); },
   success: function (message, options) { return say(ownOf(this), message, options, "success"); },
@@ -164,28 +155,16 @@ var toastDef = {
     });
   },
 
-  // a template page's: close it before its three seconds
-  hide: function () {
-    var own = ownOf(this);
-    if (!own.templatePage) { this.clear(); return; }
-    clearTimeout(own.hideTimer);
-    own.scope.visible = false;
-  },
-
   init: function (context) {
     var own = ownOf(this);
     own.scope = this;
     own.context = context;
     own.host = context.host;
-    own.templatePage = context.host.hasAttribute("data-kit-component");
     context.cleanup(function () {
       own.gone = true;
-      clearTimeout(own.hideTimer);
       own.all.concat(own.leaving).forEach(function (record) { clearTimeout(record.timer); clearTimeout(record.going); });
       own.spoken.forEach(clearTimeout);
     });
-    if (own.templatePage) return;
-
     var host = context.host;
     own.top = String(this.place).indexOf("top") === 0;
     if (!EDGES[String(this.place)]) complain("place của toast là một mép hay góc màn hình: bottom-right, bottom, bottom-left, top-right, top, top-left; không phải " + this.place);
@@ -287,15 +266,6 @@ function complain(what, problem) {
 
 function keyboard(element) {
   try { return !!element && element.matches(":focus-visible"); } catch (problem) { return true; }
-}
-
-// templateShow is v1.0.0's show: one message, three seconds, a second show starts them again.
-function templateShow(own, message) {
-  var scope = own.scope;
-  scope.message = message || "Notification";
-  scope.visible = true;
-  clearTimeout(own.hideTimer);
-  own.hideTimer = setTimeout(function () { scope.visible = false; }, TEMPLATE_PAGE);
 }
 
 // read turns what a call wrote into a notice's parts, saying what it could not use.
@@ -494,7 +464,7 @@ function settle(own, had, holding, reveal) {
       clock(own);
     }
   }
-  if (own.reasons.pointer && !host.querySelector(":scope > [data-kit-key]:hover")) {
+  if (own.reasons.pointer && !host.querySelector(":scope > [data-kitwork-key]:hover")) {
     own.reasons.pointer = false;
     clock(own);
   }
@@ -570,24 +540,24 @@ function back(own) {
 
 // rows are the notices the kernel drew: the host's children it made from the blueprint, by key
 function rows(own) {
-  return Array.prototype.filter.call(own.host.children, function (child) { return child.hasAttribute("data-kit-key"); });
+  return Array.prototype.filter.call(own.host.children, function (child) { return child.hasAttribute("data-kitwork-key"); });
 }
 
 function rowFor(own, id) {
   var key = String(id);
-  var found = rows(own).filter(function (row) { return row.getAttribute("data-kit-key") === key; });
+  var found = rows(own).filter(function (row) { return row.getAttribute("data-kitwork-key") === key; });
   return found[0] || null;
 }
 
 function rowOf(own, element) {
   if (!element || !element.closest || !own.host.contains(element)) return null;
-  var row = element.closest("[data-kit-key]");
+  var row = element.closest("[data-kitwork-key]");
   return row && row.parentElement === own.host ? row : null;
 }
 
 function recordOf(own, row) {
   if (!row) return null;
-  return find(own, row.getAttribute("data-kit-key"));
+  return find(own, row.getAttribute("data-kitwork-key"));
 }
 
 // neighbour is the notice after row on screen that is not leaving, else the one before it

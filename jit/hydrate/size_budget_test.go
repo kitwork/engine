@@ -13,8 +13,9 @@ import (
 // kernelCoreBudget is the spec's bundle budget (ideaship-final §8, ideaship-master §6): the core
 // kernel at or under 13 KB gzip, checked in CI. It was 12 KB until the kernel learnt to read the
 // grouped data-kitwork-* attributes of a Kitwork UI page (KITWORK_UI.md §11) beside the
-// hand-written data-kit-* forms (11/10/2026); the dual reader is what the extra KB pays for. Eight
+// hand-written data-kit-* forms (11/10/2026); the dual reader is what the extra KB paid for. Eight
 // of them since class toggles left data-kitwork-bind for their own data-kitwork-class (11/10/2026).
+// The hand-written reader went on 26/10/2026; the budget stayed where it was.
 // Delivery minifies the kernel file through minifier.JS (jit/js/delivery.go, when not AllowLocal),
 // so the figure gated here is kernel.js minified the same way and gzipped at the best level — the
 // bytes a visitor's browser actually receives for the core. The modules that ride with it (bridge,

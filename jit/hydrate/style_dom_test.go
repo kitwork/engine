@@ -52,8 +52,8 @@ func TestStyleWritesAndRestoresTheAuthoredBaseline(t *testing.T) {
 var kit = window.kit;
 // The reset path is about the EXPRESSION's result, so bind width to a value that can itself
 // become nullish — "value + '%'" would only ever produce the string "null%".
-var host = el("section", { "data-kit-scope": "width: '40%', tone: 'red', gone: false" });
-var bar = el("div", { "data-kit-style:width": "width", "data-kit-style:color": "tone", "data-kit-style:opacity": "gone" });
+var host = el("section", { "data-kitwork-scope": "width: '40%'; tone: 'red'; gone: false" });
+var bar = el("div", { "data-kitwork-style": "width: width; color: tone; opacity: gone" });
 bar.setAttribute("style", "color: blue");
 bar.style.setProperty("color", "blue", "");
 host.appendChild(bar);
@@ -78,7 +78,7 @@ if (bar.style.getPropertyValue("width") !== "") throw new Error("a property with
 kit.scopeFor(host).width = "75%";
 kit.render();
 if (bar.style.getPropertyValue("width") !== "75%") throw new Error("width did not come back: " + bar.style.getPropertyValue("width"));
-console.log("data-kit-style: writes, restores the authored baseline, removes what it invented");
+console.log("data-kitwork-style: writes, restores the authored baseline, removes what it invented");
 `
 	runNodeDOMScript(t, "style_write.test.js", assertions)
 }
@@ -92,8 +92,8 @@ var kit = window.kit;
 var failed = "";
 var originalError = console.error;
 console.error = function (error, directive) { failed = directive; };
-var boundary = el("div", { "data-kit-scope": "bad: '', good: ''" });
-var probe = el("p", { "data-kit-style:color": "bad", "data-kit-style:background": "good" });
+var boundary = el("div", { "data-kitwork-scope": "bad: ''; good: ''" });
+var probe = el("p", { "data-kitwork-style": "color: bad; background: good" });
 boundary.appendChild(probe);
 document.body.appendChild(boundary);
 kit.render();
@@ -111,7 +111,7 @@ var scope = kit.scopeFor(boundary);
   failed = "";
   scope.bad = pair[0];
   kit.render();
-  if (failed !== "data-kit-style:color") throw new Error(pair[1] + " must be reported, naming the directive, got " + JSON.stringify(failed));
+  if (failed !== "data-kitwork-style color") throw new Error(pair[1] + " must be reported, naming the attribute and the pair, got " + JSON.stringify(failed));
   if (probe.style.getPropertyValue("color") !== "") throw new Error(pair[1] + " must write nothing: " + probe.style.getPropertyValue("color"));
 });
 
@@ -121,7 +121,7 @@ scope.good = "var(--color-brand)";
 kit.render();
 console.error = originalError;
 if (probe.style.getPropertyValue("background") !== "var(--color-brand)") throw new Error("var() must be allowed: " + probe.style.getPropertyValue("background"));
-console.log("data-kit-style: refuses an escaping value, allows var()");
+console.log("data-kitwork-style: refuses an escaping value, allows var()");
 `
 	runNodeDOMScript(t, "style_unsafe.test.js", assertions)
 }
@@ -131,14 +131,14 @@ console.log("data-kit-style: refuses an escaping value, allows var()");
 func TestStyleSkipsARefusedProperty(t *testing.T) {
 	const assertions = `
 var kit = window.kit;
-var host = el("section", { "data-kit-scope": "value: 'red'" });
-var probe = el("p", { "data-kit-style:--kit-brand": "value", "data-kit-style:color": "value" });
+var host = el("section", { "data-kitwork-scope": "value: 'red'" });
+var probe = el("p", { "data-kitwork-style": "--kit-brand: value; color: value" });
 host.appendChild(probe);
 document.body.appendChild(host);
 kit.render();
 if (probe.style.getPropertyValue("--kit-brand") !== "") throw new Error("the engine namespace must not be written");
 if (probe.style.getPropertyValue("color") !== "red") throw new Error("the property beside it must still be written");
-console.log("data-kit-style: a refused property writes nothing, its neighbour still applies");
+console.log("data-kitwork-style: a refused property writes nothing, its neighbour still applies");
 `
 	runNodeDOMScript(t, "style_refused.test.js", assertions)
 }

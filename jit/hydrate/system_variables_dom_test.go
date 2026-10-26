@@ -9,9 +9,12 @@ import "testing"
 func TestKernelSystemVariablesInActions(t *testing.T) {
 	runNodeDOMScript(t, "system_variables.js", `
 var kit = window.kit;
-var host = el("section", { "data-kit-scope": "isThis: 'unset', oldEl: 'unset', oldRoot: 'unset', hostIsBoundary: 'unset', eventType: 'unset'" });
-var button = el("button", { "data-kit-click": "isThis = $this.getAttribute('data-kit-click') ? 'yes' : 'no'; oldEl = $el === 0 ? 'gone' : 'alive'; oldRoot = $root === 0 ? 'gone' : 'alive'; hostIsBoundary = $host.getAttribute('data-kit-scope') ? 'yes' : 'no'; eventType = $event.type" });
-var out = el("output", { "data-kit-text": "isThis + ' ' + oldEl + ' ' + oldRoot + ' ' + hostIsBoundary + ' ' + eventType" });
+var host = el("section", { "data-kitwork-scope": "isThis: 'unset'; oldEl: 'unset'; oldRoot: 'unset'; hostIsBoundary: 'unset'; eventType: 'unset'" });
+// one click pair per write: ";" separates the pairs of data-kitwork-event, and each pair runs
+var button = el("button", { "data-kitwork-event": "click: isThis = $this.getAttribute('data-kitwork-event') ? 'yes' : 'no'; " +
+  "click: oldEl = $el === 0 ? 'gone' : 'alive'; click: oldRoot = $root === 0 ? 'gone' : 'alive'; " +
+  "click: hostIsBoundary = $host.getAttribute('data-kitwork-scope') ? 'yes' : 'no'; click: eventType = $event.type" });
+var out = el("output", { "data-kitwork-bind": "text: isThis + ' ' + oldEl + ' ' + oldRoot + ' ' + hostIsBoundary + ' ' + eventType" });
 host.appendChild(button); host.appendChild(out);
 document.body.appendChild(host);
 kit.render();
@@ -21,7 +24,7 @@ click(button);
 if (out.textContent !== "yes gone gone yes click") throw new Error("system variables in a scoped action ($el/$root must be gone): " + JSON.stringify(out.textContent));
 
 kit.component("taker", { label: "x" });
-var taker = el("div", { "data-kit-component": "taker", "data-kit-alias": "$this" });
+var taker = el("div", { "data-kitwork-component": "taker: $this" });
 document.body.appendChild(taker);
 kit.render();
 if (kit.scope.$this !== 0) throw new Error("$this must not be takeable as a component alias");

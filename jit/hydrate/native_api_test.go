@@ -109,8 +109,8 @@ window.location = global.location;
   if (typeof kit.clipboard !== "object" || typeof kit.camera !== "object") {
     throw new Error("clipboard/camera must be service objects, not callable shims");
   }
-  if (typeof kit.theme.toggle !== "function" || typeof kit.navigation.back !== "function") {
-    throw new Error("theme/navigation namespaces missing");
+  if (typeof kit.appearance.toggle !== "function" || typeof kit.navigation.back !== "function") {
+    throw new Error("appearance/navigation namespaces missing");
   }
   if (typeof kit.window.restore !== "function" || typeof kit.capabilities.supports !== "function") {
     throw new Error("window/capabilities namespaces missing");
@@ -118,8 +118,12 @@ window.location = global.location;
   if (typeof kit.network.status !== "function") {
     throw new Error("network namespace missing");
   }
-  if (typeof kit.toggleTheme !== "function" || typeof kit.minimize !== "function") {
+  if (typeof kit.back !== "function" || typeof kit.minimize !== "function") {
     throw new Error("trusted-JavaScript compatibility aliases missing");
+  }
+  // kit.theme / kit.toggleTheme (the light/dark service's old names) and kit.dialog went on 26/10/2026.
+  if (kit.theme !== undefined || kit.toggleTheme !== undefined || kit.dialog !== undefined) {
+    throw new Error("a service removed on 26/10/2026 is still installed");
   }
 
   var unavailable = kit.host.info();
@@ -164,18 +168,18 @@ window.location = global.location;
 
   // mode is the CHOICE, resolved is what is painted. With nothing stored, the choice is "system"
   // and the paint follows prefers-color-scheme — the same three modes the server pre-paint reads.
-  if (kit.theme.mode !== "system") throw new Error("with nothing stored the choice is system, got " + kit.theme.mode);
-  if (kit.theme.resolved !== "light" && kit.theme.resolved !== "dark") {
-    throw new Error("resolved must be a painted mode, got " + kit.theme.resolved);
+  if (kit.appearance.mode !== "system") throw new Error("with nothing stored the choice is system, got " + kit.appearance.mode);
+  if (kit.appearance.resolved !== "light" && kit.appearance.resolved !== "dark") {
+    throw new Error("resolved must be a painted mode, got " + kit.appearance.resolved);
   }
-  if (kit.theme.system() !== "system" || kit.theme.mode !== "system") {
-    throw new Error("theme.system() should hand the choice back to the OS");
+  if (kit.appearance.system() !== "system" || kit.appearance.mode !== "system") {
+    throw new Error("appearance.system() should hand the choice back to the OS");
   }
-  if (kit.theme.set("dark") !== "dark" || kit.theme.mode !== "dark" || kit.theme.resolved !== "dark") {
-    throw new Error("theme.set did not update mode/resolved state");
+  if (kit.appearance.set("dark") !== "dark" || kit.appearance.mode !== "dark" || kit.appearance.resolved !== "dark") {
+    throw new Error("appearance.set did not update mode/resolved state");
   }
-  if (kit.theme.toggle() !== "light" || kit.theme.mode !== "light") {
-    throw new Error("theme.toggle did not switch the resolved mode");
+  if (kit.appearance.toggle() !== "light" || kit.appearance.mode !== "light") {
+    throw new Error("appearance.toggle did not switch the resolved mode");
   }
   kit.navigation.back();
   kit.navigation.forward();
@@ -276,7 +280,7 @@ window.location = global.location;
     throw new Error("native network.status contract mismatch");
   }
   var callsBeforeRuntimeOwnedProbe = calls.length;
-  if (await kit.capabilities.supports("theme.toggle") !== true ||
+  if (await kit.capabilities.supports("appearance.toggle") !== true ||
       await kit.capabilities.supports("navigation.back") !== true) {
     throw new Error("runtime-owned capabilities became dependent on the native shell");
   }

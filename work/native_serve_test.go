@@ -33,8 +33,8 @@ func TestNativeInMemoryServe(t *testing.T) {
 		}
 	}
 	write("router.kitwork.js", `import { router } from "kitwork";`)
-	write("index.kitwork.html", `<html data-kit-app="v1"><head><title>native</title></head><body>{{ @page }}</body></html>`)
-	write("page.kitwork.html", `<main><button data-kit-click="kit.theme.toggle()">theme</button></main>`)
+	write("index.kitwork.html", `<html><head><title>native</title></head><body>{{ @page }}</body></html>`)
+	write("page.kitwork.html", `<main data-kitwork-scope="open: false"><button data-kitwork-event="click: open = !open">menu</button></main>`)
 	write("notfound.kitwork.html", `<main>404</main>`)
 	write("assets/logo.svg", `<svg xmlns="http://www.w3.org/2000/svg"/>`)
 	write("api/router.kitwork.js",
@@ -92,7 +92,7 @@ func TestNativeInMemoryServe(t *testing.T) {
 
 	// Sanity on the interesting bytes: page carries the kernel reference + directive; api is json.
 	home := inMemory("/").Body.String()
-	if !strings.Contains(home, "/_kitwork/kernel.") || !strings.Contains(home, "kit.theme.toggle()") {
+	if !strings.Contains(home, "/_kitwork/kernel.") || !strings.Contains(home, `data-kitwork-event="click: open = !open"`) {
 		t.Errorf("home over kitwork:// lost its kernel/directives: %s", home)
 	}
 	if api := inMemory("/api").Body.String(); !strings.Contains(api, `"native":true`) {

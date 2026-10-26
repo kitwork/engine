@@ -197,7 +197,7 @@ func TestUIFontsCodeSwitchesToJetBrainsMono(t *testing.T) {
 // CONTROL: a .ui site that names no body face gets Google Sans Flex.
 func TestTemplatePageFontsAreUnchanged(t *testing.T) {
 	const markup = `<p class="font-outfit">x</p><pre><code style="font-family: 'Fira Code'">y</code></pre>`
-	tenant := componentFixture(t, componentPage(markup))
+	tenant := identitySite(t, templatePage(markup))
 	page := serveEngine(tenant, http.MethodGet, "/").Body.String()
 	urls := func(html string) []string {
 		var out []string

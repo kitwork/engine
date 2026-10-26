@@ -75,7 +75,7 @@ func TestBrowserDriveCarriesTheSiteAppearanceDefault(t *testing.T) {
 	    function () { log.push(state()); osDark = true; root.removeAttribute("data-theme"); go("other"); },
 	    function () {
 	      log.push(state());
-	      fetch("/report?log=" + encodeURIComponent(log.join(",")) + "&same=" + (window.kit.theme === window.kit.appearance ? "1" : "0"));
+	      fetch("/report?log=" + encodeURIComponent(log.join(",")));
 	    }
 	  ];
 	  fetch("/hold"); // a request waiting on its answer keeps the browser's clock running in real time
@@ -120,7 +120,7 @@ func TestBrowserDriveCarriesTheSiteAppearanceDefault(t *testing.T) {
 		case "/report":
 			q := request.URL.Query()
 			mu.Lock()
-			report = map[string]string{"log": q.Get("log"), "same": q.Get("same")}
+			report = map[string]string{"log": q.Get("log")}
 			mu.Unlock()
 			once.Do(func() { close(reported) })
 		default:
@@ -160,9 +160,6 @@ func TestBrowserDriveCarriesTheSiteAppearanceDefault(t *testing.T) {
 	}
 	if got := strings.Split(report["log"], ","); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("states after each move:\n got  %s\n want %s", strings.Join(got, "\n      "), strings.Join(want, "\n      "))
-	}
-	if report["same"] != "1" {
-		t.Error("kit.theme must be the same object as kit.appearance")
 	}
 	for _, h := range hits {
 		if h == "/dark " || h == "/other " {

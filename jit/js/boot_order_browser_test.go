@@ -18,13 +18,17 @@ import (
 // the kernel, and the kernel's first pass is a real paint — so whatever has not registered by then
 // misses it. Boot waits for DOMContentLoaded, which every deferred file precedes.
 // A component that registers afterwards leaves its boundary without a scope for that pass, and a
-// name nothing declares reads as 0. The visible cost is not a warning: `data-kit-text` paints "0"
-// for a frame, and `data-kit-bind:src="photo"` makes the browser FETCH a url called "0" — a real
-// request, a real 404, on every page load of every site that uses a component.
+// name nothing declares reads as 0. The visible cost is not a warning: `text: photo` paints "0" for a
+// frame, and `src: photo` makes the browser FETCH a url called "0" — a real request, a real 404, on
+// every page load of every site that uses a component.
 //
 // This test watches the server, not the DOM, because the request is the part a person would see in
 // a log and never be able to explain. The second half starts the kernel by hand between its file and
 // the component's, so the proof cannot pass by there being nothing to catch.
+//
+// The probe registers from a deferred file of the page's own after the kernel's, where a component's
+// file stands (a site's own _components/<name>.js, which it was until 26/10/2026, went with template
+// pages; no catalogue component holds a url).
 func TestBrowserComponentsRegisterBeforeTheFirstPaint(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping boot-order browser proof in short mode")
@@ -34,13 +38,13 @@ func TestBrowserComponentsRegisterBeforeTheFirstPaint(t *testing.T) {
 		t.Skip("Chrome, Chromium, or Edge is not installed")
 	}
 
-	const module = `kit.component("probe-photo", { photo: "/ok.png" });`
 	const page = `<!doctype html>
-<html lang="en" data-kit-app="boot-order"><head><meta charset="utf-8"><title>boot order</title></head><body>
-  <div data-kit-component="probe-photo">
-    <img id="photo" data-kit-bind:src="photo" alt="">
-    <b id="label" data-kit-text="photo"></b>
+<html lang="en"><head><meta charset="utf-8"><title>boot order</title></head><body>
+  <div data-kitwork-component="probe-photo">
+    <img id="photo" data-kitwork-bind="src: photo" alt="">
+    <b id="label" data-kitwork-bind="text: photo"></b>
   </div>
+  <script>kit.component("probe-photo", { photo: "/ok.png" });</script>
   <script>
   window.addEventListener("load", function () {
     var root = document.documentElement;
@@ -51,17 +55,17 @@ func TestBrowserComponentsRegisterBeforeTheFirstPaint(t *testing.T) {
   </script>
 </body></html>`
 
-	site := fakeSite{"probe-photo": module}
 	run := func(t *testing.T, startEarly bool) []string {
 		t.Helper()
-		delivered := deliverTestPage(t, page, nil, site)
-		if !strings.Contains(delivered.html, "/_kitwork/components/probe-photo.") {
-			t.Fatalf("the page should get the component as a file of its own:\n%s", delivered.html)
+		delivered := deliverTestPage(t, page, nil)
+		if !strings.Contains(delivered.files["/test-scripts/0.js"], `kit.component("probe-photo"`) ||
+			strings.Index(delivered.html, `src="/test-scripts/0.js"`) < strings.Index(delivered.html, `src="/_kitwork/kernel.`) {
+			t.Fatalf("the page should get the component as a deferred file of its own, after the kernel's:\n%s", delivered.html)
 		}
 		if startEarly {
 			// Between the kernel's file and the component's: what the old composition did when it put
 			// boot before the modules.
-			at := strings.LastIndex(delivered.html[:strings.Index(delivered.html, `src="/_kitwork/components/probe-photo.`)], "<script")
+			at := strings.LastIndex(delivered.html[:strings.Index(delivered.html, `src="/test-scripts/0.js"`)], "<script")
 			delivered.html = delivered.html[:at] + `<script src="/test-scripts/start.js" defer></script>` + delivered.html[at:]
 			delivered.files["/test-scripts/start.js"] = "window.kit.start();"
 		}

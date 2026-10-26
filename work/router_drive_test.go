@@ -9,9 +9,9 @@ import (
 	"testing"
 )
 
-// driveFile is Drive's own file on a page, under either prefix the engine has served it from
-// (/kit/drive.<hash>.js, /_kitwork/drive.<hash>.js); production drops the quotes around src.
-var driveFile = regexp.MustCompile(`/(?:kit|_kitwork)/drive\.[0-9a-f]+\.js`)
+// driveFile is Drive's own file on a page, /_kitwork/drive.<hash>.js (/kit/drive.<hash>.js is
+// answered by nothing since 26/10/2026); production drops the quotes around src.
+var driveFile = regexp.MustCompile(`/_kitwork/drive\.[0-9a-f]+\.js`)
 
 // templateHome boots a template site (router.kitwork.js) whose root router is the given lines and
 // returns its home page, what the boot printed and whether the generation it activated has Drive on.
@@ -36,7 +36,7 @@ func templateHome(t *testing.T, router, page string) (body, printed string, driv
 // reload(true) loads every page whole, and the last word in the file is the one meant. Without it a
 // template site reloads, as it always has.
 func TestReloadFalseTurnsDriveOnForATemplateSite(t *testing.T) {
-	const page = `<main><a href="/next">next</a><b data-kit-text="'x'">x</b></main>`
+	const page = `<main><a href="/next">next</a><b data-kitwork-bind="text: 'x'">x</b></main>`
 	for _, test := range []struct {
 		router string
 		drive  bool
@@ -67,7 +67,7 @@ func TestReloadFalseTurnsDriveOnForATemplateSite(t *testing.T) {
 		}
 	}
 	// A root marker used to switch Drive on; it buys nothing.
-	if body, _, drive := templateHome(t, ``, `<main data-kit-hydrate="v1"><b data-kit-text="'x'">x</b></main>`); drive || driveFile.MatchString(body) {
+	if body, _, drive := templateHome(t, ``, `<main data-kit-hydrate="v1"><b data-kitwork-bind="text: 'x'">x</b></main>`); drive || driveFile.MatchString(body) {
 		t.Errorf("a marker must not turn Drive on:\n%s", body)
 	}
 }
@@ -99,7 +99,7 @@ func TestReloadDefaultFollowsTheKindOfSite(t *testing.T) {
 // what to write instead. A file that does not call it says nothing.
 func TestRouterDriveIsGone(t *testing.T) {
 	const said = "router.drive() is gone — write router.reload(false)"
-	const page = `<main><a href="/next">next</a><b data-kit-text="'x'">x</b></main>`
+	const page = `<main><a href="/next">next</a><b data-kitwork-bind="text: 'x'">x</b></main>`
 	line := "[router] router.kitwork.js: " + said + "\n"
 
 	for _, router := range []string{

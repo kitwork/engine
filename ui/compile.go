@@ -2092,7 +2092,7 @@ func (c *compiler) tagAttributes(n *Node, info tagInfo, p *attrPlan, o *elemOp, 
 		if r := take("reload"); r != nil {
 			switch strings.TrimSpace(r.Value) {
 			case "true":
-				writeAttr(w, "data-kit-reload", "true") // this link loads the next page whole
+				writeAttr(w, "data-kitwork-reload", "true") // this link loads the next page whole
 			case "false":
 			default:
 				return errAttr(n, r, "reload chỉ nhận \"true\" hoặc \"false\"")

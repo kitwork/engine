@@ -66,7 +66,7 @@ func TestToastHostAndBlueprint(t *testing.T) {
 	if n := strings.Count(html, "data-kitwork-for="); n != 1 {
 		t.Errorf("the blueprint is written %d times, want once:\n%s", n, html)
 	}
-	mustNotContain(t, html, `role="status" aria-live`, `data-kit-item`)
+	mustNotContain(t, html, `role="status" aria-live`, `data-kitwork-item`)
 
 	// the page's language names the region; alt names it; place and limit go in as written
 	s := memorySite("", toastSite(toastStack(` as="$toast"`), `<content><text>x</text></content>`))

@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -49,7 +50,7 @@ func runBrowserProof(t *testing.T, label string, components []string, body strin
 	}
 	page := "<!doctype html><html><head></head><body>" + body + "</body></html>"
 	page = strings.Replace(page, "<script>", "<script>"+proofScriptHead, 1)
-	delivered := deliverTestPage(t, page, components, nil)
+	delivered := deliverTestPage(t, page, components)
 
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if delivered.serveFiles(response, request) {
@@ -87,4 +88,32 @@ func runBrowserProof(t *testing.T, label string, components []string, body strin
 		t.Fatalf("%s proof failed: %s", label, output[i:end])
 	}
 	t.Fatalf("%s proof did not pass (err=%v):\n%.2000s", label, err, output)
+}
+
+// findHeadlessBrowser is the Chrome, Chromium or Edge the browser proofs drive, or "" when none is
+// installed or KITWORK_BROWSER_TESTS turns them off. (It lived with the migrated-patterns proof, which
+// went with the hand-written directives on 26/10/2026.)
+func findHeadlessBrowser() string {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("KITWORK_BROWSER_TESTS"))) {
+	case "0", "false", "off", "no":
+		return ""
+	}
+	for _, name := range []string{"google-chrome", "chromium", "chromium-browser", "chrome", "msedge"} {
+		if path, err := exec.LookPath(name); err == nil {
+			return path
+		}
+	}
+	if runtime.GOOS != "windows" {
+		return ""
+	}
+	for _, path := range []string{
+		filepath.Join(os.Getenv("ProgramFiles"), "Google", "Chrome", "Application", "chrome.exe"),
+		filepath.Join(os.Getenv("ProgramFiles(x86)"), "Microsoft", "Edge", "Application", "msedge.exe"),
+		filepath.Join(os.Getenv("LOCALAPPDATA"), "Google", "Chrome", "Application", "chrome.exe"),
+	} {
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			return path
+		}
+	}
+	return ""
 }

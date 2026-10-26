@@ -53,9 +53,10 @@ func runGroupedBrowserPage(t *testing.T, browser string, files map[string]string
 
 var groupedResultRe = regexp.MustCompile(`(?s)<pre id="result">(.*?)</pre>`)
 
-// Every fact is paired with its control in the same page: the hand-written data-kit-text beside the
-// grouped bind, a click inside beside the click outside, another key beside Escape, the safe style
-// pair beside the refused one, the legacy alias beside the grouped one.
+// Every fact is paired with its control in the same page: a click inside beside the click outside,
+// another key beside Escape, the safe style pair beside the refused one, a second host's alias beside
+// the first's. (The hand-written data-kit-* controls went with the kernel's reader of them on
+// 26/10/2026.)
 func TestBrowserGroupedDirectives(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping the grouped browser proof in short mode")
@@ -72,16 +73,15 @@ func TestBrowserGroupedDirectives(t *testing.T) {
     <div id="panel" class="card" hidden data-kitwork-bind="show: open; text: 'count=' + count" data-kitwork-class="active: open; py-1.5: open; idle: !open"></div>
   </div>
   <div id="oldbind" data-kitwork-bind="class.active: open"></div>
-  <span id="legacy" data-kit-text="count"></span>
   <input id="field" data-kitwork-bind="value: query">
   <span id="echo" data-kitwork-bind="text: query"></span>
   <div id="bar" style="height:2px" data-kitwork-style="width: size + '%'; background-image: image; --progress: size"></div>
   <ul id="list"><li data-kitwork-for="row, i of rows; key: row.id" data-kitwork-bind="text: i + row.n"></li></ul>
   <p id="cond" data-kitwork-if="open">open</p>
-  <div id="host" data-kitwork-component="counter@1.0.0: $counter" data-kitwork-scope="step: limit"><b id="value" data-kitwork-bind="text: value"></b></div>
-  <div id="old" data-kit-component="counter" data-kit-alias="$old" data-kit-scope="step: 2"></div>
-  <button id="bump" data-kitwork-event="click: $counter.inc(); click: $old.inc()">bump</button>
-  <i id="oldvalue" data-kit-text="$old.value"></i>
+  <div id="host" data-kitwork-component="counter: $counter" data-kitwork-scope="step: limit"><b id="value" data-kitwork-bind="text: value"></b></div>
+  <div id="second" data-kitwork-component="counter: $second" data-kitwork-scope="step: 2"></div>
+  <button id="bump" data-kitwork-event="click: $counter.inc(); click: $second.inc()">bump</button>
+  <i id="secondvalue" data-kitwork-bind="text: $second.value"></i>
 </main>
 <pre id="result"></pre>
 <script>
@@ -94,7 +94,6 @@ window.addEventListener("load", function () { setTimeout(function () {
   facts.startHidden = $("panel").hidden;
   facts.startAria = $("toggle").getAttribute("aria-expanded");
   facts.startCond = !!$("cond");
-  facts.legacyStart = $("legacy").textContent;
   facts.startClass = $("panel").className;
   $("toggle").click();
   facts.openHidden = $("panel").hidden;
@@ -105,7 +104,6 @@ window.addEventListener("load", function () { setTimeout(function () {
   facts.openAria = $("toggle").getAttribute("aria-expanded");
   facts.openText = $("panel").textContent;
   facts.openCond = !!$("cond");
-  facts.legacyAfter = $("legacy").textContent;
   $("panel").click();
   facts.insideClickHidden = $("panel").hidden;
   document.body.click();
@@ -124,11 +122,11 @@ window.addEventListener("load", function () { setTimeout(function () {
   facts.backgroundImage = $("bar").style.backgroundImage;
   facts.progress = $("bar").style.getPropertyValue("--progress");
   facts.height = $("bar").style.height;
-  facts.rows = Array.prototype.map.call($("list").children, function (li) { return li.textContent + "/" + li.getAttribute("data-kit-key"); }).join(",");
+  facts.rows = Array.prototype.map.call($("list").children, function (li) { return li.textContent + "/" + li.getAttribute("data-kitwork-key"); }).join(",");
   facts.valueStart = $("value").textContent;
   $("bump").click();
   facts.valueAfter = $("value").textContent;
-  facts.oldAfter = $("oldvalue").textContent;
+  facts.secondAfter = $("secondvalue").textContent;
   facts.errors = errors;
   document.getElementById("result").textContent = JSON.stringify(facts);
 }, 50); });
@@ -151,9 +149,8 @@ window.addEventListener("load", function () { setTimeout(function () {
 		t.Fatalf("the page's report is not JSON: %v\n%s", err, match[1])
 	}
 	want := map[string]any{
-		"startHidden": true, "startAria": "false", "startCond": false, "legacyStart": "0",
+		"startHidden": true, "startAria": "false", "startCond": false,
 		"openHidden": false, "openActive": true, "openAria": "true", "openText": "count=1", "openCond": true,
-		"legacyAfter": "1", // control: the hand-written spelling paints in the same pass
 		// data-kitwork-class: each named class toggled whole (py-1.5 keeps its dot), the static
 		// "card" kept, in the order classList adds them
 		"startClass": "card idle", "openClass": "card active py-1.5", "outsideClass": "card idle",
@@ -165,7 +162,7 @@ window.addEventListener("load", function () { setTimeout(function () {
 		"fieldStart": "start", "echo": "typed",
 		"width": "25%", "backgroundImage": "", "progress": "25", "height": "2px",
 		"rows":       "0A/a,1B/b",
-		"valueStart": "0", "valueAfter": "3", "oldAfter": "2",
+		"valueStart": "0", "valueAfter": "3", "secondAfter": "2",
 	}
 	for key, value := range want {
 		if facts[key] != value {
@@ -186,8 +183,9 @@ window.addEventListener("load", function () { setTimeout(function () {
 	}
 }
 
-// A Kitwork UI page's progressbar host is data-kitwork-component="progressbar" (with or without a
-// version or an alias), and Drive must find it there to read its data-kitwork-delay: delay 0 shows
+// A Kitwork UI page's progressbar host is data-kitwork-component="progressbar" (with or without an
+// alias; a version tail is no longer read, 26/10/2026), and Drive must find it there to read its
+// data-kitwork-delay: delay 0 shows
 // even a fast move. CONTROL: a host Drive does not recognise as a progressbar leaves Drive's own
 // 120ms, which does not show the same move — so the test fails if Drive missed the grouped host.
 func TestBrowserDriveFindsAGroupedProgressbarHost(t *testing.T) {
@@ -202,7 +200,6 @@ func TestBrowserDriveFindsAGroupedProgressbarHost(t *testing.T) {
 		name, host, showsUp string
 	}{
 		{"grouped host", `<div data-kitwork-component="progressbar" data-kitwork-delay="0"></div>`, "true"},
-		{"grouped host with a version", `<div data-kitwork-component="progressbar@1.0.0" data-kitwork-delay="0"></div>`, "true"},
 		{"grouped host with an alias", `<div data-kitwork-component="progressbar: $bar" data-kitwork-delay="0"></div>`, "true"},
 		{"CONTROL: not a progressbar host", `<div data-kitwork-component="progressbars" data-kitwork-delay="0"></div>`, "false"},
 	}
@@ -215,8 +212,8 @@ func TestBrowserDriveFindsAGroupedProgressbarHost(t *testing.T) {
 	}
 }
 
-// Drive takes an ordinary link and leaves alone a link whose data-kitwork-event has a click entry,
-// as it does a data-kit-click link: the handler runs, and the browser follows the link its own way.
+// Drive takes an ordinary link and leaves alone a link whose data-kitwork-event has a click entry:
+// the handler runs, and the browser follows the link its own way.
 // The proof is the request header Drive adds (X-Kitwork-Hydrate: 1), recorded by the server.
 func TestBrowserDriveLeavesAGroupedClickLinkAlone(t *testing.T) {
 	if testing.Short() {

@@ -37,9 +37,9 @@ func TestBrowserUnderAStrictContentSecurityPolicy(t *testing.T) {
 	page := `<!doctype html><html><head>
   <style data-kitwork-generated="css">.probe { color: rgb(1, 2, 3); }</style>
 </head><body>
-  <div id="box" data-kit-scope="{ count: 1 }" class="probe">
-    <b id="out" data-kit-text="count * 21"></b>
-    <button id="go" data-kit-click="count = count + 1">+</button>
+  <div id="box" data-kitwork-scope="count: 1" class="probe">
+    <b id="out" data-kitwork-bind="text: count * 21"></b>
+    <button id="go" data-kitwork-event="click: count = count + 1">+</button>
   </div>
   <script src="/kit.js"></script>
   <script src="/proof.js"></script>
@@ -76,7 +76,7 @@ func TestBrowserUnderAStrictContentSecurityPolicy(t *testing.T) {
 	// What a site that takes CSP seriously writes. Note what is NOT here: 'unsafe-eval'.
 	const policy = "default-src 'self'; script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'none'"
 
-	delivered := deliverTestPage(t, page, nil, nil)
+	delivered := deliverTestPage(t, page, nil)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if delivered.serveFiles(response, request) {
 			return

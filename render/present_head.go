@@ -149,8 +149,8 @@ func (r *Render) applyUIPresentation(out string) (string, []*jitjs.Asset) {
 	}
 	out = icons.Render(out)
 	out = logo.Render(out)
-	out, scripts := jitjs.DeliverFiles(out, r.siteComponents, jitjs.Options{Drive: r.drive})
-	hydrate.Check(out, jitjs.ComponentNames(r.siteComponents))
+	out, scripts := jitjs.DeliverFiles(out, jitjs.Options{Drive: r.drive})
+	hydrate.Check(out, jitjs.ComponentNames())
 	switch r.themeMode {
 	case "off":
 	case "force":

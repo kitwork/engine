@@ -42,7 +42,6 @@ type Config struct {
 	HighlightTheme   string            // folder-scoped default for {{ src.highlight() }} (router.highlight)
 	ManifestPath     string            // where router.manifest() publishes, for the <head> link
 	HighlightPalette map[string]string // per-role overrides from router.highlight({ role: … })
-	SiteComponents   jitjs.Site        // the tenant's own _components/<name>.js, frozen at generation
 	Source           Source            // immutable template source; nil reads the live filesystem
 	// ExpressionFailed hears a {{ expression }} whose value is a failure (a method that is not a
 	// function, a value an error left), with the expression as the engine reads it and the failure's
@@ -64,7 +63,6 @@ func New(c Config) *Render {
 		highlightTheme:   c.HighlightTheme,
 		manifestPath:     c.ManifestPath,
 		highlightPalette: c.HighlightPalette,
-		siteComponents:   c.SiteComponents,
 		source:           c.Source,
 		expressionFailed: c.ExpressionFailed,
 	}
@@ -90,7 +88,6 @@ type Render struct {
 	highlightTheme       string            // folder-scoped default theme for {{ src.highlight() }}
 	manifestPath         string            // router.manifest() output path, linked from <head>
 	highlightPalette     map[string]string // per-role class overrides for the highlight pass
-	siteComponents       jitjs.Site
 	source               Source                           // immutable generation snapshot; nil = live filesystem
 	expressionFailed     func(expression, message string) // see Config.ExpressionFailed
 	program              *node
@@ -374,16 +371,15 @@ func (r *Render) applyStaticPresentation(out string) string {
 	out = logo.Render(out)
 
 	// 3e. JavaScript for kernel pages: the kernel, Drive when the site asked for it, and one file per
-	// component (data-kit-component, or the engine's data-kitwork-component) and directive file the
-	// page uses — each named by its content, so each is cached once and for good (jit/js
-	// delivery.go). A page that uses no grammar — neither data-kit-* nor the eight grouped
-	// data-kitwork-* directives — gets nothing.
-	out = jitjs.Deliver(out, r.siteComponents, jitjs.Options{Drive: r.drive})
+	// component (data-kitwork-component) and directive file the page uses — each named by its content,
+	// so each is cached once and for good (jit/js delivery.go). A page that uses none of the eight
+	// grouped data-kitwork-* directives gets nothing.
+	out = jitjs.Deliver(out, jitjs.Options{Drive: r.drive})
 
 	// 3h. hydrate: verify every authored expression (compile-time linting, printed while developing).
 	// It reads the page and never changes it; the wire ships the SOURCE and the client parses it
 	// (no eval).
-	hydrate.Check(out, jitjs.ComponentNames(r.siteComponents))
+	hydrate.Check(out, jitjs.ComponentNames())
 	// Drive is a site-wide choice (router.reload(false), the default of a Kitwork UI site): the page
 	// carries Drive's file only when the site asked for it, so the file being there is the answer and
 	// no flag is written for it.

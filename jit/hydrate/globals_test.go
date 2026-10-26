@@ -36,9 +36,9 @@ console.log("the globals are reachable and open no route to Function");
 func TestKernelGlobalsResolveInsideABoundary(t *testing.T) {
 	runNodeDOMScript(t, "globals_directive.test.js", `
 var kit = window.kit;
-var box = el("div", { "data-kit-scope": "{ total: 7, size: 4, Date: 'mine' }" });
-var pages = el("b", { "data-kit-text": "Math.ceil(total / size) + ' pages'" });
-var own = el("i", { "data-kit-text": "Date" });
+var box = el("div", { "data-kitwork-scope": "total: 7; size: 4; Date: 'mine'" });
+var pages = el("b", { "data-kitwork-bind": "text: Math.ceil(total / size) + ' pages'" });
+var own = el("i", { "data-kitwork-bind": "text: Date" });
 box.appendChild(pages); box.appendChild(own);
 document.body.appendChild(box);
 kit.render();

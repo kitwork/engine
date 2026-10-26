@@ -1,5 +1,5 @@
 /* carousel component — slides on a scroll-snap track, which one is showing, and moving on by itself
- * (Kitwork UI's <carousel>, docs/components/carousel.md; template pages keep their markup).
+ * (Kitwork UI's <carousel>, docs/components/carousel.md).
  *
  * On a Kitwork UI page the engine writes it from:
  *
@@ -14,8 +14,8 @@
  * <list> as the track (class carousel-track, an id, tabindex 0, aria-live bound to playing), each
  * <item> a slide
  * (aria-roledescription), and each dot a button with its place as value, aria-controls naming the
- * track, and click "go(Number($this.value))" (a for's index is the server's). A template page marks
- * the track and the slides itself (data-kit-element="track", "slide") and draws its own dots.
+ * track, and click "go(Number($this.value))" (a for's index is the server's). (A template page's
+ * carousel — data-kit-element="track" and "slide", its own dots, `active` — went on 26/10/2026.)
  *
  * THE BROWSER DOES THE MOVING. A track with scroll-snap swipes on a phone, scrolls on a trackpad,
  * steps with the arrow keys once focused and carries momentum; reduced motion is CSS's. What no markup
@@ -64,8 +64,6 @@
  *     The main button let go while another is held ends it; that other opens no menu meanwhile.
  *   · right to left (dir="rtl") is the mirror: the row starts at the right, the next slide comes from
  *     the left, a drag or a swipe to the right moves on, and in fade ← is next().
- *
- * active is current's old name, kept for the template pages written before (the kitwork.io site).
  */
 var CAROUSEL = Symbol("kit:carousel");
 var PLAY_FOR = 5000; // play() on a carousel with no duration written
@@ -79,21 +77,16 @@ function own(scope) {
   return scope[CAROUSEL] || null;
 }
 
-// parts are the track and its slides, read live: a template page marks them, a Kitwork UI page's
-// track is the engine's (class carousel-track) and its slides are the track's children
+// parts are the track and its slides, read live: the track is the engine's (class carousel-track) and
+// its slides are the track's children the engine marked (aria-roledescription): the list's <empty>,
+// shown when a for has nothing, is no slide
 function parts(scope) {
   var mine = own(scope);
   if (!mine) return { track: null, slides: [] };
-  var context = mine.context;
-  var track = context.element("track") || context.owned(".carousel-track")[0] || null;
-  var slides = context.elements("slide");
-  if (!slides.length && track) {
-    // on a Kitwork UI page the engine marked each slide (aria-roledescription): the list's <empty>,
-    // shown when a for has nothing, is no slide
-    slides = Array.prototype.filter.call(track.children, function (child) {
-      return child.nodeType === 1 && (!mine.ui || child.hasAttribute("aria-roledescription"));
-    });
-  }
+  var track = mine.context.owned(".carousel-track")[0] || null;
+  var slides = !track ? [] : Array.prototype.filter.call(track.children, function (child) {
+    return child.nodeType === 1 && child.hasAttribute("aria-roledescription");
+  });
   return { track: track, slides: slides };
 }
 
@@ -283,20 +276,18 @@ function wrap(n, length) {
 // value and named the track in aria-controls
 function dots(scope) {
   var mine = own(scope), track = parts(scope).track;
-  if (!mine || !mine.ui || !track || !track.id) return [];
+  if (!mine || !track || !track.id) return [];
   return mine.context.owned("[aria-controls][value]").filter(function (dot) {
     return dot.getAttribute("aria-controls") === track.id;
   });
 }
 
-// mark names each slide of a Kitwork UI page and marks the slide and the dot showing; a template page
-// draws its own. count follows the slides on any page.
+// mark names each slide and marks the slide and the dot showing. count follows the slides.
 function mark(scope) {
   var mine = own(scope);
   if (!mine) return;
   var slides = parts(scope).slides, total = slides.length, at = Number(scope.current) || 0;
   if (scope.count !== total) scope.count = total;
-  if (!mine.ui) return;
   var set = function (element, name, value) {
     if (element.getAttribute(name) !== value) element.setAttribute(name, value);
   };
@@ -401,8 +392,6 @@ var carouselDef = {
   playing: false,
   duration: 0,
 
-  get active() { return this.current; },
-
   go: function (index) {
     if (busy(this)) return this.current; // still sliding: the press is not taken
     var p = parts(this), n = Number(index);
@@ -468,15 +457,10 @@ var carouselDef = {
     var scope = this;
     var mine = scope[CAROUSEL] = {
       context: context,
-      ui: context.host.hasAttribute("data-kitwork-component"),
       timer: 0, target: null, moved: false, from: 0, round: null, transition: null,
       watching: false, still: 0, last: 0, drag: null, dragged: false, unsnapped: false,
       hover: false, focus: false, hidden: !!document.hidden, seen: true, gone: false
     };
-    if (!mine.ui) {
-      context.require("track");
-      context.require("slide");
-    }
     var p = parts(scope);
     var track = p.track;
 
@@ -621,7 +605,7 @@ var carouselDef = {
       // words it selects into view, which would cut the move short
       context.listen(track, "selectstart", function (event) { if (busy(scope)) event.preventDefault(); });
       // a slide written with for, painted again: named and marked again
-      if (mine.ui && window.MutationObserver) {
+      if (window.MutationObserver) {
         var watch = new MutationObserver(function () { mark(scope); });
         watch.observe(track, { childList: true });
         context.cleanup(function () { watch.disconnect(); });

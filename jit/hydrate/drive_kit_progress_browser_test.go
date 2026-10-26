@@ -26,11 +26,10 @@ func TestBrowserDriveReportsToKitProgress(t *testing.T) {
 		t.Skip("Chrome, Chromium, or Edge is not installed")
 	}
 	cases := []struct {
-		name, host           string
+		name, host            string
 		driveBar, kitProgress string
 	}{
-		{"a progressbar host", `<div data-kit-component="progressbar"></div>`, "false", "true"},
-		{"a pinned progressbar host", `<div data-kit-component="progressbar@1.0.0"></div>`, "false", "true"},
+		{"a progressbar host", `<div data-kitwork-component="progressbar"></div>`, "false", "true"},
 		{"CONTROL: no progressbar host, still no bar of Drive's own", ``, "false", "true"},
 	}
 	for _, c := range cases {

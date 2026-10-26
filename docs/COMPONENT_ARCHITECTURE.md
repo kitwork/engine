@@ -1,5 +1,10 @@
 # Kiến trúc component của Kitwork (bản nháp 03/10/2026)
 
+> 26/10/2026: `_components/` của site, cú pháp `data-kit-*` và các component chỉ trang template dùng đã gỡ
+> cùng client của trang template (bước 1 của việc cắt thời cũ). Component của site giờ viết bằng `.ui` +
+> `.work`. Phần nói về chúng là lịch sử.
+
+
 Một cách duy nhất để làm mọi phần giao diện có tên trong Kitwork — catalogue của engine lẫn
 `_components/` của từng site, trên web, desktop và mobile. Tài liệu này nói **luật**; cách viết chi
 tiết nằm ở skill `kitwork-javascript`. Mục đánh dấu **CHỜ QUYẾT** là chỗ Quốc chưa chốt.

@@ -103,7 +103,7 @@ const networkProbe = `(function () {
     said: function () { return take("__said"); },
     browser: function () { return take("__browser"); },
     toast: function () {
-      var rows = Array.prototype.filter.call(toast.children, function (c) { return c.hasAttribute("data-kit-key") && !c.hasAttribute("data-leaving"); });
+      var rows = Array.prototype.filter.call(toast.children, function (c) { return c.hasAttribute("data-kitwork-key") && !c.hasAttribute("data-leaving"); });
       return rows.map(function (row) { var p = row.querySelectorAll("p"); return p[1].textContent + (shown(p[2]) ? p[2].textContent : ""); }).join(" ; ") || "no notice";
     },
     clear: function () { kit.scope.$toast.clear(); return new Promise(function (done) { start(done, 250); }); },

@@ -16,10 +16,10 @@ kit.component("getterdemo", {
   add: function () { this.items = this.items.concat([{ done: false }]); }
 });
 
-var host = el("div", { "data-kit-component": "getterdemo", "data-kit-alias": "$demo" });
-var remaining = el("b", { "data-kit-text": "remaining" });
-var total = el("i", { "data-kit-text": "total" });
-var go = el("button", { "data-kit-click": "add()" });
+var host = el("div", { "data-kitwork-component": "getterdemo: $demo" });
+var remaining = el("b", { "data-kitwork-bind": "text: remaining" });
+var total = el("i", { "data-kitwork-bind": "text: total" });
+var go = el("button", { "data-kitwork-event": "click: add()" });
 host.appendChild(remaining); host.appendChild(total); host.appendChild(go);
 document.body.appendChild(host);
 kit.render();
@@ -35,8 +35,8 @@ if (remaining.textContent !== "2") throw new Error("remaining did not follow ite
 if (total.textContent !== "3") throw new Error("total did not follow items, got " + total.textContent);
 
 // And two instances never share one array.
-var second = el("div", { "data-kit-component": "getterdemo" });
-var count = el("u", { "data-kit-text": "total" });
+var second = el("div", { "data-kitwork-component": "getterdemo" });
+var count = el("u", { "data-kitwork-bind": "text: total" });
 second.appendChild(count);
 document.body.appendChild(second);
 kit.render();

@@ -1,38 +1,31 @@
 ;(function (window, document) {
   "use strict";
-  // data-kit-intersect — run an expression when an element enters the screen, or leaves it.
+  // intersect-enter and intersect-leave — run an expression when an element enters the screen, or
+  // leaves it. A Kitwork UI page writes them as pairs of data-kitwork-event:
   //
-  //   <section data-kit-intersect:once="$impact.start()">           the first time it shows
-  //   <video data-kit-intersect="$this.play()"
-  //          data-kit-intersect:leave="$this.pause()">             every time it comes and goes
-  //   <div data-kit-intersect:half="…">  <div data-kit-intersect:margin(-20%)="…">
+  //   intersect-enter.once: start()                 the first time it shows
+  //   intersect-enter: play(); intersect-leave: pause()   every time it comes and goes
+  //   intersect-enter.half: …   intersect-enter.margin(-1.5rem): …
   //
-  // The kernel knows only the attribute's NAME and runs its expression through the ordinary event
-  // pipeline (:once and the rest). This file is the eyes: one IntersectionObserver per attribute,
-  // dispatching an event named after the attribute on the element. The engine delivers it only to
-  // a page that writes data-kit-intersect, so no other page carries an observer.
+  // The kernel knows only the pair's NAME and runs its expression through the ordinary event
+  // pipeline (once and the rest). This file is the eyes: one IntersectionObserver per pair,
+  // dispatching an event under the pair's own name on the element. The engine delivers it only to a
+  // page that writes one, so no other page carries an observer.
   //
-  // The observer's modifiers:
-  //   :leave        run when the element is NOT on screen — including the first report, so a reveal
-  //                 can tell "not seen yet" from "not known yet"
-  //   :half :full   how much must show: half of it, or all of it (0.99, as a sub-pixel never reaches 1)
-  //   :margin(x)    grow or shrink the screen before the test, as CSS margin: :margin(-20%)
+  // The observer's modifiers, after '.' (a dot inside margin(…) is the argument's):
+  //   intersect-leave  run when the element is NOT on screen — including the first report, so a
+  //                    reveal can tell "not seen yet" from "not known yet"
+  //   half, full       how much must show: half of it, or all of it (0.99, as a sub-pixel never reaches 1)
+  //   margin(x)        grow or shrink the screen before the test, as CSS margin: margin(-1.5rem)
   // A browser without IntersectionObserver answers "on screen" once: content that waits to be seen
-  // must never wait forever.
-  //
-  // A Kitwork UI page writes the same thing as pairs of data-kitwork-event: intersect-enter[.mods]
-  // and intersect-leave[.mods] ("intersect-enter.once: start(); intersect-leave: stop()"). Each pair
-  // is watched like an attribute and dispatched under the pair's own name, which is the event the
-  // kernel listens for; its modifiers follow '.' (a dot inside margin(…) is the argument's, as in
-  // margin(-1.5rem)), and intersect-leave means :leave. A pair's name has no '%' or space, so a
-  // percentage margin is the hand-written form's alone.
+  // must never wait forever. (The hand-written data-kit-intersect[:modifier…] of template pages went
+  // on 26/10/2026.)
   var kit = window.kit;
   if (!kit || kit.intersect) return;
-  var HEAD = "data-kit-intersect";
-  var watching = new WeakMap(); // element → { attribute or pair name: observer }
+  var watching = new WeakMap(); // element → { pair name: observer }
 
   function modifiersOf(name) {
-    return name.split(name.indexOf(HEAD) === 0 ? ":" : /\.(?![^(]*\))/).slice(1);
+    return name.split(/\.(?![^(]*\))/).slice(1);
   }
 
   function optionsOf(name) {
@@ -51,7 +44,7 @@
 
   function watch(element, name) {
     var modifiers = modifiersOf(name);
-    var leave = modifiers.indexOf("leave") >= 0 || name.indexOf("intersect-leave") === 0, once = modifiers.indexOf("once") >= 0;
+    var leave = name.indexOf("intersect-leave") === 0, once = modifiers.indexOf("once") >= 0;
     if (typeof window.IntersectionObserver !== "function") {
       if (!leave) announce(element, name);
       return null;
@@ -74,12 +67,14 @@
     return observer;
   }
 
-  // scan matches each element's intersect attributes with its observers: a new attribute is
-  // watched, one that left (a morph rewrote the element) is released.
+  // scan matches each element's intersect pairs with its observers: a new pair is watched, one that
+  // left (a morph rewrote the element) is released.
   function scan(root) {
     if (!root || root.nodeType !== 1) return;
+    // every element, not only those with a data-kitwork-event: one a morph took the attribute off still
+    // holds observers to release
     [root].concat(Array.prototype.slice.call(root.querySelectorAll("*"))).forEach(function (element) {
-      var names = element.getAttributeNames().filter(function (name) { return name.indexOf(HEAD) === 0; });
+      var names = [];
       // (a value the kernel cannot read is reported there; here it watches nothing)
       try {
         kit.internal.grouped.pairs(element.getAttribute("data-kitwork-event") || "").forEach(function (pair) {
@@ -109,8 +104,8 @@
   }
 
   // Start once the kernel has painted the page — the kernel has learnt to listen for each attribute
-  // by then — and look again whenever the page changes under it: a Drive swap, a row data-kit-for
-  // renders, a branch data-kit-if mounts.
+  // by then — and look again whenever the page changes under it: a Drive swap, a row a for renders,
+  // a branch an if mounts.
   // Nodes only, not attributes: a binding writes attributes on every paint, and a rescan per paint
   // would be the whole page each time. A morph that rewrites an element's attributes ends in
   // kitwork:load, which rescans too.

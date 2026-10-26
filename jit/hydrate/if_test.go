@@ -2,9 +2,9 @@ package hydrate
 
 import "testing"
 
-// data-kit-if is the sibling of data-kit-for on the same anchor+template+cleanupTree machinery, but
-// its contract is the one that separates it from data-kit-show, and that contract is what this test
-// pins:
+// data-kitwork-if is the sibling of data-kitwork-for on the same anchor+template+cleanupTree
+// machinery, but its contract is the one that separates it from `show:` in data-kitwork-bind, and that
+// contract is what this test pins:
 //
 //  1. false  → the branch is NOT in the DOM at all (show would keep it, merely hidden);
 //  2. true   → the branch MOUNTS and its bindings run (text bound from the component scope);
@@ -22,9 +22,9 @@ func TestKitIfMountsUnmountsAndDisposes(t *testing.T) {
 var kit = window.kit;
 
 // <section component=panel> <div if="open"> <span text="title"> </div> </section>
-var section = el("section", { "data-kit-component": "panel" });
-var div = el("div", { "data-kit-if": "open" });
-div.appendChild(el("span", { "data-kit-text": "title" }));
+var section = el("section", { "data-kitwork-component": "panel" });
+var div = el("div", { "data-kitwork-if": "open" });
+div.appendChild(el("span", { "data-kitwork-bind": "text: title" }));
 section.appendChild(div);
 document.body.appendChild(section);
 
@@ -36,7 +36,7 @@ kit.component("panel", {
 });
 kit.render();
 
-function texts() { return document.querySelectorAll("[data-kit-text]"); }
+function texts() { return document.querySelectorAll("[data-kitwork-bind]"); }
 
 // 1. open=false → the whole branch is captured as a template and replaced by an anchor: absent.
 if (texts().length !== 0) throw new Error("closed: branch should be absent, found " + texts().length);
@@ -46,7 +46,7 @@ kit.scopeFor(section).toggle();
 kit.render();
 if (texts().length !== 1) throw new Error("opened: expected 1 mounted node, got " + texts().length);
 var span1 = texts()[0];
-var mount1 = span1.parentNode; // the mounted branch root — data-kit-if removed, so it never re-collects
+var mount1 = span1.parentNode; // the mounted branch root — data-kitwork-if removed, so it never re-collects
 if (span1.textContent !== "Editor") throw new Error("opened: span text = " + span1.textContent);
 
 // The dispose probe: a cleanup registered on the mounted subtree. cleanupTree must fire it on unmount.
@@ -74,17 +74,17 @@ if (texts().length !== 1) throw new Error("reopen: expected 1 node, got " + text
 if (texts()[0] === span1) throw new Error("reopen: same node returned — it was never truly unmounted");
 if (texts()[0].textContent !== "Renamed") throw new Error("reopen: state did not survive unmount, got " + texts()[0].textContent);
 
-console.log("data-kit-if: mount/unmount + dispose OK (absent -> mount -> relabel -> unmount+dispose -> fresh remount)");
+console.log("data-kitwork-if: mount/unmount + dispose OK (absent -> mount -> relabel -> unmount+dispose -> fresh remount)");
 `
 	runNodeDOMScript(t, "if.test.js", assertions)
 }
 
 // data-kitwork-if is one of the eight grouped attributes a Kitwork UI page carries (KITWORK_UI.md
-// §11): its value is expression SOURCE, exactly like data-kit-if (the control beside it), and a false
-// condition takes the element out. What stays inert is every other data-kitwork-* name — a retired
-// per-directive spelling (data-kitwork-text, now `text:` in data-kitwork-bind) and the transport
-// markers the engine hangs on a page (generated, layout, current, delay, transition): their elements
-// and contents stay exactly as written.
+// §11): its value is expression SOURCE, and a false condition takes the element out. What stays inert
+// is every other data-kitwork-* name — a retired per-directive spelling (data-kitwork-text, now
+// `text:` in data-kitwork-bind) and the transport markers the engine hangs on a page (generated,
+// layout, current, delay, transition) — and the hand-written data-kit-if of template pages, which the
+// kernel stopped reading on 26/10/2026: their elements and contents stay exactly as written.
 func TestKitIfReadsTheGroupedForm(t *testing.T) {
 	const assertions = `
 var grouped = el("div", { "data-kitwork-if": "count > 1" });
@@ -103,19 +103,19 @@ document.body.appendChild(markers);
 function probes(kind) { return document.querySelectorAll('[data-if-probe="' + kind + '"]').length; }
 
 window.kit.set("count", 0);
-if (probes("legacy") !== 0) throw new Error("control: data-kit-if with a false condition must take its element out");
-if (probes("grouped") !== 0) throw new Error("data-kitwork-if with a false condition must take its element out, as data-kit-if does");
+if (probes("grouped") !== 0) throw new Error("data-kitwork-if with a false condition must take its element out");
+if (probes("legacy") !== 1 || !legacy.parentNode) throw new Error("data-kit-if is not a directive any more: a false condition must leave its element in place");
 
 window.kit.set("count", 2);
-if (probes("legacy") !== 1) throw new Error("control: data-kit-if must mount when its condition turns true");
 if (probes("grouped") !== 1) throw new Error("data-kitwork-if must mount when its condition turns true");
+if (probes("legacy") !== 1) throw new Error("data-kit-if must stay inert when its condition turns true");
 
 if (text.textContent !== "authored") throw new Error("data-kitwork-text is not a directive and must stay inert, got " + JSON.stringify(text.textContent));
 if (!markers.parentNode || document.querySelectorAll("[data-marker-probe]").length !== 1) throw new Error("an element carrying transport markers must stay, with its content");
 var kept = ["generated", "layout", "current", "delay", "transition"].filter(function (n) { return markers.hasAttribute("data-kitwork-" + n); });
 if (kept.length !== 5) throw new Error("the kernel must not touch transport markers, kept " + kept.join(","));
 
-console.log("data-kitwork-if: read as source like data-kit-if; data-kitwork-text and transport markers inert");
+console.log("data-kitwork-if: read as source; data-kit-if, data-kitwork-text and transport markers inert");
 `
 	runNodeDOMScript(t, "if-grouped.test.js", assertions)
 }

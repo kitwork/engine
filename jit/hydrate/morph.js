@@ -10,7 +10,7 @@
   // which a fetched page does carry and a swap must replace like anything else. Drive adds to it.
   var clientOwned = kit.internal.clientOwned || (kit.internal.clientOwned = new WeakSet());
   // What makes an element the same component on both sides of a swap (see morph, below).
-  var IDENTITY = ["data-kit-component", "data-kit-scope", "data-kitwork-component", "data-kitwork-scope"];
+  var IDENTITY = ["data-kitwork-component", "data-kitwork-scope"];
 
   // ---- morph: kernel primitive — make an existing DOM node match a new one, preserving
   // focus, cursor, scroll and input state (nodes are PATCHED, never recreated).
@@ -28,8 +28,7 @@
       // A different tag is a different element — and so is a different component or scope literal
       // on the same tag. Patched in place, a tabs host that became a toast host kept the tabs'
       // scope, listeners and alias: kit.components.toast and $note answered as the tabs (02/10).
-      // The same component on both pages is kept, state and all, which is what Drive is for. Both
-      // spellings are identity: the hand-written data-kit-* and a Kitwork UI page's data-kitwork-*.
+      // The same component on both pages is kept, state and all, which is what Drive is for.
       if (fromNode.tagName !== toNode.tagName || IDENTITY.some(function (name) {
         return fromNode.getAttribute(name) !== toNode.getAttribute(name);
       })) {
@@ -58,12 +57,11 @@
       var fromChildren = Array.prototype.slice.call(fromNode.childNodes).filter(function (n) { return !kernelUI(n); });
       var toChildren = Array.prototype.slice.call(toNode.childNodes);
 
-      // A row's identity is authored, and there is ONE spelling for it: data-kit-key, the same one
-      // data-kit-for uses. Plain data-key was read here too — an alias with no reason to exist, and a
-      // name any other library on the page might also be using. The engine-prefixed data-kitwork-key
-      // had no emitter and went in the same direction (22/09, §9).
+      // A row's identity is its data-kitwork-key, the marker a live for writes on each row it makes
+      // (data-kit-key until 26/10/2026). Plain data-key is never read: a name any other library on
+      // the page might also be using.
       function getKey(n) {
-        return n.nodeType === 1 ? n.getAttribute("data-kit-key") : null;
+        return n.nodeType === 1 ? n.getAttribute("data-kitwork-key") : null;
       }
 
       var fromKeys = {};

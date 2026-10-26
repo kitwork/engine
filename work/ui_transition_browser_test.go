@@ -65,7 +65,7 @@ const transitionProbe = `(function () {
   if (window.__motion) return "ready";
   var toast = document.querySelector('[data-kitwork-component^="toast"]');
   var finds = {
-    toast: function () { return toast.querySelector(":scope > [data-kit-key]"); },
+    toast: function () { return toast.querySelector(":scope > [data-kitwork-key]"); },
     placed: function () { return document.getElementById("placed"); },
     faded: function () { return document.getElementById("faded"); },
     plain: function () { return document.getElementById("plain"); }
@@ -457,7 +457,7 @@ func TestBrowserTransition(t *testing.T) {
 			// in: the toast says a notice that stays; Drive's word opens every network's notice at once.
 			// out: the toast's notice by its own dismiss button, each network's by its close().
 			come := `kit.scope.$toast.info("Một thông báo.", { duration: 0 }); document.dispatchEvent(new CustomEvent("kitwork:offline"));`
-			leave := `document.querySelector('[data-kitwork-component^="toast"] > [data-kit-key] button').click();
+			leave := `document.querySelector('[data-kitwork-component^="toast"] > [data-kitwork-key] button').click();
   ["placed", "faded", "plain"].forEach(function (id) { document.getElementById("close-" + id).click(); });`
 			for _, motion := range []string{"no-preference", "reduce"} {
 				d.call("Emulation.setEmulatedMedia", map[string]any{"features": []map[string]string{{"name": "prefers-reduced-motion", "value": motion}}})

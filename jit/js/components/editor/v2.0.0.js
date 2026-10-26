@@ -1,6 +1,6 @@
 /* editor component — rich text written in place, in the one grammar a saved post is shown in
- * (Kitwork UI's <editor>; the grammar is utilities/richtext's, v2). A template page's
- * data-kit-component="editor" keeps v1.0.0 (runtime.go, templateVersions).
+ * (Kitwork UI's <editor>; the grammar is utilities/richtext's, v2). (A template page's editor,
+ * v1.0.0, went on 26/10/2026.)
  *
  * The author draws everything; the engine writes the parts this file finds:
  *

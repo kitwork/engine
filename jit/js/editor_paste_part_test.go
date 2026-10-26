@@ -17,7 +17,8 @@ import (
 // The editor's reading of a paste and a drop is a file of its own, a part (parts/editor-paste.js,
 // 21/10/2026, PartAsset): served at /_kitwork/parts/editor-paste.<hash>.js by its exact current name
 // only, never linked by a page, and named in the editor's delivered file with its hash where the
-// editor's source names it without one. The template editor (v1.0.0) has no part.
+// editor's source names it without one. (The template editor, v1.0.0, which had no part, went on
+// 26/10/2026.)
 // CONTROL (run 21/10/2026, copies of delivery.go through -overlay, fix in the scratchpad): with
 // withParts handing the source back as it is, "the editor's file names the part with its hash" failed;
 // with AssetAt answering no part, "served by its exact name" failed.
@@ -32,25 +33,22 @@ func TestEditorPastePartIsDeliveredByName(t *testing.T) {
 	if !strings.Contains(ComponentSource("editor", ""), `"/_kitwork/parts/editor-paste.js"`) {
 		t.Errorf("the editor's source names no part")
 	}
-	editor := componentAsset("editor", nil)
+	editor := componentAsset("editor")
 	if body := string(editor.Body); !strings.Contains(body, `"`+part.Path+`"`) || strings.Contains(body, `"/_kitwork/parts/editor-paste.js"`) {
 		t.Errorf("the editor's file names the part with its hash: want %s in it", part.Path)
 	}
-	if asset, exact := AssetAt(part.Path, nil); asset != part || !exact {
+	if asset, exact := AssetAt(part.Path); asset != part || !exact {
 		t.Errorf("served by its exact name: %s gave %v, exact %v", part.Path, asset, exact)
 	}
 	for _, path := range []string{"/_kitwork/parts/editor-paste.0123456789abcdef.js", "/_kitwork/parts/editor-paste.js", "/kit/parts/editor-paste.0123456789abcdef.js",
 		"/_kitwork/parts/nothing.0123456789abcdef.js", "/_kitwork/parts/Editor-paste.0123456789abcdef.js", "/_kitwork/parts/../components/editor.0123456789abcdef.js"} {
-		if asset, _ := AssetAt(path, nil); asset != nil {
+		if asset, _ := AssetAt(path); asset != nil {
 			t.Errorf("%s is answered with %s: only the part's exact name is", path, asset.Path)
 		}
 	}
-	page := Deliver(`<html><head></head><body><div data-kitwork-component="editor: $body"></div></body></html>`, nil, Options{})
+	page := Deliver(`<html><head></head><body><div data-kitwork-component="editor: $body"></div></body></html>`, Options{})
 	if !strings.Contains(page, editor.Path) || strings.Contains(page, "/parts/") {
 		t.Errorf("a page with an editor links the editor and never its part:\n%s", page)
-	}
-	if v1 := componentAsset("editor@v1.0.0", nil); v1 == nil || strings.Contains(string(v1.Body), "/parts/") {
-		t.Errorf("the template editor names a part")
 	}
 	if PartAsset("../components/editor/v2.0.0") != nil || PartAsset("nothing") != nil {
 		t.Errorf("a part that is not one is answered")
@@ -123,7 +121,7 @@ func runEditorPartServed(t *testing.T, label string, refuse func(path string) bo
 	body = strings.Replace(body, "<script>", "<script>"+editorScript+editorV2Script, 1)
 	page := "<!doctype html><html><head></head><body>" + editorStyle + body + "</body></html>"
 	page = strings.Replace(page, "<script>", "<script>"+proofScriptHead, 1)
-	delivered := deliverTestPage(t, page, nil, nil)
+	delivered := deliverTestPage(t, page, nil)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if refuse(request.URL.Path) {
 			http.NotFound(response, request)

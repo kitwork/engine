@@ -6,8 +6,6 @@
  *        data-kitwork-bind="show: active; aria-valuenow: value" data-kitwork-style="top: top">
  *     <div data-kitwork-style="width: value + '%'"></div>
  *   </div>
- * By hand on a template page the same host reads data-kit-component="progressbar" data-kit-show="active"
- * data-kit-bind:aria-valuenow="value" data-kit-style:top="top", with data-kit-style:width on the fill.
  *
  * Markup never calls kit: kit.progress is the one place work in flight reports to (Drive reports a
  * page change, a page reports an upload), and this component is how markup sees it. Its state is two
@@ -16,7 +14,7 @@
  * moves without a reload and has no progressbar, the engine puts one at the top of <body>.
  *
  * start() / update(n) / finish() pass straight through, for a page that drives the bar itself:
- *   <button data-kit-click="$progress.start()">…
+ *   <button click="$progress.start()">…
  */
 var progressbarDef = {
   get value() { return window.kit.progress.value; },

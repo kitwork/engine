@@ -198,7 +198,7 @@ func TestRouterBundleSplitAndInlineDeliverTheJavaScriptParts(t *testing.T) {
 		t.Fatalf("CONTROL: router.bundle(false) links the kernel, Drive and two components:\n%s", files)
 	}
 	body := func(path string) string {
-		asset, _ := jitjs.AssetAt(path, nil)
+		asset, _ := jitjs.AssetAt(path)
 		if asset == nil {
 			t.Fatalf("%s names no engine file", path)
 		}

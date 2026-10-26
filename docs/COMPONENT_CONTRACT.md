@@ -1,5 +1,10 @@
 # Hợp đồng component (chốt 01/10, sửa 02/10/2026)
 
+> 26/10/2026: `context.require`, `context.element(s)` và `data-kit-element` đã gỡ cùng client của trang
+> template (bước 1 của việc cắt thời cũ). Engine viết các phần của một component và kiểm chúng khi trang
+> biên dịch. Trang này giữ làm lịch sử.
+
+
 Một component nói rõ nó cần gì từ markup và đưa gì lại — **ngay trong code của nó**, không file
 riêng. Bản 01/10 đặt hợp đồng vào file JSON cạnh mỗi file JS (`7c1234b0`); 02/10 Quốc thấy rắc
 rối và đã revert: JSON chép lại state và method mà file JS đã nói, rồi cần một test chỉ để giữ

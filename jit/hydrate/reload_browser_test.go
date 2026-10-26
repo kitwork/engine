@@ -14,9 +14,10 @@ import (
 	"time"
 )
 
-// `data-kit-reload="true"` is the author saying "load this one the ordinary way". It is the only
-// spelling: the old opt-out rode on the root marker (data-kit-hydrate="false"), which forced the
-// author to type the engine's own word and gave one attribute two unrelated meanings.
+// `reload="true"`, written on the page as `data-kitwork-reload="true"`, is the author saying "load
+// this one the ordinary way" (data-kit-reload until 26/10/2026). It is the only spelling: the old
+// opt-out rode on the root marker (data-kit-hydrate="false"), which forced the author to type the
+// engine's own word and gave one attribute two unrelated meanings.
 //
 // The proof is on the wire, because that is where the difference actually is. Drive fetches a page
 // with X-Kitwork-Hydrate: 1 and swaps it in; the browser's own navigation carries no such header.
@@ -57,7 +58,7 @@ func TestBrowserReloadOptsOutOfDrive(t *testing.T) {
 				 });</script>`)))
 		case "/soft":
 			// Drive morphed us here. Now click the opt-out link, which must be a real navigation.
-			_, _ = response.Write([]byte(page("soft", `<a id="hard" href="/hard" data-kit-reload="true">hard</a>`+
+			_, _ = response.Write([]byte(page("soft", `<a id="hard" href="/hard" data-kitwork-reload="true">hard</a>`+
 				`<script>window.addEventListener("kitwork:load", function () {
 				   setTimeout(function () { var a = document.getElementById("hard"); if (a) a.click(); }, 60);
 				 });
@@ -100,10 +101,10 @@ func TestBrowserReloadOptsOutOfDrive(t *testing.T) {
 		t.Fatalf("an ordinary link must still be driven (X-Kitwork-Hydrate=%q)", soft.header)
 	}
 	if hard == nil {
-		t.Fatalf("the data-kit-reload link was never followed; requests=%v\n%.700s", hits, output)
+		t.Fatalf("the data-kitwork-reload link was never followed; requests=%v\n%.700s", hits, output)
 	}
 	if hard.header != "" {
-		t.Fatalf(`data-kit-reload="true" must leave the link to the browser, but Drive fetched it (X-Kitwork-Hydrate=%q)`, hard.header)
+		t.Fatalf(`data-kitwork-reload="true" must leave the link to the browser, but Drive fetched it (X-Kitwork-Hydrate=%q)`, hard.header)
 	}
 	// The final DOM is deliberately NOT asserted: --dump-dom does not wait for a real navigation to
 	// finish, and the evidence that matters is the request itself, which the server already recorded.

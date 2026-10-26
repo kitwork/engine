@@ -59,7 +59,7 @@ func TestUINotFoundDrawsTheNearestPage(t *testing.T) {
 		for _, drive := range []bool{false, true} {
 			header := map[string]string(nil)
 			if drive {
-				header = map[string]string{"X-KitJS-Drive": "1"}
+				header = map[string]string{"X-Kitwork-Hydrate": "1"}
 			}
 			r := serveGet(tn, c.path, header)
 			if r.Code != http.StatusNotFound || !strings.Contains(r.Body.String(), c.want) || !strings.Contains(r.Body.String(), "<html") {
@@ -77,7 +77,7 @@ func TestUIErrorDrawsTheErrorPage(t *testing.T) {
 		for _, drive := range []bool{false, true} {
 			header := map[string]string(nil)
 			if drive {
-				header = map[string]string{"X-KitJS-Drive": "1"}
+				header = map[string]string{"X-Kitwork-Hydrate": "1"}
 			}
 			r := serveGet(tn, path, header)
 			if r.Code != http.StatusInternalServerError || !strings.Contains(r.Body.String(), want) || !strings.Contains(r.Body.String(), "<html") {

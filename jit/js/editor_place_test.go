@@ -137,11 +137,11 @@ func TestEditorPlacePartIsDeliveredByName(t *testing.T) {
 	if !strings.Contains(ComponentSource("editor", ""), `"/_kitwork/parts/editor-place.js"`) {
 		t.Fatalf("the editor's source does not name its place part")
 	}
-	editor := componentAsset("editor", nil)
+	editor := componentAsset("editor")
 	if body := string(editor.Body); !strings.Contains(body, `"`+part.Path+`"`) || strings.Contains(body, `"/_kitwork/parts/editor-place.js"`) {
 		t.Fatalf("the editor a page gets names the part with its hash (%s): %v", part.Path, strings.Contains(body, part.Path))
 	}
-	page := Deliver(`<html><head></head><body><div data-kitwork-component="editor"></div></body></html>`, nil, Options{})
+	page := Deliver(`<html><head></head><body><div data-kitwork-component="editor"></div></body></html>`, Options{})
 	if !strings.Contains(page, editor.Path) || strings.Contains(page, "/parts/") {
 		t.Fatalf("a page links the editor and never its parts:\n%s", page)
 	}

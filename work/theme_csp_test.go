@@ -11,13 +11,15 @@ import (
 )
 
 // End to end: a site that sends `script-src 'self'` still gets its anti-flash pre-paint, because
-// the engine declares the script it injected. Nothing else in the policy moves.
+// the engine declares the script it injected. Nothing else in the policy moves. The pre-paint follows
+// the declared darkMode, not the markup (the page called kit.theme.toggle() until kit.theme went,
+// 26/10/2026).
 func TestServedPageCarriesThePrepaintHashInItsOwnPolicy(t *testing.T) {
 	const policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
-	tenant := componentFixture(t, map[string]string{
+	tenant := identitySite(t, map[string]string{
 		"localhost/filesystem.kitwork": "",
 		"localhost/index.kitwork.html": `<!doctype html><html><head></head><body>{{ @page }}</body></html>`,
-		"localhost/page.kitwork.html":  `<button data-kit-click="kit.theme.toggle()">theme</button>`,
+		"localhost/page.kitwork.html":  `<p>a page of a site that declares its dark</p>`,
 		"localhost/router.kitwork.js": `import { router } from "kitwork";` + "\n" +
 			`router.css({ darkMode: ["class"] });` + "\n" +
 			`router.guard((ctx, response) => { response.header("Content-Security-Policy", "` + policy + `"); });`,
@@ -44,7 +46,7 @@ func TestServedPageCarriesThePrepaintHashInItsOwnPolicy(t *testing.T) {
 // A page with no pre-paint keeps the policy the site wrote, byte for byte.
 func TestServedPageWithoutPrepaintKeepsItsPolicy(t *testing.T) {
 	const policy = "default-src 'self'; script-src 'self'"
-	tenant := componentFixture(t, map[string]string{
+	tenant := identitySite(t, map[string]string{
 		"localhost/filesystem.kitwork": "",
 		"localhost/index.kitwork.html": `<!doctype html><html><head></head><body>{{ @page }}</body></html>`,
 		"localhost/page.kitwork.html":  `<p>no theme here</p>`,

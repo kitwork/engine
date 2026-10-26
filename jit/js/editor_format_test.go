@@ -99,10 +99,10 @@ func TestEditorFormatPartsAreDeliveredByName(t *testing.T) {
 		if part == nil || part.Role != "part" || !regexp.MustCompile(`^/_kitwork/parts/editor-(format|markdown)\.[0-9a-f]{16}\.js$`).MatchString(part.Path) {
 			t.Fatalf("the part: %+v", part)
 		}
-		if asset, exact := AssetAt(part.Path, nil); asset != part || !exact {
+		if asset, exact := AssetAt(part.Path); asset != part || !exact {
 			t.Errorf("%s is not answered by its exact name", part.Path)
 		}
-		if asset, _ := AssetAt(part.Path[:len(part.Path)-20]+".0123456789abcdef.js", nil); asset != nil {
+		if asset, _ := AssetAt(part.Path[:len(part.Path)-20] + ".0123456789abcdef.js"); asset != nil {
 			t.Errorf("a name of another build is answered with %s", asset.Path)
 		}
 	}
@@ -112,16 +112,16 @@ func TestEditorFormatPartsAreDeliveredByName(t *testing.T) {
 	if !strings.Contains(string(markdown.Body), `Symbol.for("kitwork:editor-markdown")`) || !strings.Contains(string(format.Body), `Symbol.for("kitwork:editor-format")`) {
 		t.Errorf("a part does not define its function under its symbol")
 	}
-	editor := componentAsset("editor", nil)
+	editor := componentAsset("editor")
 	if body := string(editor.Body); !strings.Contains(body, `"`+format.Path+`"`) || strings.Contains(body, `"/_kitwork/parts/editor-format.js"`) {
 		t.Errorf("the editor's file names the formats' part with its hash: want %s in it", format.Path)
 	}
-	page := Deliver(`<html><head></head><body><div data-kitwork-component="editor: $body" data-kitwork-scope="format: 'markdown'"></div></body></html>`, nil, Options{})
+	page := Deliver(`<html><head></head><body><div data-kitwork-component="editor: $body" data-kitwork-scope="format: 'markdown'"></div></body></html>`, Options{})
 	if strings.Contains(page, "/parts/") {
 		t.Errorf("a page links a part:\n%s", page)
 	}
 	// the page's check of names reads format and dropped as the editor's
-	if names, ok := ComponentNames(nil)("editor"); !ok || !containsString(names, "format") || !containsString(names, "dropped") {
+	if names, ok := ComponentNames()("editor"); !ok || !contains(names, "format") || !contains(names, "dropped") {
 		t.Errorf("the editor's names do not hold format and dropped: %v (read: %v)", names, ok)
 	}
 	// a part naming itself keeps its name as written (its own hash would be its own bytes)

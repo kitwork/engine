@@ -211,10 +211,10 @@ func cacheKey(r *http.Request, methodPolicy *FolderMethod) (string, bool) {
 	if method == http.MethodHead {
 		method = http.MethodGet
 	}
-	// a move by Drive (X-Kitwork-Hydrate, the old KitJS X-KitJS-Drive) is its own key, apart from the
-	// load of the page
+	// a move by Drive (X-Kitwork-Hydrate) is its own key, apart from the load of the page (the old
+	// KitJS header, X-KitJS-Drive, is not read since 26/10/2026)
 	drive := "0"
-	if r.Header.Get("X-KitJS-Drive") == "1" || r.Header.Get("X-Kitwork-Hydrate") == "1" {
+	if r.Header.Get("X-Kitwork-Hydrate") == "1" {
 		drive = "1"
 	}
 	key := method + "\x00" + normalizedPath(r.URL.EscapedPath()) + "\x00drive=" + drive

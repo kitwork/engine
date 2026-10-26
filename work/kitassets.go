@@ -14,14 +14,6 @@ import (
 	"github.com/kitwork/engine/ui/stylesheet"
 )
 
-// siteOrNil keeps a nil *siteComponents from becoming a non-nil jitjs.Site interface value.
-func siteOrNil(site *siteComponents) jitjs.Site {
-	if site == nil {
-		return nil
-	}
-	return site
-}
-
 // enginePathSegment is the first segment of everything the engine serves for itself: /_kitwork/.
 // Under it, grouped by role and never by file type (the extension says that), each file named
 // <role>.<hash>.<ext> — one-of-a-kind files at the top, kinds with many files in a folder:
@@ -51,8 +43,9 @@ func isEnginePath(p string) bool {
 // serveEngineIf answers what the engine serves for itself, before the folder tree is walked. A path
 // under /_kitwork/ that names nothing is a 404 from the engine (engineNotFound) — never the tenant's
 // disk, never a route — so a folder named _kitwork in a site is never served, however the request
-// spells it. The names used before 11/10/2026 keep answering, for pages cached or left open across a
-// deploy: /kit/… (the JavaScript) and /jitfonts/… (the fonts), each with today's file, not kept.
+// spells it. The fonts' names used before 11/10/2026 keep answering, for pages cached or left open
+// across a deploy: /jitfonts/…, with today's file, not kept. (The JavaScript's, /kit/…, went with
+// template pages' client on 26/10/2026.)
 func (t *Tenant) serveEngineIf(w http.ResponseWriter, r *http.Request) bool {
 	if r == nil {
 		return false
@@ -69,9 +62,6 @@ func (t *Tenant) serveEngineIf(w http.ResponseWriter, r *http.Request) bool {
 			t.serveKitAsset(w, r)
 		}
 		return true
-	case strings.HasPrefix(p, jitjs.LegacyAssetPrefix):
-		t.serveKitAsset(w, r)
-		return true
 	case strings.HasPrefix(p, fonts.LegacyRoutePrefix):
 		serveFont(w, r)
 		return true
@@ -82,13 +72,9 @@ func (t *Tenant) serveEngineIf(w http.ResponseWriter, r *http.Request) bool {
 // serveKitAsset serves one page JavaScript file — the kernel, Drive, and one file per component,
 // service and directive (jit/js delivery.go), and a Kitwork UI page's scrolled.<hash>.js
 // (scrolledScript) and, while developing, its warnings.<hash>.js (router_ui.go warningsScript: a name
-// the generation never made is the engine's 404). An old name that still means something — a page
-// cached before a deploy, the /kit/ prefix, a component or service name with its version — gets
-// today's file, marked no-cache, so the page keeps working without that file being kept under a name
-// that is not its own.
-//
-// A site's own component is looked up in THIS tenant's _components, so one site's file is never
-// answered from another's — though, being content-addressed, the same bytes would be the same name.
+// the generation never made is the engine's 404). An old hash that still means something — a page
+// cached before a deploy — gets today's file, marked no-cache, so the page keeps working without that
+// file being kept under a name that is not its own.
 func (t *Tenant) serveKitAsset(w http.ResponseWriter, r *http.Request) {
 	if exact, ok := scrolledScriptAt(r.URL.Path); ok {
 		script := scrolledScript()
@@ -115,7 +101,7 @@ func (t *Tenant) serveKitAsset(w http.ResponseWriter, r *http.Request) {
 		serveEngineFile(w, r, "text/javascript; charset=utf-8", script.body, script.digest, true)
 		return
 	}
-	asset, exact := jitjs.AssetAt(r.URL.Path, siteOrNil(t.renderPlan().SiteComponents()))
+	asset, exact := jitjs.AssetAt(r.URL.Path)
 	if asset == nil {
 		engineNotFound(w, r)
 		return

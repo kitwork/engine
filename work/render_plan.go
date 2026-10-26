@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	jitjs "github.com/kitwork/engine/jit/js"
 	"github.com/kitwork/engine/render"
 	"github.com/kitwork/engine/value"
 )
@@ -19,32 +18,11 @@ import (
 type RenderPlan struct {
 	mu sync.RWMutex
 
-	base           string
-	snapshot       *render.Snapshot
-	renderers      map[string]*plannedRenderer
-	siteComponents *siteComponents
-	ui             *uiSite // Kitwork UI pages (*.ui) with their heads and stylesheets, compiled here
-	closed         bool
-}
-
-// siteComponentsOrNil hands render a typed nil-free value: a tenant owning no component passes no
-// site at all, so its pages render exactly as they did before this existed.
-func (p *RenderPlan) siteComponentsOrNil() jitjs.Site {
-	if p == nil || p.siteComponents == nil {
-		return nil
-	}
-	return p.siteComponents
-}
-
-// SiteComponents is the tenant's frozen component set (nil when it owns none) — the /kit.js route
-// resolves a component:<name> the embedded catalogue does not have against it.
-func (p *RenderPlan) SiteComponents() *siteComponents {
-	if p == nil {
-		return nil
-	}
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.siteComponents
+	base      string
+	snapshot  *render.Snapshot
+	renderers map[string]*plannedRenderer
+	ui        *uiSite // Kitwork UI pages (*.ui) with their heads and stylesheets, compiled here
+	closed    bool
 }
 
 type plannedRenderer struct {
@@ -80,22 +58,11 @@ func newRenderPlan(t *Tenant, tree *RouteTree) (*RenderPlan, error) {
 	}
 
 	presentation := t.presentation().View()
-	// The site's own browser components (_components/<name>.js, this domain then the identity it
-	// belongs to) are read once here and frozen for the generation; watching the folders makes an
-	// edit reload the site like a template edit does.
-	siteComponents := loadSiteComponents(base)
-	for _, directory := range componentDirectories(base) {
-		if err := t.generation.Sources().WatchDirectory(directory); err != nil {
-			snapshot.Close()
-			return nil, err
-		}
-	}
 	plan := &RenderPlan{
-		base:           base,
-		snapshot:       snapshot,
-		siteComponents: siteComponents,
-		ui:             newUISite(base, !presentation.Drive),
-		renderers:      make(map[string]*plannedRenderer),
+		base:      base,
+		snapshot:  snapshot,
+		ui:        newUISite(base, !presentation.Drive),
+		renderers: make(map[string]*plannedRenderer),
 	}
 	plan.ui.origin = "https://" + t.Domain()
 	// a Kitwork UI site's pages read only what their route gives them: a name read and not given is the
@@ -130,7 +97,6 @@ func newRenderPlan(t *Tenant, tree *RouteTree) (*RenderPlan, error) {
 			HighlightTheme:   presentation.HighlightTheme,
 			ManifestPath:     presentation.ManifestPath,
 			HighlightPalette: presentation.HighlightPalette,
-			SiteComponents:   plan.siteComponentsOrNil(),
 			Source:           snapshot,
 			ExpressionFailed: expressionFailed,
 		}

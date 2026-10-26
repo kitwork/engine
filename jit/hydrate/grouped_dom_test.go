@@ -7,9 +7,10 @@ import (
 )
 
 // The eight grouped attributes of a Kitwork UI page (KITWORK_UI.md §11) driven through the real
-// kernel on the node DOM shim (blocks_dom_test.go). Each test sets a hand-written data-kit-* control
-// beside the grouped form where the two should agree, and asserts the reason a regression would
-// break — the value written, the handler that ran, the error named — not merely that something moved.
+// kernel on the node DOM shim (blocks_dom_test.go). Each test asserts the reason a regression would
+// break — the value written, the handler that ran, the error named — not merely that something moved,
+// with a control beside it. (Until 26/10/2026 a hand-written data-kit-* control stood beside the
+// grouped form; the kernel reads only the grouped form now.)
 
 // groupedHelpers: an event the shim's document can dispatch, a working classList for the one element
 // that needs it (the shim's is a no-op), and console.error captured as "message@directive".
@@ -37,19 +38,17 @@ function check(ok, message) { if (!ok) { console.error = originalError; throw ne
 `
 
 // bind: text is text, never HTML; show is the hidden property; aria-* is spelled "true"/"false"; any
-// other name goes through writeBinding. The hand-written data-kit-text beside it is the control that
-// both spellings paint in the same pass.
+// other name goes through writeBinding. The first paint and the paint after a write are each other's
+// control.
 func TestGroupedBindWritesTextShowAndAria(t *testing.T) {
 	const assertions = groupedHelpers + `
 var host = el("section", { "data-kitwork-scope": "open: false; count: 2; label: '<b>hi</b>'" });
 var text = el("span", { "data-kitwork-bind": "text: label" });
 var panel = el("div", { "data-kitwork-bind": "show: open; aria-expanded: open; title: 'n=' + count" });
-var legacy = el("b", { "data-kit-text": "count" });
-host.appendChild(text); host.appendChild(panel); host.appendChild(legacy);
+host.appendChild(text); host.appendChild(panel);
 document.body.appendChild(host);
 kit.render();
 
-check(legacy.textContent === "2", "control: the hand-written data-kit-text did not paint, got " + JSON.stringify(legacy.textContent));
 check(text.textContent === "<b>hi</b>", "text: must be the literal text, got " + JSON.stringify(text.textContent));
 check(panel.hidden === true, "show: false must hide the element");
 check(panel.getAttribute("aria-expanded") === "false", "aria-expanded must read \"false\", got " + panel.getAttribute("aria-expanded"));
@@ -61,10 +60,9 @@ kit.render();
 check(panel.hidden === false, "show: true must reveal the element");
 check(panel.getAttribute("aria-expanded") === "true", "aria-expanded must read \"true\", got " + panel.getAttribute("aria-expanded"));
 check(panel.getAttribute("title") === "n=3", "title must follow count, got " + panel.getAttribute("title"));
-check(legacy.textContent === "3", "control: data-kit-text must follow count, got " + legacy.textContent);
 check(reported.length === 0, "nothing should be reported: " + reported.join(" | "));
 console.error = originalError;
-console.log("grouped bind: text (literal), show, aria-*, attribute — beside data-kit-text");
+console.log("grouped bind: text (literal), show, aria-*, attribute");
 `
 	runNodeDOMScript(t, "grouped-bind.test.js", assertions)
 }
@@ -72,9 +70,8 @@ console.log("grouped bind: text (literal), show, aria-*, attribute — beside da
 // class: data-kitwork-class="name: condition; …" toggles each named class — the exact name, a dot
 // in it kept (py-1.5), the author's static class never touched — truthy on, falsy off. A pair that
 // does not compile is reported naming data-kitwork-class and the pair, while the pairs beside it on
-// the same element still toggle (the control). The hand-written data-kit-class expression is
-// unchanged (the control that the class pass ran beside it). class.<name> is no longer a bind name:
-// such a pair in data-kitwork-bind is an attribute write like any other name — the attribute
+// the same element still toggle (the control). class.<name> is no longer a bind name: such a pair
+// in data-kitwork-bind is an attribute write like any other name — the attribute
 // appearing is the control that the pair WAS read — and never touches a class.
 func TestGroupedClassTogglesEachNamedClass(t *testing.T) {
 	const assertions = groupedHelpers + `
@@ -84,18 +81,15 @@ var classes = realClassList(row);
 classes.card = true; // what the author wrote in class="card"
 var broken = el("div", { "data-kitwork-class": "bad: 1 +; good: open" });
 var brokenClasses = realClassList(broken);
-var legacy = el("p", { "data-kit-class": "{ ring: open }" });
-var legacyClasses = realClassList(legacy);
 var oldBind = el("div", { "data-kitwork-bind": "class.active: open" });
 var oldClasses = realClassList(oldBind);
-host.appendChild(row); host.appendChild(broken); host.appendChild(legacy); host.appendChild(oldBind);
+host.appendChild(row); host.appendChild(broken); host.appendChild(oldBind);
 document.body.appendChild(host);
 kit.render();
 
 check(!classes.done && !classes["icon-sun"] && !classes["py-1.5"], "falsy conditions must leave their classes off, got " + JSON.stringify(classes));
 check(classes.idle === true, "a truthy condition must add its class at the first paint, got " + JSON.stringify(classes));
 check(classes.card === true, "the author's static class must not be touched");
-check(!legacyClasses.ring, "control: data-kit-class must leave ring off while open is false");
 
 var s = kit.scopeFor(host);
 s.value = 100; s.mode = "dark"; s.open = true;
@@ -105,7 +99,6 @@ check(classes["icon-sun"] === true, "icon-sun: mode == 'dark' must add icon-sun,
 check(classes["py-1.5"] === true, "a class name with a dot must be toggled whole, got " + JSON.stringify(classes));
 check(!classes.idle, "idle: !open must remove idle, got " + JSON.stringify(classes));
 check(classes.card === true, "the author's static class must survive the toggles");
-check(legacyClasses.ring === true, "control: the hand-written data-kit-class must still add ring");
 check(brokenClasses.good === true && !brokenClasses.bad, "the pair beside one that does not compile must still toggle, got " + JSON.stringify(brokenClasses));
 var named = reported.filter(function (r) { return /@data-kitwork-class bad$/.test(r); });
 check(named.length === 1 && reported.length === 1, "the pair that does not compile must be reported once, naming data-kitwork-class bad, got " + JSON.stringify(reported));
@@ -198,7 +191,7 @@ console.log("grouped style: properties + custom property, url() refused and name
 	runNodeDOMScript(t, "grouped-style.test.js", assertions)
 }
 
-// event: the Kitwork UI names mapped to the DOM's and the modifiers of the hand-written family.
+// event: the Kitwork UI names mapped to the DOM's, with the modifiers of the event family.
 // click runs on the element and its ancestors; click-outside runs only for a click elsewhere (the
 // inside click is the control); keydown.escape filters the key (another key is the control);
 // double-click is dblclick; input.debounce(n) coalesces; pointer-enter does not bubble, so a child's
@@ -263,32 +256,34 @@ setTimeout(function () {
 	runNodeDOMScript(t, "grouped-events.test.js", assertions)
 }
 
-// component: data-kitwork-component="name@version: $alias" mounts the registered blueprint, the alias
+// component: data-kitwork-component="name: $alias" mounts the registered blueprint, the alias
 // reaches it from outside its subtree, and data-kitwork-scope sets its parameters over the
-// blueprint's defaults, each value run in the scope AROUND the host. The hand-written host with its
-// own data-kit-alias is the control. A name nothing registered is reported under the grouped
-// attribute, and a value that does not read is reported once.
+// blueprint's defaults, each value run in the scope AROUND the host. A second host of the same
+// component with its own alias and values is the control that each alias reaches its own instance.
+// A name nothing registered is reported under the grouped attribute, and a value that does not read
+// is reported once. (A version tail on the name, counter@1.0.0, is no longer dropped before the
+// lookup since 26/10/2026: the engine writes none.)
 func TestGroupedComponentAliasAndScope(t *testing.T) {
 	const assertions = groupedHelpers + `
 kit.component("counter", { count: 0, step: 1, inc: function () { this.count += this.step; } });
 var page = el("section", { "data-kitwork-scope": "limit: 5" });
-var host = el("div", { "data-kitwork-component": "counter@1.0.0: $counter", "data-kitwork-scope": "step: limit; count: 10" });
+var host = el("div", { "data-kitwork-component": "counter: $counter", "data-kitwork-scope": "step: limit; count: 10" });
 var label = el("span", { "data-kitwork-bind": "text: count" });
 var plus = el("button", { "data-kitwork-event": "click: inc()" });
 host.appendChild(label); host.appendChild(plus);
 var outside = el("button", { "data-kitwork-event": "click: $counter.inc()" });
 var outLabel = el("b", { "data-kitwork-bind": "text: $counter.count" });
 page.appendChild(host); page.appendChild(outside); page.appendChild(outLabel);
-var legacyHost = el("div", { "data-kit-component": "counter", "data-kit-alias": "$old", "data-kit-scope": "step: 2" });
-var legacyLabel = el("i", { "data-kit-text": "$old.step" });
+var secondHost = el("div", { "data-kitwork-component": "counter: $second", "data-kitwork-scope": "step: 2" });
+var secondLabel = el("i", { "data-kitwork-bind": "text: $second.step" });
 var missing = el("div", { "data-kitwork-component": "nowhere" });
 var broken = el("div", { "data-kitwork-component": "counter: counter" });
-document.body.appendChild(page); document.body.appendChild(legacyHost); document.body.appendChild(legacyLabel);
+document.body.appendChild(page); document.body.appendChild(secondHost); document.body.appendChild(secondLabel);
 document.body.appendChild(missing); document.body.appendChild(broken);
 kit.render();
 kit.render();
 
-check(legacyLabel.textContent === "2", "control: the hand-written host and its data-kit-alias, got " + legacyLabel.textContent);
+check(secondLabel.textContent === "2", "control: the second host and its own alias, got " + secondLabel.textContent);
 check(label.textContent === "10", "data-kitwork-scope must override the blueprint's count, got " + label.textContent);
 check(kit.scopeFor(host).step === 5, "step: limit must be run in the scope around the host, step = " + kit.scopeFor(host).step);
 document.dispatchEvent({ type: "click", target: plus, preventDefault: function () {}, stopPropagation: function () {} });
@@ -296,7 +291,7 @@ check(label.textContent === "15", "inc() must run the blueprint's method in the 
 document.dispatchEvent({ type: "click", target: outside, preventDefault: function () {}, stopPropagation: function () {} });
 check(label.textContent === "20" && outLabel.textContent === "20", "$counter must reach the host from outside its subtree, got " + label.textContent + " / " + outLabel.textContent);
 var counters = kit.components.counter;
-check(Array.isArray(counters) && counters.length === 2, "both hosts must be active under the versionless name, got " + JSON.stringify(counters && counters.length));
+check(Array.isArray(counters) && counters.length === 2, "both hosts must be active under the component's name, got " + JSON.stringify(counters && counters.length));
 
 var missed = reported.filter(function (r) { return r === 'hydrate: no component registered as "nowhere"@data-kitwork-component'; });
 check(missed.length === 1, "a missing component must be reported once, naming data-kitwork-component: " + JSON.stringify(reported));
@@ -304,14 +299,15 @@ var unread = reported.filter(function (r) { return r.indexOf("counter: counter")
 check(unread.length === 1, "an alias without $ must be reported once, naming the attribute: " + JSON.stringify(reported));
 check(reported.length === 2, "nothing else should be reported: " + JSON.stringify(reported));
 console.error = originalError;
-console.log("grouped component: name@version: $alias, scope over defaults in the parent scope, missing and unreadable reported");
+console.log("grouped component: name: $alias, scope over defaults in the parent scope, missing and unreadable reported");
 `
 	runNodeDOMScript(t, "grouped-component.test.js", assertions)
 }
 
 // if mounts and unmounts; for materialises rows keyed by "; key: …", and a keyed row MOVES when the
-// list reorders (the same node, new place). Rows carry the kernel's own data-kit-item / data-kit-key
-// and never the data-kitwork-for they were made from (or they would be collected again).
+// list reorders (the same node, new place). Rows carry the kernel's own data-kitwork-item /
+// data-kitwork-key and never the data-kitwork-for they were made from (or they would be collected
+// again).
 func TestGroupedIfAndForWithKey(t *testing.T) {
 	const assertions = groupedHelpers + `
 var host = el("section", { "data-kitwork-scope": "open: false; rows: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }]" });
@@ -334,7 +330,7 @@ check(!probes[0].parentNode.hasAttribute("data-kitwork-if"), "if: the mounted co
 function rows() { return list.childNodes.filter(function (n) { return n.nodeType === 1; }); }
 var r = rows();
 check(r.length === 2, "for: two rows expected, got " + r.length);
-check(r[0].getAttribute("data-kit-key") === "a" && r[1].getAttribute("data-kit-key") === "b", "for: rows must be keyed by row.id, got " + r.map(function (n) { return n.getAttribute("data-kit-key"); }));
+check(r[0].getAttribute("data-kitwork-key") === "a" && r[1].getAttribute("data-kitwork-key") === "b", "for: rows must be keyed by row.id, got " + r.map(function (n) { return n.getAttribute("data-kitwork-key"); }));
 check(r[0].textContent === "0:A" && r[1].textContent === "1:B", "for: row content, got " + r.map(function (n) { return n.textContent; }));
 check(!r[0].hasAttribute("data-kitwork-for"), "for: a row must not carry data-kitwork-for");
 var nodeB = r[1];
