@@ -2,6 +2,7 @@ package safepath
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -49,6 +50,38 @@ func TestBoundaryRejectsEscapingSymlinkAndMissingChild(t *testing.T) {
 	}
 	if inside {
 		t.Fatal("prepared boundary accepted an escaping symlink")
+	}
+}
+
+// A junction (mklink /J, no privilege needed) is a link as much as a symlink: one that leads out of the
+// boundary is outside, one that stays in is read as where it leads.
+//
+// CONTROL: with canonical resolving by filepath.EvalSymlinks (which has not followed a junction since
+// Go 1.23), "prepared boundary accepted an escaping junction" failed.
+func TestBoundaryResolvesJunctions(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("junctions are Windows'")
+	}
+	root := t.TempDir()
+	outside := t.TempDir()
+	own := filepath.Join(root, "own")
+	if err := os.MkdirAll(own, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for link, target := range map[string]string{"external": outside, "alias": own} {
+		if out, err := exec.Command("cmd", "/c", "mklink", "/J", filepath.Join(root, link), target).CombinedOutput(); err != nil {
+			t.Fatalf("mklink /J: %v: %s", err, out)
+		}
+	}
+	boundary, err := NewBoundary(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inside, err := boundary.Contains(filepath.Join(root, "external", "secret.txt")); err != nil || inside {
+		t.Fatalf("prepared boundary accepted an escaping junction: inside=%v err=%v", inside, err)
+	}
+	if relative, inside, err := boundary.Relative(filepath.Join(root, "alias", "new.txt")); err != nil || !inside || relative != filepath.Join("own", "new.txt") {
+		t.Fatalf("a junction inside = %q %v %v, want %q", relative, inside, err, filepath.Join("own", "new.txt"))
 	}
 }
 

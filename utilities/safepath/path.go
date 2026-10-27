@@ -1,5 +1,5 @@
 // Package safepath resolves filesystem paths without allowing lexical or
-// symlink-based escapes from an owned root.
+// link-based escapes (a symlink, or on Windows a junction) from an owned root.
 package safepath
 
 import (
@@ -101,9 +101,9 @@ func Resolve(base string, paths ...string) (string, error) {
 	return target, nil
 }
 
-// Contains reports whether target remains under base after resolving symlinks.
+// Contains reports whether target remains under base after resolving links.
 // It resolves the nearest existing ancestor so a not-yet-created write target
-// cannot escape through a symlinked parent directory.
+// cannot escape through a linked parent directory.
 func Contains(base, target string) (bool, error) {
 	boundary, err := NewBoundary(base)
 	if err != nil {
@@ -128,7 +128,7 @@ func canonical(name string) (string, error) {
 
 	var missing []string
 	for {
-		resolved, resolveErr := filepath.EvalSymlinks(current)
+		resolved, resolveErr := resolveLinks(current)
 		if resolveErr == nil {
 			for i := len(missing) - 1; i >= 0; i-- {
 				resolved = filepath.Join(resolved, missing[i])

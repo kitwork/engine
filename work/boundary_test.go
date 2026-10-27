@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -125,28 +127,70 @@ func TestContextFileRejectsCrossAppTraversal(t *testing.T) {
 }
 
 func TestStaticAndContextFileRejectCrossAppSymlink(t *testing.T) {
+	checkCrossAppLinkRefused(t, "symlink", func(target, link string) {
+		if err := os.Symlink(target, link); err != nil {
+			t.Skipf("symlink unavailable: %v", err)
+		}
+	})
+}
+
+// A junction is a link as much as a symlink: on Windows mklink /J makes one without the right a symlink
+// needs, so any program that can write into a site can make one. filepath.EvalSymlinks has not followed
+// one since Go 1.23 (it reads a junction as a folder), and safepath read the path through it as inside
+// the site. It runs on Windows only: no other system makes a junction.
+//
+// CONTROL: with safepath resolving a path by filepath.EvalSymlinks alone (as before 27/10/2026), zero-VM
+// static serving answered the other app's secret.txt: "zero-VM static serving followed a junction outside
+// the site".
+func TestStaticAndContextFileRejectCrossAppJunction(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("junctions are Windows'")
+	}
+	checkCrossAppLinkRefused(t, "junction", func(target, link string) {
+		if out, err := exec.Command("cmd", "/c", "mklink", "/J", link, target).CombinedOutput(); err != nil {
+			t.Fatalf("mklink /J: %v: %s", err, out)
+		}
+	})
+}
+
+// checkCrossAppLinkRefused stands a link made by makeLink in the site's assets/ (a Kitwork UI site serves
+// files only from its allowlist, assets/ among them) leading into another app, and checks that neither
+// zero-VM static serving nor context.file reads through it, while a link of the same kind that stays in
+// the site is still served (without that, a build refusing every link would pass).
+func checkCrossAppLinkRefused(t *testing.T, kind string, makeLink func(target, link string)) {
+	t.Helper()
 	root, tenant := buildBoundaryFixture(t, boundaryFileRouter)
-	// a Kitwork UI site serves files only from its allowlist, so the link stands in assets/, which it serves
-	assets := filepath.Join(root, "acme", "localhost", "assets")
-	if err := os.MkdirAll(assets, 0755); err != nil {
+	site := filepath.Join(root, "acme", "localhost")
+	assets := filepath.Join(site, "assets")
+	own := filepath.Join(site, "library")
+	for _, folder := range []string{assets, own} {
+		if err := os.MkdirAll(folder, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(own, "book.txt"), []byte("OWN-LINKED"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	link := filepath.Join(assets, "external")
-	target := filepath.Join(root, "victim-corp", "victim.com")
-	if err := os.Symlink(target, link); err != nil {
-		t.Skipf("symlink unavailable: %v", err)
-	}
+	makeLink(filepath.Join(root, "victim-corp", "victim.com"), filepath.Join(assets, "external"))
+	makeLink(own, filepath.Join(assets, "inside"))
 
 	staticReq := httptest.NewRequest(http.MethodGet, "http://localhost/assets/external/secret.txt", nil)
 	staticRec := httptest.NewRecorder()
 	tenant.Serve(staticRec, staticReq)
 	if strings.Contains(staticRec.Body.String(), "TOP-SECRET-CROSS-TENANT") {
-		t.Fatal("zero-VM static serving followed a symlink outside the site")
+		t.Errorf("zero-VM static serving followed a %s outside the site", kind)
 	}
 
 	contextRec := getBoundary(t, tenant, "app/localhost/assets/external/secret.txt")
 	if strings.Contains(contextRec.Body.String(), "TOP-SECRET-CROSS-TENANT") {
-		t.Fatal("ctx.file followed a symlink outside the app")
+		t.Errorf("ctx.file followed a %s outside the app", kind)
+	}
+
+	ownReq := httptest.NewRequest(http.MethodGet, "http://localhost/assets/inside/book.txt", nil)
+	ownRec := httptest.NewRecorder()
+	tenant.Serve(ownRec, ownReq)
+	if ownRec.Code != http.StatusOK || ownRec.Body.String() != "OWN-LINKED" {
+		t.Errorf("zero-VM static serving refused a %s that stays in the site: %d %q", kind, ownRec.Code, ownRec.Body.String())
 	}
 }
 
