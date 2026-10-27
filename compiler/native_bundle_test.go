@@ -166,3 +166,56 @@ func TestNativeBundleDirectoryImport(t *testing.T) {
 		t.Errorf("expected side-effect error, got: %v", errFail)
 	}
 }
+
+// import "./dir/" runs every .work file of the folder, as its error message says it does, and an import
+// written without its .work finds the file (27/10/2026: only .kitwork.js members were read, and an
+// import without a suffix tried .kitwork.js and .js, so both ran nothing of a .work app). A file of
+// another kind in the folder is not run. CONTROL: the same folder read as text has all three files.
+func TestNativeBundleReadsWorkModules(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"main.work": `import "./routes/";
+import { greet } from "./lib/greet";
+const said = greet("x");`,
+		"routes/a.work":  `import { log } from "kitwork"; log.print("route a loaded");`,
+		"routes/b.work":  `import { log } from "kitwork"; log.print("route b loaded");`,
+		"routes/c.js":    `import { log } from "kitwork"; log.print("route c should not load");`,
+		"lib/greet.work": `export const greet = (name) => "Hello, " + name + "!";`,
+	}
+	for rel, content := range files {
+		full := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entry := filepath.Join(dir, "main.work")
+	prog, err := parseProgram(files["main.work"])
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	combined, moduleFiles, err := nativeBundle(entry, prog)
+	if err != nil {
+		t.Fatalf("nativeBundle error: %v", err)
+	}
+	out := combined.String()
+	for _, want := range []string{"route a loaded", "route b loaded", "Hello, "} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the bundle misses %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "route c should not load") {
+		t.Errorf("a .js file of the folder is not a module of the app:\n%s", out)
+	}
+	watched := strings.Join(moduleFiles, "\n")
+	for _, want := range []string{"a.work", "b.work", "greet.work"} {
+		if !strings.Contains(watched, want) {
+			t.Errorf("hot reload must watch %s, it watches:\n%s", want, watched)
+		}
+	}
+	if entries, _ := os.ReadDir(filepath.Join(dir, "routes")); len(entries) != 3 {
+		t.Errorf("CONTROL: the folder holds three files, got %d", len(entries))
+	}
+}

@@ -12,14 +12,14 @@ import (
 
 func TestInspectFileCrossesNativeArtifactBoundary(t *testing.T) {
 	root := t.TempDir()
-	entry := filepath.Join(root, "router.kitwork.js")
-	helper := filepath.Join(root, "helper.kitwork.js")
+	entry := filepath.Join(root, "main.work")
+	helper := filepath.Join(root, "helper.work")
 	if err := os.WriteFile(helper, []byte(`export const twice = (number) => number * 2;`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(entry, []byte(`
-import { twice } from "./helper.kitwork.js";
-let result = twice(21);
+import { twice } from "./helper.work";
+const result = twice(21);
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ let result = twice(21);
 		report.CacheKey == "" {
 		t.Fatalf("inspection compatibility = %+v", report)
 	}
-	if len(report.Sources) != 2 || report.Sources[0] != "router.kitwork.js" || report.Sources[1] != "helper.kitwork.js" {
+	if len(report.Sources) != 2 || report.Sources[0] != "main.work" || report.Sources[1] != "helper.work" {
 		t.Fatalf("inspection sources = %#v", report.Sources)
 	}
 	if report.Program.BytecodeVersion != runtime.BytecodeVersion ||
@@ -54,7 +54,7 @@ func TestInspectFileRejectsMissingAndNonKitworkSources(t *testing.T) {
 	if _, err := InspectFile("router.js"); err == nil {
 		t.Fatal("ordinary JavaScript source was accepted")
 	}
-	if _, err := InspectFile(filepath.Join(t.TempDir(), "missing.kitwork.js")); err == nil {
+	if _, err := InspectFile(filepath.Join(t.TempDir(), "missing.work")); err == nil {
 		t.Fatal("missing source was accepted")
 	}
 }
@@ -68,10 +68,10 @@ func TestInspectFileResolvesAppImports(t *testing.T) {
 	loose := t.TempDir()
 	importing := `import { report } from "app/.shared/report.work";` + "\nlet result = report();"
 	for relative, content := range map[string]string{
-		"apps/acme/.shared/report.work":    `export const report = () => "acme";`,
-		"apps/acme/tasks/daily.kitwork.js": importing,
-		"app/.shared/report.work":          `export const report = () => "app";`,
-		"app/tasks/mail.kitwork.js":        importing,
+		"apps/acme/.shared/report.work": `export const report = () => "acme";`,
+		"apps/acme/tasks/daily.work":    importing,
+		"app/.shared/report.work":       `export const report = () => "app";`,
+		"app/tasks/mail.work":           importing,
 	} {
 		full := filepath.Join(host, filepath.FromSlash(relative))
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
@@ -81,14 +81,14 @@ func TestInspectFileResolvesAppImports(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(loose, "daily.kitwork.js"), []byte(importing), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(loose, "daily.work"), []byte(importing), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(host)
 
 	for _, c := range []struct{ entry, app string }{
-		{"apps/acme/tasks/daily.kitwork.js", "apps/acme"},
-		{"app/tasks/mail.kitwork.js", "app"},
+		{"apps/acme/tasks/daily.work", "apps/acme"},
+		{"app/tasks/mail.work", "app"},
 	} {
 		entry := filepath.Join(host, filepath.FromSlash(c.entry))
 		appRoot := filepath.Join(host, filepath.FromSlash(c.app))
@@ -108,8 +108,8 @@ func TestInspectFileResolvesAppImports(t *testing.T) {
 		}
 	}
 
-	_, err := InspectFile(filepath.Join(loose, "daily.kitwork.js"))
-	want := `daily.kitwork.js:1:24: import "app/.shared/report.work": file này không thuộc app nào nên không có app/`
+	_, err := InspectFile(filepath.Join(loose, "daily.work"))
+	want := `daily.work:1:24: import "app/.shared/report.work": file này không thuộc app nào nên không có app/`
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("no app: error = %v, want %q", err, want)
 	}

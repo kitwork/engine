@@ -329,8 +329,8 @@ func validateManifest(root string, manifest Manifest, generated bool) error {
 		if _, err := resolvePath(root, fixture.Entry); err != nil {
 			return fmt.Errorf("case %q entry: %w", fixture.Name, err)
 		}
-		if !strings.HasSuffix(strings.ToLower(fixture.Entry), ".kitwork.js") {
-			return fmt.Errorf("case %q entry is not a .kitwork.js source", fixture.Name)
+		if entry := strings.ToLower(fixture.Entry); !strings.HasSuffix(entry, ".work") && !strings.HasSuffix(entry, ".kitwork.js") {
+			return fmt.Errorf("case %q entry is not a .work source (or an archived .kitwork.js)", fixture.Name)
 		}
 		if _, err := resolvePath(root, fixture.Program); err != nil {
 			return fmt.Errorf("case %q Program: %w", fixture.Name, err)

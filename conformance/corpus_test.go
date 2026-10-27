@@ -166,8 +166,8 @@ func validateCorpusManifest(t testing.TB, root string, manifest corpusManifest) 
 		if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 			t.Fatalf("%s escapes testdata: %q", fullName, fixture.File)
 		}
-		if strings.ToLower(filepath.Ext(clean)) != ".js" || !strings.HasSuffix(strings.ToLower(clean), ".kitwork.js") {
-			t.Fatalf("%s is not a .kitwork.js fixture: %q", fullName, fixture.File)
+		if lower := strings.ToLower(clean); !strings.HasSuffix(lower, ".work") && !strings.HasSuffix(lower, ".kitwork.js") {
+			t.Fatalf("%s is not a .work fixture: %q", fullName, fixture.File)
 		}
 		if _, exists := seenFiles[filepath.ToSlash(clean)]; exists {
 			t.Fatalf("duplicate corpus file %q", fixture.File)

@@ -25,7 +25,7 @@ type InspectionReport struct {
 	Program               kitruntime.ProgramInspection `json:"program"`
 }
 
-// InspectFile compiles one executable .kitwork.js file through native imports,
+// InspectFile compiles one executable .work (or .kitwork.js) file through native imports,
 // validates and restores its bytecode artifact, then inspects the restored
 // immutable Program.
 func InspectFile(path string) (InspectionReport, error) {
@@ -33,8 +33,8 @@ func InspectFile(path string) (InspectionReport, error) {
 	if path == "" {
 		return InspectionReport{}, fmt.Errorf("inspect: source path is required")
 	}
-	if !strings.HasSuffix(strings.ToLower(path), ".kitwork.js") {
-		return InspectionReport{}, fmt.Errorf("inspect: source must end in .kitwork.js: %q", path)
+	if lower := strings.ToLower(path); !strings.HasSuffix(lower, ".work") && !strings.HasSuffix(lower, ".kitwork.js") {
+		return InspectionReport{}, fmt.Errorf("inspect: source must end in .work: %q", path)
 	}
 
 	appRoot := inspectAppRoot(path)

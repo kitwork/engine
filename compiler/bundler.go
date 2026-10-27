@@ -239,7 +239,9 @@ func (b *bundler) ensureModule(absPath string) (string, error) {
 		}
 		var files []string
 		for _, entry := range entries {
-			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".kitwork.js") {
+			// a .work file, as the error above says (27/10/2026: only .kitwork.js members were read, so
+			// import "./dir/" of .work files ran nothing), and a template site's .kitwork.js until it goes
+			if !entry.IsDir() && (strings.HasSuffix(entry.Name(), ".work") || strings.HasSuffix(entry.Name(), ".kitwork.js")) {
 				files = append(files, filepath.Join(absPath, entry.Name()))
 			}
 		}
@@ -520,7 +522,8 @@ func statModule(base string) (string, bool) {
 	if filepath.Ext(base) == "" {
 		candidates = append(candidates,
 			base+".kitwork.js", base+".js",
-			filepath.Join(base, "index.kitwork.js"), filepath.Join(base, "index.js"))
+			filepath.Join(base, "index.kitwork.js"), filepath.Join(base, "index.js"),
+			base+".work", filepath.Join(base, "index.work")) // 27/10/2026: an import without its .work
 	}
 	for _, c := range candidates {
 		if fi, err := os.Stat(c); err == nil {

@@ -477,8 +477,8 @@ func fingerprintModuleDirectory(directory string) (sourceFingerprint, error) {
 	hash := sha256.New()
 	for _, entry := range entries {
 		name := entry.Name()
-		if entry.IsDir() || len(name) < len(".kitwork.js") ||
-			name[len(name)-len(".kitwork.js"):] != ".kitwork.js" {
+		// the members a directory import runs (compiler/bundler.go): .work, and .kitwork.js until it goes
+		if entry.IsDir() || !(strings.HasSuffix(name, ".work") || strings.HasSuffix(name, ".kitwork.js")) {
 			continue
 		}
 		_, _ = io.WriteString(hash, name)

@@ -13,7 +13,7 @@ import (
 
 func TestSourceManifestDetectsContentWithoutTimestampChange(t *testing.T) {
 	root := t.TempDir()
-	filename := filepath.Join(root, "router.kitwork.js")
+	filename := filepath.Join(root, "router.work")
 	if err := os.WriteFile(filename, []byte("alpha"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func makeTestDirectoryLink(t *testing.T, target, link string) string {
 
 func TestSourceManifestDetectsRouterAndDirectoryAppearance(t *testing.T) {
 	root := t.TempDir()
-	missing := filepath.Join(root, "api", "router.kitwork.js")
+	missing := filepath.Join(root, "api", "router.work")
 	if err := os.MkdirAll(filepath.Dir(missing), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +266,7 @@ func TestSourceManifestDetectsRouterAndDirectoryAppearance(t *testing.T) {
 
 func TestSourceManifestDetectsModuleDirectoryMembership(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "first.kitwork.js"), []byte("const x = 1;"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "first.work"), []byte("const x = 1;"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -287,7 +287,7 @@ func TestSourceManifestDetectsModuleDirectoryMembership(t *testing.T) {
 	if changed, err := generation.Sources().Changed(); err != nil || changed {
 		t.Fatalf("non-module file changed module graph: changed=%v err=%v", changed, err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "second.kitwork.js"), []byte("const y = 2;"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "second.work"), []byte("const y = 2;"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if changed, err := generation.Sources().Changed(); err != nil || !changed {
