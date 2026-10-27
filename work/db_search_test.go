@@ -27,7 +27,8 @@ func TestSchemaTableSearchE2E(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	router := `import { router, internals } from "kitwork";` + "\n" +
+	router := `import * as router from "kitwork/router";` + "\n" +
+		`import { internals } from "kitwork";` + "\n" +
 		`const { sqlite, text } = internals;` + "\n" +
 		`const db = sqlite("shop.db", {` + "\n" +
 		`  products: {` + "\n" +
@@ -46,7 +47,7 @@ func TestSchemaTableSearchE2E(t *testing.T) {
 		`    conj:     db.products.search("cotton jean").limit(10).list(),` + "\n" + // AND: only p2 has both
 		`  });` + "\n" +
 		`});`
-	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, UIRouterFileName), []byte(router), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -141,14 +142,15 @@ func TestSchemaTableSearchSkipsOversizedLexicalNoise(t *testing.T) {
 		t.Fatal(err)
 	}
 	noise := strings.Repeat("x", 300)
-	router := `import { router, internals } from "kitwork";` + "\n" +
+	router := `import * as router from "kitwork/router";` + "\n" +
+		`import { internals } from "kitwork";` + "\n" +
 		`const { sqlite, text } = internals;` + "\n" +
 		`const db = sqlite("shop.db", { products: { id: text().key(), body: text().searchable() } });` + "\n" +
 		`router.get((ctx) => {` + "\n" +
 		`  db.products.create({ id: "p1", body: "useful ` + noise + ` searchable" });` + "\n" +
 		`  return ctx.json(db.products.search("useful").list());` + "\n" +
 		`});`
-	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, UIRouterFileName), []byte(router), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	tenant := NewTenant(tmp, "localhost")

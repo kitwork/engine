@@ -133,8 +133,20 @@ func TestNothingCarriesAVersionPinOrPrerender(t *testing.T) {
 }
 
 // Each file the page names is served, cached for good; an old hash still gets today's file, not kept.
+// The site loads every page whole (router.reload(true)), so the page names the kernel and its two
+// components and nothing of Drive.
 func TestKitFilesAreServedImmutable(t *testing.T) {
-	tenant := identitySite(t, templatePage(`<div data-kitwork-component="tabs"></div><div data-kitwork-component="dropdown"></div>`))
+	tenant := buildUISiteMode(t, map[string]string{
+		"localhost/router.work": "import * as router from \"kitwork/router\";\nrouter.reload(true);\n",
+		"localhost/view.ui":     `<view><content /></view>`,
+		"localhost/content.ui": `<content>
+  <tabs as="$files" alt="Files" flex="row"><button click="select('a')">a</button><button click="select('b')">b</button></tabs>
+  <box show="$files.selected == 'a'"><text>a</text></box>
+  <box show="$files.selected == 'b'"><text>b</text></box>
+  <dropdown><button click="toggle()" expanded="{{ open }}">Mở</button></dropdown>
+</content>`,
+	}, false)
+	t.Cleanup(tenant.Close)
 	out := homeOf(t, tenant)
 	paths := servedScript.FindAllStringSubmatch(out, -1)
 	if len(paths) != 3 {

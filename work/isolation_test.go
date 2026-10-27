@@ -33,7 +33,7 @@ func buildIsolationFixture(t *testing.T, routerScript string) (root string, tena
 	if err := os.MkdirAll(filepath.Join(appDir, "views"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(appDir, "router.kitwork.js"), []byte(routerScript), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(appDir, UIRouterFileName), []byte(routerScript), 0644); err != nil {
 		t.Fatal(err)
 	}
 	// A file the tenant IS allowed to read, so a case that returns nothing because the whole API
@@ -71,7 +71,8 @@ func serveIsolation(t *testing.T, tenant *Tenant, target string) *httptest.Respo
 // capability is one more branch instead of one more fixture. The paths of kitwork/file start in the app's
 // data (.database/files/) or, written app/…, in its code: the escapes are tried from both.
 const readSinkRouter = `
-import { router, collection } from "kitwork";
+import * as router from "kitwork/router";
+import { collection } from "kitwork";
 import * as file from "kitwork/file";
 
 router.get((ctx) => {
@@ -156,7 +157,7 @@ func TestAppIsolationReadSinksAllowOwnFile(t *testing.T) {
 // writeSinkRouter is every change of a handle of kitwork/file, at a path the request gives: none may land
 // in, or take from, another app.
 const writeSinkRouter = `
-import { router } from "kitwork";
+import * as router from "kitwork/router";
 import * as file from "kitwork/file";
 
 router.get((ctx) => {
@@ -209,7 +210,8 @@ func TestAppIsolationWriteSinksDenyEscape(t *testing.T) {
 // SQLite file by name (newDbProxy, sqliteRel), so the confinement is checked through the test-only module.
 
 const sqliteSinkRouter = `
-import { router, internals } from "kitwork";
+import * as router from "kitwork/router";
+import { internals } from "kitwork";
 const { sqlite, struct, int } = internals;
 
 router.get((ctx) => {
@@ -245,7 +247,7 @@ func TestAppIsolationSqliteNameCannotEscape(t *testing.T) {
 // ── URL-driven sinks: no tenant cooperation needed, so these are the most exposed ──────────────
 
 const staticOnlyRouter = `
-import { router } from "kitwork";
+import * as router from "kitwork/router";
 
 router.get((ctx) => {
     return ctx.text("home");
@@ -275,7 +277,7 @@ router.get((ctx) => {
 // sources and dot-files unreadable.
 
 // Sources and dot-files must never be served even from inside the tenant: .env holds secrets and
-// *.kitwork.* is the app's own source code.
+// router.work is the app's own source code.
 func TestAppIsolationStaticRefusesSourcesAndDotFiles(t *testing.T) {
 	root, tenant := buildIsolationFixture(t, staticOnlyRouter)
 
@@ -283,14 +285,23 @@ func TestAppIsolationStaticRefusesSourcesAndDotFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(appDir, ".env"), []byte("SECRET_KEY="+victimMarker), 0644); err != nil {
 		t.Fatal(err)
 	}
+	// A router.work site serves only its allowlist, which already keeps /.env out: the same file in
+	// assets/, which it serves, is what reaches the dot-file rule.
+	if err := os.MkdirAll(filepath.Join(appDir, "assets"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "assets", ".env"), []byte("SECRET_KEY="+victimMarker), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	for _, target := range []string{
 		"http://localhost/.env",
-		"http://localhost/router.kitwork.js",
+		"http://localhost/assets/.env",
+		"http://localhost/router.work",
 	} {
 		rec := serveIsolation(t, tenant, target)
 		body := rec.Body.String()
-		if strings.Contains(body, victimMarker) || strings.Contains(body, "import { router }") {
+		if strings.Contains(body, victimMarker) || strings.Contains(body, "import * as router") {
 			t.Fatalf("static serving exposed %q: %s", target, body)
 		}
 	}
@@ -298,11 +309,12 @@ func TestAppIsolationStaticRefusesSourcesAndDotFiles(t *testing.T) {
 
 // Kitwork UI sources (*.ui interface, *.work logic) carry no ".kitwork." in their names, so the
 // *.kitwork.* rule alone would serve them. They must be refused like any other source, in any
-// folder and in any letter case, while an ordinary file in the same folder still serves.
+// folder and in any letter case, while an ordinary file in the same folder still serves. A Kitwork UI
+// site serves files only from its allowlist, so they stand in its assets/, which it serves.
 func TestAppIsolationStaticRefusesUISources(t *testing.T) {
 	root, tenant := buildIsolationFixture(t, staticOnlyRouter)
 
-	appDir := filepath.Join(root, "acme", "localhost")
+	appDir := filepath.Join(root, "acme", "localhost", "assets")
 	sources := map[string]string{
 		"view.ui":              "<view>" + victimMarker + "</view>",
 		"router.work":          "// " + victimMarker,
@@ -322,16 +334,16 @@ func TestAppIsolationStaticRefusesUISources(t *testing.T) {
 	}
 
 	// Control: the static path is live, so a refusal below is the guard and not a broken route.
-	if body := serveIsolation(t, tenant, "http://localhost/shop/notes.txt").Body.String(); !strings.Contains(body, "PLAIN-FILE-SERVES") {
+	if body := serveIsolation(t, tenant, "http://localhost/assets/shop/notes.txt").Body.String(); !strings.Contains(body, "PLAIN-FILE-SERVES") {
 		t.Fatalf("control file was not served, the test cannot tell a refusal from a broken path: %q", body)
 	}
 
 	for _, target := range []string{
-		"http://localhost/view.ui",
-		"http://localhost/router.work",
-		"http://localhost/shop/content.ui",
-		"http://localhost/shop/cart.work",
-		"http://localhost/shop/Product-Card.UI",
+		"http://localhost/assets/view.ui",
+		"http://localhost/assets/router.work",
+		"http://localhost/assets/shop/content.ui",
+		"http://localhost/assets/shop/cart.work",
+		"http://localhost/assets/shop/Product-Card.UI",
 	} {
 		if body := serveIsolation(t, tenant, target).Body.String(); strings.Contains(body, victimMarker) {
 			t.Fatalf("static serving exposed UI source %q: %s", target, body)

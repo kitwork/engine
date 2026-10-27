@@ -58,8 +58,7 @@ func TestRouteHandlerDestructuringAFunctionIsAnError(t *testing.T) {
 // handler, a handler taking request and response apart.
 func TestDestructuringOutsideTheHandlerParameterStays(t *testing.T) {
 	tmp := writeSite(t, map[string]string{
-		"filesystem.kitwork": "",
-		"router.kitwork.js": "import * as router from \"kitwork/router\";\n" +
+		"router.work": "import * as router from \"kitwork/router\";\n" +
 			"const label = ({ json, data }) => json + \"/\" + data;\n" +
 			"router.get(({ request, response }) => {\n" +
 			"  const ids = [{ id: 1 }, { id: 2 }].map(({ id }) => id * 10);\n" +

@@ -31,7 +31,8 @@ func TestSchemaDbTenantEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	router := `import { router, internals } from "kitwork";` + "\n" +
+	router := `import * as router from "kitwork/router";` + "\n" +
+		`import { internals } from "kitwork";` + "\n" +
 		`const { sqlite, kitid, text, int, datetime } = internals;` + "\n" +
 		`const vouchers = {` + "\n" +
 		`  id: kitid().primaryKey(),` + "\n" +
@@ -53,7 +54,7 @@ func TestSchemaDbTenantEntry(t *testing.T) {
 		`    activeCount: active.length` + "\n" +
 		`  });` + "\n" +
 		`});`
-	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, UIRouterFileName), []byte(router), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -412,7 +413,8 @@ func TestSchemaColumnTypesRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	router := `import { router, internals } from "kitwork";` + "\n" +
+	router := `import * as router from "kitwork/router";` + "\n" +
+		`import { internals } from "kitwork";` + "\n" +
 		`const { sqlite, id, text, int, float, bool, choice, now, year, jsonb, array } = internals;` + "\n" +
 		`const items = {` + "\n" +
 		`  id: id(),` + "\n" +
@@ -440,7 +442,7 @@ func TestSchemaColumnTypesRoundTrip(t *testing.T) {
 		`    hasId: row.id != ""` + "\n" +
 		`  });` + "\n" +
 		`});`
-	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, UIRouterFileName), []byte(router), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -542,12 +544,13 @@ func TestMigrationPlansForPreviewsSchema(t *testing.T) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, internals } from "kitwork";` + "\n" +
+	router := `import * as router from "kitwork/router";` + "\n" +
+		`import { internals } from "kitwork";` + "\n" +
 		`const { sqlite, kitid, text } = internals;` + "\n" +
 		`const vouchers = { id: kitid().primaryKey(), code: text() };` + "\n" +
 		`const db = sqlite("app.db", { vouchers });` + "\n" +
 		`router.get((ctx) => ctx.json({ ok: 1 }));`
-	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, UIRouterFileName), []byte(router), 0644); err != nil {
 		t.Fatal(err)
 	}
 	tenant := NewTenant(tmp, "planhost")
@@ -657,7 +660,8 @@ func TestSchemaTableWritePathThroughVM(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	router := `import { router, internals } from "kitwork";
+	router := `import * as router from "kitwork/router";
+import { internals } from "kitwork";
 const { sqlite, kitid, text, int, datetime } = internals;
 const links = {
   id: kitid().primaryKey(),
@@ -683,7 +687,7 @@ router.get((ctx) => {
     total: db.links.count()
   });
 });`
-	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, UIRouterFileName), []byte(router), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -765,12 +769,13 @@ func TestSchemaMigrationFailureSurfacesToHandler(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	router := `import { router, internals } from "kitwork";
+	router := `import * as router from "kitwork/router";
+import { internals } from "kitwork";
 const { sqlite, kitid, text } = internals;
 const notes = { id: kitid().primaryKey(), body: text() };
 const db = sqlite("app.db", { notes: notes });
 router.get((ctx) => ctx.json({ n: db.notes.count() }));`
-	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, UIRouterFileName), []byte(router), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -804,7 +809,8 @@ func TestSchemaNowOnUpdateAutoTouch(t *testing.T) {
 	// The trick that makes this deterministic despite second-granularity timestamps: first PIN
 	// updated_at to the year 2000 explicitly (caller-provided value must win — touch skips it), then
 	// do a normal update that never mentions updated_at. Auto-touch must move it OFF 2000 to now().
-	router := `import { router, internals } from "kitwork";
+	router := `import * as router from "kitwork/router";
+import { internals } from "kitwork";
 const { sqlite, kitid, text, int, now } = internals;
 const posts = {
   id: kitid().primaryKey(),
@@ -830,7 +836,7 @@ router.get((ctx) => {
     views: touched.views
   });
 });`
-	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, UIRouterFileName), []byte(router), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -936,12 +942,13 @@ func TestSchemaColumnDeclarationOrder(t *testing.T) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, internals } from "kitwork";
+	router := `import * as router from "kitwork/router";
+import { internals } from "kitwork";
 const { sqlite, kitid, text } = internals;
 const things = { id: kitid().primaryKey(), zebra: text(), apple: text(), mango: text() };
 const db = sqlite("app.db", { things: things }, { token: "tok", access: "readwrite" });
 router.get((ctx) => { db.things.create({ zebra: "z", apple: "a", mango: "m" }); return ctx.json({ ok: true }); });`
-	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, UIRouterFileName), []byte(router), 0644); err != nil {
 		t.Fatal(err)
 	}
 	tenant := NewTenant(tmp, "localhost")
@@ -1140,7 +1147,8 @@ func TestSchemaIndexThroughVM(t *testing.T) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, internals } from "kitwork";
+	router := `import * as router from "kitwork/router";
+import { internals } from "kitwork";
 const { sqlite, kitid, text } = internals;
 const links = {
   id: kitid().primaryKey(),
@@ -1150,7 +1158,7 @@ const links = {
 };
 const db = sqlite("app.db", { links: links }, { token: "tok", access: "readwrite" });
 router.get((ctx) => { db.links.create({ slug: "s", code: "c", status: "active" }); return ctx.json({ ok: true }); });`
-	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, UIRouterFileName), []byte(router), 0644); err != nil {
 		t.Fatal(err)
 	}
 	tenant := NewTenant(tmp, "localhost")
@@ -1256,7 +1264,8 @@ func TestSchemaRefForeignKey(t *testing.T) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, internals } from "kitwork";
+	router := `import * as router from "kitwork/router";
+import { internals } from "kitwork";
 const { sqlite, id, text, ref } = internals;
 const users = { id: id(), email: text().notNull().unique() };
 const links = {
@@ -1270,7 +1279,7 @@ router.get((ctx) => {
   const ln = db.links.create({ user_id: u.id, code: "x" });
   return ctx.json({ uid: u.id, link_user: ln.user_id });
 });`
-	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, UIRouterFileName), []byte(router), 0644); err != nil {
 		t.Fatal(err)
 	}
 	tenant := NewTenant(tmp, "localhost")

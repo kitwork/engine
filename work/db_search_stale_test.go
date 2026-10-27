@@ -135,7 +135,8 @@ func TestSchemaTableSearchStaleOnSameLengthEdit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	router := `import { router, internals } from "kitwork";` + "\n" +
+	router := `import * as router from "kitwork/router";` + "\n" +
+		`import { internals } from "kitwork";` + "\n" +
 		`const { sqlite, text } = internals;` + "\n" +
 		`const db = sqlite("notes.db", { notes: { id: text().key(), body: text().searchable() } });` + "\n" +
 		`router.get((ctx) => {` + "\n" +
@@ -146,7 +147,7 @@ func TestSchemaTableSearchStaleOnSameLengthEdit(t *testing.T) {
 		`  const afterReact = db.notes.search("react").limit(5).list();` + "\n" +
 		`  return ctx.json({ before: before, afterVue: afterVue, afterReact: afterReact });` + "\n" +
 		`});`
-	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, UIRouterFileName), []byte(router), 0644); err != nil {
 		t.Fatal(err)
 	}
 

@@ -12,8 +12,9 @@ import (
 // a payment with no bank; generate() was ERROR. CONTROL: a payment with a bank and an amount validates
 // and generates its payload.
 func TestNapasFailsWithInvalidArgument(t *testing.T) {
-	serve := safeSite(t, map[string]string{
-		"": `import { router, napas } from "kitwork";
+	serve := safeRouterWorkSite(t, map[string]string{
+		"": `import * as router from "kitwork/router";
+import { napas } from "kitwork";
 router.get((ctx) => {
   const checked = safe(() => napas.validate());
   const made = safe(() => napas.generate());

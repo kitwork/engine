@@ -24,9 +24,9 @@ func TestServePinsAndReleasesSiteGeneration(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router } from "kitwork";
-router.get().handle((ctx) => ctx.text("ok"));`
-	if err := os.WriteFile(filepath.Join(dir, RouterFileName), []byte(router), 0o644); err != nil {
+	router := `import * as router from "kitwork/router";
+router.get((context) => context.text("ok"));`
+	if err := os.WriteFile(filepath.Join(dir, UIRouterFileName), []byte(router), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

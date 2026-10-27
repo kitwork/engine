@@ -22,17 +22,17 @@ func TestHandlerCallingANonFunctionFailsLikeEveryRuntimeError(t *testing.T) {
 	developing(t) // a 500 carries its diagnostic only while developing
 	root := t.TempDir()
 	routes := map[string]string{
-		"":        "import { router } from \"kitwork\";\nrouter.get((ctx) => ctx.json({ home: true }));\n",
-		"broken":  "import { router } from \"kitwork\";\nrouter.get((ctx) => {\n  const o = { x: 3 };\n  o.x(\"k\");\n  return ctx.json({ reached: true });\n});\n",
-		"control": "import { router } from \"kitwork\";\nrouter.get((ctx) => {\n  const o = { x: 3 };\n  fail(\"boom\");\n  return ctx.json({ reached: true });\n});\n",
-		"safe":    "import { router } from \"kitwork\";\nrouter.get((ctx) => {\n  const o = { x: 3 };\n  const r = safe(() => o.x(\"k\"));\n  return ctx.json({ value: r.value, error: r.error.message, code: r.error.code, at: r.error.at });\n});\n",
+		"":        "import * as router from \"kitwork/router\";\nrouter.get((ctx) => ctx.json({ home: true }));\n",
+		"broken":  "import * as router from \"kitwork/router\";\nrouter.get((ctx) => {\n  const o = { x: 3 };\n  o.x(\"k\");\n  return ctx.json({ reached: true });\n});\n",
+		"control": "import * as router from \"kitwork/router\";\nrouter.get((ctx) => {\n  const o = { x: 3 };\n  fail(\"boom\");\n  return ctx.json({ reached: true });\n});\n",
+		"safe":    "import * as router from \"kitwork/router\";\nrouter.get((ctx) => {\n  const o = { x: 3 };\n  const r = safe(() => o.x(\"k\"));\n  return ctx.json({ value: r.value, error: r.error.message, code: r.error.code, at: r.error.at });\n});\n",
 	}
 	for folder, source := range routes {
 		dir := filepath.Join(root, "test", "localhost", folder)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(source), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, UIRouterFileName), []byte(source), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -59,11 +59,11 @@ func TestHandlerCallingANonFunctionFailsLikeEveryRuntimeError(t *testing.T) {
 	}
 
 	code, body, record = serve("/broken")
-	const message = "router.kitwork.js:4:3: o.x không phải hàm (là số): không gọi được"
+	const message = "router.work:4:3: o.x không phải hàm (là số): không gọi được"
 	if code != http.StatusInternalServerError || !strings.HasPrefix(body, message) || strings.Contains(body, "reached") {
 		t.Fatalf("a handler calling a non-function = %d %q, want 500 with %q", code, body, message)
 	}
-	for _, field := range []string{"Kitwork runtime execution failed", "code=RUNTIME_ERROR", "cause_code=NOT_A_FUNCTION", "source=router.kitwork.js", "line=4", "column=3", "stage=handler"} {
+	for _, field := range []string{"Kitwork runtime execution failed", "code=RUNTIME_ERROR", "cause_code=NOT_A_FUNCTION", "source=router.work", "line=4", "column=3", "stage=handler"} {
 		if !strings.Contains(record, field) {
 			t.Fatalf("the site's log record lacks %q: %q", field, record)
 		}
@@ -81,8 +81,8 @@ func TestHandlerCallingANonFunctionFailsLikeEveryRuntimeError(t *testing.T) {
 	}
 	// the message says what failed, at says where (the place no longer leads the message)
 	const safeMessage = "o.x không phải hàm (là số): không gọi được"
-	if safe.Value != nil || safe.Error != safeMessage || safe.Code != "NOT_A_FUNCTION" || safe.At != "router.kitwork.js:4:24" {
-		t.Fatalf("the safe() handler got %+v, want %q, NOT_A_FUNCTION at router.kitwork.js:4:24", safe, safeMessage)
+	if safe.Value != nil || safe.Error != safeMessage || safe.Code != "NOT_A_FUNCTION" || safe.At != "router.work:4:24" {
+		t.Fatalf("the safe() handler got %+v, want %q, NOT_A_FUNCTION at router.work:4:24", safe, safeMessage)
 	}
 }
 
@@ -165,13 +165,13 @@ func TestHandlerThatStartedAViewKeepsItsPageOnANonFunctionCall(t *testing.T) {
 func TestCallingAnEnvValueIsNotAFunction(t *testing.T) {
 	developing(t) // a 500 carries its diagnostic only while developing
 	serve := notAFunctionSite(t, map[string]string{
-		".env":                     "API_KEY=sk-live-secret\nPORT=8080\n",
-		"broken/router.kitwork.js": "import { router, environment } from \"kitwork\";\nrouter.get((ctx) => {\n  environment.API_KEY();\n  return ctx.json({ reached: true });\n});\n",
-		"safe/router.kitwork.js":   "import { router, environment } from \"kitwork\";\nrouter.get((ctx) => {\n  const r = safe(() => environment.PORT());\n  return ctx.json({ error: r.error.message, at: r.error.at, code: r.error.code, port: environment.PORT, required: environment.require(\"PORT\") });\n});\n",
+		".env":               "API_KEY=sk-live-secret\nPORT=8080\n",
+		"broken/router.work": "import * as router from \"kitwork/router\";\nimport { environment } from \"kitwork\";\nrouter.get((ctx) => {\n  environment.API_KEY();\n  return ctx.json({ reached: true });\n});\n",
+		"safe/router.work":   "import * as router from \"kitwork/router\";\nimport { environment } from \"kitwork\";\nrouter.get((ctx) => {\n  const r = safe(() => environment.PORT());\n  return ctx.json({ error: r.error.message, at: r.error.at, code: r.error.code, port: environment.PORT, required: environment.require(\"PORT\") });\n});\n",
 	})
 
 	code, body, record := serve("/broken")
-	const message = "router.kitwork.js:3:3: environment.API_KEY không phải hàm (là chuỗi): không gọi được"
+	const message = "router.work:4:3: environment.API_KEY không phải hàm (là chuỗi): không gọi được"
 	if code != http.StatusInternalServerError || !strings.HasPrefix(body, message) || strings.Contains(body, "reached") {
 		t.Fatalf("environment.API_KEY() = %d %q, want 500 with %q", code, body, message)
 	}
@@ -192,7 +192,7 @@ func TestCallingAnEnvValueIsNotAFunction(t *testing.T) {
 	}
 	// a number is not shown either (14/10/2026): env.PIN() would print the PIN
 	if safe.Code != "NOT_A_FUNCTION" || safe.Error != "environment.PORT không phải hàm (là số): không gọi được" ||
-		safe.At != "router.kitwork.js:3:24" || safe.Port != 8080 || safe.Required != 8080 {
+		safe.At != "router.work:4:24" || safe.Port != 8080 || safe.Required != 8080 {
 		t.Fatalf("safe(() => environment.PORT()) and the control environment.require(\"PORT\") = %+v", safe)
 	}
 }

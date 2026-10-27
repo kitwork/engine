@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -32,13 +33,13 @@ func TestNativeInMemoryServe(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("router.kitwork.js", `import { router } from "kitwork";`)
-	write("index.kitwork.html", `<html><head><title>native</title></head><body>{{ @page }}</body></html>`)
-	write("page.kitwork.html", `<main data-kitwork-scope="open: false"><button data-kitwork-event="click: open = !open">menu</button></main>`)
-	write("notfound.kitwork.html", `<main>404</main>`)
+	write("router.work", `import * as router from "kitwork/router";`+"\n"+`router.meta({ title: "native" });`)
+	write("view.ui", `<view><content /></view>`)
+	write("content.ui", `<content><dropdown><button click="open = !open">menu</button></dropdown></content>`)
+	write("notfound.ui", `<content><text>404</text></content>`)
 	write("assets/logo.svg", `<svg xmlns="http://www.w3.org/2000/svg"/>`)
-	write("api/router.kitwork.js",
-		`import { router } from "kitwork";`+"\n"+`router.get((ctx) => ctx.json({ native: true }));`)
+	write("api/router.work",
+		`import * as router from "kitwork/router";`+"\n"+`router.get((context) => context.json({ native: true }));`)
 
 	tenant := NewTenant(tmp, "app.local")
 	if err := tenant.Run(); err != nil {
@@ -67,11 +68,11 @@ func TestNativeInMemoryServe(t *testing.T) {
 		return resp.StatusCode, resp.Header.Get("Content-Type"), body
 	}
 
-	// The client kernel is a file named by its hash, so its path is read off the page.
+	// The client kernel is a file named by its hash, so its path is read off the page (production
+	// drops the quotes around src).
 	kernel := ""
-	if home := inMemory("/").Body.String(); strings.Contains(home, `src="/_kitwork/kernel.`) {
-		rest := home[strings.Index(home, `src="/_kitwork/kernel.`)+len(`src="`):]
-		kernel = rest[:strings.Index(rest, `"`)]
+	if found := regexp.MustCompile(`src="?(/_kitwork/kernel\.[0-9a-f]+\.js)`).FindStringSubmatch(inMemory("/").Body.String()); found != nil {
+		kernel = found[1]
 	}
 	if kernel == "" {
 		t.Fatal("the home page carries no kernel file")

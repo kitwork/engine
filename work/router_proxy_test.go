@@ -51,15 +51,15 @@ func TestTreeProxyPersist(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("router.kitwork.js", `import { router } from "kitwork";`)
-	write("index.kitwork.html", `<html><body>{{ @page }}</body></html>`)
-	write("page.kitwork.html", `<main>home</main>`)
-	write("notfound.kitwork.html", `<main>nothing here</main>`)
+	write("router.work", `import * as router from "kitwork/router";`)
+	write("view.ui", `<view><content /></view>`)
+	write("content.ui", `<content><text>home</text></content>`)
+	write("notfound.ui", `<content><text>nothing here</text></content>`)
 	// Fixed upstream + disk cache.
-	write("logo/router.kitwork.js", `import { router } from "kitwork";`+"\n"+
+	write("logo/router.work", `import * as router from "kitwork/router";`+"\n"+
 		`router.proxy("`+upstream.URL+`/logo.png").persist("1h");`)
 	// Handler-computed upstream (no cache, so every hit re-resolves).
-	write("shot/router.kitwork.js", `import { router } from "kitwork";`+"\n"+
+	write("shot/router.work", `import * as router from "kitwork/router";`+"\n"+
 		`router.proxy(() => "`+upstream.URL+`/dynamic");`)
 
 	tenant := NewTenant(tmp, "localhost")

@@ -18,7 +18,7 @@ import (
 func TestBackgroundFileThatFailsAtRunTimeSaysSo(t *testing.T) {
 	tmp := t.TempDir()
 	files := map[string]string{
-		"localhost/router.kitwork.js": `import { router } from "kitwork"; router.get((ctx) => ctx.text("ok"));`,
+		"localhost/router.work":       "import * as router from \"kitwork/router\";\nrouter.get((context) => context.text(\"ok\"));\n",
 		".schedule/broken.work":       "import * as schedule from \"kitwork/schedule\";\nconst o = { x: 3 };\no.x();\nexport const broken = schedule.every(\"1h\").run((context) => 1);\n",
 		".schedule/control.work":      "import * as schedule from \"kitwork/schedule\";\nfail(\"boom\");\nexport const control = schedule.every(\"1h\").run((context) => 1);\n",
 		".schedule/good.work":         "import * as schedule from \"kitwork/schedule\";\nexport const good = schedule.every(\"1h\").run((context) => 1);\n",

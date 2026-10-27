@@ -110,10 +110,10 @@ func TestRouterAppImportOfAMissingFileFailsTheBoot(t *testing.T) {
 func TestBackgroundLoadersImportFromTheAppRoot(t *testing.T) {
 	root := t.TempDir()
 	writeAppTree(t, root, map[string]string{
-		"acme/.shared/plan.work":           "export const every = \"1h\";\nexport const attempts = 4;",
-		"acme/.schedule/daily.work":        "import * as schedule from \"kitwork/schedule\";\nimport { every } from \"app/.shared/plan.work\";\nexport const daily = schedule.every(every).run((context) => {});",
-		"acme/.shared/queue/mail.work":     "import * as queue from \"kitwork/queue\";\nimport { attempts } from \"app/.shared/plan.work\";\nexport const mail = queue.job((context) => {}).retry(attempts);",
-		"acme/localhost/router.kitwork.js": `import { router } from "kitwork"; router.get((ctx) => ctx.text("ok"));`,
+		"acme/.shared/plan.work":       "export const every = \"1h\";\nexport const attempts = 4;",
+		"acme/.schedule/daily.work":    "import * as schedule from \"kitwork/schedule\";\nimport { every } from \"app/.shared/plan.work\";\nexport const daily = schedule.every(every).run((context) => {});",
+		"acme/.shared/queue/mail.work": "import * as queue from \"kitwork/queue\";\nimport { attempts } from \"app/.shared/plan.work\";\nexport const mail = queue.job((context) => {}).retry(attempts);",
+		"acme/localhost/router.work":   "import * as router from \"kitwork/router\";\nrouter.get((context) => context.text(\"ok\"));",
 		// another app with the same names: never reached from acme
 		"other/.shared/plan.work": "export const every = \"2h\";\nexport const attempts = 9;",
 	})

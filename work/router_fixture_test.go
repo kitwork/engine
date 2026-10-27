@@ -22,7 +22,8 @@ func TestRealAppDonateRouteFixture(t *testing.T) {
 	}
 
 	routerScript := `
-import { router, qrcode } from "kitwork";
+import * as router from "kitwork/router";
+import { qrcode } from "kitwork";
 
 router.get((ctx) => {
     const payment = {
@@ -38,7 +39,7 @@ router.get((ctx) => {
     return ctx.html(svg);
 });
 `
-	if err := os.WriteFile(filepath.Join(donateDir, "router.kitwork.js"), []byte(routerScript), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(donateDir, UIRouterFileName), []byte(routerScript), 0644); err != nil {
 		t.Fatal(err)
 	}
 

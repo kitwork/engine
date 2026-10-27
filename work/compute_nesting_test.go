@@ -22,8 +22,8 @@ import (
 // same route with room to finish, which proves the fixture and makes the failure the budget's.
 
 const nestingPreamble = `
-import { router, internals } from "kitwork";
-
+import * as router from "kitwork/router";
+import { internals } from "kitwork";
 // the query builder over a SQLite file of the site, and a KitDB of it with a transaction: the engine's
 // storage, through the test-only module (storage_internals_test.go)
 const file = internals.file("app.db");
@@ -50,7 +50,7 @@ func newNestingTenant(t *testing.T, routes string, maxEnergy uint64) *Tenant {
 		t.Fatal(err)
 	}
 	source := nestingPreamble + routes
-	if err := os.WriteFile(filepath.Join(routeDir, "router.kitwork.js"), []byte(source), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(routeDir, UIRouterFileName), []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	tenant := NewTenant(root, "localhost")

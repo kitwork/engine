@@ -10,8 +10,9 @@ import (
 // read, as the closed set says of a token: it gave {}. jwt.verify stays data, null for a token it
 // cannot trust. CONTROL: a token jwt.sign made decodes to its claims.
 func TestJWTDecodeOfANonTokenIsInvalidInput(t *testing.T) {
-	serve := safeSite(t, map[string]string{
-		"": `import { router, jwt } from "kitwork";
+	serve := safeRouterWorkSite(t, map[string]string{
+		"": `import * as router from "kitwork/router";
+import { jwt } from "kitwork";
 router.get((ctx) => {
   const broken = safe(() => jwt.decode("%%%"));
   const parts = safe(() => jwt.decode("a.b"));

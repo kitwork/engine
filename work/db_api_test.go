@@ -21,15 +21,16 @@ func TestDataAPIQueryOverHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The db is DECLARED served in JS (token + access) — that is what turns the endpoint on, not a .env.
-	router := `import { router, internals } from "kitwork";
+	router := `import * as router from "kitwork/router";
+import { internals } from "kitwork";
 const { sqlite, kitid, text, int } = internals;
 const links = { id: kitid().primaryKey(), code: text().notNull().unique(), clicks: int().default(0) };
 const db = sqlite("kiturl.db", { links: links }, { token: "secret-token-123", access: "readwrite" });
-router.get((ctx) => {
+router.get((context) => {
   db.links.create({ code: "kitwork", clicks: 3 });
-  return ctx.json({ ok: true });
+  return context.json({ ok: true });
 });`
-	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, UIRouterFileName), []byte(router), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -99,9 +100,9 @@ func TestDataAPIDisabledWithoutToken(t *testing.T) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router } from "kitwork";
-router.get((ctx) => ctx.json({ ok: true }));`
-	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0644); err != nil {
+	router := `import * as router from "kitwork/router";
+router.get((context) => context.json({ ok: true }));`
+	if err := os.WriteFile(filepath.Join(dir, UIRouterFileName), []byte(router), 0644); err != nil {
 		t.Fatal(err)
 	}
 	tenant := NewTenant(tmp, "localhost")

@@ -12,18 +12,17 @@ import (
 
 // End to end: a site that sends `script-src 'self'` still gets its anti-flash pre-paint, because
 // the engine declares the script it injected. Nothing else in the policy moves. The pre-paint follows
-// the declared darkMode, not the markup (the page called kit.theme.toggle() until kit.theme went,
-// 26/10/2026).
+// the site's declared dark look (a { light, dark } pair of router.colors), not the markup (the page called
+// kit.theme.toggle() until kit.theme went, 26/10/2026).
 func TestServedPageCarriesThePrepaintHashInItsOwnPolicy(t *testing.T) {
 	const policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
-	tenant := identitySite(t, map[string]string{
-		"localhost/filesystem.kitwork": "",
-		"localhost/index.kitwork.html": `<!doctype html><html><head></head><body>{{ @page }}</body></html>`,
-		"localhost/page.kitwork.html":  `<p>a page of a site that declares its dark</p>`,
-		"localhost/router.kitwork.js": `import { router } from "kitwork";` + "\n" +
-			`router.css({ darkMode: ["class"] });` + "\n" +
-			`router.guard((ctx, response) => { response.header("Content-Security-Policy", "` + policy + `"); });`,
-	})
+	tenant := buildUISiteMode(t, map[string]string{
+		"localhost/router.work": `import * as router from "kitwork/router";` + "\n" +
+			`router.colors({ canvas: { light: "#f6f3ee", dark: "#141110" } });` + "\n" +
+			`router.guard((context) => { context.header("Content-Security-Policy", "` + policy + `"); });` + "\n",
+		"localhost/view.ui":    `<view><content /></view>`,
+		"localhost/content.ui": `<content><text>a page of a site that declares its dark</text></content>`,
+	}, false)
 
 	recorder := httptest.NewRecorder()
 	tenant.Serve(recorder, httptest.NewRequest(http.MethodGet, "http://localhost/", nil))
@@ -32,7 +31,7 @@ func TestServedPageCarriesThePrepaintHashInItsOwnPolicy(t *testing.T) {
 	}
 	body := recorder.Body.String()
 	if !strings.Contains(body, `<script data-kitwork-generated="appearance">`) {
-		t.Fatal("the page should carry the pre-paint: darkMode is declared")
+		t.Fatal("the page should carry the pre-paint: a dark look is declared")
 	}
 	sent := recorder.Result().Header.Get("Content-Security-Policy")
 	if !strings.Contains(sent, theme.PrepaintHash()) {
@@ -46,13 +45,12 @@ func TestServedPageCarriesThePrepaintHashInItsOwnPolicy(t *testing.T) {
 // A page with no pre-paint keeps the policy the site wrote, byte for byte.
 func TestServedPageWithoutPrepaintKeepsItsPolicy(t *testing.T) {
 	const policy = "default-src 'self'; script-src 'self'"
-	tenant := identitySite(t, map[string]string{
-		"localhost/filesystem.kitwork": "",
-		"localhost/index.kitwork.html": `<!doctype html><html><head></head><body>{{ @page }}</body></html>`,
-		"localhost/page.kitwork.html":  `<p>no theme here</p>`,
-		"localhost/router.kitwork.js": `import { router } from "kitwork";` + "\n" +
-			`router.guard((ctx, response) => { response.header("Content-Security-Policy", "` + policy + `"); });`,
-	})
+	tenant := buildUISiteMode(t, map[string]string{
+		"localhost/router.work": `import * as router from "kitwork/router";` + "\n" +
+			`router.guard((context) => { context.header("Content-Security-Policy", "` + policy + `"); });` + "\n",
+		"localhost/view.ui":    `<view><content /></view>`,
+		"localhost/content.ui": `<content><text>no theme here</text></content>`,
+	}, false)
 	recorder := httptest.NewRecorder()
 	tenant.Serve(recorder, httptest.NewRequest(http.MethodGet, "http://localhost/", nil))
 	if sent := recorder.Result().Header.Get("Content-Security-Policy"); sent != policy {

@@ -33,12 +33,13 @@ func TestTreeOutboundFetchCache(t *testing.T) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, http } from "kitwork";` + "\n" +
+	router := `import * as router from "kitwork/router";` + "\n" +
+		`import * as http from "kitwork/http";` + "\n" +
 		`router.get((ctx) => {` + "\n" +
 		`    const res = http.get("` + upstream.URL + `").cache("1m").persist("1m").send();` + "\n" +
 		`    return ctx.json({ body: res.text(), cached: res.cached });` + "\n" +
 		`});`
-	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, UIRouterFileName), []byte(router), 0644); err != nil {
 		t.Fatal(err)
 	}
 

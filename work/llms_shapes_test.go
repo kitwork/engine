@@ -19,10 +19,7 @@ func TestLlmsArgumentShapes(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			files := map[string]string{
-				"filesystem.kitwork": "",
-				"index.kitwork.html": shorthandShell,
-				"page.kitwork.html":  `<main>home</main>`,
-				"router.kitwork.js":  `import { router } from "kitwork";` + "\n" + c.call,
+				"router.work": `import * as router from "kitwork/router";` + "\n" + c.call,
 			}
 			if c.onDisk {
 				files["llms.txt"] = "SERVED FROM DISK"
@@ -39,10 +36,7 @@ func TestLlmsArgumentShapes(t *testing.T) {
 // takes the same shapes.
 func TestLlmsFullPublishesTheCompanionPath(t *testing.T) {
 	get := scaffold(t, map[string]string{
-		"filesystem.kitwork": "",
-		"index.kitwork.html": shorthandShell,
-		"page.kitwork.html":  `<main>home</main>`,
-		"router.kitwork.js": `import { router } from "kitwork";` + "\n" +
+		"router.work": `import * as router from "kitwork/router";` + "\n" +
 			`router.llms({ title: "Short" });` + "\n" +
 			`router.llmsFull({ title: "Full" });`,
 	})

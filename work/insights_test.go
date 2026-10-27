@@ -23,8 +23,8 @@ func TestInsightsSearchGaps(t *testing.T) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	os.WriteFile(filepath.Join(dir, "router.kitwork.js"),
-		[]byte(`import { router } from "kitwork"; router.get((ctx) => ctx.text("ok"));`), 0644)
+	os.WriteFile(filepath.Join(dir, UIRouterFileName),
+		[]byte("import * as router from \"kitwork/router\";\nrouter.get((ctx) => ctx.text(\"ok\"));"), 0644)
 
 	tenant := NewTenant(tmp, "localhost")
 	if err := tenant.Run(); err != nil {

@@ -65,7 +65,7 @@ func TestResolveIdentityForLayoutSeparatesSiteAndTenantAuthority(t *testing.T) {
 		}
 	}
 
-	marker := filepath.Join(root, "app-id", domain, RouterFileName)
+	marker := filepath.Join(root, "app-id", domain, UIRouterFileName)
 	if err := os.MkdirAll(filepath.Dir(marker), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestResolveIdentityForLayoutRejectsDuplicateDomainOwners(t *testing.T) {
 	database.System = nil
 	t.Cleanup(func() { database.System = previousSystem })
 	for _, identity := range []string{"first", "second"} {
-		marker := filepath.Join(root, identity, "example.com", RouterFileName)
+		marker := filepath.Join(root, identity, "example.com", UIRouterFileName)
 		if err := os.MkdirAll(filepath.Dir(marker), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -225,7 +225,7 @@ func writeTenantLayoutMarker(t testing.TB, directory string) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(directory, RouterFileName), []byte("// root"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(directory, UIRouterFileName), []byte("// root"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

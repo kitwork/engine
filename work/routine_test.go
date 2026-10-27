@@ -922,9 +922,9 @@ func TestRoutineRefusedAtTheTopOfAJobOrAScheduleFile(t *testing.T) {
 	})
 	tmp := t.TempDir()
 	files := map[string]string{
-		"localhost/router.kitwork.js": `import { router } from "kitwork"; router.get((ctx) => ctx.text("ok"));`,
-		".shared/queue/later.work":    "import * as queue from \"kitwork/queue\";\nimport * as routine from \"kitwork/routine\";\nroutine.go(() => testNotify(\"ran\"));\nexport const later = queue.job((context) => 1);\n",
-		".schedule/hourly.work":       "import * as schedule from \"kitwork/schedule\";\nimport * as routine from \"kitwork/routine\";\nroutine.go(() => testNotify(\"ran\"));\nexport const hourly = schedule.every(\"1h\").run((context) => 1);\n",
+		"localhost/router.work":    "import * as router from \"kitwork/router\";\nrouter.get((context) => context.text(\"ok\"));\n",
+		".shared/queue/later.work": "import * as queue from \"kitwork/queue\";\nimport * as routine from \"kitwork/routine\";\nroutine.go(() => testNotify(\"ran\"));\nexport const later = queue.job((context) => 1);\n",
+		".schedule/hourly.work":    "import * as schedule from \"kitwork/schedule\";\nimport * as routine from \"kitwork/routine\";\nroutine.go(() => testNotify(\"ran\"));\nexport const hourly = schedule.every(\"1h\").run((context) => 1);\n",
 	}
 	for path, content := range files {
 		full := filepath.Join(tmp, "acme", filepath.FromSlash(path))

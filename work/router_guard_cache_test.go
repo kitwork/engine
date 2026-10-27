@@ -44,14 +44,13 @@ func serveGet(tn *Tenant, path string, header map[string]string) *httptest.Respo
 // cache, and the next request the guard refuses is refused, not handed the cached bytes (19/10/2026:
 // the cache was read first, so one allowed request opened the route to everyone until it expired).
 func TestMethodGuardRunsBeforeResponseCache(t *testing.T) {
-	const allowed = `(ctx) => ctx.header("X-Pass") == "yes"`
+	const allowed = `(context) => context.header("X-Pass") == "yes"`
 	tmp := writeSite(t, map[string]string{
-		"filesystem.kitwork": "",
-		"router.kitwork.js":  `import { router } from "kitwork";`,
-		"ram/router.kitwork.js": `import { router } from "kitwork";` + "\n" +
-			`router.get((ctx) => ctx.text("secret")).cache("1h").guard(` + allowed + `);`,
-		"disk/router.kitwork.js": `import { router } from "kitwork";` + "\n" +
-			`router.get((ctx) => ctx.text("secret")).persist("1h").guard(` + allowed + `);`,
+		"router.work": `import * as router from "kitwork/router";`,
+		"ram/router.work": `import * as router from "kitwork/router";` + "\n" +
+			`router.get((context) => context.text("secret")).cache("1h").guard(` + allowed + `);`,
+		"disk/router.work": `import * as router from "kitwork/router";` + "\n" +
+			`router.get((context) => context.text("secret")).persist("1h").guard(` + allowed + `);`,
 	})
 	tn := NewTenant(tmp, "localhost")
 	if err := tn.Run(); err != nil {

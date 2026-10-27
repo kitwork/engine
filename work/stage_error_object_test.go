@@ -3,6 +3,7 @@ package work
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -75,12 +76,24 @@ func TestStageFailureGivesTheErrorHandlerItsObject(t *testing.T) {
 	}
 }
 
-// CONTROL for the status: a proxy that failed answers 502 when no .error() handler answers.
+// CONTROL for the status: a proxy that failed answers 502 (a router.work has no .error() hook to answer it),
+// in production.
 func TestStageFailureStillAnswersBadGateway(t *testing.T) {
-	ask, _ := failureSite(t, false, map[string]string{
-		"upstream": "import { router } from \"kitwork\";\nrouter.proxy(\"http://127.0.0.1:1/private?api_key=SECRET123\");\n",
-	})
-	answer := ask("/upstream", "", "req-upstream")
+	saved := AllowLocal
+	AllowLocal = false
+	t.Cleanup(func() { AllowLocal = saved })
+	tenant := NewTenant(writeSite(t, map[string]string{
+		"router.work":          `import * as router from "kitwork/router";`,
+		"upstream/router.work": "import * as router from \"kitwork/router\";\nrouter.proxy(\"http://127.0.0.1:1/private?api_key=SECRET123\");\n",
+	}), "localhost")
+	if err := tenant.Run(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(tenant.Close)
+	request := httptest.NewRequest(http.MethodGet, "http://localhost/upstream", nil)
+	request.Header.Set("X-Request-ID", "req-upstream")
+	answer := httptest.NewRecorder()
+	tenant.Serve(answer, request)
 	if answer.Code != http.StatusBadGateway || strings.Contains(answer.Body.String(), "SECRET123") {
 		t.Fatalf("answered %d %q, want 502 with the request id only", answer.Code, answer.Body.String())
 	}

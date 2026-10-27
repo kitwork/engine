@@ -15,14 +15,14 @@ import (
 // died of "Stack overflow" in ~16ms — before the 20ms cancel() even fired — so it passed whether or
 // not cancellation worked at all. STABILITY.md §5: a test must prove the mechanism it names.
 const cancelFixtureRouter = `
-import { router } from "kitwork";
+import * as router from "kitwork/router";
 
-router.get((ctx) => {
+router.get((context) => {
     let total = 0;
     for (let i = 0; i < 500; i++) {
         total = total + i;
     }
-    return ctx.text("done:" + total);
+    return context.text("done:" + total);
 });
 `
 
@@ -33,7 +33,7 @@ func newCancelFixtureTenant(t *testing.T) *Tenant {
 	if err := os.MkdirAll(routeDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(routeDir, "router.kitwork.js"), []byte(cancelFixtureRouter), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(routeDir, UIRouterFileName), []byte(cancelFixtureRouter), 0644); err != nil {
 		t.Fatal(err)
 	}
 	tenant := NewTenant(tmp, "localhost")

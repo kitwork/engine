@@ -47,10 +47,7 @@ const shorthandShell = `<!doctype html><body>{{ @page }}</body>`
 // exactly what the no-argument form generates.
 func TestRobotsBooleanGeneratesTheDefaultDocument(t *testing.T) {
 	get := scaffold(t, map[string]string{
-		"filesystem.kitwork":  "",
-		"index.kitwork.html":  shorthandShell,
-		"page.kitwork.html":   `<main>home</main>`,
-		"router.kitwork.js":   "import { router } from \"kitwork\";\nrouter.robots(true);",
+		"router.work": "import * as router from \"kitwork/router\";\nrouter.robots(true);",
 	})
 
 	rec := get("/robots.txt")
@@ -67,11 +64,7 @@ func TestRobotsBooleanGeneratesTheDefaultDocument(t *testing.T) {
 // than a 404: an empty robots.txt still overrides a crawler's defaults.
 func TestRobotsFalseDeclaresNothing(t *testing.T) {
 	get := scaffold(t, map[string]string{
-		"filesystem.kitwork":   "",
-		"index.kitwork.html":   shorthandShell,
-		"page.kitwork.html":    `<main>home</main>`,
-		"notfound.kitwork.html": `<main>404</main>`,
-		"router.kitwork.js":    "import { router } from \"kitwork\";\nrouter.robots(false);",
+		"router.work": "import * as router from \"kitwork/router\";\nrouter.robots(false);",
 	})
 
 	if rec := get("/robots.txt"); rec.Code == 200 && strings.Contains(rec.Body.String(), "User-agent") {
@@ -99,11 +92,8 @@ func TestAssetsBooleanMountsTheConventionalFolder(t *testing.T) {
 // drops the underscore, so it must serve at the clean /assets URL.
 func TestAssetsBooleanMountsThePrivateFolderAtTheCleanURL(t *testing.T) {
 	get := scaffold(t, map[string]string{
-		"filesystem.kitwork": "",
-		"index.kitwork.html": shorthandShell,
-		"page.kitwork.html":  `<main>home</main>`,
-		"_assets/note.txt":   "hello from private assets",
-		"router.kitwork.js":  "import { router } from \"kitwork\";\nrouter.assets(true);",
+		"_assets/note.txt": "hello from private assets",
+		"router.work":      "import * as router from \"kitwork/router\";\nrouter.assets(true);",
 	})
 
 	rec := get("/assets/note.txt")
@@ -116,11 +106,7 @@ func TestAssetsBooleanMountsThePrivateFolderAtTheCleanURL(t *testing.T) {
 // site gains a route that can only ever 404.
 func TestAssetsBooleanIgnoresAMissingFolder(t *testing.T) {
 	get := scaffold(t, map[string]string{
-		"filesystem.kitwork":    "",
-		"index.kitwork.html":    shorthandShell,
-		"page.kitwork.html":     `<main>home</main>`,
-		"notfound.kitwork.html": `<main>404</main>`,
-		"router.kitwork.js":     "import { router } from \"kitwork\";\nrouter.assets(true);",
+		"router.work": "import * as router from \"kitwork/router\";\nrouter.assets(true);",
 	})
 
 	if rec := get("/assets/note.txt"); rec.Code == 200 {

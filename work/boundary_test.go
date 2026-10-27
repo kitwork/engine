@@ -18,7 +18,7 @@ import (
 //	<root>/victim-corp/…       ← another app entirely
 //
 // so a test can tell apart the two things that look alike lexically: leaving the DOMAIN folder
-// (legitimate — _core/ and siblings live there) and leaving the APP (never legitimate).
+// (legitimate — .shared/ and siblings live there) and leaving the APP (never legitimate).
 func buildBoundaryFixture(t *testing.T, routerScript string) (root string, tenant *Tenant) {
 	t.Helper()
 	root = t.TempDir()
@@ -42,7 +42,7 @@ func buildBoundaryFixture(t *testing.T, routerScript string) (root string, tenan
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(filepath.Join(appDir, "router.kitwork.js"), []byte(routerScript), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(appDir, UIRouterFileName), []byte(routerScript), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -54,11 +54,11 @@ func buildBoundaryFixture(t *testing.T, routerScript string) (root string, tenan
 }
 
 const boundaryFileRouter = `
-import { router } from "kitwork";
+import * as router from "kitwork/router";
 import * as file from "kitwork/file";
 
-router.get((ctx) => {
-    return ctx.file(file.open(ctx.query("f")));
+router.get((context) => {
+    return context.file(file.open(context.query("f")));
 });
 `
 
@@ -126,32 +126,37 @@ func TestContextFileRejectsCrossAppTraversal(t *testing.T) {
 
 func TestStaticAndContextFileRejectCrossAppSymlink(t *testing.T) {
 	root, tenant := buildBoundaryFixture(t, boundaryFileRouter)
-	link := filepath.Join(root, "acme", "localhost", "external")
+	// a Kitwork UI site serves files only from its allowlist, so the link stands in assets/, which it serves
+	assets := filepath.Join(root, "acme", "localhost", "assets")
+	if err := os.MkdirAll(assets, 0755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(assets, "external")
 	target := filepath.Join(root, "victim-corp", "victim.com")
 	if err := os.Symlink(target, link); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
 
-	staticReq := httptest.NewRequest(http.MethodGet, "http://localhost/external/secret.txt", nil)
+	staticReq := httptest.NewRequest(http.MethodGet, "http://localhost/assets/external/secret.txt", nil)
 	staticRec := httptest.NewRecorder()
 	tenant.Serve(staticRec, staticReq)
 	if strings.Contains(staticRec.Body.String(), "TOP-SECRET-CROSS-TENANT") {
 		t.Fatal("zero-VM static serving followed a symlink outside the site")
 	}
 
-	contextRec := getBoundary(t, tenant, "app/localhost/external/secret.txt")
+	contextRec := getBoundary(t, tenant, "app/localhost/assets/external/secret.txt")
 	if strings.Contains(contextRec.Body.String(), "TOP-SECRET-CROSS-TENANT") {
 		t.Fatal("ctx.file followed a symlink outside the app")
 	}
 }
 
 const boundaryUploadRouter = `
-import { router } from "kitwork";
+import * as router from "kitwork/router";
 import * as file from "kitwork/file";
 
-router.post((ctx) => {
-    const saved = file.open("uploads/").segment(ctx.query("name")).write(ctx.request.file("doc"));
-    return ctx.json({ saved: saved.path });
+router.post((context) => {
+    const saved = file.open("uploads/").segment(context.query("name")).write(context.request.file("doc"));
+    return context.json({ saved: saved.path });
 });
 `
 
@@ -188,7 +193,7 @@ func TestUploadWritesIntoTheAppsData(t *testing.T) {
 }
 
 // An escaping upload destination is a WRITE primitive: dropping a file onto another app's
-// router.kitwork.js would hand it execution. segment() takes one name, so a name from the request never
+// router.work would hand it execution. segment() takes one name, so a name from the request never
 // climbs, and the client's file name is never a path. Nothing may be created outside the app.
 func TestUploadRefusesEscapingName(t *testing.T) {
 	root, tenant := buildBoundaryFixture(t, boundaryUploadRouter)

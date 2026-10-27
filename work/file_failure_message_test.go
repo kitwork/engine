@@ -13,8 +13,8 @@ import (
 // is not there NOT_FOUND, the app's .env through app/ DENIED; none carries the server's absolute paths.
 // CONTROL: a file of the data zone is written and read back.
 func TestFileFailureNamesThePathAsWritten(t *testing.T) {
-	serve := safeSite(t, map[string]string{
-		"": `import { router } from "kitwork";
+	serve := safeRouterWorkSite(t, map[string]string{
+		"": `import * as router from "kitwork/router";
 import * as file from "kitwork/file";
 router.get((ctx) => {
   const outside = safe(() => file.text("../../../../etc/passwd"));

@@ -25,14 +25,15 @@ func TestRealAppHTTPContractFixture(t *testing.T) {
 	}
 
 	routerScript := `
-import { router, http } from "kitwork";
+import * as router from "kitwork/router";
+import * as http from "kitwork/http";
 
 router.get((ctx) => {
     const res = http.get("` + ts.URL + `").cache("5m").send().json();
     return ctx.json({ message: res.message });
 });
 `
-	if err := os.WriteFile(filepath.Join(appDir, "router.kitwork.js"), []byte(routerScript), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(appDir, UIRouterFileName), []byte(routerScript), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -63,7 +64,8 @@ func TestRealAppDatabaseContractFixture(t *testing.T) {
 	// the engine's storage through the test-only module (storage_internals_test.go): a KitDB table, a
 	// write inside a transaction callback, a query lambda
 	routerScript := `
-import { router, internals } from "kitwork";
+import * as router from "kitwork/router";
+import { internals } from "kitwork";
 const { kitdb, struct, id, text, int } = internals;
 const db = kitdb("contract.kitdb", { items: struct({ id: id(), name: text(), price: int() }) });
 
@@ -76,7 +78,7 @@ router.get((ctx) => {
     return ctx.json({ name: item.name, price: item.price });
 });
 `
-	if err := os.WriteFile(filepath.Join(appDir, "router.kitwork.js"), []byte(routerScript), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(appDir, UIRouterFileName), []byte(routerScript), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -147,7 +149,8 @@ func TestRealAppJWTContractFixture(t *testing.T) {
 	}
 
 	routerScript := `
-import { router, jwt } from "kitwork";
+import * as router from "kitwork/router";
+import { jwt } from "kitwork";
 
 router.get((ctx) => {
     const token = jwt.sign({ user: "admin" }, "secret123");
@@ -157,7 +160,7 @@ router.get((ctx) => {
     return ctx.json({ user: verified.payload.user, forged: forged, tampered: tampered });
 });
 `
-	if err := os.WriteFile(filepath.Join(appDir, "router.kitwork.js"), []byte(routerScript), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(appDir, UIRouterFileName), []byte(routerScript), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -194,7 +197,8 @@ func TestRealAppShortbaseContractFixture(t *testing.T) {
 	}
 
 	routerScript := `
-import { router, shortbase } from "kitwork";
+import * as router from "kitwork/router";
+import { shortbase } from "kitwork";
 
 router.get((ctx) => {
     const code = shortbase.encode(123456);
@@ -202,7 +206,7 @@ router.get((ctx) => {
     return ctx.json({ code: code, id: id });
 });
 `
-	if err := os.WriteFile(filepath.Join(appDir, "router.kitwork.js"), []byte(routerScript), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(appDir, UIRouterFileName), []byte(routerScript), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -236,7 +240,7 @@ func TestRealAppScheduleContractFixture(t *testing.T) {
 	}
 
 	routerScript := `
-import { router } from "kitwork";
+import * as router from "kitwork/router";
 import * as schedule from "kitwork/schedule";
 
 router.get((ctx) => {
@@ -244,7 +248,7 @@ router.get((ctx) => {
     return ctx.json({ count: list.length });
 });
 `
-	if err := os.WriteFile(filepath.Join(appDir, "router.kitwork.js"), []byte(routerScript), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(appDir, UIRouterFileName), []byte(routerScript), 0644); err != nil {
 		t.Fatal(err)
 	}
 

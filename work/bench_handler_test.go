@@ -9,7 +9,10 @@ import (
 )
 
 type handlerBenchmarkFixture struct {
-	name                 string
+	name string
+	// file is the router file router is written to: router.work, or "" for a template site's
+	// router.kitwork.js (the rows that measure a template page or a collection)
+	file                 string
 	router               string
 	files                map[string]string
 	maxAllocations       float64
@@ -54,19 +57,21 @@ func benchmarkHandlerFixtures() []handlerBenchmarkFixture {
 	return []handlerBenchmarkFixture{
 		{
 			name:                 "text",
+			file:                 UIRouterFileName,
 			maxAllocations:       60,
 			maxEngineAllocations: 45,
 			router: `
-import { router } from "kitwork";
+import * as router from "kitwork/router";
 router.get((ctx) => ctx.text("ok"));
 `,
 		},
 		{
 			name:                 "json-compute",
+			file:                 UIRouterFileName,
 			maxAllocations:       100,
 			maxEngineAllocations: 82,
 			router: `
-import { router } from "kitwork";
+import * as router from "kitwork/router";
 
 const calculate = (values) => values
 	.map((item) => item * 3)
@@ -81,16 +86,18 @@ router.get((ctx) => {
 		},
 		{
 			name:                 "native-import",
+			file:                 UIRouterFileName,
 			maxAllocations:       90,
 			maxEngineAllocations: 72,
 			router: `
-import { router } from "kitwork";
-import { summarize } from "./_core/summary.kitwork.js";
+import * as router from "kitwork/router";
+import { summarize } from "app/.shared/summary.work";
 
 router.get((ctx) => ctx.json(summarize([4, 8, 15, 16, 23, 42])));
 `,
 			files: map[string]string{
-				"_core/summary.kitwork.js": `
+				// the app's .shared/, beside the site's folder
+				"../.shared/summary.work": `
 export const summarize = (items) => ({
 	count: items.len(),
 	total: items.reduce((sum, item) => sum + item, 0)
@@ -165,8 +172,10 @@ Hello from the benchmark corpus.
 		},
 		{
 			name: "sqlite-callback",
+			file: UIRouterFileName,
 			router: `
-import { router, internals } from "kitwork";
+import * as router from "kitwork/router";
+import { internals } from "kitwork";
 
 // a query lambda on a SQLite file of the site, through the test-only module (storage_internals_test.go)
 const { sqlite, struct, int, text } = internals;
@@ -204,8 +213,12 @@ func benchHandlerTenant(
 			tb.Fatal(err)
 		}
 	}
+	file := fixture.file
+	if file == "" {
+		file = RouterFileName
+	}
 	if err := os.WriteFile(
-		filepath.Join(directory, RouterFileName),
+		filepath.Join(directory, file),
 		[]byte(fixture.router),
 		0o644,
 	); err != nil {

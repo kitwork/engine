@@ -160,19 +160,26 @@ func TestRouterDriveIsGone(t *testing.T) {
 
 // A misspelt argument to router.reload is named at boot rather than shrugged off.
 func TestReloadRejectsANonBoolean(t *testing.T) {
-	for _, call := range []string{`router.reload("yes");`, `router.reload();`, `router.reload(false, true);`} {
-		tenant, _ := writeTestSite(t, call, `<main></main>`)
+	boot := func(call string) error {
 		var err error
-		captureBootOutput(t, func() { err = tenant.Run() })
-		if err == nil || !strings.Contains(err.Error(), "router.reload expects true or false") {
+		captureBootOutput(t, func() {
+			var tenant *Tenant
+			tenant, err = bootUISite(t, map[string]string{
+				"localhost/router.work": "import * as router from \"kitwork/router\";\n" + call + "\n",
+				"localhost/view.ui":     `<view><content /></view>`,
+				"localhost/content.ui":  `<content><text>x</text></content>`,
+			}, true)
+			t.Cleanup(tenant.Close)
+		})
+		return err
+	}
+	for _, call := range []string{`router.reload("yes");`, `router.reload();`, `router.reload(false, true);`} {
+		if err := boot(call); err == nil || !strings.Contains(err.Error(), "router.reload expects true or false") {
 			t.Errorf("%s: want a boot error naming true or false, got %v", call, err)
 		}
 	}
 	for _, call := range []string{`router.reload(true);`, `router.reload(false);`} {
-		tenant, _ := writeTestSite(t, call, `<main></main>`)
-		var err error
-		captureBootOutput(t, func() { err = tenant.Run() })
-		if err != nil {
+		if err := boot(call); err != nil {
 			t.Errorf("control: %s must boot: %v", call, err)
 		}
 	}

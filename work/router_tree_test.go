@@ -13,13 +13,13 @@ import (
 // A REAL filesystem-routed tenant, built on disk and served through the same path the engine
 // uses (Run() → Serve()). It exercises the whole tree pipeline end to end:
 //
-//	filesystem.kitwork              → opts the tenant into folder routing
-//	index.kitwork.html              → the shell (inherited, walked up)
-//	page.kitwork.html               → the home page (local)
-//	notfound.kitwork.html           → the 404 view (bubbles up)
-//	users/page.kitwork.html         → a static child page
-//	users/{user}/router.kitwork.js  → a dynamic folder with a handler that reads the param
-//	users/{user}/router → .guard     → blocks one value to prove folder guards run
+//	router.work                     → the site's root router: the tenant routes by folder
+//	view.ui                         → the shell (inherited, walked up)
+//	content.ui                      → the home page (local)
+//	notfound.ui                     → the 404 view (bubbles up)
+//	users/content.ui                → a static child page
+//	users/{user}/router.work        → a dynamic folder with a handler that reads the param
+//	users/{user}/router.guard       → blocks one value to prove folder guards run
 func TestTreeTenantServesFilesystemRoutes(t *testing.T) {
 	tmp, err := os.MkdirTemp("", "kitwork-tree-*")
 	if err != nil {
@@ -38,26 +38,24 @@ func TestTreeTenantServesFilesystemRoutes(t *testing.T) {
 		}
 	}
 
-	write("filesystem.kitwork", "")
-	write("router.kitwork.js", `import { router } from "kitwork";`)
-	write("index.kitwork.html", `<!doctype html><html><body><div id="shell">{{ @page }}</div></body></html>`)
-	write("page.kitwork.html", `<main>home page</main>`)
-	write("notfound.kitwork.html", `<main>nothing here</main>`)
+	write(UIRouterFileName, `import * as router from "kitwork/router";`)
+	write("view.ui", `<view><box><text>shell</text><content /></box></view>`)
+	write("content.ui", `<content><text>home page</text></content>`)
+	write("notfound.ui", `<content><text>nothing here</text></content>`)
 
-	write("users/page.kitwork.html", `<main>all users</main>`)
+	write("users/content.ui", `<content><text>all users</text></content>`)
 
-	write("users/{user}/page.kitwork.html", `<main>a profile</main>`)
-	write("users/{user}/router.kitwork.js",
-		`import { router } from "kitwork";`+"\n"+
-			`router.guard((ctx) => ctx.params("user") == "banned" ? ctx.status(403).text("blocked") : true);`+"\n"+
-			`router.get().handle((ctx) => ctx.json({ user: ctx.params("user") }));`)
+	write("users/{user}/"+UIRouterFileName,
+		`import * as router from "kitwork/router";`+"\n"+
+			`router.guard((ctx) => ctx.params("user") == "banned" ? ctx.status(403).json({ error: "blocked" }) : true);`+"\n"+
+			`router.get((ctx) => ctx.json({ user: ctx.params("user") }));`)
 
 	tenant := NewTenant(tmp, "localhost")
 	if err := tenant.Run(); err != nil {
 		t.Fatalf("tree tenant failed to run: %v", err)
 	}
 	if tenant.routeTree() == nil {
-		t.Fatal("tenant.tree is nil — filesystem.kitwork marker did not activate tree mode")
+		t.Fatal("tenant.tree is nil — the site's router.work did not activate tree mode")
 	}
 
 	if tenant.SiteGeneration().RouteGraph() != tenant.routeTree() {

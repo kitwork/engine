@@ -95,7 +95,7 @@ func TestShortbasePrefixSuffix(t *testing.T) {
 	}
 }
 
-// The router test: `import { shortbase } from "kitwork"` used in a real .kitwork.js route, exercising
+// The router test: `import { shortbase } from "kitwork"` used in a real router.work route, exercising
 // encode AND decode across every mode — default (decimal→base58), a custom `from` alphabet with ".",
 // prefix/suffix markers, and an invalid code → null — all round-tripping through the VM.
 func TestShortbaseRouter(t *testing.T) {
@@ -107,22 +107,23 @@ func TestShortbaseRouter(t *testing.T) {
 	dir := filepath.Join(tmp, "acme", "localhost")
 	os.MkdirAll(dir, 0755)
 
-	router := `import { router, shortbase } from "kitwork";
+	router := `import * as router from "kitwork/router";
+import { shortbase } from "kitwork";
 const dotted = shortbase.from("0123456789.");
 const tagged = shortbase.prefix("KIT").suffix("_v1");
-router.get((ctx) => {
+router.get((context) => {
   const a = shortbase.encode("12345");
   const b = dotted.encode("12312321.1232134124");
   const c = tagged.encode("100");
   const bad = shortbase.decode("no.pe");
-  return ctx.json({
+  return context.json({
     a: a, aBack: shortbase.decode(a),
     b: b, bBack: dotted.decode(b),
     c: c, cBack: tagged.decode(c),
     badIsNull: bad == null
   });
 });`
-	os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0644)
+	os.WriteFile(filepath.Join(dir, UIRouterFileName), []byte(router), 0644)
 
 	tenant := NewTenant(tmp, "localhost")
 	if err := tenant.Run(); err != nil {

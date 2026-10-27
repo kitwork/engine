@@ -309,8 +309,9 @@ func TestDatabaseModuleOldWordsAreErrors(t *testing.T) {
 
 	// in a site: a read by a key the compiler does not see is the same error where it is read
 	tenant, _ := mustBoot(t, map[string]string{
-		"router.kitwork.js": `import * as database from "kitwork/database";
-import { router, safe } from "kitwork";
+		"router.work": `import * as router from "kitwork/router";
+import * as database from "kitwork/database";
+import { safe } from "kitwork";
 router.get((ctx) => {
   const word = ctx.query("word");
   const { error } = safe(() => database[word]);

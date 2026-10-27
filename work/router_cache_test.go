@@ -155,31 +155,30 @@ func TestTreeCacheQueryProjection(t *testing.T) {
 		}
 	}
 
-	write("filesystem.kitwork", "")
-	write("router.kitwork.js", `import { router } from "kitwork";`)
-	write("by-string/router.kitwork.js", `import { router } from "kitwork";
-router.get((ctx) => ctx.text("page=" + (ctx.query("page") || "") + ";noise=" + (ctx.query("noise") || ""))).cache("1h", "page");`)
-	write("by-array/router.kitwork.js", `import { router } from "kitwork";
-router.get((ctx) => ctx.text("page=" + (ctx.query("page") || "") + ";category=" + (ctx.query("category") || "") + ";noise=" + (ctx.query("noise") || ""))).cache("1h", ["page", "category"]);`)
-	write("by-object/router.kitwork.js", `import { router } from "kitwork";
-router.get((ctx) => ctx.text("page=" + (ctx.query("page") || "") + ";list=" + (ctx.query("list") || "") + ";noise=" + (ctx.query("noise") || ""))).cache("1h", { page: true, list: ["new", "click", "vote"] });`)
-	write("full-query/router.kitwork.js", `import { router } from "kitwork";
-router.get((ctx) => ctx.text("page=" + (ctx.query("page") || "") + ";category=" + (ctx.query("category") || ""))).cache("1h");`)
-	write("saved/router.kitwork.js", `import { router } from "kitwork";
-router.get((ctx) => ctx.text("page=" + (ctx.query("page") || "") + ";noise=" + (ctx.query("noise") || ""))).cache("1h", { page: true }).persist("1h");`)
-	write("drive/router.kitwork.js", `import { router } from "kitwork";
-router.get((ctx) => {
-    if (ctx.header("X-Kitwork-Hydrate") == "1") return ctx.text("drive");
-    return ctx.text("document");
+	write("router.work", `import * as router from "kitwork/router";`)
+	write("by-string/router.work", `import * as router from "kitwork/router";
+router.get((context) => context.text("page=" + (context.query("page") || "") + ";noise=" + (context.query("noise") || ""))).cache("1h", "page");`)
+	write("by-array/router.work", `import * as router from "kitwork/router";
+router.get((context) => context.text("page=" + (context.query("page") || "") + ";category=" + (context.query("category") || "") + ";noise=" + (context.query("noise") || ""))).cache("1h", ["page", "category"]);`)
+	write("by-object/router.work", `import * as router from "kitwork/router";
+router.get((context) => context.text("page=" + (context.query("page") || "") + ";list=" + (context.query("list") || "") + ";noise=" + (context.query("noise") || ""))).cache("1h", { page: true, list: ["new", "click", "vote"] });`)
+	write("full-query/router.work", `import * as router from "kitwork/router";
+router.get((context) => context.text("page=" + (context.query("page") || "") + ";category=" + (context.query("category") || ""))).cache("1h");`)
+	write("saved/router.work", `import * as router from "kitwork/router";
+router.get((context) => context.text("page=" + (context.query("page") || "") + ";noise=" + (context.query("noise") || ""))).cache("1h", { page: true }).persist("1h");`)
+	write("drive/router.work", `import * as router from "kitwork/router";
+router.get((context) => {
+    if (context.header("X-Kitwork-Hydrate") == "1") return context.text("drive");
+    return context.text("document");
 }).cache("1h", []);`)
-	write("dynamic/router.kitwork.js", `import { router } from "kitwork";
-router.guard((ctx, response) => {
-    const value = ctx.query("guard") || "none";
-    response.header("X-Guard-Value", value);
-    ctx.cookie("guard_seen", value);
+	write("dynamic/router.work", `import * as router from "kitwork/router";
+router.guard((context) => {
+    const value = context.query("guard") || "none";
+    context.header("X-Guard-Value", value);
+    context.cookie("guard_seen", value);
     return true;
 });
-router.get((ctx) => ctx.text("dynamic-body")).cache("1h", []);`)
+router.get((context) => context.text("dynamic-body")).cache("1h", []);`)
 
 	hit := func(tn *Tenant, target string, drive bool) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodGet, "http://localhost"+target, nil)
@@ -263,12 +262,12 @@ func TestTreeCacheQueryProjectionRejectsInvalidConfiguration(t *testing.T) {
 	}{
 		{
 			name:   "callback selector",
-			router: `import { router } from "kitwork"; router.get((ctx) => ctx.text("ok")).cache("1h", (page) => page == "1");`,
+			router: "import * as router from \"kitwork/router\";\n" + `router.get((context) => context.text("ok")).cache("1h", (page) => page == "1");`,
 			want:   "cache query projection must be a string, array, or object",
 		},
 		{
 			name:   "different cache and persist selectors",
-			router: `import { router } from "kitwork"; router.get((ctx) => ctx.text("ok")).cache("1h", "page").persist("1h", "category");`,
+			router: "import * as router from \"kitwork/router\";\n" + `router.get((context) => context.text("ok")).cache("1h", "page").persist("1h", "category");`,
 			want:   "cache and persist on the same route must use the same query projection",
 		},
 	}
@@ -285,10 +284,7 @@ func TestTreeCacheQueryProjectionRejectsInvalidConfiguration(t *testing.T) {
 			if err := os.MkdirAll(dir, 0o755); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(dir, "filesystem.kitwork"), nil, 0o644); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(test.router), 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, UIRouterFileName), []byte(test.router), 0o644); err != nil {
 				t.Fatal(err)
 			}
 

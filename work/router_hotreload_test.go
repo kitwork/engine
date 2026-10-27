@@ -37,12 +37,12 @@ func TestTreeGenerationDoesNotReloadInPlace(t *testing.T) {
 		}
 	}
 
-	write("router.kitwork.js", `import { router } from "kitwork";`)
-	write("_core/service.kitwork.js", `export const answer = () => ("service-v1");`)
-	apiRouter := write("api/router.kitwork.js",
-		`import { router } from "kitwork";`+"\n"+
-			`import { answer } from "../_core/service.kitwork.js";`+"\n"+
-			`router.get().handle((ctx) => ctx.text("api-v1 " + answer()));`)
+	write("router.work", `import * as router from "kitwork/router";`)
+	write(".shared/service.work", `export const answer = () => ("service-v1");`)
+	apiRouter := write("api/router.work",
+		`import * as router from "kitwork/router";`+"\n"+
+			`import { answer } from "app/.shared/service.work";`+"\n"+
+			`router.get((context) => context.text("api-v1 " + answer()));`)
 
 	tenant := NewTenant(tmp, "localhost")
 	tenant.HotReload = true
@@ -63,10 +63,10 @@ func TestTreeGenerationDoesNotReloadInPlace(t *testing.T) {
 	}
 
 	// Editing a subfolder router does not mutate this generation.
-	write("api/router.kitwork.js",
-		`import { router } from "kitwork";`+"\n"+
-			`import { answer } from "../_core/service.kitwork.js";`+"\n"+
-			`router.get().handle((ctx) => ctx.text("api-v2 " + answer()));`)
+	write("api/router.work",
+		`import * as router from "kitwork/router";`+"\n"+
+			`import { answer } from "app/.shared/service.work";`+"\n"+
+			`router.get((context) => context.text("api-v2 " + answer()));`)
 	touchFuture(apiRouter, 5)
 	time.Sleep(1100 * time.Millisecond) // past the per-node 1s throttle
 	if rec := get("/api"); !strings.Contains(rec.Body.String(), "api-v1 service-v1") {
@@ -74,7 +74,7 @@ func TestTreeGenerationDoesNotReloadInPlace(t *testing.T) {
 	}
 
 	// Editing an imported module also leaves this generation untouched.
-	servicePath := write("_core/service.kitwork.js", `export const answer = () => ("service-v2");`)
+	servicePath := write(".shared/service.work", `export const answer = () => ("service-v2");`)
 	touchFuture(servicePath, 10)
 	time.Sleep(1100 * time.Millisecond)
 	if rec := get("/api"); !strings.Contains(rec.Body.String(), "api-v1 service-v1") {
@@ -85,9 +85,9 @@ func TestTreeGenerationDoesNotReloadInPlace(t *testing.T) {
 	if rec := get("/fresh"); rec.Code != 404 {
 		t.Fatalf("fresh route should not exist yet, got %d", rec.Code)
 	}
-	write("fresh/router.kitwork.js",
-		`import { router } from "kitwork";`+"\n"+
-			`router.get().handle((ctx) => ctx.text("fresh-alive"));`)
+	write("fresh/router.work",
+		`import * as router from "kitwork/router";`+"\n"+
+			`router.get((context) => context.text("fresh-alive"));`)
 	time.Sleep(1100 * time.Millisecond)
 	if rec := get("/fresh"); rec.Code != 404 {
 		t.Fatalf("new folder entered the active generation: %d %s", rec.Code, rec.Body.String())
@@ -114,9 +114,9 @@ func TestTreeFolderHotReloadDisabled(t *testing.T) {
 		return p
 	}
 
-	write("router.kitwork.js", `import { router } from "kitwork";`)
-	apiRouter := write("api/router.kitwork.js",
-		`import { router } from "kitwork";`+"\n"+`router.get().handle((ctx) => ctx.text("v1"));`)
+	write("router.work", `import * as router from "kitwork/router";`)
+	apiRouter := write("api/router.work",
+		`import * as router from "kitwork/router";`+"\n"+`router.get((context) => context.text("v1"));`)
 
 	tenant := NewTenant(tmp, "localhost") // HotReload stays false
 	if err := tenant.Run(); err != nil {
@@ -131,8 +131,8 @@ func TestTreeFolderHotReloadDisabled(t *testing.T) {
 	if body := get(); !strings.Contains(body, "v1") {
 		t.Fatalf("baseline: %s", body)
 	}
-	write("api/router.kitwork.js",
-		`import { router } from "kitwork";`+"\n"+`router.get().handle((ctx) => ctx.text("v2"));`)
+	write("api/router.work",
+		`import * as router from "kitwork/router";`+"\n"+`router.get((context) => context.text("v2"));`)
 	ft := time.Now().Add(5 * time.Second)
 	_ = os.Chtimes(apiRouter, ft, ft)
 	time.Sleep(1100 * time.Millisecond)

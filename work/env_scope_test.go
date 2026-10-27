@@ -19,9 +19,10 @@ import (
 // apps/.env: "the app read a .env that is not its own".
 func TestEnvOfAnAppStopsAtItsRoot(t *testing.T) {
 	const router = `
-import { router, environment } from "kitwork";
+import * as router from "kitwork/router";
+import { environment } from "kitwork";
 
-router.get((ctx) => ctx.json({ own: environment.OWN, app: environment.APP_OWN, apps: environment.FROM_APPS_FOLDER,
+router.get((context) => context.json({ own: environment.OWN, app: environment.APP_OWN, apps: environment.FROM_APPS_FOLDER,
   neighbour: environment.NEIGHBOUR_SECRET, system: environment.KITWORK_TEST_FROM_THE_SYSTEM }));
 `
 	t.Setenv("KITWORK_TEST_FROM_THE_SYSTEM", "leaked")
@@ -41,7 +42,7 @@ router.get((ctx) => ctx.json({ own: environment.OWN, app: environment.APP_OWN, a
 			write(".env", "FROM_APPS_FOLDER=leaked\nNEIGHBOUR_SECRET=leaked\n")
 			write("victim-corp/.env", "NEIGHBOUR_SECRET="+victimMarker+"\n")
 			write("victim-corp/victim.com/.env", "NEIGHBOUR_SECRET="+victimMarker+"\n")
-			write("acme/localhost/router.kitwork.js", router)
+			write("acme/localhost/router.work", router)
 			if ownEnv != "missing" {
 				write("acme/localhost/.env", ownEnv)
 			}

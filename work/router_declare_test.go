@@ -16,30 +16,30 @@ func TestMethodDeclaredTwiceIsBootError(t *testing.T) {
 	}{
 		{
 			name: "router.get twice",
-			router: "import { router } from \"kitwork\";\n" +
-				"router.get((ctx) => ctx.text(\"first\"));\n" +
-				"router.get((ctx) => ctx.text(\"second\"));\n",
-			want: []string{"router router.kitwork.js:", "router.get đã khai ở dòng 2", "khai lại ở dòng 3"},
+			router: "import * as router from \"kitwork/router\";\n" +
+				"router.get((context) => context.text(\"first\"));\n" +
+				"router.get((context) => context.text(\"second\"));\n",
+			want: []string{"router router.work:", "router.get đã khai ở dòng 2", "khai lại ở dòng 3"},
 		},
 		{
-			name: "router.post twice in the namespace spelling",
+			name: "router.post twice, the second with a guard",
 			router: "import * as router from \"kitwork/router\";\n" +
-				"router.get((ctx) => ctx.text(\"page\"));\n" +
-				"router.post((ctx) => ctx.text(\"first\"));\n\n" +
-				"router.post((ctx) => ctx.text(\"second\")).guard((ctx) => true);\n",
+				"router.get((context) => context.text(\"page\"));\n" +
+				"router.post((context) => context.text(\"first\"));\n\n" +
+				"router.post((context) => context.text(\"second\")).guard((context) => true);\n",
 			want: []string{"router.post đã khai ở dòng 3", "khai lại ở dòng 5"},
 		},
 		{
 			name: "router.proxy over router.get",
-			router: "import { router } from \"kitwork\";\n" +
-				"router.get((ctx) => ctx.text(\"page\"));\n" +
+			router: "import * as router from \"kitwork/router\";\n" +
+				"router.get((context) => context.text(\"page\"));\n" +
 				"router.proxy(\"https://example.com/logo.png\");\n",
 			want: []string{"router.proxy ở dòng 3 khai lại GET mà router.get đã khai ở dòng 2"},
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			tmp := writeSite(t, map[string]string{"filesystem.kitwork": "", "router.kitwork.js": test.router})
+			tmp := writeSite(t, map[string]string{"router.work": test.router})
 			err := NewTenant(tmp, "localhost").Run()
 			if err == nil {
 				t.Fatal("boot passed with a method declared twice")
@@ -56,10 +56,9 @@ func TestMethodDeclaredTwiceIsBootError(t *testing.T) {
 // One declaration per method boots: get and post side by side are two methods, not a repeat.
 func TestEachMethodOnceBoots(t *testing.T) {
 	tmp := writeSite(t, map[string]string{
-		"filesystem.kitwork": "",
-		"router.kitwork.js": "import { router } from \"kitwork\";\n" +
-			"router.get((ctx) => ctx.text(\"page\"));\n" +
-			"router.post((ctx) => ctx.text(\"sent\"));\n",
+		"router.work": "import * as router from \"kitwork/router\";\n" +
+			"router.get((context) => context.text(\"page\"));\n" +
+			"router.post((context) => context.text(\"sent\"));\n",
 	})
 	tn := NewTenant(tmp, "localhost")
 	if err := tn.Run(); err != nil {

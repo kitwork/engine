@@ -11,7 +11,7 @@ import (
 
 // Validates the exact pattern huynhnhanquoc.com/notes/{slug} uses: a dynamic folder whose router
 // looks a record up in an object literal by the bound slug (bracket indexing on a string key),
-// then binds it into the page via ctx.view({ item }) — or 404s for an unknown slug.
+// then binds it into the folder's content.ui via ctx.view({ item }) — or 404s for an unknown slug.
 func TestTreeDynamicLookupAndViewBinding(t *testing.T) {
 	tmp, err := os.MkdirTemp("", "kitwork-treebind-*")
 	if err != nil {
@@ -30,16 +30,15 @@ func TestTreeDynamicLookupAndViewBinding(t *testing.T) {
 		}
 	}
 
-	write("filesystem.kitwork", "")
-	write("router.kitwork.js", `import { router } from "kitwork";`)
-	write("index.kitwork.html", `<!doctype html><body>{{ @page }}</body>`)
-	write("notfound.kitwork.html", `<main>404</main>`)
+	write(UIRouterFileName, `import * as router from "kitwork/router";`)
+	write("view.ui", `<view><content /></view>`)
+	write("notfound.ui", `<content><text>404</text></content>`)
 
-	write("notes/{slug}/page.kitwork.html", `<article><h1>{{ item.title }}</h1></article>`)
-	write("notes/{slug}/router.kitwork.js",
-		`import { router } from "kitwork";`+"\n"+
+	write("notes/{slug}/content.ui", `<content><text heading="1">{{ item.title }}</text></content>`)
+	write("notes/{slug}/"+UIRouterFileName,
+		`import * as router from "kitwork/router";`+"\n"+
 			`const notes = { 'alpha': { title: 'Alpha note' }, 'beta': { title: 'Beta note' } };`+"\n"+
-			`router.get().handle((ctx) => {`+"\n"+
+			`router.get((ctx) => {`+"\n"+
 			`  const note = notes[ctx.params('slug')];`+"\n"+
 			`  return note ? ctx.view({ item: note }) : ctx.status(404).text('no such note');`+"\n"+
 			`});`)

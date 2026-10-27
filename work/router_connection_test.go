@@ -65,8 +65,7 @@ func TestRouterConnectionAndConnectAreErrors(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, _, err := connectionTenant(t, map[string]string{
-				"filesystem.kitwork": "",
-				"router.kitwork.js":  `import { router } from "kitwork";` + "\n" + scenario.router + "\n" + `router.get((ctx) => ctx.json({ ok: true }));`,
+				"router.work": `import * as router from "kitwork/router";` + "\n" + scenario.router + "\n" + `router.get((context) => context.json({ ok: true }));`,
 			})
 			if err == nil || !strings.Contains(err.Error(), scenario.want) {
 				t.Fatalf("the site must not boot, saying %q: %v", scenario.want, err)
@@ -83,12 +82,12 @@ func TestRouterConnectionAndConnectAreErrors(t *testing.T) {
 // saying where an app's database is declared and how a file imports it.
 func TestContextDatabaseIsAnError(t *testing.T) {
 	tenant, _ := mustBoot(t, map[string]string{
-		"filesystem.kitwork": "",
-		"router.kitwork.js": `import { router, safe } from "kitwork";
-router.get((ctx) => {
-  const read = safe(() => ctx.database.table("items").count());
-  const named = safe(() => ctx.database("system"));
-  return ctx.json({ read: read.error.code + " " + read.error.message, named: named.error.message });
+		"router.work": `import * as router from "kitwork/router";
+import { safe } from "kitwork";
+router.get((context) => {
+  const read = safe(() => context.database.table("items").count());
+  const named = safe(() => context.database("system"));
+  return context.json({ read: read.error.code + " " + read.error.message, named: named.error.message });
 });`,
 	})
 	code, body, raw := hitJSON(t, tenant, "/")

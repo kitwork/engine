@@ -22,7 +22,7 @@ func TestSiteSQLiteFileUnderData(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(`import { router } from "kitwork";
+	if err := os.WriteFile(filepath.Join(dir, UIRouterFileName), []byte(`import * as router from "kitwork/router";
 router.get((ctx) => ctx.text("ok"));`), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -78,15 +78,16 @@ router.get((ctx) => ctx.text("ok"));`), 0o644); err != nil {
 // the compiler does not see (the module kitwork by a namespace), sqlite is the same error where it is read.
 func TestImportSqliteIsAnError(t *testing.T) {
 	_, _, err := connectionTenant(t, map[string]string{
-		"router.kitwork.js": "import { router, sqlite } from \"kitwork\";\nrouter.get((ctx) => ctx.json(sqlite.table(\"users\").list()));",
+		"router.work": "import * as router from \"kitwork/router\";\nimport { sqlite } from \"kitwork\";\nrouter.get((ctx) => ctx.json(sqlite.table(\"users\").list()));",
 	})
 	if err == nil || !strings.Contains(err.Error(), `import { sqlite } from "kitwork" đã bỏ: SQLite là connection("tên") trong app/.shared/schema/, với tên đó khai { sqlite: đường_dẫn } trong app.databases({ … }) của application.work`) {
 		t.Fatalf("import { sqlite } must stop the boot naming connection(\"tên\"): %v", err)
 	}
 
 	tenant, _ := mustBoot(t, map[string]string{
-		"router.kitwork.js": `import * as kit from "kitwork";
-import { router, safe } from "kitwork";
+		"router.work": `import * as router from "kitwork/router";
+import * as kit from "kitwork";
+import { safe } from "kitwork";
 router.get((ctx) => {
   const { error } = safe(() => kit.sqlite.table("users"));
   return ctx.json({ code: error.code, message: error.message });

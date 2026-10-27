@@ -14,6 +14,18 @@ import (
 // safeSite writes one router.kitwork.js per folder and serves one request of a path.
 func safeSite(t *testing.T, routers map[string]string) func(path string) *httptest.ResponseRecorder {
 	t.Helper()
+	return safeSiteOf(t, RouterFileName, routers)
+}
+
+// safeRouterWorkSite writes one router.work per folder and serves one request of a path.
+func safeRouterWorkSite(t *testing.T, routers map[string]string) func(path string) *httptest.ResponseRecorder {
+	t.Helper()
+	return safeSiteOf(t, UIRouterFileName, routers)
+}
+
+// safeSiteOf writes one router file of the name per folder and serves one request of a path.
+func safeSiteOf(t *testing.T, routerFile string, routers map[string]string) func(path string) *httptest.ResponseRecorder {
+	t.Helper()
 	saved := AllowLocal
 	AllowLocal = true // developing: an uncaught failure answers its text, which a test reads
 	t.Cleanup(func() { AllowLocal = saved })
@@ -23,7 +35,7 @@ func safeSite(t *testing.T, routers map[string]string) func(path string) *httpte
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, RouterFileName), []byte(source), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, routerFile), []byte(source), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -43,11 +55,11 @@ func safeSite(t *testing.T, routers map[string]string) func(path string) *httpte
 // import { log }, declares safe as the same global, and a call through it catches. Without the export
 // the import gave null and every call was the NOT_A_FUNCTION error. CONTROL: the global without import.
 func TestKitworkExportsSafe(t *testing.T) {
-	serve := safeSite(t, map[string]string{
-		"imported": "import { router, safe } from \"kitwork\";\nrouter.get((ctx) => {\n  const r = safe(() => fail(\"x\"));\n  return ctx.json({ code: r.error.code, value: r.value });\n});\n",
-		"renamed":  "import { router, safe as guard } from \"kitwork\";\nrouter.get((ctx) => ctx.json({ value: guard(() => 7).value }));\n",
-		"global":   "import { router } from \"kitwork\";\nrouter.get((ctx) => ctx.json({ code: safe(() => fail(\"x\")).error.code }));\n",
-		"member":   "import { router } from \"kitwork\";\nrouter.get((ctx) => ctx.json({ value: kitwork().safe(() => 8).value }));\n",
+	serve := safeRouterWorkSite(t, map[string]string{
+		"imported": routerImport + "import { safe } from \"kitwork\";\nrouter.get((context) => {\n  const r = safe(() => fail(\"x\"));\n  return context.json({ code: r.error.code, value: r.value });\n});\n",
+		"renamed":  routerImport + "import { safe as guard } from \"kitwork\";\nrouter.get((context) => context.json({ value: guard(() => 7).value }));\n",
+		"global":   routerImport + "router.get((context) => context.json({ code: safe(() => fail(\"x\")).error.code }));\n",
+		"member":   routerImport + "router.get((context) => context.json({ value: kitwork().safe(() => 8).value }));\n",
 	})
 	for path, want := range map[string]string{
 		"/imported": `{"code":"FAIL","value":null}`,
@@ -100,7 +112,7 @@ router.get((ctx) => {
 });
 `
 	body := serveNesting(t, newNestingTenant(t, routes, 10_000_000), context.Background())
-	for _, want := range []string{`"code":"FAIL"`, `"message":"điều kiện hỏng"`, `"at":"router.kitwork.js:20:9"`, `"kept":null`} {
+	for _, want := range []string{`"code":"FAIL"`, `"message":"điều kiện hỏng"`, `"at":"router.work:20:9"`, `"kept":null`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("%s lacks %s", body, want)
 		}
@@ -110,8 +122,9 @@ router.get((ctx) => {
 // The same on a KitDB table, whose terminals read the builder's plan rather than run it: the chain keeps
 // the predicate's failure (SchemaTable.failWith). CONTROL: a predicate that works lists the row.
 func TestKitDBQueryLambdaFailureIsTheQuerysFailure(t *testing.T) {
-	serve := safeSite(t, map[string]string{
-		"": `import { router, internals } from "kitwork";
+	serve := safeRouterWorkSite(t, map[string]string{
+		"": `import * as router from "kitwork/router";
+import { internals } from "kitwork";
 const { kitdb, struct, text } = internals;
 const items = struct({ id: text().key(), label: text() });
 const db = kitdb("lambda-failure.kitdb", { items });

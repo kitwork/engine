@@ -21,7 +21,7 @@ func TestTreeSemanticOutputsAndTypedResponse(t *testing.T) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router } from "kitwork";
+	router := `import * as router from "kitwork/router";
 router.rss({
     path: "/feed.xml",
     title: "Test & Feed",
@@ -40,12 +40,12 @@ router.sitemap(() => [
     { loc: "/concepts/runtime", lastmod: "2026-07-11" },
     { loc: "/concepts/runtime" }
 ]).cache("1h");
-router.get((ctx) => ctx.type("text/csv; charset=utf-8").send("name,value\nkitwork,1"));
+router.get((context) => context.type("text/csv; charset=utf-8").text("name,value\nkitwork,1"));
 `
-	if err := os.WriteFile(filepath.Join(dir, RouterFileName), []byte(router), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, UIRouterFileName), []byte(router), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "notfound.kitwork.html"), []byte("not found"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "notfound.ui"), []byte("<content><text>not found</text></content>"), 0644); err != nil {
 		t.Fatal(err)
 	}
 

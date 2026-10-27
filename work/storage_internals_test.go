@@ -15,7 +15,8 @@ import (
 // are errors now (database_module.go). This test-only module builds the same proxies through the Go API
 // (newDbProxy), so the internals keep their coverage while no app can write them:
 //
-//	import { router, internals } from "kitwork";
+//	import * as router from "kitwork/router";
+//	import { internals } from "kitwork";
 //	const { kitdb, struct, id, text, int } = internals;
 //
 // It exists only in the test binary: a method of KitWork declared in a _test.go file.

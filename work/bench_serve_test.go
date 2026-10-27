@@ -23,7 +23,7 @@ func benchTenant(b *testing.B, root, domain, body string) *Tenant {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		b.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(body), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, UIRouterFileName), []byte(body), 0o644); err != nil {
 		b.Fatal(err)
 	}
 	t := NewTenant(root, domain)
@@ -34,16 +34,16 @@ func benchTenant(b *testing.B, root, domain, body string) *Tenant {
 }
 
 const benchRouterPlain = `
-import { router } from "kitwork";
-router.get((ctx) => ctx.text("ok"));
+import * as router from "kitwork/router";
+router.get((context) => context.text("ok"));
 `
 
 // A rule on the folder plus one on the method: the limiter runs twice per request, which is a
 // modest, realistic configuration rather than a worst case.
 const benchRouterLimited = `
-import { router } from "kitwork";
-router.ratelimit({ rate: 1000000, per: "1m" });
-router.get((ctx) => ctx.text("ok")).limit({ rate: 1000000, per: "1m" });
+import * as router from "kitwork/router";
+router.limit({ rate: 1000000, per: "1m" });
+router.get((context) => context.text("ok")).limit({ rate: 1000000, per: "1m" });
 `
 
 func serveOnce(t *Tenant, domain string) {
