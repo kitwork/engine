@@ -16,6 +16,7 @@ import (
 	requestscope "github.com/kitwork/engine/request"
 	"github.com/kitwork/engine/utilities/cache"
 	"github.com/kitwork/engine/value"
+	"github.com/kitwork/engine/work"
 )
 
 func TestEngineAuthorizerRunsAtResolvedAppBoundary(t *testing.T) {
@@ -51,7 +52,7 @@ func TestEngineAuthorizerRunsAtResolvedAppBoundary(t *testing.T) {
 }
 
 // writeTreeTenant lays a minimal FILESYSTEM-ROUTED tenant on disk (root/test/localhost) whose root
-// router answers GET / with the given body. Returns the router file path (the tenant marker hot
+// router.work answers GET / with the given body. Returns the router file path (the tenant marker hot
 // reload watches). The flat app.kitwork.js model is gone — every engine test drives the tree.
 func writeTreeTenant(t testing.TB, tmpDir, body string) string {
 	t.Helper()
@@ -59,15 +60,15 @@ func writeTreeTenant(t testing.TB, tmpDir, body string) string {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	routerFile := filepath.Join(dir, "router.kitwork.js")
+	routerFile := filepath.Join(dir, work.UIRouterFileName)
 	writeRouterBody(t, routerFile, body)
 	return routerFile
 }
 
 func writeRouterBody(t testing.TB, routerFile, body string) {
 	t.Helper()
-	code := "import { router } from \"kitwork\";\n" +
-		"router.get().handle((ctx) => ctx.text(\"" + body + "\"));\n"
+	code := "import * as router from \"kitwork/router\";\n" +
+		"router.get((context) => context.text(\"" + body + "\"));\n"
 	if err := os.WriteFile(routerFile, []byte(code), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +173,7 @@ func TestEngineHotReloadAndFallback(t *testing.T) {
 
 	// 3. Broken syntax cannot publish a partial generation. The previous
 	// generation remains current and continues serving.
-	if err := os.WriteFile(routerFile, []byte("import { router } from \"kitwork\";\nrouter.get().handle((ctx => {\n"), 0o644); err != nil {
+	if err := os.WriteFile(routerFile, []byte("import * as router from \"kitwork/router\";\nrouter.get((context => {\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	futureTime2 := futureTime.Add(5 * time.Second)
@@ -213,7 +214,8 @@ func TestEngineHotReloadAndFallback(t *testing.T) {
 
 func TestEngineReloadsWholeGenerationForRouteGraphChanges(t *testing.T) {
 	tmpDir := t.TempDir()
-	dir := filepath.Join(tmpDir, "test", "localhost")
+	// the app is acme, so its .shared/ is acme/.shared/ (the "test" folder names no app: app/ is the site's)
+	dir := filepath.Join(tmpDir, "acme", "localhost")
 	write := func(relative, content string) {
 		t.Helper()
 		filename := filepath.Join(dir, filepath.FromSlash(relative))
@@ -235,13 +237,13 @@ func TestEngineReloadsWholeGenerationForRouteGraphChanges(t *testing.T) {
 		time.Sleep(1100 * time.Millisecond)
 	}
 
-	write("router.kitwork.js", `import { router } from "kitwork";`)
-	write("_core/service.kitwork.js", `export const answer = () => ("service-v1");`)
+	write("router.work", `import * as router from "kitwork/router";`)
+	write("../.shared/service.work", `export const answer = () => ("service-v1");`)
 	write(
-		"api/router.kitwork.js",
-		`import { router } from "kitwork";`+"\n"+
-			`import { answer } from "../_core/service.kitwork.js";`+"\n"+
-			`router.get().handle((ctx) => ctx.text("api-v1 " + answer()));`,
+		"api/router.work",
+		`import * as router from "kitwork/router";`+"\n"+
+			`import { answer } from "app/.shared/service.work";`+"\n"+
+			`router.get((context) => context.text("api-v1 " + answer()));`,
 	)
 
 	engine := New(tmpDir, 0, true, "")
@@ -253,10 +255,10 @@ func TestEngineReloadsWholeGenerationForRouteGraphChanges(t *testing.T) {
 	first := engine.cache["localhost"].current()
 
 	write(
-		"api/router.kitwork.js",
-		`import { router } from "kitwork";`+"\n"+
-			`import { answer } from "../_core/service.kitwork.js";`+"\n"+
-			`router.get().handle((ctx) => ctx.text("api-v2 " + answer()));`,
+		"api/router.work",
+		`import * as router from "kitwork/router";`+"\n"+
+			`import { answer } from "app/.shared/service.work";`+"\n"+
+			`router.get((context) => context.text("api-v2 " + answer()));`,
 	)
 	waitForCheck()
 	if response := request(engine, "/api"); response.Code != http.StatusOK ||
@@ -268,7 +270,7 @@ func TestEngineReloadsWholeGenerationForRouteGraphChanges(t *testing.T) {
 		t.Fatal("subfolder edit did not replace and retire the generation")
 	}
 
-	write("_core/service.kitwork.js", `export const answer = () => ("service-v2");`)
+	write("../.shared/service.work", `export const answer = () => ("service-v2");`)
 	waitForCheck()
 	if response := request(engine, "/api"); response.Code != http.StatusOK ||
 		!strings.Contains(response.Body.String(), "api-v2 service-v2") {
@@ -280,9 +282,9 @@ func TestEngineReloadsWholeGenerationForRouteGraphChanges(t *testing.T) {
 	}
 
 	write(
-		"fresh/router.kitwork.js",
-		`import { router } from "kitwork";`+"\n"+
-			`router.get().handle((ctx) => ctx.text("fresh-alive"));`,
+		"fresh/router.work",
+		`import * as router from "kitwork/router";`+"\n"+
+			`router.get((context) => context.text("fresh-alive"));`,
 	)
 	waitForCheck()
 	if response := request(engine, "/fresh"); response.Code != http.StatusOK ||
@@ -300,9 +302,10 @@ func TestEngineReloadsEnvironmentAsGenerationState(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	routerFile := filepath.Join(dir, "router.kitwork.js")
-	router := `import { router, environment } from "kitwork";
-router.get().handle((ctx) => ctx.text(environment.MESSAGE));`
+	routerFile := filepath.Join(dir, work.UIRouterFileName)
+	router := `import * as router from "kitwork/router";
+import { environment } from "kitwork";
+router.get((context) => context.text(environment.MESSAGE));`
 	if err := os.WriteFile(routerFile, []byte(router), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -437,13 +440,13 @@ func TestEnginePreservesSiteStateAndReplacesGenerationCache(t *testing.T) {
 		return recorder
 	}
 	route := func(body, policy string) string {
-		return `import { router } from "kitwork";` + "\n" +
-			`router.get((ctx) => ctx.text("` + body + `")).` + policy + `("1h");`
+		return `import * as router from "kitwork/router";` + "\n" +
+			`router.get((context) => context.text("` + body + `")).` + policy + `("1h");`
 	}
 
-	write("router.kitwork.js", `import { router } from "kitwork";`)
-	write("ram/router.kitwork.js", route("ram-v1", "cache"))
-	write("disk/router.kitwork.js", route("disk-v1", "persist"))
+	write("router.work", `import * as router from "kitwork/router";`)
+	write("ram/router.work", route("ram-v1", "cache"))
+	write("disk/router.work", route("disk-v1", "persist"))
 
 	engine := New(tmpDir, 0, true, "")
 	t.Cleanup(engine.Close)
@@ -458,8 +461,8 @@ func TestEnginePreservesSiteStateAndReplacesGenerationCache(t *testing.T) {
 	firstCache.Set("lifetime-probe", cache.Entry{Body: []byte("alive")}, time.Hour)
 	persistStore := first.SiteRuntime().PersistStore()
 
-	write("ram/router.kitwork.js", route("ram-v2", "cache"))
-	write("disk/router.kitwork.js", route("disk-v2", "persist"))
+	write("ram/router.work", route("ram-v2", "cache"))
+	write("disk/router.work", route("disk-v2", "persist"))
 	time.Sleep(1100 * time.Millisecond)
 
 	if response := request(engine, "/ram"); response.Code != http.StatusOK || response.Body.String() != "ram-v2" {
@@ -493,12 +496,12 @@ func TestEnginePreservesRateLimitStateAcrossGenerationReload(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	routerFile := filepath.Join(dir, "router.kitwork.js")
+	routerFile := filepath.Join(dir, work.UIRouterFileName)
 	write := func(body string) {
 		t.Helper()
-		source := `import { router } from "kitwork";` + "\n" +
-			`router.ratelimit({ ip: 1, period: "1m" });` + "\n" +
-			`router.get().handle((ctx) => ctx.text("` + body + `"));`
+		source := `import * as router from "kitwork/router";` + "\n" +
+			`router.limit({ rate: 1, per: "1m", by: "ip" });` + "\n" +
+			`router.get((context) => context.text("` + body + `"));`
 		if err := os.WriteFile(routerFile, []byte(source), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -546,7 +549,7 @@ func TestEngineSharesAppRuntimeAndIsolatesSiteRuntimes(t *testing.T) {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		writeRouterBody(t, filepath.Join(dir, "router.kitwork.js"), domain)
+		writeRouterBody(t, filepath.Join(dir, work.UIRouterFileName), domain)
 	}
 
 	engine := New(tmpDir, 0, true, "")
@@ -655,7 +658,7 @@ func TestAppSchedulerAndSitesShareOneAppRuntime(t *testing.T) {
 	if err := os.MkdirAll(scheduleDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeRouterBody(t, filepath.Join(siteDir, "router.kitwork.js"), "ok")
+	writeRouterBody(t, filepath.Join(siteDir, work.UIRouterFileName), "ok")
 	heartbeat := `import * as schedule from "kitwork/schedule";
 export const heartbeat = schedule.every("1h").run((context) => {});`
 	if err := os.WriteFile(filepath.Join(scheduleDir, "heartbeat.work"), []byte(heartbeat), 0o644); err != nil {

@@ -15,8 +15,8 @@ import (
 	"github.com/kitwork/engine/work"
 )
 
-const invalidGenerationRouter = `import { router } from "kitwork";
-router.get().handle((ctx) => {`
+const invalidGenerationRouter = `import * as router from "kitwork/router";
+router.get((context) => {`
 
 func TestEngineGenerationCandidateLifecycleOutcomes(t *testing.T) {
 	t.Run("cold valid", func(t *testing.T) {

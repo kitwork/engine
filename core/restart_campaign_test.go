@@ -748,7 +748,7 @@ func writeRestartCampaignRoute(root, source string) (string, error) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		return "", err
 	}
-	routerFile := filepath.Join(directory, work.RouterFileName)
+	routerFile := filepath.Join(directory, work.UIRouterFileName)
 	if err := os.WriteFile(routerFile, []byte(source), 0o644); err != nil {
 		return "", err
 	}
@@ -756,13 +756,12 @@ func writeRestartCampaignRoute(root, source string) (string, error) {
 }
 
 func restartCampaignSource(revision int) string {
-	return fmt.Sprintf(`
-import { router } from "kitwork";
+	return fmt.Sprintf(`import * as router from "kitwork/router";
 
 const revision = "restart-%d";
 const make = (base) => (number) => base + number;
 
-router.get((ctx) => ctx.text(revision + ":" + make(40)(2)));
+router.get((context) => context.text(revision + ":" + make(40)(2)));
 `, revision)
 }
 

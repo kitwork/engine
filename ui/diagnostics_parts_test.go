@@ -158,10 +158,10 @@ func TestPartsReaderRootOfALayoutIsAWarning(t *testing.T) {
 // :583), is a warning: the nearest wins on the server as in the kernel, so the page renders as
 // written — here the dropdown's open (false), not the view's (true).
 func TestPartsShadowedNameIsAWarning(t *testing.T) {
-	view := `import { router } from "kitwork";
-router.get((ctx) => {
+	view := `import * as router from "kitwork/router";
+router.get((context) => {
   const open = true;
-  return ctx.view({ open });
+  return context.view({ open });
 });`
 	content := `<content><dropdown><text show="open">menu</text></dropdown></content>`
 	files := map[string]string{"/site/content.ui": content, "/site/router.work": view}
@@ -185,7 +185,7 @@ router.get((ctx) => {
 	mustContain(t, html, `<button class="flex-row `+neutralClasses+`" type="button" data-kitwork-event="click: toggle()">x</button>`)
 	// control: a name only the page is given tells nothing (24/10/2026: one it is not given is an error,
 	// given_test.go)
-	titled := "import { router } from \"kitwork\";\nrouter.get((ctx) => ctx.view({ open: true, title: \"Kitwork\" }));"
+	titled := "import * as router from \"kitwork/router\";\nrouter.get((context) => context.view({ open: true, title: \"Kitwork\" }));"
 	partsQuiet(t, map[string]string{"/site/content.ui": `<content><dropdown><text>{{ title }}</text></dropdown></content>`, "/site/router.work": titled})
 }
 

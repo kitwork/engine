@@ -221,5 +221,5 @@ func writeHostTenant(t testing.TB, root, identity, domain, body string) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeRouterBody(t, filepath.Join(directory, work.RouterFileName), body)
+	writeRouterBody(t, filepath.Join(directory, work.UIRouterFileName), body)
 }

@@ -1,0 +1,3 @@
+import { twice } from "./support.work";
+
+let result = twice(21);

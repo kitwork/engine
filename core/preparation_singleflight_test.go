@@ -176,12 +176,12 @@ func writePreparationSite(t testing.TB, root, identity, domain, upstream string)
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	source := fmt.Sprintf(`
-import { router, http } from "kitwork";
+	source := fmt.Sprintf(`import * as router from "kitwork/router";
+import { http } from "kitwork";
 http.get(%q).send();
-router.get((ctx) => ctx.text("ready"));
+router.get((context) => context.text("ready"));
 `, upstream)
-	if err := os.WriteFile(filepath.Join(directory, work.RouterFileName), []byte(source), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(directory, work.UIRouterFileName), []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

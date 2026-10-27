@@ -9,7 +9,7 @@ import (
 	"github.com/kitwork/engine/work"
 )
 
-// Prewarm must discover every root/<identity>/<domain>/router.kitwork.js (the tenant marker) and
+// Prewarm must discover every root/<identity>/<domain>/router.work (the tenant marker) and
 // warm it into the cache — while ignoring folders without a root router.
 func TestPrewarmAndDiscover(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -18,7 +18,7 @@ func TestPrewarmAndDiscover(t *testing.T) {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(`const x = 1;`), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, work.UIRouterFileName), []byte(`const x = 1;`), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -56,7 +56,7 @@ func TestPrewarmDomainWarmsOnlySelectedSite(t *testing.T) {
 		if err := os.MkdirAll(directory, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(directory, work.RouterFileName), []byte(`const ready = true;`), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(directory, work.UIRouterFileName), []byte(`const ready = true;`), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}

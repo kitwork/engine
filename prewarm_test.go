@@ -17,7 +17,7 @@ func TestConfiguredPrewarmPolicies(t *testing.T) {
 		if err := os.MkdirAll(directory, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(directory, work.RouterFileName), []byte(`const ready = true;`), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(directory, work.UIRouterFileName), []byte(`const ready = true;`), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -24,23 +24,21 @@ func TestProfileCompilesOnlyExecutableEntrypoints(t *testing.T) {
 		}
 	}
 
-	write("identity/site/_core/math.kitwork.js", `export const add = (a, b) => a + b;`)
-	write("identity/site/router.kitwork.js", `
-import { router } from "kitwork";
-import { add } from "./_core/math.kitwork.js";
-router.get((ctx) => ctx.json({ answer: add(20, 22) }));
+	write("identity/.shared/math.work", `export const add = (a, b) => a + b;`)
+	write("identity/site/router.work", `import * as router from "kitwork/router";
+import { add } from "../.shared/math.work";
+router.get((context) => context.json({ answer: add(20, 22) }));
 `)
-	write("identity/site/about/router.kitwork.js", `
-import { router } from "kitwork";
-router.get((ctx) => ctx.text("about"));
+	write("identity/site/about/router.work", `import * as router from "kitwork/router";
+router.get((context) => context.text("about"));
 `)
 	write("identity/.schedule/pulse.work", `const pulse = () => 42;`)
 	write("identity/.shared/queue/mail.work", `const send = (message) => message;`)
 	write("identity/.shared/queue/config.work", "import * as queue from \"kitwork/queue\";\nqueue.parallel(2);\n")
 	write("identity/.shared/lib.work", `export const helper = () => 1;`)
-	write("identity/site/_core/ignored.kitwork.js", `const helper = () => 1;`)
-	write("identity/site/broken/router.kitwork.js", `const broken = ;`)
-	write("test/ignored/router.kitwork.js", `const ignored = 1;`)
+	write("identity/.shared/ignored.work", `const helper = () => 1;`)
+	write("identity/site/broken/router.work", `const broken = ;`)
+	write("test/ignored/router.work", `const ignored = 1;`)
 
 	report := Profile(root)
 	if report.Root != root || report.Layout != "auto" {
@@ -62,7 +60,7 @@ router.get((ctx) => ctx.text("about"));
 		t.Fatalf("incomplete compatibility contract = %#v", report)
 	}
 	if len(report.Issues) != 1 ||
-		report.Issues[0].File != "identity/site/broken/router.kitwork.js" {
+		report.Issues[0].File != "identity/site/broken/router.work" {
 		t.Fatalf("issues = %#v", report.Issues)
 	}
 	if report.BytecodeBytes == 0 ||
@@ -78,7 +76,7 @@ router.get((ctx) => ctx.text("about"));
 		t.Fatal("programs are not sorted by descending bytecode size")
 	}
 	for _, program := range report.Programs {
-		if program.File == "identity/site/_core/ignored.kitwork.js" {
+		if program.File == "identity/.shared/ignored.work" {
 			t.Fatal("helper module was profiled as an executable entrypoint")
 		}
 	}
@@ -87,17 +85,17 @@ router.get((ctx) => ctx.text("about"));
 func TestProfileWithLayoutProfilesOnlyExecutableRootShape(t *testing.T) {
 	t.Run("single app", func(t *testing.T) {
 		root := t.TempDir()
-		writeProfileSource(t, root, work.RouterFileName, profileRouterSource("home"))
-		writeProfileSource(t, root, "about/router.kitwork.js", profileRouterSource("about"))
+		writeProfileSource(t, root, work.UIRouterFileName, profileRouterSource("home"))
+		writeProfileSource(t, root, "about/router.work", profileRouterSource("about"))
 		writeProfileSource(t, root, ".schedule/pulse.work", `const pulse = () => 1;`)
 		writeProfileSource(t, root, "_cron/old.kitwork.js", `const old = () => 1;`)
-		writeProfileSource(t, root, "_core/router.kitwork.js", profileRouterSource("private"))
+		writeProfileSource(t, root, "_private/router.work", profileRouterSource("private"))
 
 		report := ProfileWithLayout(root, work.RootLayoutSingle)
 		assertProfileFiles(t, report, []string{
 			".schedule/pulse.work",
-			"about/router.kitwork.js",
-			"router.kitwork.js",
+			"about/router.work",
+			"router.work",
 		})
 	})
 
@@ -105,33 +103,33 @@ func TestProfileWithLayoutProfilesOnlyExecutableRootShape(t *testing.T) {
 		root := t.TempDir()
 		writeProfileSource(t, root, ".shared/queue/mail.work", `const mail = () => 1;`)
 		writeProfileSource(t, root, "_queue/old.kitwork.js", `const old = () => 1;`)
-		writeProfileSource(t, root, "one.example/router.kitwork.js", profileRouterSource("one"))
-		writeProfileSource(t, root, "one.example/about/router.kitwork.js", profileRouterSource("about"))
-		writeProfileSource(t, root, "identity/nested.example/router.kitwork.js", profileRouterSource("nested"))
-		writeProfileSource(t, root, "sites/legacy.example/router.kitwork.js", profileRouterSource("legacy"))
+		writeProfileSource(t, root, "one.example/router.work", profileRouterSource("one"))
+		writeProfileSource(t, root, "one.example/about/router.work", profileRouterSource("about"))
+		writeProfileSource(t, root, "identity/nested.example/router.work", profileRouterSource("nested"))
+		writeProfileSource(t, root, "sites/legacy.example/router.work", profileRouterSource("legacy"))
 
 		report := ProfileWithLayout(root, work.RootLayoutMultiDomain)
 		assertProfileFiles(t, report, []string{
 			".shared/queue/mail.work",
-			"one.example/about/router.kitwork.js",
-			"one.example/router.kitwork.js",
+			"one.example/about/router.work",
+			"one.example/router.work",
 		})
 	})
 
 	t.Run("multi tenant", func(t *testing.T) {
 		root := t.TempDir()
 		writeProfileSource(t, root, "first/.schedule/pulse.work", `const pulse = () => 1;`)
-		writeProfileSource(t, root, "first/one.example/router.kitwork.js", profileRouterSource("one"))
-		writeProfileSource(t, root, "first/one.example/about/router.kitwork.js", profileRouterSource("about"))
-		writeProfileSource(t, root, "second/two.example/router.kitwork.js", profileRouterSource("two"))
-		writeProfileSource(t, root, "sites/legacy.example/router.kitwork.js", profileRouterSource("legacy"))
+		writeProfileSource(t, root, "first/one.example/router.work", profileRouterSource("one"))
+		writeProfileSource(t, root, "first/one.example/about/router.work", profileRouterSource("about"))
+		writeProfileSource(t, root, "second/two.example/router.work", profileRouterSource("two"))
+		writeProfileSource(t, root, "sites/legacy.example/router.work", profileRouterSource("legacy"))
 
 		report := ProfileWithLayout(root, work.RootLayoutMultiTenant)
 		assertProfileFiles(t, report, []string{
 			"first/.schedule/pulse.work",
-			"first/one.example/about/router.kitwork.js",
-			"first/one.example/router.kitwork.js",
-			"second/two.example/router.kitwork.js",
+			"first/one.example/about/router.work",
+			"first/one.example/router.work",
+			"second/two.example/router.work",
 		})
 	})
 }
@@ -148,8 +146,8 @@ func writeProfileSource(t testing.TB, root, relative, source string) {
 }
 
 func profileRouterSource(body string) string {
-	return `import { router } from "kitwork";
-router.get(() => "` + body + `");`
+	return `import * as router from "kitwork/router";
+router.get((context) => context.text("` + body + `"));`
 }
 
 func assertProfileFiles(t testing.TB, report ProfileReport, want []string) {

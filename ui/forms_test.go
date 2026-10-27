@@ -201,11 +201,11 @@ func TestNameReadInsideTheHostIsNotShadowed(t *testing.T) {
 	partsWarns(t, map[string]string{"/site/content.ui": nested}, where("content.ui", nested, `click=`),
 		"toggle ở đây là của dropdown, mà dropdown bao ngoài cũng khai toggle: một tên một nghĩa")
 
-	view := `import { router } from "kitwork";
-router.get((ctx) => {
+	view := `import * as router from "kitwork/router";
+router.get((context) => {
   const open = true;
   const user = { name: "Quốc" };
-  return ctx.view({ open, user });
+  return context.view({ open, user });
 });`
 	header := `<content><dropdown><text show="open">menu</text></dropdown></content>`
 	partsWarns(t, map[string]string{"/site/content.ui": header, "/site/router.work": view}, where("content.ui", header, `show=`),

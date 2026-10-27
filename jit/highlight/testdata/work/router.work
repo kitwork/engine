@@ -1,7 +1,10 @@
 // Router của quán cà phê: tập con JavaScript mà máy ảo Kitwork chạy.
-import { router, database, environment, log } from "kitwork";
-import { normalize, slugOf } from "./_core/normalize.kitwork.js";
-import { receipt } from "./_core/receipt.kitwork.js";
+import * as router from "kitwork/router";
+import { environment } from "kitwork";
+import { desc } from "kitwork/database";
+import { db } from "app/.shared/schema/shop.work";
+import { normalize, slugOf } from "app/.shared/normalize.work";
+import { receipt } from "app/.shared/receipt.work";
 
 const PAGE_SIZE = environment.PAGE_SIZE || 20;
 const OPEN_HOUR = environment.OPEN_HOUR || 7;
@@ -12,13 +15,9 @@ const TAX = 0.08;
 const MAX_QUANTITY = 20;
 
 router.reload(false);
-
-router
-  .favicon("_assets/favicon.ico")
-  .assets("/assets/*", "_assets")
-  .language("vi")
-  .title("Quán cà phê — thực đơn hôm nay")
-  .meta({ site: "Quán cà phê", type: "website", locale: "vi_VN" });
+router.favicon("assets/favicon.ico");
+router.language("vi");
+router.meta({ title: "Quán cà phê — thực đơn hôm nay", site: "Quán cà phê", type: "website", locale: "vi_VN" });
 
 function priceOf(drink, size) {
   const extra = SURCHARGE[size] || 0;
@@ -41,59 +40,7 @@ const toCard = row => ({
   tags: row.tags || [],
 });
 
-router.get("/", ctx => {
-  const hour = new Date().getHours();
-  return ctx.view("home", { open: isOpen(hour), hour: hour, title: `Mở cửa ${OPEN_HOUR}h–${CLOSE_HOUR}h` });
-});
-
-router.get("/menu", ctx => {
-  const page = Number(ctx.query.page || 1);
-  const { value: rows = [] } = safe(() => database.table("drinks")
-    .where("available", true)
-    .orderBy("name")
-    .limit(PAGE_SIZE)
-    .offset((page - 1) * PAGE_SIZE));
-  const drinks = rows.map(toCard);
-  let cheapest = null;
-  for (let i = 0; i < drinks.length; i++) {
-    if (cheapest === null || drinks[i].price < cheapest.price) {
-      cheapest = drinks[i];
-    }
-  }
-  return ctx.view("menu", { drinks, cheapest, page, note: `trang ${page}/${Math.ceil(rows.length / PAGE_SIZE)}` });
-});
-
-router.get("/menu/:slug", ctx => {
-  const { value: drink } = safe(() => database.table("drinks").where("slug", ctx.params.slug).first());
-  if (!drink) {
-    return ctx.notfound();
-  }
-  return ctx.view("drink", { drink: toCard(drink), sizes: SIZES });
-});
-
-router.post("/order", ctx => {
-  const body = ctx.jsonBody();
-  const lines = [];
-  for (const item of body.items || []) {
-    if (!SIZES.includes(item.size)) {
-      return ctx.status(400).json({ error: `kích cỡ "${item.size}" không có` });
-    }
-    const quantity = Math.min(Number(item.quantity || 1), MAX_QUANTITY);
-    const { value: drink } = safe(() => database.table("drinks").where("id", item.id).first());
-    lines.push({ id: item.id, size: item.size, quantity: quantity, price: priceOf(drink, item.size) });
-  }
-  let sum = 0;
-  for (const line of lines) {
-    sum += lineTotal(line);
-  }
-  const order = { lines, sum, paid: false, note: body.note || null, at: Date.now() };
-  database.table("orders").insert(order);
-  log.info("đơn mới", order.sum);
-  return ctx.json({ ok: true, total: sum, receipt: receipt(order) });
-});
-
-router.get("/status/:code", ctx => {
-  const code = ctx.params.code;
+function statusOf(code) {
   let label = "";
   switch (code) {
     case "open":
@@ -105,9 +52,54 @@ router.get("/status/:code", ctx => {
     default:
       label = "Đã đóng";
   }
-  return ctx.text(label);
-});
+  return label;
+}
 
-router.get("/health", ctx => ctx.json({ ok: true, version: environment.VERSION || "dev", ratio: 3 / 4 }));
+router.get((context) => {
+  const hour = new Date().getHours();
+  const page = Number(context.request.query("page") || 1);
+  const { value: rows = [] } = safe(() => db.where((drinks) => drinks.available === true)
+    .orderBy((drinks) => desc(drinks.price))
+    .list({ page, limit: PAGE_SIZE }));
+  const cards = rows.map(toCard);
+  let cheapest = null;
+  for (let i = 0; i < cards.length; i++) {
+    if (cheapest === null || cards[i].price < cheapest.price) {
+      cheapest = cards[i];
+    }
+  }
+  return context.title(`Mở cửa ${OPEN_HOUR}h–${CLOSE_HOUR}h`).view({
+    open: isOpen(hour),
+    status: statusOf(isOpen(hour) ? "open" : "closed"),
+    drinks: cards,
+    cheapest,
+    page,
+    note: `trang ${page}/${Math.ceil(rows.length / PAGE_SIZE)}`,
+  });
+}).cache("1m", "page");
 
-export { priceOf, isOpen, toCard };
+router.post((context) => {
+  const body = context.request.json();
+  const lines = [];
+  for (const item of body.items || []) {
+    if (!SIZES.includes(item.size)) {
+      return context.status(400).json({ error: `kích cỡ "${item.size}" không có` });
+    }
+    const quantity = Math.min(Number(item.quantity || 1), MAX_QUANTITY);
+    const wanted = item.id;
+    const drink = db.first((drinks) => drinks.id === wanted);
+    if (drink === null) {
+      return context.notFound();
+    }
+    lines.push({ id: wanted, size: item.size, quantity: quantity, price: priceOf(drink, item.size) });
+  }
+  let sum = 0;
+  for (const line of lines) {
+    sum += lineTotal(line);
+  }
+  const note = body.note || null;
+  const deposit = Math.round(sum * 3 / 4);
+  db.insert((orders) => ({ total: sum, note }));
+  console.log("đơn mới", sum);
+  return context.json({ ok: true, total: sum, deposit, receipt: receipt({ lines, sum, note, at: Date.now() }) });
+}).limit({ rate: 5, per: "1m", by: "ip" });

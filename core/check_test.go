@@ -84,19 +84,19 @@ router.get((ctx) => ctx.json(missing));`,
 func TestCheckWithLayoutUsesMultiDomainDiscoveryContract(t *testing.T) {
 	root := t.TempDir()
 	site := filepath.Join(root, "one.example")
-	private := filepath.Join(root, "_core")
+	private := filepath.Join(root, "_private")
 	for _, directory := range []string{site, private} {
 		if err := os.MkdirAll(directory, 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	valid := `import { router } from "kitwork";
-router.get(() => "ok");`
-	if err := os.WriteFile(filepath.Join(site, work.RouterFileName), []byte(valid), 0o644); err != nil {
+	valid := `import * as router from "kitwork/router";
+router.get((context) => context.text("ok"));`
+	if err := os.WriteFile(filepath.Join(site, work.UIRouterFileName), []byte(valid), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(
-		filepath.Join(private, work.RouterFileName),
+		filepath.Join(private, work.UIRouterFileName),
 		[]byte(`const broken = ;`),
 		0o644,
 	); err != nil {

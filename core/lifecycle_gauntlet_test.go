@@ -28,7 +28,7 @@ func writeLifecycleRoute(
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	routerFile := filepath.Join(directory, work.RouterFileName)
+	routerFile := filepath.Join(directory, work.UIRouterFileName)
 	if err := os.WriteFile(routerFile, []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -151,28 +151,25 @@ func TestEngineLifecycleGauntlet(t *testing.T) {
 	}))
 
 	root := t.TempDir()
-	writeLifecycleRoute(t, root, "", `
-import { router } from "kitwork";
-router.get((ctx) => ctx.text("v1"));
+	writeLifecycleRoute(t, root, "", `import * as router from "kitwork/router";
+router.get((context) => context.text("v1"));
 `)
-	writeLifecycleRoute(t, root, "hold", fmt.Sprintf(`
-import { router, http } from "kitwork";
-router.get((ctx) => {
+	writeLifecycleRoute(t, root, "hold", fmt.Sprintf(`import * as router from "kitwork/router";
+import { http } from "kitwork";
+router.get((context) => {
 	const response = http.get(%q).send();
-	return ctx.text(response.text());
+	return context.text(response.text());
 });
 `, upstream.URL))
-	writeLifecycleRoute(t, root, "events", `
-import { router } from "kitwork";
+	writeLifecycleRoute(t, root, "events", `import * as router from "kitwork/router";
 import { memory } from "kitwork/storage";
-router.get((ctx) => ctx.sse.reconnect("1s").subscribe(memory("updates")));
+router.get((context) => context.sse.reconnect("1s").subscribe(memory("updates")));
 `)
-	writeLifecycleRoute(t, root, "publish", `
-import { router } from "kitwork";
+	writeLifecycleRoute(t, root, "publish", `import * as router from "kitwork/router";
 import { memory } from "kitwork/storage";
-router.post((ctx) => {
+router.post((context) => {
 	memory("updates").send({ event: "reload", id: "reload-1", data: "v2" });
-	return ctx.json(true);
+	return context.json(true);
 });
 `)
 
@@ -274,9 +271,8 @@ router.post((ctx) => {
 	}()
 	<-taskStarted
 
-	writeLifecycleRoute(t, root, "", `
-import { router } from "kitwork";
-router.get((ctx) => ctx.text("v2"));
+	writeLifecycleRoute(t, root, "", `import * as router from "kitwork/router";
+router.get((context) => context.text("v2"));
 `)
 	cached.mu.Lock()
 	cached.lastChecked = time.Time{}

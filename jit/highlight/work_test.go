@@ -7,31 +7,25 @@ import "testing"
 // the subset shares — with no regular-expression literals.
 func TestWork(t *testing.T) {
 	checkExact(t, "work", []tokenCase{
-		{"import { router, environment } from \"kitwork\";", tokensOf(
+		{"import * as router from \"kitwork/router\";", tokensOf(
 			Keyword, "import",
 			Plain, " ",
-			Punctuation, "{",
+			Operator, "*",
+			Plain, " ",
+			Keyword, "as",
 			Plain, " ",
 			Variable, "router",
-			Punctuation, ",",
-			Plain, " ",
-			Variable, "environment",
-			Plain, " ",
-			Punctuation, "}",
 			Plain, " ",
 			Keyword, "from",
 			Plain, " ",
-			String, "\"kitwork\"",
+			String, "\"kitwork/router\"",
 			Punctuation, ";",
 		)},
-		{"router.get(\"/\", ctx => ctx.json({ ok: true }));", tokensOf(
+		{"router.get(ctx => ctx.json({ ok: true }));", tokensOf(
 			Variable, "router",
 			Punctuation, ".",
 			Function, "get",
 			Punctuation, "(",
-			String, "\"/\"",
-			Punctuation, ",",
-			Plain, " ",
 			Variable, "ctx",
 			Plain, " ",
 			Operator, "=>",
@@ -428,7 +422,7 @@ func TestWork(t *testing.T) {
 			Plain, " ",
 			Punctuation, "}",
 		)},
-		{"import { a as b } from \"./lib.kitwork.js\";", tokensOf(
+		{"import { a as b } from \"./lib.work\";", tokensOf(
 			Keyword, "import",
 			Plain, " ",
 			Punctuation, "{",
@@ -439,7 +433,7 @@ func TestWork(t *testing.T) {
 			Plain, " ",
 			Keyword, "from",
 			Plain, " ",
-			String, "\"./lib.kitwork.js\"",
+			String, "\"./lib.work\"",
 			Punctuation, ";",
 		)},
 		{"// lấy trang\nconst page = ctx.query.page; /* mặc định 1 */", tokensOf(
@@ -481,26 +475,30 @@ func TestWork(t *testing.T) {
 // matters, in order.
 func TestWorkSample(t *testing.T) {
 	checkContains(t, "work", []tokenCase{{javascriptSample(t, "work", "router.work"), tokensOf(
-		Keyword, "import", Variable, "router", Variable, "database", Variable, "environment", Variable, "log",
-		Keyword, "from", String, `"kitwork"`,
+		Keyword, "import", Operator, "*", Keyword, "as", Variable, "router",
+		Keyword, "from", String, `"kitwork/router"`,
+		Variable, "environment", String, `"kitwork"`,
+		String, `"app/.shared/schema/shop.work"`,
 		Keyword, "const", Variable, "environment", Property, "PAGE_SIZE", Operator, "||", Number, "20",
 		Property, "S", Number, "0",
 		Variable, "router", Function, "reload", Constant, "false",
 		Function, "favicon", Function, "meta", Property, "site",
 		Keyword, "function", Function, "priceOf", Operator, "||", Operator, "?", Operator, "/",
 		Type, "Math", Function, "round",
-		Variable, "ctx", Operator, "=>", Keyword, "new", Type, "Date", Function, "getHours",
-		Variable, "ctx", Function, "view", String, "`Mở cửa ",
-		Type, "Number", Variable, "ctx", Property, "query",
-		Variable, "database", Function, "table", Function, "where", Constant, "true",
+		Keyword, "switch", Keyword, "case", Keyword, "break", Keyword, "default",
+		Variable, "router", Function, "get", Operator, "=>", Keyword, "new", Type, "Date", Function, "getHours",
+		Type, "Number", Property, "request", Function, "query",
+		Function, "safe", Function, "where", Constant, "true", Function, "orderBy", Function, "list",
 		Keyword, "for", Keyword, "let", Constant, "null",
-		Function, "notfound",
+		Function, "title", String, "`Mở cửa ", Function, "view",
+		Function, "cache",
+		Variable, "router", Function, "post",
 		Keyword, "for", Keyword, "const", Keyword, "of",
 		Function, "status", Function, "json", Property, "error",
-		Variable, "log", Function, "info",
-		Keyword, "switch", Keyword, "case", Keyword, "break", Keyword, "default",
-		Function, "text",
+		Function, "first", Function, "notFound",
 		Number, "3", Operator, "/", Number, "4",
-		Keyword, "export",
+		Function, "insert",
+		Variable, "console", Function, "log",
+		Function, "limit", Property, "rate",
 	)}})
 }

@@ -132,7 +132,7 @@ func TestAppRootRouterTakesPrecedenceOverNestedRouteFolders(t *testing.T) {
 
 func TestAppRootIgnoresReservedInfrastructureFolders(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "app")
-	writeRootMarker(t, filepath.Join(root, "_core"))
+	writeRootMarker(t, filepath.Join(root, "_private"))
 	writeRootMarker(t, filepath.Join(root, ".data"))
 
 	if layout := appRootLayout(root); layout != work.RootLayoutSingle {
@@ -176,7 +176,7 @@ func writeRootMarker(t testing.TB, directory string) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(directory, work.RouterFileName), []byte("// root"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(directory, work.UIRouterFileName), []byte("// root"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

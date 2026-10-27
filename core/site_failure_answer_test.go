@@ -19,7 +19,7 @@ import (
 // with no site, which any client can send. While developing (AllowLocal) the answer is the error.
 // CONTROL: a site that compiles answers 200.
 func TestSiteThatCouldNotAnswerShowsVisitorsOnlyTheRequestID(t *testing.T) {
-	const compileError = "compile router router.kitwork.js"
+	const compileError = "compile router router.work"
 	savedLocal, savedLog := work.AllowLocal, slog.Default()
 	t.Cleanup(func() {
 		work.AllowLocal = savedLocal

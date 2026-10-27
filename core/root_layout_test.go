@@ -171,9 +171,9 @@ func writeRootLayoutRouter(t testing.TB, directory, body string) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	source := `import { router } from "kitwork";
-router.get(() => "` + body + `");`
-	if err := os.WriteFile(filepath.Join(directory, work.RouterFileName), []byte(source), 0o644); err != nil {
+	source := `import * as router from "kitwork/router";
+router.get((context) => context.text("` + body + `"));`
+	if err := os.WriteFile(filepath.Join(directory, work.UIRouterFileName), []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -195,7 +195,7 @@ func writeRetentionCampaignRoute(t testing.TB, root, source string) string {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	routerFile := filepath.Join(directory, work.RouterFileName)
+	routerFile := filepath.Join(directory, work.UIRouterFileName)
 	if err := os.WriteFile(routerFile, []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -204,18 +204,18 @@ func writeRetentionCampaignRoute(t testing.TB, root, source string) string {
 
 func retentionCampaignSource(generation int, upstream string) string {
 	padding := strings.Repeat("x", retentionPaddingBytes)
-	return fmt.Sprintf(`
-import { router, http } from "kitwork";
+	return fmt.Sprintf(`import * as router from "kitwork/router";
+import { http } from "kitwork";
 
 const generation = "generation-%d";
 const retirementProbe = %q;
 const make = (base) => (number) => base + number;
 
-router.get((ctx) => {
+router.get((context) => {
 	const functions = [1, 2, 3, 4].map((base) => make(base));
 	const rendered = functions.map((fn) => fn(10)).join(",");
 	const response = http.get(%q).send();
-	return ctx.text(generation + ":" + rendered + ":" + response.text());
+	return context.text(generation + ":" + rendered + ":" + response.text());
 });
 `, generation, padding, upstream)
 }
