@@ -82,7 +82,7 @@ func newFile(role string, css []byte) File {
 	return File{Role: role, Name: role + "." + hex.EncodeToString(sum[:8]), CSS: css}
 }
 
-// Elements puts rules another generator makes (jit/icons, jit/logo) into the elements layer, after the
+// Elements puts rules another generator makes (jit/icons) into the elements layer, after the
 // layer statement: unlayered CSS would beat every layer whatever its weight, so an icon would stay
 // visible against a show-false. Empty in, nil out.
 func Elements(css []byte) []byte {

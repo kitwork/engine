@@ -13,9 +13,9 @@ import (
 // library that takes view apart from the context) is refused as it runs: the request fails 500 naming what to
 // write, never the template renderer's "Error reading index" of before, the page text the guard wrote before its
 // view (context.title(…).view) included. A guard that writes page text and then says no answers 403, not that
-// text through the template renderer. Both hold when the site also holds a template's index.kitwork.html. The
-// handler after a guard that lets the request on still draws its page, and a template site's guard is not refused
-// (its view is deferred, and the handler's answer goes out, as before).
+// text through the template renderer. The handler after a guard that lets the request on still draws its page.
+// (Until 27/10/2026 both held also with a template's index.kitwork.html left in the site, now a boot error, and a
+// template site's guard that called ctx.view was not refused: ctx.view of a template site fails now.)
 //
 // CONTROL (go test -overlay, 25/10/2026): with refuseGuardAnswer refusing nothing, every refused row went red: the
 // view went out and only runStage refused it once the guard was over, 500 "context.view(…) trong guard: guard chỉ
@@ -57,47 +57,25 @@ func TestGuardDrawsNoPageAsItRuns(t *testing.T) {
 			"router.get((context) => context.view({ name: \"Quán\" })).guard(open());\n",
 		"acme/localhost/page/content.ui": "<content><text>PAGE-{{ name }}</text></content>",
 	}
-	for _, index := range []bool{false, true} {
-		files := map[string]string{}
-		for path, content := range site {
-			files[path] = content
-		}
-		if index {
-			// a template's index left in the site: the guard's page text never reaches it
-			files["acme/localhost/index.kitwork.html"] = "<!doctype html><html><body>TEMPLATE-INDEX {{ @page }}</body></html>"
-		}
-		tenant, err := bootAppSite(t, t.TempDir(), files, "localhost")
-		if err != nil {
-			t.Fatalf("index %v: run: %v", index, err)
-		}
-		for _, target := range []string{"/made/x", "/titled/x", "/object", "/library"} {
-			rec := serveAt(tenant, http.MethodGet, "http://localhost"+target)
-			if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), refusal) {
-				t.Errorf("index %v, %s: %d %q, want 500 with %q", index, target, rec.Code, rec.Body.String(), refusal)
-			}
-		}
-		if rec := serveAt(tenant, http.MethodGet, "http://localhost/failafter"); rec.Code != http.StatusInternalServerError ||
-			strings.Contains(rec.Body.String(), `{"a":1}`) || !strings.Contains(rec.Body.String(), "`.redirect()` sau `.json()`") {
-			t.Errorf("index %v, /failafter: %d %q, want 500 with the guard's failure, not its half-made answer", index, rec.Code, rec.Body.String())
-		}
-		if rec := serveAt(tenant, http.MethodGet, "http://localhost/refused"); rec.Code != http.StatusForbidden ||
-			strings.Contains(rec.Body.String(), "TEMPLATE-INDEX") || strings.Contains(rec.Body.String(), "Error reading index") {
-			t.Errorf("index %v, /refused: %d %q, want 403 with no page", index, rec.Code, rec.Body.String())
-		}
-		if rec := serveAt(tenant, http.MethodGet, "http://localhost/page"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "PAGE-Quán") {
-			t.Errorf("index %v, /page: %d %q, want 200 with the handler's page", index, rec.Code, rec.Body.String())
-		}
-	}
-
-	// a template site's guard is not refused: its view is deferred, the handler answers, as before
-	template, err := bootAppSite(t, t.TempDir(), map[string]string{
-		"acme/localhost/router.kitwork.js": "import { router } from \"kitwork\";\nrouter.get((ctx) => ctx.text(\"x\")).guard((ctx) => ctx.view({ login: \"yes\" }));\n",
-	}, "localhost")
+	tenant, err := bootAppSite(t, t.TempDir(), site, "localhost")
 	if err != nil {
-		t.Fatalf("run template: %v", err)
+		t.Fatalf("run: %v", err)
 	}
-	if rec := serveAt(template, http.MethodGet, "http://localhost/"); rec.Code != http.StatusOK || rec.Body.String() != "x" {
-		t.Errorf("template: %d %q, want 200 \"x\"", rec.Code, rec.Body.String())
+	for _, target := range []string{"/made/x", "/titled/x", "/object", "/library"} {
+		rec := serveAt(tenant, http.MethodGet, "http://localhost"+target)
+		if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), refusal) {
+			t.Errorf("%s: %d %q, want 500 with %q", target, rec.Code, rec.Body.String(), refusal)
+		}
+	}
+	if rec := serveAt(tenant, http.MethodGet, "http://localhost/failafter"); rec.Code != http.StatusInternalServerError ||
+		strings.Contains(rec.Body.String(), `{"a":1}`) || !strings.Contains(rec.Body.String(), "`.redirect()` sau `.json()`") {
+		t.Errorf("/failafter: %d %q, want 500 with the guard's failure, not its half-made answer", rec.Code, rec.Body.String())
+	}
+	if rec := serveAt(tenant, http.MethodGet, "http://localhost/refused"); rec.Code != http.StatusForbidden || strings.Contains(rec.Body.String(), "Đăng nhập") {
+		t.Errorf("/refused: %d %q, want 403 with no page", rec.Code, rec.Body.String())
+	}
+	if rec := serveAt(tenant, http.MethodGet, "http://localhost/page"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "PAGE-Quán") {
+		t.Errorf("/page: %d %q, want 200 with the handler's page", rec.Code, rec.Body.String())
 	}
 }
 

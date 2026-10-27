@@ -10,8 +10,9 @@ import (
 
 type handlerBenchmarkFixture struct {
 	name string
-	// file is the router file router is written to: router.work, or "" for a template site's
-	// router.kitwork.js (the rows that measure a template page or a collection)
+	// file is the router file router is written to: router.work, or "" for a router.kitwork.js (the
+	// row that measures a collection; the rows that drew a template page draw a .ui page since the
+	// template pages went, 27/10/2026)
 	file                 string
 	router               string
 	files                map[string]string
@@ -107,50 +108,48 @@ export const summarize = (items) => ({
 		},
 		{
 			name:                 "guarded-view",
+			file:                 UIRouterFileName,
 			maxAllocations:       115,
-			maxEngineAllocations: 96,
+			maxEngineAllocations: 104,
 			router: `
-import { router } from "kitwork";
+import * as router from "kitwork/router";
 
-router.guard((ctx) =>
-	ctx.query("blocked") == "1"
-		? ctx.status(403).text("blocked")
-		: true
-);
-router.get((ctx) => ctx.view({
+router.guard((context) => context.query("blocked") != "1");
+router.get((context) => context.view({
 	title: "Verified handler",
 	answer: 42
 }));
 `,
 			files: map[string]string{
-				"index.kitwork.html": `<main><h1>{{ title }}</h1><p>{{ answer }}</p></main>`,
+				"view.ui":    `<view><content /></view>`,
+				"content.ui": `<content><text heading="1">{{ title }}</text><text>{{ answer }}</text></content>`,
 			},
 		},
 		{
 			name:                 "prepared-ssr",
-			maxAllocations:       110,
-			maxEngineAllocations: 100,
+			file:                 UIRouterFileName,
+			maxAllocations:       152,
+			maxEngineAllocations: 140,
 			router: `
-import { router } from "kitwork";
+import * as router from "kitwork/router";
 
-router.get((ctx) => ctx.view({
+router.get((context) => context.title("Generation-prepared SSR").view({
 	title: "Generation-prepared SSR",
 	count: 3,
 	ready: true
 }));
 `,
 			files: map[string]string{
-				"index.kitwork.html": `<html><head><title>{{ title }}</title></head><body class="min-h-dvh bg-white text-zinc-900 dark:bg-zinc-950 dark:text-white">{{ @page }}</body></html>`,
-				"page.kitwork.html": `<main class="mx-auto flex max-w-5xl gap-6 p-6">
-	<section class="card flex-1 border border-zinc-200 p-6 dark:border-zinc-800" data-kitwork-scope="count: 3">
-		<i class="icon-rocket text-red-500"></i>
-		<h1 class="text-3xl font-bold">{{ title }}</h1>
-		<input type="number" data-kitwork-bind="value: count" value="3">
-		<b data-kitwork-bind="text: count &gt; 0 ? 'Ready' : 'Waiting'">Waiting</b>
-		<button class="button mt-4" data-kitwork-event="click: count = count + 1">Ship</button>
-	</section>
-	<aside class="w-72 border-l border-zinc-200 pl-6 dark:border-zinc-800">{{ ready }}</aside>
-</main>`,
+				"view.ui": `<view><content /></view>`,
+				"content.ui": `<content>
+	<card padding="6">
+		<icon value="rocket" alt="" />
+		<text heading="1">{{ title }}</text>
+		<dropdown><button click="open = !open">Ship {{ count }}</button></dropdown>
+		<text>{{ count > 0 ? "Ready" : "Waiting" }}</text>
+	</card>
+	<text>{{ ready }}</text>
+</content>`,
 			},
 		},
 		{

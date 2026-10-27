@@ -6,7 +6,6 @@ import (
 	"github.com/kitwork/engine/jit/hydrate"
 	"github.com/kitwork/engine/jit/icons"
 	jitjs "github.com/kitwork/engine/jit/js"
-	"github.com/kitwork/engine/jit/logo"
 	jitmanifest "github.com/kitwork/engine/jit/manifest"
 	"github.com/kitwork/engine/jit/theme"
 	"github.com/kitwork/engine/ui/stylesheet"
@@ -17,11 +16,11 @@ import (
 // A Kitwork UI page knows, when it is compiled, every class, icon, component and runtime attribute it
 // can put in its HTML (ui.Page.Skeleton). The passes its head needs therefore run over that skeleton
 // once, and every response reuses what they put in <head>: the manifest link, the generator meta, the
-// icons and logos the skeleton names, the scripts it needs (the kernel, Drive, components, services)
-// and the appearance pre-paint. Its CSS is engine/ui/stylesheet's (reboot, colors, page) and the
-// engine's fonts file; what the passes make as CSS, the icons and the logos, is taken out of <head>
-// and served as a file of its own, /_kitwork/icons.<hash>.css and logo.<hash>.css, inside the
-// elements layer. Until 27/10/2026 the template pages' renderer (render.PresentHead) built this head.
+// icons the skeleton names, the scripts it needs (the kernel, Drive, components, services) and the
+// appearance pre-paint. Its CSS is engine/ui/stylesheet's (reboot, colors, page) and the engine's
+// fonts file; what the passes make as CSS, the icons, is taken out of <head> and served as a file of
+// its own, /_kitwork/icons.<hash>.css, inside the elements layer. The brand-logo pass (jit/logo) went
+// with the template pages on 27/10/2026: a .ui page never named a logo. Until 27/10/2026 the template pages' renderer (render.PresentHead) built this head.
 
 // uiPresentation is what a route's .ui pages take from the site to build their head: Drive, the
 // router.manifest path, whether the route has a dark look (its pages then pre-paint the appearance
@@ -36,7 +35,7 @@ type uiPresentation struct {
 
 // uiHeadStylesheet is one file of a page's CSS the passes make, under its role.
 type uiHeadStylesheet struct {
-	// Name is the file's role, the first part of its name under /_kitwork/: "icons" or "logo".
+	// Name is the file's role, the first part of its name under /_kitwork/: "icons".
 	Name string
 	// Generated is the data-kitwork-generated value of its link: the <style> blocks it holds were
 	// marked so.
@@ -49,7 +48,6 @@ type uiHeadStylesheet struct {
 // The roles of the stylesheets the passes make for a .ui page, in the order they write their blocks.
 var uiHeadStylesheetRoles = []struct{ name, generated string }{
 	{"icons", "icons"},
-	{"logo", "logo"},
 }
 
 // uiHeadStylesheetRole is the role of a <style> block by its data-kitwork-generated value, -1 for a
@@ -79,8 +77,7 @@ type uiHead struct {
 	// Stylesheet is where in Head the page's stylesheets belong: after the pre-paint (which must run
 	// before anything paints) and before the scripts.
 	Stylesheet int
-	// Stylesheets are the CSS files the passes made, icons then logos, each only when the skeleton
-	// names one.
+	// Stylesheets are the CSS files the passes made: the icons, only when the skeleton names one.
 	Stylesheets []uiHeadStylesheet
 	// Scripts are the JavaScript files Head links, in its order (jitjs.DeliverFiles): the kernel, Drive,
 	// the directives, services and components the page uses; nil when it links none.
@@ -106,7 +103,7 @@ func stylesheetLink(href, generated string) string {
 const uiGeneratorTag = `<meta name="generator" content="Kitwork ` + version.Number + `">`
 
 // head runs the passes over a page's skeleton and returns what they put in <head> (uiHead): the icons
-// and logos apart, one CSS text each, the rest as it goes into <head>, minified once when the site
+// apart, one CSS text, the rest as it goes into <head>, minified once when the site
 // minifies. What the passes do to the body of the skeleton is dropped: the skeleton only lists what the
 // page can use, the page itself renders per request.
 func (p *uiPresentation) head(skeleton string) uiHead {
@@ -145,7 +142,7 @@ func (p *uiPresentation) head(skeleton string) uiHead {
 }
 
 // passes are the head's passes over a document, in order: the manifest link, the generator meta, the
-// icons and logos, the scripts (it returns the JavaScript files it linked), the check of the grouped
+// icons, the scripts (it returns the JavaScript files it linked), the check of the grouped
 // attributes while developing, the appearance pre-paint. A .ui page writes its own progressbar and
 // reader.
 func (p *uiPresentation) passes(out string) (string, []*jitjs.Asset) {
@@ -154,7 +151,6 @@ func (p *uiPresentation) passes(out string) (string, []*jitjs.Asset) {
 		out = out[:end] + uiGeneratorTag + out[end:]
 	}
 	out = icons.Render(out)
-	out = logo.Render(out)
 	out, scripts := jitjs.DeliverFiles(out, jitjs.Options{Drive: p.drive})
 	hydrate.Check(out, jitjs.ComponentNames())
 	if p.dark {

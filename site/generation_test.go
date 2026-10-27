@@ -8,7 +8,6 @@ import (
 	"github.com/kitwork/engine/app"
 	"github.com/kitwork/engine/capabilities"
 	"github.com/kitwork/engine/compiler"
-	jitcss "github.com/kitwork/engine/jit/css"
 	"github.com/kitwork/engine/site"
 	"github.com/kitwork/engine/utilities/cache"
 	"github.com/kitwork/engine/value"
@@ -281,13 +280,8 @@ func TestGenerationFreezesPresentationAtActivation(t *testing.T) {
 		t.Fatal(err)
 	}
 	presentation := generation.Presentation()
-	config := &jitcss.Config{
-		Colors: map[string]jitcss.Color{"brand": jitcss.Hex("#123456")},
-		Order:  []string{"brand"},
-	}
-	if !presentation.SetJITConfig(config) ||
+	if !presentation.SetManifestPath("/manifest.json") ||
 		!presentation.SetFaviconFile("favicon.ico") ||
-		!presentation.SetThemeMode("force") ||
 		!presentation.SetDrive(true) {
 		t.Fatal("presentation rejected preparation-time declarations")
 	}
@@ -298,8 +292,6 @@ func TestGenerationFreezesPresentationAtActivation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The builder owns a detached copy even before activation.
-	config.Colors["brand"] = jitcss.Hex("#ffffff")
 	if _, err := siteRuntime.ActivateGeneration(generation); err != nil {
 		t.Fatal(err)
 	}
@@ -313,10 +305,10 @@ func TestGenerationFreezesPresentationAtActivation(t *testing.T) {
 	if !generation.Sources().Frozen() {
 		t.Fatal("activated generation source manifest is mutable")
 	}
-	if got := snapshot.JITConfig.Colors["brand"]; got != jitcss.Hex("#123456") {
-		t.Fatalf("JIT config alias leaked into generation: got %v", got)
+	if snapshot.ManifestPath != "/manifest.json" || snapshot.FaviconFile != "favicon.ico" {
+		t.Fatalf("activated presentation lost its declarations: %+v", snapshot)
 	}
-	if presentation.SetThemeMode("off") {
+	if presentation.SetManifestPath("/other.json") {
 		t.Fatal("frozen presentation accepted a mutation")
 	}
 	if presentation.SetDrive(false) {
@@ -329,9 +321,9 @@ func TestGenerationFreezesPresentationAtActivation(t *testing.T) {
 		t.Fatalf("environment = %q, want env-v1", got)
 	}
 
-	// A request cannot mutate the stored snapshot through a returned map.
-	snapshot.JITConfig.Colors["brand"] = jitcss.Hex("#000000")
-	if got := presentation.Snapshot().JITConfig.Colors["brand"]; got != jitcss.Hex("#123456") {
+	// A request cannot mutate the stored snapshot through a returned slice.
+	snapshot.AssetMounts[0].URL = "changed"
+	if got := presentation.Snapshot().AssetMounts[0].URL; got != "assets" {
 		t.Fatalf("snapshot mutation leaked into generation: got %v", got)
 	}
 	generation.ResponseCache().Set("page", cache.Entry{Body: []byte("cached")}, time.Hour)

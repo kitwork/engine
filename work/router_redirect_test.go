@@ -5,23 +5,22 @@ import (
 	"testing"
 )
 
-// ctx.redirect takes a status and must send it: a moved page says 301, a
-// form's post-redirect says 303. The status is the only thing a crawler or a
-// cache reads off a redirect, so a silently substituted one is a wrong answer.
+// context.redirect sends the status written before it: a moved page says 301, a form's
+// post-redirect says 303, and with no .status() it is 302 (KITWORK_ROUTER §6). The status is the only
+// thing a crawler or a cache reads off a redirect, so a silently substituted one is a wrong answer.
+// (A status that is not 3xx is an error: TestUIRedirectStatus. Until 27/10/2026 this tested a template
+// site, where the status was redirect's second argument and the default 303.)
 func TestRedirectHonoursTheStatusItIsGiven(t *testing.T) {
 	serve := scaffold(t, map[string]string{
-		"filesystem.kitwork": "",
-		"index.kitwork.html": shorthandShell,
-		"page.kitwork.html":  `<main>home</main>`,
-		"router.kitwork.js":  `import { router } from "kitwork";`,
-		"moved/router.kitwork.js": `import { router } from "kitwork";
-router.get((ctx) => ctx.redirect("https://kitwork.io/components", 301));`,
-		"gone/router.kitwork.js": `import { router } from "kitwork";
-router.get((ctx) => ctx.redirect("/elsewhere", 308));`,
-		"plain/router.kitwork.js": `import { router } from "kitwork";
-router.get((ctx) => ctx.redirect("/elsewhere"));`,
-		"odd/router.kitwork.js": `import { router } from "kitwork";
-router.get((ctx) => ctx.redirect("/elsewhere", 200));`,
+		"router.work": `import * as router from "kitwork/router";`,
+		"moved/router.work": `import * as router from "kitwork/router";
+router.get((context) => context.status(301).redirect("https://kitwork.io/components"));`,
+		"gone/router.work": `import * as router from "kitwork/router";
+router.get((context) => context.status(308).redirect("/elsewhere"));`,
+		"posted/router.work": `import * as router from "kitwork/router";
+router.get((context) => context.status(303).redirect("/elsewhere"));`,
+		"plain/router.work": `import * as router from "kitwork/router";
+router.get((context) => context.redirect("/elsewhere"));`,
 	})
 	for _, want := range []struct {
 		path     string
@@ -30,8 +29,8 @@ router.get((ctx) => ctx.redirect("/elsewhere", 200));`,
 	}{
 		{"/moved", http.StatusMovedPermanently, "https://kitwork.io/components"},
 		{"/gone", http.StatusPermanentRedirect, "/elsewhere"},
-		{"/plain", http.StatusSeeOther, "/elsewhere"},
-		{"/odd", http.StatusSeeOther, "/elsewhere"},
+		{"/posted", http.StatusSeeOther, "/elsewhere"},
+		{"/plain", http.StatusFound, "/elsewhere"},
 	} {
 		rec := serve(want.path)
 		if rec.Code != want.code || rec.Header().Get("Location") != want.location {

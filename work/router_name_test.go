@@ -7,7 +7,7 @@ import (
 )
 
 // The VM reaches a Go method by lowercasing its name (value.membersFor), so a
-// method called Css is what makes router.css(...) resolve. These tests assert
+// method called Colors is what makes router.colors(...) resolve. These tests assert
 // the NAME is reachable, not merely that a Go method exists — renaming the Go
 // method without keeping the lowercase spelling would silently break every site.
 func routerMethodNames(t *testing.T) map[string]reflect.Method {
@@ -26,22 +26,21 @@ func routerMethodNames(t *testing.T) map[string]reflect.Method {
 
 func TestRouterExposesCurrentDesignAndDeliveryNames(t *testing.T) {
 	names := routerMethodNames(t)
-	for _, want := range []string{"css", "colors", "fonts", "appearance", "reload", "transition", "highlight"} {
+	for _, want := range []string{"colors", "fonts", "appearance", "reload", "transition", "highlight"} {
 		if _, ok := names[want]; !ok {
 			t.Fatalf("router.%s() does not resolve: no exported method lowercases to %q", want, want)
 		}
 	}
 }
 
-// The old spellings stay reachable: dozens of live sites still call them, and a
-// rename that breaks them is a rename that cannot ship. router.jitcss() still
-// means router.css(); router.theme() is applied as router.colors() and
-// router.fonts(); router.drive(), router.javascript() and router.jitjs() apply
-// nothing, but they must resolve so the boot names what replaced them instead of
-// reporting an unknown method.
+// The old spellings a template site's router.kitwork.js may still write stay reachable until that
+// router goes: router.theme() is applied as router.colors() and router.fonts(); router.drive(),
+// router.javascript() and router.jitjs() apply nothing, but they must resolve so the boot names what
+// replaced them instead of reporting an unknown method. (router.css and router.jitcss went with the
+// template pages, 27/10/2026.)
 func TestRouterKeepsDeprecatedJitAliases(t *testing.T) {
 	names := routerMethodNames(t)
-	for _, want := range []string{"jitcss", "theme", "drive", "javascript", "jitjs"} {
+	for _, want := range []string{"theme", "drive", "javascript", "jitjs"} {
 		if _, ok := names[want]; !ok {
 			t.Fatalf("router.%s() stopped resolving; existing sites would break", want)
 		}
@@ -50,12 +49,8 @@ func TestRouterKeepsDeprecatedJitAliases(t *testing.T) {
 
 // Both spellings must reach the same implementation, or the alias is a fork
 // waiting to drift.
-func TestCssAliasMatchesJitcssSignature(t *testing.T) {
+func TestJavascriptAliasMatchesJitjsSignature(t *testing.T) {
 	names := routerMethodNames(t)
-	css, jitcss := names["css"], names["jitcss"]
-	if css.Type != jitcss.Type {
-		t.Fatalf("router.css and router.jitcss have different signatures: %s vs %s", css.Type, jitcss.Type)
-	}
 	javascript, jitjs := names["javascript"], names["jitjs"]
 	if javascript.Type != jitjs.Type {
 		t.Fatalf("router.javascript and router.jitjs have different signatures: %s vs %s", javascript.Type, jitjs.Type)

@@ -18,7 +18,7 @@ func (t *Tenant) allowedMethods(node *RouteNode, folder *FolderRouter) string {
 			set[name] = true
 		}
 	}
-	if t.folderHasUIPage(node) || t.folderHasPage(node) {
+	if t.folderHasUIPage(node) {
 		set[http.MethodGet] = true
 	}
 	if len(set) == 0 {

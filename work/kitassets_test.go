@@ -17,13 +17,31 @@ var (
 	engineFontRe   = regexp.MustCompile(`(?:url\(|href="?)(/[^)"\s>]+\.woff2)`)
 )
 
-// enginePage is a template page that needs every kind of file the engine serves for a page: the
-// kernel, a directive, a catalogue component, a native service its markup names (which brings the
-// service and its assembly), and a vendored font. It writes the grouped data-kitwork-* attributes, the
-// only ones the client reads since 26/10/2026 (before, it named menu@1.0.0 with data-kit-*, and a
-// site's own _components file that called the service).
+// enginePage is a Kitwork UI site whose page needs every kind of script and font the engine serves
+// for a page: the kernel and Drive, a directive (intersect-enter), catalogue components (tabs, a
+// dropdown, and the progressbar and reader Drive brings) and a vendored font (router.fonts). Until
+// 27/10/2026 it was a template page that also called a native service from its markup; no .ui page
+// names one (markup never calls kit, and no catalogue component calls a service), so serviceFile
+// asks the engine for the service's name.
 func enginePage() map[string]string {
-	return templatePage(`<nav data-kitwork-component="tabs"></nav><b data-kitwork-event="intersect-enter: seen = true">x</b><button data-kitwork-event="click: kit.studioState.clearHistory()">x</button><p class="font-outfit">x</p>`)
+	return uiPage(`router.fonts({ body: "Outfit" });`,
+		`<content><tabs><button click="select('a')">A</button><button click="select('b')">B</button></tabs><dropdown><button click="open = !open" intersect-enter="open = true">menu</button></dropdown></content>`)
+}
+
+// enginePageScripts is what enginePage asks for, by role and name.
+var enginePageScripts = []string{"kernel", "drive", "directives/intersect", "components/dropdown", "components/progressbar", "components/reader", "components/tabs"}
+
+// serviceFile is the native service studioState's file as the engine names it today, from the files
+// it would give a page that called the service.
+func serviceFile(t *testing.T) string {
+	t.Helper()
+	for _, asset := range jitjs.PageAssets(`<button data-kitwork-event="click: kit.studioState.clearHistory()">x</button>`, jitjs.Options{}) {
+		if strings.HasPrefix(asset.Path, "/_kitwork/services/studioState.") {
+			return asset.Path
+		}
+	}
+	t.Fatal("the engine gives no studioState file to a page that calls it")
+	return ""
 }
 
 func serveEngine(tenant *Tenant, method, path string, header ...string) *httptest.ResponseRecorder {
@@ -49,9 +67,15 @@ func TestEngineFilesLiveUnderOnePrefixByRole(t *testing.T) {
 
 	scripts := engineScriptRe.FindAllStringSubmatch(page, -1)
 	fonts := engineFontRe.FindAllStringSubmatch(page, -1)
-	if len(scripts) != 5 || len(fonts) < 2 {
-		t.Fatalf("want the kernel, a directive, the assembly, a service and a component, and the font files; got %d scripts, %d fonts:\n%s", len(scripts), len(fonts), page)
+	var named []string
+	for _, m := range scripts {
+		named = append(named, strings.TrimPrefix(strings.SplitN(m[1], ".", 2)[0], "/_kitwork/"))
 	}
+	if strings.Join(named, " ") != strings.Join(enginePageScripts, " ") || len(fonts) < 2 {
+		t.Fatalf("want the scripts %v and the font files; got %v, %d fonts:\n%s", enginePageScripts, named, len(fonts), page)
+	}
+	// the service no page here names is served by its name all the same
+	scripts = append(scripts, []string{"", serviceFile(t)})
 	scriptName := regexp.MustCompile(`^/_kitwork/(?:kernel|drive|(?:components|services|directives)/[a-zA-Z][a-zA-Z0-9-]*)\.[0-9a-f]{16}\.js$`)
 	fontName := regexp.MustCompile(`^/_kitwork/fonts/[a-z0-9-]+-[0-9]+-[a-z-]+\.[0-9a-f]{16}\.woff2$`)
 	exact := map[string]string{} // path → body
@@ -145,12 +169,14 @@ func TestEngineFilesLiveUnderOnePrefixByRole(t *testing.T) {
 
 // A tenant folder named _kitwork is never served, however the request spells its way there — case,
 // a trailing dot or space, a doubled or backslashed separator, a Windows stream name — and a file on
-// the tenant's disk at the very name of an engine file never shadows it. CONTROL: the same files in
-// a folder of another name ARE served from the disk, so the fixture would leak if the engine did not
-// answer first.
+// the tenant's disk at the very name of an engine file never shadows it, even where the site mounts
+// that folder at /_kitwork itself (router.assets). CONTROL: the same files in a folder of another
+// name, mounted the same way, ARE served from the disk, so the fixture would leak if the engine did
+// not answer first.
 func TestATenantFolderNamedKitworkIsNeverServed(t *testing.T) {
 	kernel := jitjs.KernelAsset()
 	files := enginePage()
+	files["localhost/router.work"] += "\n" + `router.assets("_kitwork", "_kitwork");` + "\n" + `router.assets("_kitworks", "_kitworks");`
 	files["localhost/_kitwork/secret.txt"] = "TENANT-SECRET"
 	files["localhost/_kitwork/fonts/secret.txt"] = "TENANT-SECRET"
 	files["localhost/"+strings.TrimPrefix(kernel.Path, "/")] = "TENANT-SECRET kernel"

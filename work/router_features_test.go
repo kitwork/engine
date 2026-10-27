@@ -5,14 +5,14 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
 
-// One tenant exercising the root-router declarations added for the reference standard:
-// stacked .ratelimit() windows, .favicon() served at /favicon.ico, the .assets() allowlist,
-// and .language() → $.meta.language.
+// One tenant exercising the root-router declarations of a router.kitwork.js added for the reference
+// standard: stacked .ratelimit() windows, .favicon() served at /favicon.ico, the .assets() allowlist.
+// (Its .language() reached a template shell's $.meta.language until the template pages went,
+// 27/10/2026; a .ui page's is router_ui_language_test.go.)
 func TestTreeRootRouterDeclarations(t *testing.T) {
 	tmp, err := os.MkdirTemp("", "kitwork-tree-decl-*")
 	if err != nil {
@@ -34,10 +34,8 @@ func TestTreeRootRouterDeclarations(t *testing.T) {
 	write("router.kitwork.js",
 		`import { router } from "kitwork";`+"\n"+
 			`router.ratelimit({ ip: 2, period: "120ms" }).ratelimit({ ip: 3, period: "1m" });`+"\n"+
-			`router.favicon("./assets/favicon.ico").assets("./assets/*").language("en");`)
-	write("index.kitwork.html", `<html lang="{{ $.meta.language }}"><body>{{ @page }}</body></html>`)
-	write("page.kitwork.html", `<main>home</main>`)
-	write("notfound.kitwork.html", `<main>nothing here</main>`)
+			`router.favicon("./assets/favicon.ico").assets("./assets/*");`+"\n"+
+			`router.get((ctx) => ctx.text("home"));`)
 	write("assets/favicon.ico", "FAVICON-BYTES")
 	write("assets/style.css", "body{}")
 	write("secret.txt", "leak me not")
@@ -69,10 +67,8 @@ func TestTreeRootRouterDeclarations(t *testing.T) {
 		return rec
 	}
 
-	// .language(): the shell reads $.meta.language. (The production minifier may drop the quotes.)
-	if rec := get("/"); rec.Code != 200 ||
-		(!strings.Contains(rec.Body.String(), `lang="en"`) && !strings.Contains(rec.Body.String(), "lang=en")) {
-		t.Fatalf("language meta: code=%d body=%s", rec.Code, rec.Body.String())
+	if rec := get("/"); rec.Code != 200 || rec.Body.String() != "home" {
+		t.Fatalf("home: code=%d body=%s", rec.Code, rec.Body.String())
 	}
 
 	// Stacked .ratelimit(): burst 2/120ms + sustained 3/1m share the dimension but not a bucket.

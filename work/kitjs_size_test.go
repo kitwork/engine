@@ -38,17 +38,18 @@ func pageJavaScript(t *testing.T, tenant *Tenant) string {
 	return all.String()
 }
 
-// A site that never asked for Drive has no use for the navigator or the DOM morph it drives —
+// sizePage is a page that uses the client — a dropdown and the state its button writes — on a site
+// whose every script is a file of its own (router.bundle(false)), so pageJavaScript reads what a
+// browser downloads.
+const sizePage = `<content><dropdown><button click="open = !open">menu</button></dropdown></content>`
+
+// A site that loads every page whole has no use for the navigator or the DOM morph it drives —
 // nothing else in the runtime calls kit.morph. Shipping them anyway is the same waste as shipping a
 // component nobody named, and it is the largest single piece of the runtime.
 func TestDriveIsNotShippedToSitesThatDidNotAskForIt(t *testing.T) {
 	serve := func(t *testing.T, router string) string {
 		t.Helper()
-		tenant, _ := writeTestSite(t, router, `<main><b data-kitwork-bind="text: 'x'">x</b></main>`)
-		if err := tenant.Run(); err != nil {
-			t.Fatal(err)
-		}
-		return pageJavaScript(t, tenant)
+		return pageJavaScript(t, identitySite(t, uiPage("router.bundle(false);\n"+router, sizePage)))
 	}
 
 	gz := func(s string) int {
@@ -59,7 +60,7 @@ func TestDriveIsNotShippedToSitesThatDidNotAskForIt(t *testing.T) {
 		return b.Len()
 	}
 
-	without := serve(t, "")
+	without := serve(t, `router.reload(true);`)
 	with := serve(t, `router.reload(false);`)
 
 	// Marker strings from the CODE, not from comments: the production asset is minified, so a comment
@@ -68,7 +69,7 @@ func TestDriveIsNotShippedToSitesThatDidNotAskForIt(t *testing.T) {
 	// TEXTAREA too since it reads data-kitwork-bind's two-way value:, so that word is no marker).
 	for _, mark := range []string{"X-Kitwork-Hydrate", "clientOwned"} {
 		if strings.Contains(without, mark) {
-			t.Fatalf("a site that never asked for Drive still received %q", mark)
+			t.Fatalf("a site that loads every page whole still received %q", mark)
 		}
 		if !strings.Contains(with, mark) {
 			t.Fatalf("router.reload(false) should ship %q", mark)
@@ -95,11 +96,7 @@ func TestDriveIsNotShippedToSitesThatDidNotAskForIt(t *testing.T) {
 func TestNativeBridgeGoesOnlyToAppsWithAShell(t *testing.T) {
 	serve := func(t *testing.T) string {
 		t.Helper()
-		tenant, _ := writeTestSite(t, "", `<main><b data-kitwork-bind="text: 'x'">x</b></main>`)
-		if err := tenant.Run(); err != nil {
-			t.Fatal(err)
-		}
-		return pageJavaScript(t, tenant)
+		return pageJavaScript(t, identitySite(t, uiPage("router.bundle(false);", sizePage)))
 	}
 
 	// The engine sets both from the manifest at boot (kitwork.go): the tenant's flag and the one the

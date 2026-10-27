@@ -96,22 +96,3 @@ func TestUIResponseEditsBeforeTheAnswer(t *testing.T) {
 		t.Errorf("/response: %d %q", r.Code, r.Header().Get("Content-Type"))
 	}
 }
-
-// A template site keeps every way it has: a title after the view, ctx.title(…) on its own, an edit after
-// the answer, ctx.file of a path.
-func TestTemplateSiteKeepsItsOrder(t *testing.T) {
-	tn := viewSite(t, map[string]string{
-		"after":   `router.get((ctx) => ctx.view({ note: "after" }).title("Sau").header("X-After", "1"));`,
-		"alone":   `router.get((ctx) => { ctx.title("Riêng"); return ctx.view({ note: "alone" }); });`,
-		"answers": `router.get((ctx) => ctx.json({ a: 1 }).status(201));`,
-	})
-	r := serveGet(tn, "/after", nil)
-	wantPage(t, "/after", r.Body.String(), "<title>Sau</title>", "<main>note after</main>")
-	if r.Header().Get("X-After") != "1" {
-		t.Errorf("/after: header lost: %v", r.Header())
-	}
-	wantPage(t, "/alone", serveGet(tn, "/alone", nil).Body.String(), "<title>Riêng</title>", "<main>note alone</main>")
-	if r := serveGet(tn, "/answers", nil); r.Code != http.StatusCreated || r.Body.String() != `{"a":1}` {
-		t.Errorf("/answers: %d %q", r.Code, r.Body.String())
-	}
-}

@@ -2,21 +2,16 @@ package work
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/value"
 )
 
-// Bind / Data / Meta / Notfound return the DEFERRED ViewBuilder a filesystem-routed handler
-// accumulates binding + meta on; the tree lifecycle renders it once at the end of the request (see
-// viewbuilder.go), so .title()/.meta() set anywhere still reach <head>.
-//
-//	ctx.view()                       → render this folder's page.kitwork.html
-//	ctx.view({ user })               → bind `user` into it
-//	ctx.bind({ note }).title("…")    → bind + set meta
-//
-// View fills the same deferred view and returns the request's response, as response.view does: the
-// answer of a page, after its edits (20/10/2026): context.title("Quán Cà Phê").view({ menu }).
+// View is the answer of a page: in router.work, the folder's .ui page drawn with the names of the
+// object, after the page's edits (20/10/2026): context.title("Quán Cà Phê").view({ menu }). A template
+// site's ctx.view(), ctx.bind() and ctx.data() rendered a page.kitwork.html until 27/10/2026, when the
+// template pages went: they fail now, saying what to write instead.
 func (c *Context) View(args ...value.Value) (*Response, error) {
 	response := c.Response()
 	if response.inUISite() {
@@ -30,11 +25,17 @@ func (c *Context) View(args ...value.Value) (*Response, error) {
 		}
 		return response.View(data)
 	}
+	// a guard of a router.work or config.work over a template's folder is told the guard's rule first
 	if err := response.answering("view"); err != nil {
 		return response, err
 	}
-	c.viewBuilder().apply(args...)
-	return response, nil
+	return response, templatePagesGone("ctx.view(…)")
+}
+
+// templatePagesGone is the error of an answer that drew a template page (.kitwork.html), gone on
+// 27/10/2026.
+func templatePagesGone(call string) error {
+	return fmt.Errorf("%s vẽ trang template (.kitwork.html), đã bỏ (27/10/2026): trang của một thư mục là content.ui, viết router.get((context) => context.view({ … })) trong router.work", call)
 }
 
 // refuseGuardAnswer refuses what a guard of a router.work or a router config.work may not answer
@@ -57,8 +58,8 @@ func (r *Router) refuseGuardAnswer(answer string) error {
 	return errors.New(compiler.ContextAnswerInGuard("context." + answer + "(…)"))
 }
 
-func (c *Context) Bind(v value.Value) *ViewBuilder { return c.viewBuilder().Bind(v) }
-func (c *Context) Data(v value.Value) *ViewBuilder { return c.viewBuilder().Data(v) }
+func (c *Context) Bind(v value.Value) (any, error) { return nil, templatePagesGone("ctx.bind(…)") }
+func (c *Context) Data(v value.Value) (any, error) { return nil, templatePagesGone("ctx.data(…)") }
 
 // The page's text from the context. In router.work each is the response's edit, before the answer:
 // context.title("x").description("y").view({ … }) (response_order.go). A template site keeps the

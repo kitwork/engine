@@ -9,7 +9,7 @@ package work
 //	router.bundle({ css: "inline", javascript: "split" });  // each part its own way
 //
 // A page's CSS has a part the whole site shares, the site part (reboot, the route's colours, the fonts'
-// @font-face), and a part of its own, the page part (its rules, its icons, a logo). Until 14/10 each was
+// @font-face), and a part of its own, the page part (its rules, its icons). Until 14/10 each was
 // a file of its own, five render-blocking requests before the first paint (Lighthouse on the kitwork
 // example: 290–520 ms lost). Its JavaScript is the kernel, Drive, scrolled and one file per component,
 // directive and service, every one deferred: none blocks the first paint (TBT 0).
@@ -21,7 +21,7 @@ package work
 //	"inline"  everything in <style>                         every part but the kernel inline
 //	"split"   site.<hash>.css + page part inline            one deferred bundle.<hash>.js per set of parts
 //	false     one file per role (reboot, colors, fonts,     one deferred file per part
-//	          icons, logo, page)
+//	          icons, page)
 //
 // Why CSS moves and JavaScript stays: a stylesheet blocks the first paint until it arrives, a deferred
 // script never does. A file per JavaScript part is shared by every page of the site in the browser's
@@ -312,12 +312,12 @@ func (u *uiSite) weighedDocument(compiled *uiCompiled, head string) string {
 }
 
 // pageCSS writes the CSS links and blocks of a page's head by its router.bundle (css): site are the
-// site part's files (reboot, colors, fonts), own its icons file (nil when it shows none), logos and
-// its own (page) the rest of the page part. The icons go in iconsSlot, so a response whose data named
+// site part's files (reboot, colors, fonts), own its icons file (nil when it shows none), page its own
+// rules, the rest of the page part. The icons go in iconsSlot, so a response whose data named
 // icons of its own can carry another set there; iconsInline says whether that set is a block. fits
 // answers "auto": whether the page, its head carrying these links and blocks (icons in place), fits
 // the first window (fitsInitialWindow).
-func (u *uiSite) pageCSS(mode string, site []cssPart, own *cssPart, logos []cssPart, page cssPart, fits func(links string) bool) (links, icons string, iconsInline bool) {
+func (u *uiSite) pageCSS(mode string, site []cssPart, own *cssPart, page cssPart, fits func(links string) bool) (links, icons string, iconsInline bool) {
 	link := func(part cssPart) string {
 		if href := u.store(part.role, part.css); href != "" {
 			return stylesheetLink(href, part.generated)
@@ -327,9 +327,6 @@ func (u *uiSite) pageCSS(mode string, site []cssPart, own *cssPart, logos []cssP
 	pagePart := func(write func(cssPart) string) string {
 		var b strings.Builder
 		b.WriteString(iconsSlot)
-		for _, logo := range logos {
-			b.WriteString(write(logo))
-		}
 		b.WriteString(write(page))
 		return b.String()
 	}

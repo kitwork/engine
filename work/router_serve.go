@@ -74,8 +74,6 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 	}
 	reqRouter.chainMeta = chainMeta
 	reqRouter.chainJsonld = chainJsonld
-	// Presentation declarations were frozen with the graph before activation.
-	reqRouter.treeRender = t.treeRender(match.Node)
 
 	// Semantic outputs are virtual root endpoints. A real filesystem node always wins; otherwise
 	// router.rss()/router.sitemap() can answer their declared path without a synthetic folder.
@@ -96,33 +94,24 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 	var savKey string
 	var savCookies int // the cookies the guards set before the handler: not the answer's
 
-	// finalize renders any deferred view builder (ctx.view/bind/…), saves it if the method opted
-	// into caching, then writes the response.
+	// finalize answers what the handler left to the end (a page, a not-found), saves the response if
+	// the method opted into caching, then writes it.
 	finalize := func() {
 		// notFound() or error(…) of a Kitwork UI handler: the nearest notfound.ui or error.ui
 		t.answerUIPage(reqRouter, reqRouter.node)
-		// Bridge the (request, response) => response.view({...}) / response.render() style: those set
-		// a "render"/"view" response, which in tree mode must render against the RESOLVED folder (not
-		// the flat render). Fold its data into a builder and render via treeRender.
-		// A builder may be there already: the page's text written before response.view({…}) went into
-		// it. The "render" marker is dropped in place, so the response keeps its status, its headers and
-		// cookies (until 19/10/2026 a fresh response lost all but the status).
-		// A Kitwork UI site answers with its .ui pages (respondUI): its builder only carries the page's text
-		// (title, description, meta), never a template view.
-		ui := uiRoute(reqRouter.node)
-		if reqRouter.treeRender != nil && !ui {
+		if !uiRoute(reqRouter.node) {
+			// a template site (router.kitwork.js): its pages went on 27/10/2026. A handler that answered
+			// with a page (response.view, response.render) fails saying so; a not-found answers the
+			// engine's plain 404, as a Kitwork UI site with no notfound.ui does.
 			if k := reqRouter.response.Kind(); k == "render" || k == "view" {
-				vb := ctxObj.viewBuilder()
-				if d := reqRouter.response.Data(); d.IsMap() {
-					vb.apply(d)
-				}
 				reqRouter.response.data = value.Value{K: value.Nil}
-				reqRouter.response.kind = "" // the builder's HTML is the answer
-				vb.flush()
+				reqRouter.response.kind = ""
+				failure := uncaught(templatePagesGone("response.view(…)").Error())
+				t.recordFailure(reqRouter, "view", failure)
+				reqRouter.fail(failure, http.StatusInternalServerError)
+			} else if reqRouter.isNotfound && !reqRouter.response.IsSend() && reqRouter.err == nil {
+				reqRouter.response.Text(value.New("Not Found"), http.StatusNotFound)
 			}
-		}
-		if reqRouter.viewBuilder != nil && !reqRouter.response.IsSend() && !ui {
-			reqRouter.viewBuilder.flush()
 		}
 		if savMethod != nil && reqRouter.err == nil {
 			t.saveResponse(savMethod, savKey, reqRouter.response, savCookies)
@@ -141,18 +130,12 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 		reqRouter.responder(w)
 	}
 
-	// notFound answers 404 with the nearest not-found page, walking up from the deepest folder reached:
-	// a Kitwork UI site's notfound.ui, or the engine's plain "Not Found" when it has none (27/10/2026:
-	// until then a .ui site with no notfound.ui answered through the template pages' renderer, which
-	// wrote the path of an index.kitwork.html while developing); a template site's notfound.kitwork.html.
+	// notFound answers 404 with the nearest notfound.ui, walking up from the deepest folder reached, or
+	// the engine's plain "Not Found" when there is none (27/10/2026: until then a .ui site with no
+	// notfound.ui, and every template site, answered through the template pages' renderer).
 	notFound := func() {
 		reqRouter.isNotfound = true
-		if uiRoute(match.Node) {
-			t.respondUI(reqRouter, match.Node, nil)
-			finalize()
-			return
-		}
-		ctxObj.View() // creates the deferred builder; finalize renders it
+		t.respondUI(reqRouter, match.Node, nil)
 		finalize()
 	}
 
@@ -257,10 +240,7 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 	// No explicit method for this verb: a GET on a folder that has a page renders it; anything
 	// else is a not-found.
 	if method == nil {
-		if asGet && t.folderHasPage(match.Node) {
-			ctxObj.View()
-			finalize()
-		} else if asGet && t.folderHasUIPage(match.Node) {
+		if asGet && t.folderHasUIPage(match.Node) {
 			t.respondUI(reqRouter, match.Node, nil) // a content.ui with no router.get: a page with no data
 			finalize()
 		} else {
@@ -354,10 +334,6 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 					reqRouter.response.HTML(res)
 				}
 			}
-		case method.isView:
-			ctxObj.View(method.viewArgs...)
-		case t.folderHasPage(match.Node):
-			ctxObj.View()
 		default:
 			notFound()
 			return
@@ -596,20 +572,6 @@ func returnedKind(v value.Value) string {
 		return "một hàm"
 	}
 	return "một giá trị"
-}
-
-// treeRender points the render engine at a folder: page = <folder>/page.kitwork.html, while the
-// nearest index.kitwork.html and each slot resolve by walking UP from the folder to the root —
-// exactly the inside-out view resolution the docs describe, reusing the existing render engine.
-func (t *Tenant) treeRender(n *RouteNode) *plannedRenderer {
-	if n == nil || t.renderPlan() == nil {
-		return nil
-	}
-	return t.renderPlan().renderer(n.relPath())
-}
-
-func (t *Tenant) folderHasPage(n *RouteNode) bool {
-	return n != nil && t.renderPlan() != nil && t.renderPlan().hasPage(n.relPath())
 }
 
 // isUISource reports whether a URL path names a Kitwork UI source file: *.ui (interface) or *.work

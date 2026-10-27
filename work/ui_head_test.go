@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kitwork/engine/render"
 	"github.com/kitwork/engine/ui/stylesheet"
 	"github.com/kitwork/engine/utilities/minifier"
 )
@@ -31,8 +30,8 @@ func headStylesheetOf(built uiHead, name string) string {
 // The head of a .ui page runs its passes once over the page's skeleton and keeps what they put in
 // <head>; nothing of the skeleton's body comes back. A .ui page's CSS is engine/ui/stylesheet's, so no
 // template CSS pass runs: no utilities for a class, no material, no @font-face. What the passes make as
-// CSS, the icons and the brand logos, is taken out of the head, one stylesheet each, inside the
-// elements layer. Insert puts the page's links where the stylesheets belong: after the pre-paint,
+// CSS, the icons, is taken out of the head, a stylesheet of its own, inside the elements layer (the
+// brand logos had one too until jit/logo went, 27/10/2026). Insert puts the page's links where the stylesheets belong: after the pre-paint,
 // before the scripts.
 func TestUIHeadTakesTheStylesheetsOut(t *testing.T) {
 	p := &uiPresentation{dark: true, drive: true}
@@ -74,20 +73,13 @@ func TestUIHeadTakesTheStylesheetsOut(t *testing.T) {
 		t.Errorf("the stylesheets go once after the pre-paint (%d) and before the scripts (%d), at %d:\n%s", prepaint, script, at, head)
 	}
 
-	// control: a skeleton with no icon makes no stylesheet, and the template pages' passes over the
-	// same skeleton do make the utilities, the material and the @font-face
+	// control: a skeleton with no icon makes no stylesheet
 	other := p.head(`<div class="p-4"></div>`)
 	if got := headStylesheetNames(other); got != "" {
-		t.Errorf("a page with no icon and no logo has no stylesheet from the passes, got %q", got)
+		t.Errorf("a page with no icon has no stylesheet from the passes, got %q", got)
 	}
 	if empty := (uiHead{Head: "<meta>", Stylesheet: -1}); empty.Insert("<link>") != "<meta><link>" {
 		t.Error("a head with no place for the stylesheets puts them at its end")
-	}
-	template := render.New(render.Config{Base: t.TempDir(), JitCSS: true, ThemeMode: "force", Drive: true}).Present("<!doctype html><html><head></head>" + skeleton + "</html>")
-	for _, want := range []string{".p-2", `data-kitwork-generated="material"`, "@font-face"} {
-		if !strings.Contains(template, want) {
-			t.Errorf("CONTROL: a template page's passes make %q; without it this test proves nothing", want)
-		}
 	}
 }
 
@@ -103,24 +95,11 @@ func TestUIHeadPrepaintsADarkRoute(t *testing.T) {
 	}
 }
 
-// A brand logo is a generator of its own: its stylesheet comes after the icons, as its block did,
-// inside the elements layer too.
-func TestUIHeadLinksTheLogoAfterTheIcons(t *testing.T) {
-	built := (&uiPresentation{}).head(`<p class="p-2 font-outfit"><i class="icon-coffee"></i><i class="logo-github"></i></p>`)
-	if got := headStylesheetNames(built); got != "icons=icons logo=logo" {
-		t.Fatalf("a page with a logo has two stylesheets from the passes, the logo second: got %q", got)
-	}
-	logo := headStylesheetOf(built, "logo")
-	if !strings.Contains(logo, ".logo-github") || strings.Contains(headStylesheetOf(built, "icons"), ".logo-github") || !strings.HasPrefix(logo, stylesheet.LayerStatement) {
-		t.Errorf("the logo's rule is in the logo file alone, layered:\n%.300s", logo)
-	}
-}
-
 // Minified once for production: the CSS and the head alike, and the pre-paint kept byte for byte (its
 // CSP hash is fixed). The minifier drops the quotes of data-kitwork-generated="icons"; the role is
 // still read, so the stylesheets stay apart (CONTROL: it does drop them).
 func TestUIHeadMinifiesOnce(t *testing.T) {
-	skeleton := `<p class="p-2 text-brand"><i class="icon-coffee"></i><i class="logo-github"></i>x</p>`
+	skeleton := `<p class="p-2 text-brand"><i class="icon-coffee"></i>x</p>`
 	built := (&uiPresentation{dark: true, minify: true}).head(skeleton)
 	icons := headStylesheetOf(built, "icons")
 	written := headStylesheetOf((&uiPresentation{dark: true}).head(skeleton), "icons")
@@ -128,8 +107,8 @@ func TestUIHeadMinifiesOnce(t *testing.T) {
 		!strings.Contains(written, "var(--i) center") {
 		t.Errorf("the CSS must be minified (the development file keeps the space):\n%.300s\n%.300s", icons, written)
 	}
-	if got := headStylesheetNames(built); got != "icons=icons logo=logo" {
-		t.Errorf("minified, the stylesheets are still one per generator: got %q", got)
+	if got := headStylesheetNames(built); got != "icons=icons" {
+		t.Errorf("minified, the icons are still a stylesheet of their own: got %q", got)
 	}
 	for _, sheet := range built.Stylesheets {
 		if strings.Contains(sheet.CSS, "<style") {
@@ -154,12 +133,12 @@ func TestUIHeadMinifiesOnce(t *testing.T) {
 func TestTagAttribute(t *testing.T) {
 	for attributes, want := range map[string]string{
 		` data-kitwork-generated="icons"`:                                "icons",
-		` data-kitwork-generated='logo'`:                                 "logo",
+		` data-kitwork-generated='reboot'`:                               "reboot",
 		` data-kitwork-generated=fonts`:                                  "fonts",
 		` id=x data-kitwork-generated = fonts media=all`:                 "fonts",
 		` DATA-KITWORK-GENERATED="icons"`:                                "icons",
 		` data-x-data-kitwork-generated="icons"`:                         "",
-		` data-kitwork-generated-by="icons" data-kitwork-generated=logo`: "logo",
+		` data-kitwork-generated-by="icons" data-kitwork-generated=page`: "page",
 		` data-kitwork-generated`:                                        "",
 		``:                                                               "",
 		` media="all"`:                                                   "",

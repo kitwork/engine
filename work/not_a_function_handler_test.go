@@ -116,48 +116,6 @@ func notAFunctionSite(t *testing.T, files map[string]string) func(string) (int, 
 	}
 }
 
-// A handler that has already started a view (ctx.title, meta, bind, view) when the call fails keeps
-// its page: the request answers 200 with what was bound before the failure, what was to be bound after
-// it is missing, and only the site's log has the error. That is the channel every runtime error of a
-// handler already had, fail("boom") in the same place being the control; a 500 with the message comes
-// only from a handler that has not started a view.
-func TestHandlerThatStartedAViewKeepsItsPageOnANonFunctionCall(t *testing.T) {
-	developing(t) // a 500 carries its diagnostic only while developing
-	const page = "<p>page[{{ early }}|{{ shown }}]</p>"
-	handler := func(failure string) string {
-		return "import { router } from \"kitwork\";\nrouter.get((ctx) => {\n  ctx.title(\"T\");\n  ctx.bind({ early: \"EARLY\" });\n  const o = { x: 3 };\n  " + failure + ";\n  return ctx.bind({ shown: \"BOUND\" });\n});\n"
-	}
-	serve := notAFunctionSite(t, map[string]string{
-		"index.kitwork.html":           "<main>{{ @page }}</main>",
-		"control/router.kitwork.js":    handler("fail(\"boom\")"),
-		"control/page.kitwork.html":    page,
-		"view/router.kitwork.js":       handler("o.x()"),
-		"view/page.kitwork.html":       page,
-		"notstarted/router.kitwork.js": "import { router } from \"kitwork\";\nrouter.get((ctx) => {\n  const o = { x: 3 };\n  o.x();\n  return ctx.bind({ shown: \"BOUND\" });\n});\n",
-		"notstarted/page.kitwork.html": page,
-	})
-
-	code, body, record := serve("/control")
-	if code != http.StatusOK || !strings.Contains(body, "page[EARLY|null]") || !strings.Contains(record, "msg=\"Kitwork runtime execution failed\"") || !strings.Contains(record, "boom") {
-		t.Fatalf("CONTROL: a view handler's runtime error = %d %q, record %q", code, body, record)
-	}
-
-	code, body, record = serve("/view")
-	if code != http.StatusOK || !strings.Contains(body, "page[EARLY|null]") || strings.Contains(body, "BOUND") || strings.Contains(body, "không phải hàm") {
-		t.Fatalf("a view handler calling a non-function = %d %q, want 200 with the page bound before the call", code, body)
-	}
-	for _, field := range []string{"Kitwork runtime execution failed", "cause_code=NOT_A_FUNCTION", "router.kitwork.js:6:3: o.x không phải hàm (là số): không gọi được"} {
-		if !strings.Contains(record, field) {
-			t.Fatalf("the site's log record lacks %q: %q", field, record)
-		}
-	}
-
-	code, body, _ = serve("/notstarted")
-	if code != http.StatusInternalServerError || !strings.HasPrefix(body, "router.kitwork.js:4:3: o.x không phải hàm (là số): không gọi được") {
-		t.Fatalf("a handler with no view started = %d %q, want 500 with the message", code, body)
-	}
-}
-
 // environment has one method, require: environment.API_KEY() calls a value, so it is the not-a-function
 // error like any other (14/10/2026), named as written and without the string's text, which is the secret.
 // Until then the proxy answered every other name with null, without a word. environment.require is the

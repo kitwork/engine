@@ -27,20 +27,18 @@ func TestCheckAggregatesSiteAndScheduleFailuresWithoutStartingRuntime(t *testing
 			t.Fatal(err)
 		}
 	}
-	router := `import { router } from "kitwork";
-router.get((ctx) => ctx.text("ok"));`
-	write(filepath.Join(valid, "router.kitwork.js"), router)
-	write(filepath.Join(valid, "index.kitwork.html"), `<html>{{ @page }}</html>`)
-	write(filepath.Join(valid, "page.kitwork.html"), `<main>ok</main>`)
+	router := `import * as router from "kitwork/router";
+router.get((context) => context.text("ok"));`
+	write(filepath.Join(valid, work.UIRouterFileName), router)
 	write(
-		filepath.Join(brokenImport, "router.kitwork.js"),
-		`import { missing } from "../../_core/missing.kitwork.js";
-import { router } from "kitwork";
-router.get((ctx) => ctx.json(missing));`,
+		filepath.Join(brokenImport, work.UIRouterFileName),
+		`import * as router from "kitwork/router";
+import { missing } from "../.shared/missing.work";
+router.get((context) => context.json(missing));`,
 	)
-	write(filepath.Join(brokenTemplate, "router.kitwork.js"), router)
-	write(filepath.Join(brokenTemplate, "index.kitwork.html"), `<html>{{ @page }}</html>`)
-	write(filepath.Join(brokenTemplate, "page.kitwork.html"), `{{ if }}`)
+	// a template page left in a site: a boot error since the template pages went (27/10/2026)
+	write(filepath.Join(brokenTemplate, work.UIRouterFileName), router)
+	write(filepath.Join(brokenTemplate, "page.kitwork.html"), `<main>ok</main>`)
 	write(
 		filepath.Join(cronDir, "broken.work"),
 		`import * as schedule from "kitwork/schedule"; export const broken = schedule.every("1m").run((context) => {`,
@@ -71,7 +69,7 @@ router.get((ctx) => ctx.json(missing));`,
 	for _, issue := range report.Issues {
 		joined += issue.Error() + "\n"
 	}
-	for _, want := range []string{"import.example", "template.example", "broken.work", "schedule compile"} {
+	for _, want := range []string{"import.example", "template.example", "page.kitwork.html: trang template (.kitwork.html) không còn được đọc", "broken.work", "schedule compile"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("report does not identify %q:\n%s", want, joined)
 		}

@@ -10,7 +10,7 @@ import (
 
 // The presentation skeleton of a page: every class, icon, component host and runtime attribute the
 // page can ever put in its HTML, written once when the page is compiled. The engine's presentation
-// passes (icons, logos, scripts, the appearance pre-paint) run over it once — not over every
+// passes (icons, scripts, the appearance pre-paint) run over it once — not over every
 // response: the icons they find are one stylesheet of the page, and the rest of the <head> they
 // produce is reused by every request (KITWORK_UI §18: the HTML is not rescanned on each response).
 // The page's own classes need no pass: their rules were recorded as the page compiled (Page.rules).

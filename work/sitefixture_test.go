@@ -6,24 +6,8 @@ import (
 	"testing"
 )
 
-// writeTestSite writes the smallest filesystem-routed site — a root router, a shell, one page and a
-// notfound — and returns its tenant (not yet run) and the site directory.
-func writeTestSite(t *testing.T, router, page string) (*Tenant, string) {
-	t.Helper()
-	root := t.TempDir()
-	directory := filepath.Join(root, "test", "localhost")
-	writeSiteFile(t, directory, "router.kitwork.js", `import { router } from "kitwork";`+"\n"+router)
-	writeSiteFile(t, directory, "index.kitwork.html", `<!doctype html><html><head><title>Test</title></head><body {{ if section == "docs" }}data-ready="yes" {{ end }}>{{ @page }}</body></html>`)
-	writeSiteFile(t, directory, "page.kitwork.html", page)
-	writeSiteFile(t, directory, "notfound.kitwork.html", `<main>Not found</main>`)
-
-	tenant := NewTenant(root, "localhost")
-	t.Cleanup(tenant.Close)
-	return tenant, directory
-}
-
 // identitySite writes apps/<identity>/… and runs its domain, localhost: a path in files is relative to
-// the IDENTITY, so "localhost/page.kitwork.html" is the domain's. (componentFixture in
+// the IDENTITY, so "localhost/content.ui" is the domain's. (componentFixture in
 // sitecomponents_test.go until a site's own _components went, 26/10/2026.)
 func identitySite(t *testing.T, files map[string]string) *Tenant {
 	t.Helper()
@@ -42,14 +26,14 @@ func identitySite(t *testing.T, files map[string]string) *Tenant {
 	return tenant
 }
 
-// templatePage is the smallest template site that renders one page through the render pipeline, for
-// identitySite.
-func templatePage(markup string) map[string]string {
+// uiPage is the smallest Kitwork UI site of one page, for identitySite: the root router.work (its
+// import line, then the lines given), the frame and the page. (writeTestSite and templatePage wrote a
+// template site until the template pages went, 27/10/2026.)
+func uiPage(router, content string) map[string]string {
 	return map[string]string{
-		"localhost/filesystem.kitwork": "",
-		"localhost/index.kitwork.html": `<!doctype html><html><head></head><body>{{ @page }}</body></html>`,
-		"localhost/page.kitwork.html":  markup,
-		"localhost/router.kitwork.js":  `import { router } from "kitwork";`,
+		"localhost/router.work": `import * as router from "kitwork/router";` + "\n" + router,
+		"localhost/view.ui":     `<view><content /></view>`,
+		"localhost/content.ui":  content,
 	}
 }
 

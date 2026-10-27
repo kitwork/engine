@@ -41,8 +41,6 @@ func scaffold(t *testing.T, files map[string]string) func(string) *httptest.Resp
 	}
 }
 
-const shorthandShell = `<!doctype html><body>{{ @page }}</body>`
-
 // robots(true) is the short way to say "yes, the default" — it must generate
 // exactly what the no-argument form generates.
 func TestRobotsBooleanGeneratesTheDefaultDocument(t *testing.T) {
@@ -75,11 +73,8 @@ func TestRobotsFalseDeclaresNothing(t *testing.T) {
 // assets(true) mounts the conventional folder without naming it.
 func TestAssetsBooleanMountsTheConventionalFolder(t *testing.T) {
 	get := scaffold(t, map[string]string{
-		"filesystem.kitwork": "",
-		"index.kitwork.html": shorthandShell,
-		"page.kitwork.html":  `<main>home</main>`,
-		"assets/note.txt":    "hello from assets",
-		"router.kitwork.js":  "import { router } from \"kitwork\";\nrouter.assets(true);",
+		"assets/note.txt": "hello from assets",
+		"router.work":     "import * as router from \"kitwork/router\";\nrouter.assets(true);",
 	})
 
 	rec := get("/assets/note.txt")

@@ -49,10 +49,7 @@ type Router struct {
 	catch  *value.Lambda
 	final  *value.Lambda
 
-	// View route: render a page directly (no JS handler, no VM). Set by .view().
-	isView     bool
-	isNotfound bool // a view route that responds 404 (set by .notfound())
-	viewArgs   []value.Value
+	isNotfound bool // the request answers 404 (context.notFound(), or no route)
 
 	// JIT stylesheet route: serve the tenant's site-wide JIT CSS (no JS handler, no VM).
 	// Set by .jit(); the path defaults to /jitcss.
@@ -69,7 +66,7 @@ type Router struct {
 	// numberParams are the params of a [number] folder in a Kitwork UI site: request.params gives a
 	// number (KITWORK_ROUTER §2)
 	numberParams map[string]bool
-	err    error // Biến lưu lỗi để truyền giữa các công đoạn
+	err          error // Biến lưu lỗi để truyền giữa các công đoạn
 	// failure is the runtime failure behind err when a run ended in one (failed), what a .error()
 	// handler's error parameter describes (errorObject).
 	failure value.Value
@@ -105,10 +102,6 @@ type Router struct {
 
 	// Metadata and application level bindings
 	meta value.Value
-
-	// treeRender, when set, is the render a filesystem-routed (tree) request uses for ctx.view():
-	// it is pointed at the resolved folder so page/index/slots resolve by that folder's chain.
-	treeRender *plannedRenderer
 
 	// viewBuilder is the DEFERRED view result for a filesystem-routed request (see viewbuilder.go).
 	// Handlers accumulate binding + meta on it; the tree lifecycle renders it once at the end.

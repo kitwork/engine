@@ -4,11 +4,9 @@ import (
 	"bytes"
 	"net/http"
 	"regexp"
-	"sort"
 	"strings"
 	"testing"
 
-	jitcss "github.com/kitwork/engine/jit/css"
 	"github.com/kitwork/engine/jit/fonts"
 )
 
@@ -119,8 +117,8 @@ func hasPreload(page, prefix string) bool {
 func TestUIFontsDefaultToGoogleSansFlexAndGoogleSansCode(t *testing.T) {
 	tenant := buildUISite(t, withFontsLine(t, "", map[string]string{"localhost/content.ui": codePage}))
 	home, sheet := fontsSheet(t, tenant, "http://localhost/")
-	roles := ":root{--font-body:'Google Sans Flex', " + jitcss.DefaultConfig.FontFamily["sans"] +
-		";--font-code:'Google Sans Code', " + jitcss.DefaultConfig.FontFamily["mono"] + "}"
+	roles := ":root{--font-body:'Google Sans Flex', " + systemSans +
+		";--font-code:'Google Sans Code', " + systemMono + "}"
 	if !strings.HasPrefix(sheet.css, roles) {
 		t.Errorf("the roles are the defaults, each before its system stack: want %q, got:\n%.300s", roles, sheet.css)
 	}
@@ -176,7 +174,7 @@ func TestUIFontsCodeSwitchesToJetBrainsMono(t *testing.T) {
 	for _, written := range []string{"JetBrains Mono", "jetbrains mono"} {
 		tenant := buildUISite(t, withFontsLine(t, `router.fonts({ code: "`+written+`" });`, map[string]string{"localhost/content.ui": codePage}))
 		page, sheet := fontsSheet(t, tenant, "http://localhost/")
-		if !strings.Contains(sheet.css, ";--font-code:'JetBrains Mono', "+jitcss.DefaultConfig.FontFamily["mono"]+"}") ||
+		if !strings.Contains(sheet.css, ";--font-code:'JetBrains Mono', "+systemMono+"}") ||
 			!strings.Contains(sheet.css, "--font-body:'Google Sans Flex', ") {
 			t.Errorf("%q: the code role is JetBrains Mono, the body the default:\n%.300s", written, sheet.css)
 		}
@@ -188,36 +186,5 @@ func TestUIFontsCodeSwitchesToJetBrainsMono(t *testing.T) {
 		if !hasPreload(page, "/_kitwork/fonts/jetbrains-mono-100-800-latin.") {
 			t.Errorf("%q: the code face preloaded is JetBrains Mono's: %v", written, preloadsOf(page))
 		}
-	}
-}
-
-// The defaults are a Kitwork UI page's: a template page keeps what it had — Outfit and Fira Code by
-// name, from the template path: the woff2 its @font-face and preloads name are exactly fonts.Render's
-// for the same markup (the production minifier rewrites the rest of the CSS), and no Google Sans face.
-// CONTROL: a .ui site that names no body face gets Google Sans Flex.
-func TestTemplatePageFontsAreUnchanged(t *testing.T) {
-	const markup = `<p class="font-outfit">x</p><pre><code style="font-family: 'Fira Code'">y</code></pre>`
-	tenant := identitySite(t, templatePage(markup))
-	page := serveEngine(tenant, http.MethodGet, "/").Body.String()
-	urls := func(html string) []string {
-		var out []string
-		for _, m := range engineFontRe.FindAllStringSubmatch(html, -1) {
-			out = append(out, m[1])
-		}
-		sort.Strings(out)
-		return out
-	}
-	got, want := urls(page), urls(fonts.Render("<head></head><body>"+markup+"</body>"))
-	if strings.Join(got, " ") != strings.Join(want, " ") || !strings.Contains(strings.Join(got, " "), "/_kitwork/fonts/outfit-400-latin.") ||
-		!strings.Contains(strings.Join(got, " "), "/_kitwork/fonts/fira-code-400-latin.") {
-		t.Errorf("the template page names the fonts the template path names, Outfit and Fira Code:\ngot  %v\nwant %v", got, want)
-	}
-	if lower := strings.ToLower(page); strings.Contains(lower, "google sans") || strings.Contains(lower, "google-sans") {
-		t.Errorf("a template page gets no default face:\n%.2000s", page)
-	}
-
-	control := buildUISite(t, withFontsLine(t, "", nil))
-	if _, sheet := fontsSheet(t, control, "http://localhost/"); len(facesOf(sheet.css)["Google Sans Flex"]) != 3 {
-		t.Errorf("CONTROL: a .ui site that names no body face ships Google Sans Flex:\n%s", sheet.css)
 	}
 }

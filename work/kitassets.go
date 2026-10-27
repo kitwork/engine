@@ -22,7 +22,7 @@ import (
 //	/_kitwork/warnings.<hash>.js (a .ui page's warnings, while developing only)
 //	/_kitwork/bundle.<hash>.js   (a .ui page's JavaScript parts as one file, router.bundle "split")
 //	/_kitwork/site.<hash>.css    (a .ui page's reboot, colours and fonts as one file, router.bundle)
-//	/_kitwork/page.<hash>.css    /_kitwork/icons.<hash>.css  /_kitwork/logo.<hash>.css  /_kitwork/fonts.<hash>.css
+//	/_kitwork/page.<hash>.css    /_kitwork/icons.<hash>.css  /_kitwork/fonts.<hash>.css
 //	/_kitwork/components/<name>.<hash>.js   /_kitwork/services/<name>.<hash>.js
 //	/_kitwork/directives/<name>.<hash>.js   /_kitwork/fonts/<family>-<weight>-<subset>.<hash>.woff2
 const enginePathSegment = "_kitwork"
@@ -145,7 +145,7 @@ func scrolledScriptAt(p string) (exact, ok bool) {
 }
 
 // servePageStylesheet serves one of a Kitwork UI page's stylesheets, /_kitwork/<role>.<hash>.css
-// (page, icons, logo, fonts), from the store of the generation that compiled the page (router_ui.go):
+// (page, icons, fonts), from the store of the generation that compiled the page (router_ui.go):
 // what one generator made for the page, named by its role and its bytes, so kept for good. A name this
 // generation never made — an unknown hash, a hash under another role — is the engine's 404, not kept:
 // never the tenant's disk, and never an older stylesheet under a name that is not its own, as a page

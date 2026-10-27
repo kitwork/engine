@@ -4,8 +4,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-
-	jitcss "github.com/kitwork/engine/jit/css"
 )
 
 // modes reads colors.css into its two blocks: custom property → value, for light (:root) and dark
@@ -62,12 +60,6 @@ func TestColorsWithoutRouterColorsHasTheGround(t *testing.T) {
 	if !strings.Contains(string(Colors(p).CSS), ":root{color-scheme:light;") {
 		t.Error("the light block names its scheme")
 	}
-	// Control: the palette a .ui site had without router.colors (jit/css's defaults) had no ground.
-	for _, token := range []string{"canvas", "ink", "line"} {
-		if _, ok := jitcss.DefaultConfig.Colors[token]; ok {
-			t.Fatalf("control: jit/css's defaults now declare %s; this test no longer shows the difference", token)
-		}
-	}
 }
 
 // A branch's colors.css differs from the site's only in the tokens the branch re-values: the brand it
@@ -84,7 +76,7 @@ func TestBranchFileDiffersOnlyInItsOwnTokens(t *testing.T) {
 		t.Fatalf("the branch changed tokens it does not write: %v", differing)
 	}
 	light, _ := modes(t, branchFile.CSS)
-	if light["--brand"] != "#2563eb" || light["--brand-on"] != jitcss.Palette("#2563eb")["on"] {
+	if light["--brand"] != "#2563eb" || light["--brand-on"] != "#ffffff" {
 		t.Fatalf("the branch's brand did not regrow its family: %v", light)
 	}
 	// Control: a branch that re-values ink moves the dark surfaces too (they take the hue of ink), and
@@ -137,7 +129,7 @@ func TestPaleBrandFocusFallsBackToInk(t *testing.T) {
 		t.Fatal(err)
 	}
 	light, _ := modes(t, Colors(pale).CSS)
-	if jitcss.Contrast("#ffd166", "#f6f9fc") >= 3 {
+	if contrastHex("#ffd166", "#f6f9fc") >= 3 {
 		t.Fatal("the pale brand is not pale")
 	}
 	if light["--kitwork-focus"] != "var(--ink)" {
@@ -146,7 +138,7 @@ func TestPaleBrandFocusFallsBackToInk(t *testing.T) {
 	// Control: a brand that reaches 3:1 is the ring.
 	strong, _ := NewPalette(true, map[string]Color{"brand": {Light: "#2563eb"}})
 	light, dark := modes(t, Colors(strong).CSS)
-	if jitcss.Contrast("#2563eb", "#f6f9fc") < 3 || jitcss.Contrast("#2563eb", "#ffffff") < 3 {
+	if contrastHex("#2563eb", "#f6f9fc") < 3 || contrastHex("#2563eb", "#ffffff") < 3 {
 		t.Fatal("control: the strong brand does not reach 3:1")
 	}
 	if light["--kitwork-focus"] != "var(--brand)" {
@@ -162,16 +154,22 @@ func TestPaleBrandFocusFallsBackToInk(t *testing.T) {
 	if light["--kitwork-focus"] != "var(--brand)" || dark["--kitwork-focus"] != "var(--ink)" {
 		t.Errorf("per mode: light %s, dark %s", light["--kitwork-focus"], dark["--kitwork-focus"])
 	}
-	if jitcss.Contrast("#000000", "#ffffff") < 20.9 || jitcss.Contrast("#ffffff", "#ffffff") != 1 {
+	if contrastHex("#000000", "#ffffff") < 20.9 || contrastHex("#ffffff", "#ffffff") != 1 {
 		t.Fatal("control: the contrast formula is wrong")
 	}
 }
 
-// colors.css carries only the chain's tokens, as full colours: none of jit/css's legacy palette, no
-// *-dark copies, no rgb triplets, no --color- names, no --kitwork-brand.
+// legacyColourNames are the colour names of the template pages' CSS engine (jit/css, gone on
+// 27/10/2026), which colors.css never carried.
+var legacyColourNames = []string{"white", "black", "gray", "red", "deeppink", "orangered", "gold", "darkviolet", "lime",
+	"deepskyblue", "peace", "blue", "primary", "warning", "positive", "danger", "success", "info", "default", "special",
+	"dark", "elegant", "stylish", "unique", "profession", "light", "ghost", "lavender", "kitwork", "brand"}
+
+// colors.css carries only the chain's tokens, as full colours: none of the template pages' legacy
+// palette, no *-dark copies, no rgb triplets, no --color- names, no --kitwork-brand.
 func TestColorsHasNoLegacyNames(t *testing.T) {
 	css := string(Colors(examplePalette(t)).CSS)
-	for name := range jitcss.DefaultConfig.Colors {
+	for _, name := range legacyColourNames {
 		switch name {
 		case "brand", "success", "warning", "danger", "info":
 			continue
@@ -237,7 +235,7 @@ func TestBranchRegrowsTheFamily(t *testing.T) {
 		t.Fatalf("a written rung is kept: %s", l)
 	}
 	branch, _ := NewPalette(false, root, map[string]Color{"brand": {Light: "#2563eb"}})
-	grown := jitcss.Palette("#2563eb")
+	grown := map[string]string{"on": "#ffffff"}
 	for _, rung := range rungs {
 		if l, _, _ := branch.Value("brand." + rung); l != grown[rung] {
 			t.Errorf("brand.%s is %s, want %s grown from the branch's brand", rung, l, grown[rung])
@@ -268,12 +266,6 @@ func TestAccentNamedLikeALegacyColourGetsItsDark(t *testing.T) {
 		if _, dark, _ := p.Value(token); dark == "" {
 			t.Errorf("%s has no dark value", token)
 		}
-	}
-	// Control: given the names as they are, router.themes' formula skips them.
-	config := &jitcss.Config{Colors: map[string]jitcss.Color{"ink": jitcss.Hex("#0a2540"), "primary": jitcss.Hex("#4242ff"), "sky": jitcss.Hex("#2563eb")}}
-	jitcss.DeriveThemes(config, "dark")
-	if _, ok := config.Themes["dark"]["primary"]; ok {
-		t.Fatal("control: the formula now derives primary itself; the alias is no longer needed")
 	}
 }
 
@@ -308,10 +300,10 @@ func TestPaletteRefusesWhatIsNotAPalette(t *testing.T) {
 	}
 }
 
-// The grown rung (on) is jit/css's Palette of the hue, and Declared leaves it out.
+// The grown rung (on) is the label grown from the hue (onLabel), and Declared leaves it out.
 func TestGrownRungsAreThePalettesOwn(t *testing.T) {
 	p := examplePalette(t)
-	grown := jitcss.Palette("#2f9e63")
+	grown := map[string]string{"on": "#0a1a10"}
 	for _, rung := range rungs {
 		if l, _, _ := p.Value("success." + rung); l != grown[rung] {
 			t.Errorf("success.%s %s, want %s", rung, l, grown[rung])

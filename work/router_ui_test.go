@@ -631,8 +631,8 @@ func TestRouterColorsAndFontsTakeAnObject(t *testing.T) {
 
 // router.theme() was the old name of router.colors() and router.fonts(); in a router.work it is a compile
 // error naming the two (24/10/2026, KITWORK_ROUTER.md mục 4), at the site root and in a branch alike, where
-// it is written. A branch written with router.colors boots (the control). A template site's router.theme()
-// still applies with its boot line (renamedTheme, TestTemplateSiteThemeStillApplies).
+// it is written. A branch written with router.colors boots (the control). (A router.kitwork.js still applies
+// router.theme() with a boot line, renamedTheme, until it goes; its test went with the template pages, 27/10/2026.)
 //
 // CONTROL (24/10/2026, -overlay with theme taken out of the compiler's removed words): both rows went red with
 // "router.work:5:8: router.theme không có; router có get, post, …", not the error naming colors and fonts.
@@ -659,64 +659,6 @@ func TestUISiteThemeIsAnErrorNamingColorsAndFonts(t *testing.T) {
 	}
 	if page := pageWithStylesheet(t, tenant, "http://localhost/tinh"); !strings.Contains(page, "--brand:#9333ea") {
 		t.Error("control: the branch written with router.colors takes its own brand")
-	}
-}
-
-// A template site (router.kitwork.js) keeps router.theme(), the old name of router.colors() and
-// router.fonts(), as every old way of a template site stays (24/10/2026): its colours and fonts apply, at the
-// site root and in a branch, where a later call re-values what an earlier one wrote and keeps the rest, and the
-// boot names it once per file that calls it, however many calls. A branch written with router.colors says
-// nothing (the control). The compile error of router.theme is router.work's alone.
-//
-// CONTROL (24/10/2026, -overlay with FolderRouter.Theme returning before it does anything): "router.theme() at
-// a template's root must apply its brand: got \"invalid\"" (no value), the same for the fonts and the branch's
-// brand and ink, and "want the line … exactly once at boot, got 0" for both files.
-func TestTemplateSiteThemeStillApplies(t *testing.T) {
-	const said = "router.theme() is now router.colors() and router.fonts() — applied"
-	tenant, site := writeTestSite(t, `router.theme({ colors: { brand: "#c8742c" }, fonts: { code: "Fira Code" } });`, `<main>home</main>`)
-	writeSiteFile(t, site, "docs/router.kitwork.js", `import { router } from "kitwork";`+
-		"\nrouter.theme({ colors: { brand: \"#16a34a\", ink: \"#111111\" } });\nrouter.theme({ colors: { brand: \"#2563eb\" } });")
-	writeSiteFile(t, site, "docs/page.kitwork.html", `<main>docs</main>`)
-	writeSiteFile(t, site, "tinh/router.kitwork.js", `import { router } from "kitwork";`+"\nrouter.colors({ brand: \"#9333ea\" });")
-	writeSiteFile(t, site, "tinh/page.kitwork.html", `<main>tinh</main>`)
-	var home, docs, still *FolderRouter
-	printed := captureBootOutput(t, func() {
-		if err := tenant.Run(); err != nil {
-			t.Fatal(err)
-		}
-		root := tenant.routeTree().root
-		home = root.ensureFolder(tenant)
-		for name, into := range map[string]**FolderRouter{"docs": &docs, "tinh": &still} {
-			node := root.child(name, map[string]string{}, false)
-			if node == nil {
-				t.Fatalf("the template site has no folder %s", name)
-			}
-			*into = node.ensureFolder(tenant)
-		}
-	})
-	if err := tenant.routeTree().root.compileError(); err != nil {
-		t.Fatalf("the template site's root router: %v", err)
-	}
-	if got := home.colors["brand"].Text(); got != "#c8742c" {
-		t.Errorf("router.theme() at a template's root must apply its brand: got %q", got)
-	}
-	if got := home.fonts["code"].Text(); got != "Fira Code" {
-		t.Errorf("router.theme() at a template's root must apply its fonts: got %q", got)
-	}
-	if brand, ink := docs.colors["brand"].Text(), docs.colors["ink"].Text(); brand != "#2563eb" || ink != "#111111" {
-		t.Errorf("router.theme() twice in a branch: the later brand wins and the ink stays, got brand %q, ink %q", brand, ink)
-	}
-	if got := still.colors["brand"].Text(); got != "#9333ea" {
-		t.Errorf("control: the branch written with router.colors takes its own brand, got %q", got)
-	}
-	for _, file := range []string{"router.kitwork.js", filepath.Join("docs", "router.kitwork.js")} {
-		line := "[router] " + file + ": " + said + "\n"
-		if got := strings.Count(printed, line); got != 1 {
-			t.Errorf("want the line %q exactly once at boot, got %d:\n%s", strings.TrimSpace(line), got, printed)
-		}
-	}
-	if got := strings.Count(printed, said); got != 2 {
-		t.Errorf("two files call router.theme(), so two lines, got %d (the router.colors branch says nothing):\n%s", got, printed)
 	}
 }
 

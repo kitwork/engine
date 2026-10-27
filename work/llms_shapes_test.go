@@ -51,18 +51,20 @@ func TestLlmsFullPublishesTheCompanionPath(t *testing.T) {
 	}
 }
 
-// The manifest API is camelCase elsewhere (hotReload, allowLocal, rateLimit),
-// so the companion has to answer to that spelling, not only the flat one.
+// The companion is router.llmsFull, camelCase like the router's other names; in router.work the flat
+// spelling is a compile error naming it. (A router.kitwork.js answers to both; this tested that, on a
+// template site, until the template pages went, 27/10/2026.)
 func TestLlmsFullAnswersToTheCamelCaseSpelling(t *testing.T) {
-	for _, call := range []string{`router.llmsFull(true);`, `router.llmsfull(true);`} {
-		get := scaffold(t, map[string]string{
-			"filesystem.kitwork": "",
-			"index.kitwork.html": shorthandShell,
-			"page.kitwork.html":  `<main>home</main>`,
-			"router.kitwork.js":  `import { router } from "kitwork";` + "\n" + call,
-		})
-		if rec := get("/llms-full.txt"); rec.Code != 200 {
-			t.Fatalf("%s did not publish /llms-full.txt: code=%d", call, rec.Code)
-		}
+	get := scaffold(t, map[string]string{
+		"router.work": `import * as router from "kitwork/router";` + "\n" + `router.llmsFull(true);`,
+	})
+	if rec := get("/llms-full.txt"); rec.Code != 200 {
+		t.Fatalf("router.llmsFull(true) did not publish /llms-full.txt: code=%d", rec.Code)
+	}
+	_, err := bootUISite(t, map[string]string{
+		"localhost/router.work": `import * as router from "kitwork/router";` + "\n" + `router.llmsfull(true);`,
+	}, true)
+	if err == nil || !strings.Contains(err.Error(), "router.work:2:8: router.llmsfull không có; ý là router.llmsFull?") {
+		t.Fatalf("router.llmsfull in router.work: %v, want the compile error naming router.llmsFull", err)
 	}
 }

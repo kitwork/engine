@@ -5,7 +5,7 @@ package work
 // router.fonts declare the site's design tokens, and router.appearance the light/dark mode its pages show
 // first. Each page is compiled once per generation by the ui package, its head with it: its stylesheets
 // are files of their own, one per role (/_kitwork/reboot.<hash>.css, colors.<hash>.css, fonts.<hash>.css,
-// icons.<hash>.css, logo.<hash>.css, page.<hash>.css, engine/ui/stylesheet); a request only runs the
+// icons.<hash>.css, page.<hash>.css, engine/ui/stylesheet); a request only runs the
 // handler (the names of the object its view is given are what the page reads) and fills the prepared page
 // with them.
 
@@ -111,7 +111,6 @@ func (f *FolderRouter) Colors(args ...value.Value) (*FolderRouter, error) {
 		return f, nil
 	}
 	f.colors = addDeclarations(f.colors, args[0].Map())
-	f.publishSitePalette()
 	return f, nil
 }
 
@@ -139,7 +138,6 @@ func (f *FolderRouter) Fonts(args ...value.Value) (*FolderRouter, error) {
 		return f, nil
 	}
 	f.fonts = addDeclarations(f.fonts, args[0].Map())
-	f.publishSitePalette()
 	return f, nil
 }
 
@@ -224,7 +222,6 @@ func (f *FolderRouter) Theme(cfg value.Value) *FolderRouter {
 	if fonts, ok := cfg.Map()["fonts"]; ok && fonts.IsMap() {
 		f.fonts = addDeclarations(f.fonts, fonts.Map())
 	}
-	f.publishSitePalette()
 	return f
 }
 
@@ -523,7 +520,7 @@ type uiSite struct {
 	code    bool
 
 	// stylesheets are the pages' stylesheets by their name under /_kitwork/ without the extension,
-	// <role>.<hash> (reboot.<hash>, colors.<hash>, fonts.<hash>, icons.<hash>, logo.<hash>, page.<hash>):
+	// <role>.<hash> (reboot.<hash>, colors.<hash>, fonts.<hash>, icons.<hash>, page.<hash>):
 	// two pages whose CSS of one role is the same share that file — reboot for every page, the colours
 	// of every page of one colour chain. Filled as pages compile; read by every request for a
 	// stylesheet, hence a lock of their own.
@@ -649,7 +646,7 @@ type pageStylesheet struct {
 
 // A page stylesheet's name is <role>.<hash>.css at the top of the engine's prefix — one file per role
 // on a page, so no folder: /_kitwork/reboot.<hash>.css, /_kitwork/colors.<hash>.css,
-// /_kitwork/fonts.<hash>.css, /_kitwork/icons.<hash>.css, /_kitwork/logo.<hash>.css,
+// /_kitwork/fonts.<hash>.css, /_kitwork/icons.<hash>.css,
 // /_kitwork/page.<hash>.css (the woff2 files are /_kitwork/fonts/…, a folder: "fonts." and "fonts/"
 // are two names).
 const (
@@ -892,12 +889,12 @@ func (u *uiSite) store(role string, css []byte) string {
 const iconsSlot = "\x00icons\x00"
 
 // buildHead builds a compiled page's head once: the route's presentation passes over its skeleton
-// (the pre-paint, the scripts, its icons and logos), then after the pre-paint the font preloads (first,
+// (the pre-paint, the scripts, its icons), then after the pre-paint the font preloads (first,
 // so the faces are asked for before the browser reads any CSS: until the fix of 14/10/2026 they came last, after
 // a page block that can be past the first window) and its stylesheets in the cascade's order —
-// reboot, colors, fonts, icons, logo, page —, before the scripts. How each part is delivered is the
-// route's router.bundle (router_ui_bundle.go): by default ("auto") the page's own CSS (page, icons,
-// logo) is written in the page, and the site's (reboot, colors, fonts) too when the page then fits the
+// reboot, colors, fonts, icons, page —, before the scripts. How each part is delivered is the
+// route's router.bundle (router_ui_bundle.go): by default ("auto") the page's own CSS (page, icons)
+// is written in the page, and the site's (reboot, colors, fonts) too when the page then fits the
 // first window, else linked as one site.<hash>.css; with router.bundle(false) each role is a file of
 // its own, as before 14/10/2026. Every layered stylesheet opens with the same layer statement, so its
 // rules keep their order wherever its link or block stands; the few unlayered rules (the page's focus
@@ -928,15 +925,9 @@ func (u *uiSite) buildHead(compiled *uiCompiled) string {
 	}
 	site := siteCSSParts(compiled.style, fontsFile(compiled.style, weights, u.code || page.UsesCode()))
 	var own *cssPart // the page's own icons, nil when it shows no icon
-	var logos []cssPart
 	for _, sheet := range built.Stylesheets {
-		part := cssPart{role: sheet.Name, generated: sheet.Generated, css: []byte(sheet.CSS)}
-		switch {
-		case len(part.css) == 0:
-		case sheet.Name == "icons":
+		if part := (cssPart{role: sheet.Name, generated: sheet.Generated, css: []byte(sheet.CSS)}); sheet.Name == "icons" && len(part.css) > 0 {
 			own = &part
-		default:
-			logos = append(logos, part)
 		}
 	}
 	rules := cssPart{role: "page", generated: "css", css: page.Stylesheet().CSS}
@@ -951,7 +942,7 @@ func (u *uiSite) buildHead(compiled *uiCompiled) string {
 	preloads := fontPreloads(compiled.style, page.UsesCode())
 	// "auto" weighs the head production sends: the warnings file below is development's only
 	fits := func(links string) bool { return u.fitsInitialWindow(compiled, built.Insert(preloads+links+scripts)) }
-	links, icons, iconsInline := u.pageCSS(compiled.style.bundle.css, site, own, logos, rules, fits)
+	links, icons, iconsInline := u.pageCSS(compiled.style.bundle.css, site, own, rules, fits)
 	compiled.iconsInline = iconsInline
 	if u.development {
 		if src := u.warningsScript(page); src != "" {
@@ -1087,7 +1078,6 @@ func (t *Tenant) respondUI(reqRouter *Router, node *RouteNode, scope map[string]
 		for k, v := range vb.meta {
 			meta[k] = v
 		}
-		vb.rendered = true // this page is the response; the template view must not render too
 	}
 
 	reqRouter.uiAnswered = true

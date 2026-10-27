@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kitwork/engine/ui"
 	"github.com/kitwork/engine/ui/stylesheet"
 )
 
@@ -326,8 +325,9 @@ func TestPageStylesheetIsAnEngineFile(t *testing.T) {
 
 // A request runs no presentation pass over its document. Data text that a pass would read as
 // something to serve — a font-family naming a vendored typeface, the name of the appearance API —
-// changes nothing: no @font-face, no preload, no pre-paint. CONTROL: the per-request passes, run over
-// that same document, add both. (The shared site has no dark look, so nothing else pre-paints.)
+// changes nothing: no @font-face, no preload, no pre-paint. (The shared site has no dark look, so
+// nothing else pre-paints. The control that ran the template pages' per-request passes over the same
+// document went with them on 27/10/2026: no such pass is left to run.)
 func TestUIPageRunsNoPassPerRequest(t *testing.T) {
 	const note = "font-family: Fira Code — toggleTheme"
 	tenant := buildFilesSite(t, withFiles(map[string]string{
@@ -351,18 +351,6 @@ router.get((ctx) => {
 		}
 	}
 
-	plan := tenant.renderPlan()
-	compiled, err := plan.ui.page("du-lieu", uiOwnPage)
-	if err != nil {
-		t.Fatal(err)
-	}
-	document := compiled.page.Document(ui.Request{Path: "/du-lieu", Scope: map[string]any{"note": note}})
-	old := plan.renderer("du-lieu").base.Present(document)
-	for _, want := range []string{"fira-code-400", `data-kitwork-generated="appearance"`} {
-		if !strings.Contains(old, want) {
-			t.Errorf("CONTROL: the per-request passes over the same document add %q; without it this test proves nothing", want)
-		}
-	}
 }
 
 // A class from data keeps its place in the cascade: it is in the page's stylesheet with the page's

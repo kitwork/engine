@@ -344,27 +344,26 @@ router.get((context) => context.text(environment.MESSAGE));`
 	}
 }
 
-func TestEngineReloadsTemplateSnapshotAndKeepsValidFallback(t *testing.T) {
+// An edit of a .ui page makes a new generation with a new render plan, never the active one reading the
+// disk. (A template site's page.kitwork.html until the template pages went, 27/10/2026; a template page
+// that did not compile kept the valid generation, which a .ui page does not do: its generation is
+// published and the page answers its error.)
+func TestEngineReloadsUIPagesIntoANewGeneration(t *testing.T) {
 	tmpDir := t.TempDir()
 	dir := filepath.Join(tmpDir, "test", "localhost")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(
-		filepath.Join(dir, "router.kitwork.js"),
-		[]byte(`import { router } from "kitwork";`),
-		0o644,
-	); err != nil {
-		t.Fatal(err)
+	for name, content := range map[string]string{
+		work.UIRouterFileName: `import * as router from "kitwork/router";`,
+		"view.ui":             `<view><content /></view>`,
+		"content.ui":          `<content><text>ui-v1</text></content>`,
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
-	indexFile := filepath.Join(dir, "index.kitwork.html")
-	pageFile := filepath.Join(dir, "page.kitwork.html")
-	if err := os.WriteFile(indexFile, []byte(`<html><body>{{ @page }}</body></html>`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(pageFile, []byte(`<main>template-v1</main>`), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	pageFile := filepath.Join(dir, "content.ui")
 
 	request := func(engine *Engine) *httptest.ResponseRecorder {
 		t.Helper()
@@ -375,8 +374,8 @@ func TestEngineReloadsTemplateSnapshotAndKeepsValidFallback(t *testing.T) {
 	engine := New(tmpDir, 0, true, "")
 	t.Cleanup(engine.Close)
 	if response := request(engine); response.Code != http.StatusOK ||
-		!strings.Contains(response.Body.String(), "template-v1") {
-		t.Fatalf("template baseline: %d %q", response.Code, response.Body.String())
+		!strings.Contains(response.Body.String(), "ui-v1") {
+		t.Fatalf("page baseline: %d %q", response.Code, response.Body.String())
 	}
 	first := engine.cache["localhost"].current()
 	firstPlan := first.SiteGeneration().RenderPlan()
@@ -384,37 +383,26 @@ func TestEngineReloadsTemplateSnapshotAndKeepsValidFallback(t *testing.T) {
 		t.Fatal("generation has no render plan")
 	}
 
-	if err := os.WriteFile(pageFile, []byte(`<main>template-v2</main>`), 0o644); err != nil {
+	if err := os.WriteFile(pageFile, []byte(`<content><text>ui-v2</text></content>`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if response := request(engine); response.Code != http.StatusOK ||
-		!strings.Contains(response.Body.String(), "template-v1") {
-		t.Fatalf("active snapshot observed disk edit before reload: %d %q", response.Code, response.Body.String())
+		!strings.Contains(response.Body.String(), "ui-v1") {
+		t.Fatalf("active generation observed disk edit before reload: %d %q", response.Code, response.Body.String())
 	}
 	time.Sleep(1100 * time.Millisecond)
 	if response := request(engine); response.Code != http.StatusOK ||
-		!strings.Contains(response.Body.String(), "template-v2") {
-		t.Fatalf("template reload: %d %q", response.Code, response.Body.String())
+		!strings.Contains(response.Body.String(), "ui-v2") {
+		t.Fatalf("page reload: %d %q", response.Code, response.Body.String())
 	}
 	second := engine.cache["localhost"].current()
 	if second == first || second.SiteGeneration().RenderPlan() == firstPlan {
-		t.Fatal("template edit did not replace the generation render plan")
+		t.Fatal("page edit did not replace the generation render plan")
 	}
 	if first.SiteGeneration().RenderPlan() != nil {
 		t.Fatal("retired generation retained its render plan")
 	}
 
-	if err := os.WriteFile(pageFile, []byte(`{{ if }}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(1100 * time.Millisecond)
-	if response := request(engine); response.Code != http.StatusOK ||
-		!strings.Contains(response.Body.String(), "template-v2") {
-		t.Fatalf("broken template replaced valid generation: %d %q", response.Code, response.Body.String())
-	}
-	if engine.cache["localhost"].current() != second {
-		t.Fatal("broken template candidate was published")
-	}
 }
 
 func TestEnginePreservesSiteStateAndReplacesGenerationCache(t *testing.T) {

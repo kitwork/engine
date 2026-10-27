@@ -59,8 +59,6 @@ type FolderMethod struct {
 	success    *value.Lambda   // runs after a clean handler (canonical name for the old `then`)
 	errorH     *value.Lambda   // runs when the method errored (canonical name for the old `catch`)
 	final      *value.Lambda
-	isView     bool
-	viewArgs   []value.Value
 	outputKind string
 	outputData value.Value
 	outputPath string
@@ -115,15 +113,6 @@ func (m *FolderMethod) Finally(l value.Value) *FolderMethod { m.final = lambdaOf
 func (m *FolderMethod) Then(l value.Value) *FolderMethod             { return m.Success(l) }
 func (m *FolderMethod) Catch(l value.Value) *FolderMethod            { return m.Error(l) }
 func (m *FolderMethod) Middleware(args ...value.Value) *FolderMethod { return m.Guard(args...) }
-
-// View ends a method by rendering this folder's page — no JS handler:
-//
-//	router.get().view()          // GET → this folder's page.kitwork.html
-func (m *FolderMethod) View(args ...value.Value) *FolderMethod {
-	m.isView = true
-	m.viewArgs = args
-	return m
-}
 
 // Cache keeps the rendered response in RAM (fast, lost on restart). The argument is a rolling
 // duration OR a wall-clock boundary; no arg = forever:
@@ -797,62 +786,16 @@ func publicAssetURL(disk string) string {
 // Language is sugar for meta({ language }) — $.meta.language in the view, for <html lang="…">.
 func (f *FolderRouter) Language(v value.Value) *FolderRouter { f.meta["language"] = v; return f }
 
-// Jittheme is the deprecated site-wide pre-paint switch (22/09): true ALWAYS injects the
-// anti-flash script, false disables it. The theme now decides this itself from what the site
-// declared — router.css({ darkMode: ["class"] }) or router.themes({ dark: true }) pre-paint every
-// page — and router.themes({ prepaint: false }) is the one remaining setting (opt out). Kept so
-// existing sites keep working; new sites do not call it.
-func (f *FolderRouter) Jittheme(args ...value.Value) *FolderRouter {
-	mode := "force" // bare router.jittheme() reads as "turn it on"
-	if len(args) > 0 && args[0].K == value.Bool && args[0].N == 0 {
-		mode = "off"
-	}
-	f.tenant.presentation().SetThemeMode(mode)
-	return f
-}
-
-// JitTheme is the camelCase alias (.jitTheme).
-func (f *FolderRouter) JitTheme(args ...value.Value) *FolderRouter { return f.Jittheme(args...) }
-
-// Highlight pins the site-wide default palette for a bare {{ src.highlight() }}
-// in views — e.g. router.highlight("classic"). A page may still override per
-// call with {{ src.highlight("mono") }}; the built-in default is used otherwise.
-// That is the template's grammar, read in router.kitwork.js, unchanged. In
-// router.work it is Kitwork UI's: the colour of each kind of code token of the
-// .ui pages, router.highlight({ keyword: "violet", "function": { light, dark } })
-// (uiHighlight, router_ui_highlight.go). The folder's router file decides: the
-// two grammars meet on the same keys ({ keyword: "#ff0000" } is the template's
-// and no colour of .ui), so the shape of the value cannot.
+// Highlight is Kitwork UI's router.highlight: the colour of each kind of code token of the .ui pages,
+// router.highlight({ keyword: "violet", "function": { light, dark } }) (uiHighlight,
+// router_ui_highlight.go). The template pages' grammar of the same word (a named theme for
+// {{ src.highlight() }}) went with the template pages on 27/10/2026: a router.kitwork.js that still
+// writes it is told so.
 func (f *FolderRouter) Highlight(args ...value.Value) (*FolderRouter, error) {
 	if f != nil && f.ui {
 		return f.uiHighlight(args...)
 	}
-	if len(args) == 0 {
-		return f, nil
-	}
-	// STRING: pick a named theme — router.highlight("tokyo-night").
-	if args[0].IsString() {
-		f.tenant.presentation().SetHighlightTheme(args[0].String())
-		return f, nil
-	}
-	// MAP: a theme plus per-role tweaks, or tweaks alone on the default theme —
-	// router.highlight({ theme: "tokyo-night", keyword: "#ff0000" }). Keeping the
-	// overrides HERE rather than in router.css() means one call owns the whole
-	// appearance of a code block, and the theme name is never written twice.
-	if args[0].IsMap() {
-		palette := map[string]string{}
-		for role, entry := range args[0].Map() {
-			if role == "theme" {
-				f.tenant.presentation().SetHighlightTheme(entry.String())
-				continue
-			}
-			if entry.K == value.String {
-				palette[role] = entry.Text()
-			}
-		}
-		f.tenant.presentation().SetHighlightPalette(palette)
-	}
-	return f, nil
+	return f, fmt.Errorf("router.highlight của trang template không còn (27/10/2026): màu khối mã của trang .ui viết trong router.work, router.highlight({ keyword: \"brand\", comment: \"ink-30\" })")
 }
 
 // Meta shorthands at the node-declaration level — same set as the ViewBuilder, so a static page
