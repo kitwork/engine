@@ -45,7 +45,6 @@ import (
 	"sync"
 
 	jitjs "github.com/kitwork/engine/jit/js"
-	"github.com/kitwork/engine/render"
 	"github.com/kitwork/engine/ui/stylesheet"
 	"github.com/kitwork/engine/value"
 )
@@ -321,7 +320,7 @@ func (u *uiSite) weighedDocument(compiled *uiCompiled, head string) string {
 func (u *uiSite) pageCSS(mode string, site []cssPart, own *cssPart, logos []cssPart, page cssPart, fits func(links string) bool) (links, icons string, iconsInline bool) {
 	link := func(part cssPart) string {
 		if href := u.store(part.role, part.css); href != "" {
-			return render.Link(href, part.generated)
+			return stylesheetLink(href, part.generated)
 		}
 		return ""
 	}
@@ -394,7 +393,7 @@ const bundleRole = "bundle"
 // as a deferred module script (data-kitwork-part names the file it stands for, Drive runs the ones a
 // move brings). The kernel is always its own file. It rewrites built (its Stylesheet place follows
 // what moved before it) and returns what replaces scrolledTag.
-func (u *uiSite) pageScripts(mode string, built *render.PageHead, scrolledTag string) string {
+func (u *uiSite) pageScripts(mode string, built *uiHead, scrolledTag string) string {
 	if mode != bundleSplit && mode != bundleInline {
 		return scrolledTag
 	}

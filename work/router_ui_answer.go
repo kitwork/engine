@@ -70,9 +70,7 @@ func (t *Tenant) answerUIPage(reqRouter *Router, node *RouteNode) {
 	}
 	switch {
 	case reqRouter.isNotfound || response.uiPage == uiNotFoundPage:
-		if !t.hasUIPage(node, uiNotFoundPage) {
-			return // no notfound.ui: the text it answers today
-		}
+		// the nearest notfound.ui, or the engine's plain "Not Found" when there is none (respondUI)
 		reqRouter.isNotfound = true
 	case response.uiPage == uiErrorPage:
 		if !t.hasUIPage(node, uiErrorPage) {

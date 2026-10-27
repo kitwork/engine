@@ -23,14 +23,11 @@ import (
 	"time"
 
 	"github.com/kitwork/engine/compiler"
-	jitcss "github.com/kitwork/engine/jit/css"
 	"github.com/kitwork/engine/jit/fonts"
 	"github.com/kitwork/engine/jit/hydrate"
 	"github.com/kitwork/engine/jit/icons"
 	jitjs "github.com/kitwork/engine/jit/js"
-	"github.com/kitwork/engine/render"
 	"github.com/kitwork/engine/runtime"
-	sitepkg "github.com/kitwork/engine/site"
 	"github.com/kitwork/engine/ui"
 	"github.com/kitwork/engine/ui/stylesheet"
 	"github.com/kitwork/engine/value"
@@ -243,93 +240,6 @@ func addDeclarations(into map[string]value.Value, declared map[string]value.Valu
 	return into
 }
 
-// publishSitePalette hands the site root's colours and typefaces to the presentation as the site's CSS
-// configuration. It is rebuilt whole from the defaults on every call, so router.colors and router.fonts
-// may come in either order and as many times as the file likes. A branch keeps its own on the folder
-// (routeCSS). router.css() is a template site's whole configuration: on one site the later wins.
-func (f *FolderRouter) publishSitePalette() {
-	if f == nil || f.tenant == nil || f.node == nil || f.node.parent != nil {
-		return
-	}
-	config := buildJitcssConfig(value.Value{K: value.Map, V: map[string]value.Value{}})
-	if config == nil {
-		return
-	}
-	if applyPalette(config, f.colors, f.fonts) {
-		f.tenant.presentation().SetThemes([]string{"dark"})
-	}
-	f.tenant.presentation().SetJITConfig(config)
-}
-
-// applyPalette writes one folder's router.colors() and router.fonts() into a CSS configuration: each
-// colour, its dark rung (<token>-dark, which re-values the token under .dark) when it has one, and the
-// typefaces. It reports whether any dark value was declared. Tokens are written in name order, so the
-// CSS is the same on every boot.
-//
-// An accent (brand, success, warning… every colour but the surfaces and the text) is a family: from
-// its one hue the engine grows deep, soft, wash and on (jitcss.Palette) unless the palette writes the
-// rung itself. A grown rung is a token like any other, so a badge's soft fill and deep text get a dark
-// value of their own instead of staying a light pastel on a dark page.
-func applyPalette(config *jitcss.Config, colors, fonts map[string]value.Value) bool {
-	dark := false
-	declared := map[string]bool{}
-	for name := range colors {
-		declared[strings.ReplaceAll(name, ".", "-")] = true
-	}
-	for _, name := range sortedNames(colors) {
-		v := colors[name]
-		light, night := "", ""
-		switch {
-		case v.IsString():
-			light = v.String()
-		case v.IsMap():
-			if c, ok := v.Map()["light"]; ok && c.IsString() {
-				light = c.String()
-			}
-			if c, ok := v.Map()["dark"]; ok && c.IsString() {
-				night = c.String()
-			}
-		}
-		token := strings.ReplaceAll(name, ".", "-")
-		if light != "" {
-			setColor(config, token, light)
-		}
-		if night != "" {
-			dark = true
-			setColor(config, token+"-dark", night)
-		}
-		if light == "" || !accentToken(token) {
-			continue
-		}
-		grown := jitcss.Palette(light)
-		for _, rung := range sortedRungs(grown) {
-			if rung == "DEFAULT" || declared[token+"-"+rung] {
-				continue // the hue itself is the token; a rung the palette writes is its own
-			}
-			setColor(config, token+"-"+rung, grown[rung])
-		}
-	}
-	for _, role := range sortedNames(fonts) {
-		v := fonts[role]
-		if !v.IsString() || strings.TrimSpace(v.String()) == "" {
-			continue
-		}
-		fallback := jitcss.DefaultConfig.FontFamily["sans"]
-		if role == "code" {
-			fallback = jitcss.DefaultConfig.FontFamily["mono"]
-		}
-		config.FontFamily[role] = quoteFamily(strings.TrimSpace(v.String())) + ", " + fallback
-	}
-	return dark
-}
-
-func setColor(config *jitcss.Config, token, hex string) {
-	config.Colors[token] = jitcss.Hex(hex)
-	if !contains(config.Order, token) {
-		config.Order = append(config.Order, token)
-	}
-}
-
 func sortedNames(m map[string]value.Value) []string {
 	names := make([]string, 0, len(m))
 	for name := range m {
@@ -337,25 +247,6 @@ func sortedNames(m map[string]value.Value) []string {
 	}
 	sort.Strings(names)
 	return names
-}
-
-func sortedRungs(m map[string]string) []string {
-	rungs := make([]string, 0, len(m))
-	for rung := range m {
-		rungs = append(rungs, rung)
-	}
-	sort.Strings(rungs)
-	return rungs
-}
-
-// accentToken reports whether a colour is an accent that grows a family: every colour except the
-// surfaces (canvas, panel, paper, line) and the text (ink and its rungs).
-func accentToken(token string) bool {
-	switch token {
-	case "canvas", "panel", "paper", "line", "ink":
-		return false
-	}
-	return !strings.HasPrefix(token, "ink-")
 }
 
 // routeAppearance is the router.appearance() of the nearest folder from the route up to the site root
@@ -367,50 +258,6 @@ func routeAppearance(node *RouteNode) string {
 		}
 	}
 	return "system"
-}
-
-// routeCSS is one route's CSS configuration, and whether its pages have a dark look (the render plan
-// then pre-paints every one of them). It is the site's, with the router.colors() and router.fonts() of
-// every folder between the site root and the route merged over it, the nearest last, and the dark look
-// derived again from the merged tokens: a branch that changes brand gets a dark brand of its own, and
-// a dark pair written only in a branch gives that branch a dark look. A route whose appearance is
-// "dark" (mode) gets one too, derived from the tokens, when nothing declared one. A route that changes
-// nothing shares the site's configuration as it is.
-func routeCSS(site *jitcss.Config, node *RouteNode, mode string) (*jitcss.Config, bool) {
-	var chain []*FolderRouter
-	for n := node; n != nil && n.parent != nil; n = n.parent {
-		if n.folder != nil && (len(n.folder.colors) > 0 || len(n.folder.fonts) > 0) {
-			chain = append(chain, n.folder)
-		}
-	}
-	siteDark := site != nil && (site.Themes["dark"] != nil || site.DarkByClass)
-	deriveDark := mode == "dark" && !siteDark
-	if len(chain) == 0 && !deriveDark {
-		return site, siteDark
-	}
-	var merged *jitcss.Config
-	if site != nil {
-		merged = sitepkg.CloneJITConfig(site)
-	} else {
-		merged = buildJitcssConfig(value.Value{K: value.Map, V: map[string]value.Value{}})
-	}
-	var modes []string
-	for m := range merged.Themes {
-		modes = append(modes, m)
-	}
-	merged.Themes = nil
-	dark := deriveDark
-	for i := len(chain) - 1; i >= 0; i-- {
-		if applyPalette(merged, chain[i].colors, chain[i].fonts) {
-			dark = true
-		}
-	}
-	if dark && !contains(modes, "dark") {
-		modes = append(modes, "dark")
-	}
-	sort.Strings(modes)
-	jitcss.DeriveThemes(merged, modes...)
-	return merged, contains(modes, "dark") || merged.DarkByClass
 }
 
 // routeStyle is what a route's .ui pages are styled with: its colour chain (router.colors of the site
@@ -564,13 +411,29 @@ func fontFamily(role, declared string) string {
 	return fonts.DefaultBody
 }
 
+// systemSans and systemMono are the system stacks after a .ui page's typefaces, body and code: the
+// faces every platform has, when the page's own is not there yet or not at all.
+const (
+	systemSans = "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif"
+	systemMono = "ui-monospace, SFMono-Regular, Menlo, monospace"
+)
+
+// quoteFamily quotes a family name that contains spaces, as CSS requires: Plus Jakarta Sans is
+// only a valid font-family value written as "Plus Jakarta Sans".
+func quoteFamily(name string) string {
+	if strings.ContainsAny(name, " ") && !strings.HasPrefix(name, "'") && !strings.HasPrefix(name, "\"") {
+		return "'" + name + "'"
+	}
+	return name
+}
+
 // fontStack is a role's font-family on a .ui page: its typeface (fontFamily), then the system stack
 // of that role, as a template page's font-body and font-code are. A Google family is written as Google
 // spells it, the name its @font-face carries, however router.fonts wrote it ("google sans code").
 func fontStack(role, family string) string {
-	fallback := jitcss.DefaultConfig.FontFamily["sans"]
+	fallback := systemSans
 	if role == "code" {
-		fallback = jitcss.DefaultConfig.FontFamily["mono"]
+		fallback = systemMono
 	}
 	family = fontFamily(role, family)
 	if found, ok := fonts.Find(family); ok {
@@ -653,7 +516,7 @@ type uiSite struct {
 	// while the render plan is built, before any page compiles; a route not listed compiles with the
 	// site's own.
 	styles        map[string]routeStyle
-	presentations map[string]*render.Render
+	presentations map[string]*uiPresentation
 	// weights are the font weights the site's pages use, and code whether any of them sets text in the
 	// code face, gathered when every page compiles (compileAll), so the pages share one fonts file
 	weights []int
@@ -687,7 +550,7 @@ type uiCompiled struct {
 	// icons are the names of the icons the page shows whatever its data: what its icons file holds.
 	icons []string
 	// presentation is the route's, for the CSS of icons only a request's data names.
-	presentation *render.Render
+	presentation *uiPresentation
 	style        routeStyle
 	// route is the path of the page's route ("/", "/docs/{slug}"), for the one render without data that
 	// router.bundle "auto" weighs (fitsInitialWindow)
@@ -812,7 +675,7 @@ func newUISite(base string, reload bool) *uiSite {
 		development:   AllowLocal,
 		pages:         map[string]*uiCompiled{},
 		styles:        map[string]routeStyle{},
-		presentations: map[string]*render.Render{},
+		presentations: map[string]*uiPresentation{},
 		stylesheets:   map[string]pageStylesheet{},
 		scripts:       map[string]engineScript{},
 	}
@@ -896,11 +759,15 @@ func (u *uiSite) script(name string) (engineScript, bool) {
 	return script, ok
 }
 
-// setRoute records a route's presentation and its colours and typefaces.
-func (u *uiSite) setRoute(relative string, node *RouteNode, presentation *render.Render) {
+// setRoute records a route's colours and typefaces, and its presentation: the site's, with whether the
+// route has a dark look (its colour chain declares a dark value, or its appearance is "dark"), so
+// every page of the route pre-paints the appearance before anything shows.
+func (u *uiSite) setRoute(relative string, node *RouteNode, site uiPresentation) {
 	if u != nil {
-		u.styles[relative] = routeStyleOf(node)
-		u.presentations[relative] = presentation
+		style := routeStyleOf(node)
+		u.styles[relative] = style
+		site.dark = style.err == nil && style.palette.Dark()
+		u.presentations[relative] = &site
 	}
 }
 
@@ -996,14 +863,14 @@ func (u *uiSite) iconsHead(compiled *uiCompiled, extra []string) string {
 		return compiled.head
 	}
 	sort.Strings(set)
-	href, css := u.dataIcons.file(strings.Join(set, " "), func() []byte { return compiled.presentation.IconsStylesheet(set) })
+	href, css := u.dataIcons.file(strings.Join(set, " "), func() []byte { return compiled.presentation.iconsStylesheet(set) })
 	if href == "" {
 		return compiled.head
 	}
 	if compiled.iconsInline {
 		return compiled.headBefore + inlineStyle("icons", css) + compiled.headAfter
 	}
-	return compiled.headBefore + render.Link(href, "icons") + compiled.headAfter
+	return compiled.headBefore + stylesheetLink(href, "icons") + compiled.headAfter
 }
 
 // store keeps one stylesheet under <role>.<hash> and returns its URL, "" for no CSS.
@@ -1046,7 +913,7 @@ func (u *uiSite) buildHead(compiled *uiCompiled) string {
 		return ""
 	}
 	compiled.icons = page.Icons()
-	built := presentation.PresentHead(page.Skeleton())
+	built := presentation.head(page.Skeleton())
 	weights := page.Weights()
 	if len(u.weights) > 0 {
 		seen := map[int]bool{}

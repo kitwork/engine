@@ -5,7 +5,6 @@ import (
 	"path"
 	"strings"
 
-	"github.com/kitwork/engine/jit/highlight"
 	"github.com/kitwork/engine/ui/stylesheet"
 	"github.com/kitwork/engine/value"
 )
@@ -39,7 +38,7 @@ func (f *FolderRouter) uiHighlight(args ...value.Value) (*FolderRouter, error) {
 	example := `router.highlight({ keyword: "brand", string: "success", comment: "ink-30" })`
 	if len(args) == 1 && args[0].IsString() {
 		name := strings.TrimSpace(args[0].String())
-		if highlight.KnownTheme(name) {
+		if templateHighlightTheme(name) {
 			return f, fmt.Errorf("router.highlight(%q): %s là bộ màu của trang template, mã màu cố định cho một nền tối; khối mã của trang .ui tô theo bảng màu của site, đọc trên nền của trang ở cả sáng và tối. Đổi màu loại nào thì viết loại ấy: %s", name, name, example)
 		}
 		return f, fmt.Errorf("router.highlight(%q): router.highlight nhận một object màu theo loại chữ, không nhận một chữ: %s", name, example)
@@ -251,4 +250,24 @@ func withRouteHighlight(palette *stylesheet.Palette, node *RouteNode) (*styleshe
 		chain = append(chain, layer)
 	}
 	return palette.WithHighlight(chain...)
+}
+
+// templateHighlightTheme reports whether a name is one of the template pages' highlight themes
+// (tokyonight, classic, mono), whatever its case and its spaces or dashes: router.highlight("Tokyo Night")
+// is told what that word was, not only that a string is not an object.
+func templateHighlightTheme(name string) bool {
+	var key strings.Builder
+	for i := 0; i < len(name); i++ {
+		switch c := name[i]; {
+		case c >= 'A' && c <= 'Z':
+			key.WriteByte(c + 32)
+		case c >= 'a' && c <= 'z', c >= '0' && c <= '9':
+			key.WriteByte(c)
+		}
+	}
+	switch key.String() {
+	case "tokyonight", "classic", "mono":
+		return true
+	}
+	return false
 }

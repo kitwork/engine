@@ -107,7 +107,10 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 		// A builder may be there already: the page's text written before response.view({…}) went into
 		// it. The "render" marker is dropped in place, so the response keeps its status, its headers and
 		// cookies (until 19/10/2026 a fresh response lost all but the status).
-		if reqRouter.treeRender != nil {
+		// A Kitwork UI site answers with its .ui pages (respondUI): its builder only carries the page's text
+		// (title, description, meta), never a template view.
+		ui := uiRoute(reqRouter.node)
+		if reqRouter.treeRender != nil && !ui {
 			if k := reqRouter.response.Kind(); k == "render" || k == "view" {
 				vb := ctxObj.viewBuilder()
 				if d := reqRouter.response.Data(); d.IsMap() {
@@ -118,7 +121,7 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 				vb.flush()
 			}
 		}
-		if reqRouter.viewBuilder != nil && !reqRouter.response.IsSend() {
+		if reqRouter.viewBuilder != nil && !reqRouter.response.IsSend() && !ui {
 			reqRouter.viewBuilder.flush()
 		}
 		if savMethod != nil && reqRouter.err == nil {
@@ -138,11 +141,13 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 		reqRouter.responder(w)
 	}
 
-	// notFound renders the nearest notfound.kitwork.html (walking up from the deepest folder
-	// reached) at HTTP 404 — the bubble the docs describe.
+	// notFound answers 404 with the nearest not-found page, walking up from the deepest folder reached:
+	// a Kitwork UI site's notfound.ui, or the engine's plain "Not Found" when it has none (27/10/2026:
+	// until then a .ui site with no notfound.ui answered through the template pages' renderer, which
+	// wrote the path of an index.kitwork.html while developing); a template site's notfound.kitwork.html.
 	notFound := func() {
 		reqRouter.isNotfound = true
-		if t.hasUINotFound(match.Node) { // a Kitwork UI site: the nearest notfound.ui
+		if uiRoute(match.Node) {
 			t.respondUI(reqRouter, match.Node, nil)
 			finalize()
 			return

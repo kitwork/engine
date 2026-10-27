@@ -6,8 +6,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-
-	jitcss "github.com/kitwork/engine/jit/css"
 )
 
 // Color is a token's value as router.colors() writes it: one colour ("#hex", Dark empty) whose dark
@@ -36,7 +34,7 @@ var kitDesign = map[string]Color{
 // surfaces are the neutral grounds; with ink (the text) they are the tokens that grow no family.
 var surfaces = map[string]bool{"canvas": true, "panel": true, "paper": true, "line": true}
 
-// rungs are what an accent grows from its one hue: on, a label on the solid fill (jitcss.Palette). The
+// rungs are what an accent grows from its one hue: on, a label on the solid fill (onLabel). The
 // rungs deep, soft and wash are gone (13/10/2026): a stronger, a tinted and a faint colour are the
 // operators X+N, X-85 and X-95 (operators.go), and a site may not declare one (checkToken).
 var rungs = []string{"on"}
@@ -138,7 +136,7 @@ func NewPalette(dark bool, chain ...map[string]Color) (*Palette, error) {
 		if !accent(name) {
 			continue
 		}
-		grown := jitcss.Palette(tokens[name].light)
+		grown := map[string]string{"on": onLabel(tokens[name].light)}
 		for _, rung := range rungs {
 			if _, written := tokens[name+"."+rung]; !written && grown[rung] != "" {
 				tokens[name+"."+rung] = &value{light: grown[rung]}
@@ -233,11 +231,10 @@ func checkHex(token, mode, hex string) (string, error) {
 	return h, nil
 }
 
-// deriveDark fills the dark value of every token that has none, with router.themes()'s formula
-// (jitcss.DeriveThemes): surfaces take the hue of ink, text lifts into the light band, accents keep
-// their hue and regrow their label (on) on the dark fill. The formula knows tokens by their role
-// names, so each accent family goes in under a neutral alias: an accent named like a Tailwind or a
-// legacy jit/css colour (blue, primary) still gets a dark value.
+// deriveDark fills the dark value of every token that has none, with the dark formula (derive.go):
+// surfaces take the hue of ink, text lifts into the light band, accents keep their hue and regrow their
+// label (on) on the dark fill. The formula knows tokens by their role names, so each accent family goes
+// in under a neutral alias, accent0, accent1…, whatever the site named it (blue, primary).
 func (p *Palette) deriveDark() {
 	alias := map[string]string{}
 	family := 0
@@ -264,21 +261,20 @@ func (p *Palette) deriveDark() {
 		alias[name] = "other-" + strconv.Itoa(other) // no formula reaches it: it keeps its light value
 		other++
 	}
-	config := &jitcss.Config{Colors: map[string]jitcss.Color{}}
+	colors := map[string]rgb{}
 	for _, name := range p.names {
-		config.Colors[alias[name]] = jitcss.Hex(p.light[name])
+		colors[alias[name]] = rgbOf(p.light[name])
 		if night, ok := p.dark[name]; ok {
-			config.Colors[alias[name]+"-dark"] = jitcss.Hex(night)
+			colors[alias[name]+"-dark"] = rgbOf(night)
 		}
 	}
-	jitcss.DeriveThemes(config, "dark")
-	derived := config.Themes["dark"]
+	derived := deriveDark(colors)
 	for _, name := range p.names {
 		if _, hand := p.dark[name]; hand {
 			continue
 		}
 		if c, ok := derived[alias[name]]; ok {
-			p.dark[name] = c.HexString()
+			p.dark[name] = c.hex()
 		}
 	}
 }
@@ -294,7 +290,7 @@ func focusOn(mode, fallback map[string]string) string {
 		return fallback[token]
 	}
 	brand := get("brand")
-	if jitcss.Contrast(brand, get("canvas")) >= 3 && jitcss.Contrast(brand, get("paper")) >= 3 {
+	if contrastHex(brand, get("canvas")) >= 3 && contrastHex(brand, get("paper")) >= 3 {
 		return "brand"
 	}
 	return "ink"

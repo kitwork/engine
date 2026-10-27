@@ -101,21 +101,23 @@ func newRenderPlan(t *Tenant, tree *RouteTree) (*RenderPlan, error) {
 			ExpressionFailed: expressionFailed,
 		}
 	}
+	// what a route's .ui pages take from the site to build their head; setRoute adds the route's dark look
+	uiBase := uiPresentation{drive: presentation.Drive, manifestPath: presentation.ManifestPath, minify: productionMinify}
 	var routes []string
 	for _, node := range tree.routeNodes() {
 		relative := node.relPath()
 		routes = append(routes, relative)
 		config := configFor(relative)
-		// router.colors()/fonts() of the folders down to this route, over the site's; router.appearance()
-		// of the nearest folder that says. A dark look the site did not have (a branch's dark pair, a
-		// route shown dark first) pre-paints too, unless the site opted out.
+		// a template page's CSS: router.colors()/fonts() of the folders down to this route, over the
+		// site's; router.appearance() of the nearest folder that says. A dark look the site did not have
+		// (a branch's dark pair, a route shown dark first) pre-paints too, unless the site opted out.
 		css, dark := routeCSS(presentation.JITConfig, node, routeAppearance(node))
 		config.JitConfig = css
 		if dark && config.ThemeMode == "" {
 			config.ThemeMode = "force"
 		}
 		baseRender := render.New(config)
-		plan.ui.setRoute(relative, node, baseRender)
+		plan.ui.setRoute(relative, node, uiBase)
 		notfoundConfig := config
 		notfoundConfig.NotfoundMode = true
 		pageRender := baseRender.Prepare()

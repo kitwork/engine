@@ -362,7 +362,7 @@ func (r *Render) applyStaticPresentation(out string) string {
 	// 3c. JIT icons: scan for `<i class="icon-x">` (and the icons a data-kitwork-class toggles in) and
 	// inject a per-page <style data-kitwork-generated="icons"> with CSS-mask rules for ONLY the icons
 	// used (jit/icons) — a cheap no-op when none are present. A Kitwork UI page links that CSS as
-	// /_kitwork/icons.<hash>.css instead (PresentHead). No Font Awesome, no CDN, no payload; there is
+	// /_kitwork/icons.<hash>.css instead (work/ui_head.go). No Font Awesome, no CDN, no payload; there is
 	// no shared icon stylesheet (the /jiticons route of router.icons() went on 09/07/2026).
 	out = icons.Render(out)
 
@@ -467,9 +467,9 @@ func (r *Render) Prepare() *Render {
 // Present finishes a whole HTML document built elsewhere exactly like a template page: CSS for the
 // classes it uses, icons, fonts, delivered scripts, appearance pre-paint, then minification when the site
 // minifies. Nothing in the engine calls it: a Kitwork UI page builds its head once from its skeleton
-// (PresentHead) and links its own stylesheets (engine/ui/stylesheet), with none of the template
+// (work/ui_head.go) and links its own stylesheets (engine/ui/stylesheet), with none of the template
 // passes' CSS. It stays as the control two tests compare with: what these passes would make of the same
-// document (TestUIPageRunsNoPassPerRequest, TestPresentHeadTakesTheStylesheetsOut).
+// document (TestUIPageRunsNoPassPerRequest, TestUIHeadTakesTheStylesheetsOut).
 func (r *Render) Present(document string) string {
 	if r == nil {
 		return document
