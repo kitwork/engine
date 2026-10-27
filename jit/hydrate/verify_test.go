@@ -21,12 +21,12 @@ func verifyOf(t *testing.T, html string) string {
 // silence, so every one is named at render, with the component that is that service's view.
 func TestVerifyNamesAnyKitInMarkup(t *testing.T) {
 	for source, view := range map[string]string{
-		`<button data-kit-click="kit.theme.toggle()">x</button>`:                "the theme component",
-		`<b data-kit-text="kit.theme.resolved"></b>`:                            "the theme component",
-		`<b data-kit-text="kit?.theme?.resolved"></b>`:                          "the theme component",
-		`<button data-kit-click="kit.window.close()">x</button>`:                "the titlebar component",
-		`<button data-kit-click="kit.clipboard.copy('x')">x</button>`:           "the clipboard component",
-		`<button data-kit-click="kit.permissions.request('camera')">x</button>`: "calls kit.permissions",
+		`<button data-kitwork-event="click: kit.theme.toggle()">x</button>`:                "the theme component",
+		`<b data-kitwork-bind="text: kit.theme.resolved"></b>`:                             "the theme component",
+		`<b data-kitwork-bind="text: kit?.theme?.resolved"></b>`:                           "the theme component",
+		`<button data-kitwork-event="click: kit.window.close()">x</button>`:                "the titlebar component",
+		`<button data-kitwork-event="click: kit.clipboard.copy('x')">x</button>`:           "the clipboard component",
+		`<button data-kitwork-event="click: kit.permissions.request('camera')">x</button>`: "calls kit.permissions",
 	} {
 		report := verifyOf(t, source)
 		if !strings.Contains(report, "markup does not call kit") || !strings.Contains(report, view) {
@@ -35,9 +35,9 @@ func TestVerifyNamesAnyKitInMarkup(t *testing.T) {
 	}
 	// CONTROL: what only looks like kit stays silent.
 	for _, fine := range []string{
-		`<b data-kit-text="'kit.theme is a service'"></b>`,
-		`<b data-kit-text="item.kit.name"></b>`,
-		`<button data-kit-component="theme" data-kit-click="toggle()">x</button>`,
+		`<b data-kitwork-bind="text: 'kit.theme is a service'"></b>`,
+		`<b data-kitwork-bind="text: item.kit.name"></b>`,
+		`<button data-kitwork-component="theme" data-kitwork-event="click: toggle()">x</button>`,
 	} {
 		if report := verifyOf(t, fine); strings.Contains(report, "markup does not call kit") {
 			t.Errorf("%s was reported as a kit call:\n%s", fine, report)
@@ -48,9 +48,9 @@ func TestVerifyNamesAnyKitInMarkup(t *testing.T) {
 // $element.nosuch.textContent is how copy(undefined) reached the clipboard: the name resolved to
 // nothing and the expression carried on. The server can see every data-kit-element in the document.
 func TestVerifyNamesAnElementNothingDeclares(t *testing.T) {
-	html := `<body><figure data-kit-component="clipboard">
+	html := `<body><figure data-kitwork-component="clipboard">
   <pre data-kit-element="source">x</pre>
-  <button data-kit-click="copy($element.sorce.textContent)">c</button>
+  <button data-kitwork-event="click: copy($element.sorce.textContent)">c</button>
 </figure></body>`
 	report := verifyOf(t, html)
 
@@ -73,7 +73,7 @@ func TestVerifyNamesAnElementNothingDeclares(t *testing.T) {
 // looked like a typo five times over; assembled, it is correct. Render always sees the assembled
 // page, so the pass only speaks about names when it can see everything a name could refer to.
 func TestVerifyDoesNotGuessAboutAFragment(t *testing.T) {
-	header := `<button data-kit-click="$element.search.showModal()">Search</button>`
+	header := `<button data-kitwork-event="click: $element.search.showModal()">Search</button>`
 	if report := verifyOf(t, header); report != "" {
 		t.Errorf("a fragment was judged as if it were the whole page:\n%s", report)
 	}
@@ -91,47 +91,40 @@ func TestVerifyDoesNotGuessAboutAFragment(t *testing.T) {
 }
 
 // Documentation prints the grammar inside <pre><code>, and an example is text. kitjs.org's
-// installation page shows a whole standalone page there — including data-kit-click="count++" —
+// installation page shows a whole standalone page there — including a click that writes count++ —
 // and it must not be reported as the page's own markup.
 func TestVerifyDoesNotJudgeAPrintedExample(t *testing.T) {
-	example := `<html><body><pre><code>&lt;button data-kit-click="count++"&gt;+&lt;/button&gt;
-&lt;b data-kit-text="kit.theme.systen"&gt;&lt;/b&gt;</code></pre></body></html>`
+	example := `<html><body><pre><code>&lt;button data-kitwork-event="click: count++"&gt;+&lt;/button&gt;
+&lt;b data-kitwork-bind="text: kit.theme.systen"&gt;&lt;/b&gt;</code></pre></body></html>`
 	if report := verifyOf(t, example); report != "" {
 		t.Errorf("a printed example was judged as live markup:\n%s", report)
 	}
 
 	// CONTROL: a directive ON the <pre> itself is live, and a mistake in it must still be named.
-	live := `<html><body><pre data-kit-text="kit.theme.systen"></pre></body></html>`
+	live := `<html><body><pre data-kitwork-bind="text: kit.theme.systen"></pre></body></html>`
 	if report := verifyOf(t, live); !strings.Contains(report, "systen") {
 		t.Errorf("a live directive on a <pre> element was skipped along with its content:\n%s", report)
 	}
 }
 
-// The existing checks must keep working, since this pass is where they live.
+// The existing checks must keep working, since this pass is where they live. (A template page's
+// data-kit-class was an expression whose class names had to be written out in full; a grouped class
+// pair's name is the class itself, so there is nothing to construct.)
 func TestVerifyStillReportsWhatItAlreadyDid(t *testing.T) {
-	if report := verifyOf(t, `<b data-kit-text="count *">x</b>`); !strings.Contains(report, "hydrate:") {
+	if report := verifyOf(t, `<b data-kitwork-bind="text: count *">x</b>`); !strings.Contains(report, "hydrate:") {
 		t.Errorf("a malformed expression was not reported:\n%s", report)
-	}
-	if report := verifyOf(t, `<b data-kit-class="'text-' + colour">x</b>`); !strings.Contains(report, "written out in full") {
-		t.Errorf("a constructed class name was not reported:\n%s", report)
-	}
-	// …but joining two complete names with a space is not construction. This is studio's own
-	// completion popup, reduced; it was reported until the separator was told apart from a fragment.
-	joined := `<b data-kit-class="(wide ? 'left-96' : 'left-14') + ' ' + (tall ? 'top-8' : 'top-2')">x</b>`
-	if report := verifyOf(t, joined); report != "" {
-		t.Errorf("two complete names joined by a space were reported as constructed:\n%s", report)
 	}
 }
 
 // And a page with nothing wrong reports nothing at all — otherwise every site would learn to ignore
 // this output, which is the failure mode the whole pass exists to avoid.
 func TestVerifyIsSilentOnCorrectMarkup(t *testing.T) {
-	html := `<div data-kit-scope="{ open: false, count: 0 }" data-kit-click:outside="open = false">
-  <button data-kit-click="open = !open" data-kit-bind:aria-expanded="open ? 'true' : 'false'">m</button>
-  <ul data-kit-show="open" hidden>
-    <li data-kit-for="item, i of items" data-kit-key="item.id" data-kit-text="item.name + ' ' + i"></li>
+	html := `<div data-kitwork-scope="open: false; count: 0" data-kitwork-event="click-outside: open = false">
+  <button data-kitwork-event="click: open = !open" data-kitwork-bind="aria-expanded: open ? 'true' : 'false'">m</button>
+  <ul data-kitwork-bind="show: open" hidden>
+    <li data-kitwork-for="item, i of items; key: item.id" data-kitwork-bind="text: item.name + ' ' + i"></li>
   </ul>
-  <input data-kit-model="count" data-kit-debounce="200">
+  <input data-kitwork-bind="value: count" data-kitwork-event="input.debounce(200): count = count">
 </div>`
 	if report := verifyOf(t, html); report != "" {
 		t.Errorf("correct markup produced a report:\n%s", report)
@@ -140,17 +133,17 @@ func TestVerifyIsSilentOnCorrectMarkup(t *testing.T) {
 
 // A binding runs on every paint, so one that writes changes the state each time the page is drawn.
 // KitJS 1.0.0 made it a rule — bindings read, actions write — and it arrived with ++/-- (29/09).
-// It covers every write, not just the new operators: data-kit-text="count = 5" is the same mistake.
+// It covers every write, not just the new operators: a text pair `count = 5` is the same mistake.
 func TestVerifyNamesAWriteInsideABinding(t *testing.T) {
 	for _, bad := range []string{
-		`<b data-kit-text="count++"></b>`,
-		`<b data-kit-text="--count"></b>`,
-		`<b data-kit-show="open = true"></b>`,
-		`<b data-kit-class="$.seen++ ? 'a' : 'b'"></b>`,
-		`<b data-kit-bind:title="label = 'x'"></b>`,
-		`<b data-kit-style:width="n++"></b>`,
+		`<b data-kitwork-bind="text: count++"></b>`,
+		`<b data-kitwork-bind="text: --count"></b>`,
+		`<b data-kitwork-bind="show: open = true"></b>`,
+		`<b data-kitwork-class="a: $.seen++"></b>`,
+		`<b data-kitwork-bind="title: label = 'x'"></b>`,
+		`<b data-kitwork-style="width: n++"></b>`,
 		// A lambda in a binding is there to be CALLED: map runs this write once per item, per paint.
-		`<b data-kit-text="items.map((x) => seen++).length"></b>`,
+		`<b data-kitwork-bind="text: items.map((x) => seen++).length"></b>`,
 	} {
 		if report := verifyOf(t, bad); !strings.Contains(report, "binding runs on every paint") {
 			t.Errorf("a write inside a binding was not reported: %s\n%s", bad, report)
@@ -160,12 +153,12 @@ func TestVerifyNamesAWriteInsideABinding(t *testing.T) {
 	// CONTROL: the same writes in an ACTION are the point of the grammar and must stay silent —
 	// including the exact demo counter kitjs.org ships. A lambda that only READS is fine anywhere.
 	for _, fine := range []string{
-		`<button data-kit-click="count++">+</button>`,
-		`<button data-kit-click="--count">-</button>`,
-		`<button data-kit-click="open = !open">t</button>`,
-		`<form data-kit-submit:prevent="$.sent++"></form>`,
-		`<b data-kit-text="count + 1"></b>`,
-		`<b data-kit-text="items.filter((x) => x.done).length"></b>`,
+		`<button data-kitwork-event="click: count++">+</button>`,
+		`<button data-kitwork-event="click: --count">-</button>`,
+		`<button data-kitwork-event="click: open = !open">t</button>`,
+		`<form data-kitwork-event="submit.prevent: $.sent++"></form>`,
+		`<b data-kitwork-bind="text: count + 1"></b>`,
+		`<b data-kitwork-bind="text: items.filter((x) => x.done).length"></b>`,
 	} {
 		if report := verifyOf(t, fine); report != "" {
 			t.Errorf("a write in an action, or a pure read, was reported: %s\n%s", fine, report)

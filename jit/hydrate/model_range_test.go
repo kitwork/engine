@@ -4,8 +4,8 @@ import "testing"
 
 // A two-way `value:` in data-kitwork-bind on a type=range (or type=number) input must bind a NUMBER,
 // not a string — otherwise n + step string-concatenates ("0" + "3" = "03") instead of adding. Caught
-// by the full showcase demo (a range-driven counter produced "611" instead of 6). Client half; the
-// server twin is in prerender_test.go (TestPreRenderModelRange).
+// by the full showcase demo (a range-driven counter produced "611" instead of 6). (The server's twin
+// went with the template pages' pre-render, 27/10/2026.)
 func TestModelRangeCoercesToNumber(t *testing.T) {
 	const assertions = `
 var kit = window.kit;

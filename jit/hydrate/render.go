@@ -75,28 +75,22 @@ func UsesGrammar(html string) bool {
 //	                  Drive made), -layout, -current, -delay, -transition, -shell, -highlight and the
 //	                  old -jit. These never make a page look like a Kitwork page.
 //
-//	data-kit-*      the hand-written GRAMMAR of template pages (data-kit-text, data-kit-bind:x,
-//	                data-kit-click:prevent, …), read beside the grouped form until the shared
-//	                clean-up; and what the kernel itself writes on a materialised row
-//	                (data-kit-item, data-kit-key).
+//	data-kit-*      what the kernel itself writes on a materialised row (data-kit-item,
+//	                data-kit-key), and the few hand-written attributes that are not expressions:
+//	                data-kit-element (a name for $element), data-kit-drag (a desktop window's title
+//	                bar, directives/drag.js) and data-kit-reload (Drive leaves the link alone). The
+//	                hand-written expression grammar of template pages (data-kit-text,
+//	                data-kit-bind:x, data-kit-click:prevent, …) went with them: the kernel stopped
+//	                reading it on 26/10/2026 and this check on 27/10/2026.
 //
 // (A precompiled IR directive — data-kitwork-text="[JSON]" — was a reserved wire mode the engine
 // never emitted; it is gone (ideaship-final §9), and data-kitwork-text is not a grouped directive:
 // text is a pair of data-kitwork-bind.) The root marker (data-kit-app / data-kit-hydrate) is gone
 // entirely: a page is recognised by its grammar, and Drive is switched on by router.reload(false).
 
-// directiveRe matches a hand-written EXPRESSION directive — data-kit-<name>="<expr>". The grouped
-// data-kitwork-* attributes are verified by their own pass (grouped_check.go), pair by pair.
-// Expressions use single-quoted string literals, so the value never contains a double quote.
-// An event handler is data-kit-<event>[:modifier…] (ideaship-final §2–§4), or the long form
-// data-kit-event:<name>[:modifier…] for any event by name — one a component emits, or a DOM event
-// outside the short list (02/10). Its modifiers are checked by checkEventModifiers, since the kernel
-// disables a handler it cannot make sense of.
-var directiveRe = regexp.MustCompile(`data-kit-(text|show|if|bind:[a-z][a-z0-9-]*|style:[-a-zA-Z0-9_]+|class|(?:click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout|event:[a-z][a-z0-9-]*|intersect)(?::[a-z0-9+]+(?:\([^)"]*\))?)*)="([^"]*)"`)
-
-// The event family and the modifier pipeline of ideaship-final §4, as the kernel runs it: target
-// → filter → prevent → stop → timing → once. The author may write them in any order; the server
-// names a modifier the kernel would refuse, so the mistake is seen at render, not lost in silence.
+// The modifier pipeline of ideaship-final §4, as the kernel runs it: target → filter → prevent →
+// stop → timing → once. The author may write them in any order; the server names a modifier the
+// kernel would refuse, so the mistake is seen at render, not lost in silence.
 // comboModifierRe matches a key-combination modifier — `mod+k`, `mod+shift+p`, `alt+enter`. The
 // `+` is what tells it apart from an ordinary modifier like :prevent.
 var comboModifierRe = regexp.MustCompile(`^[a-z0-9]+(?:\+[a-z0-9]+)+$`)
@@ -109,8 +103,8 @@ var comboModifierKeys = map[string]bool{"mod": true, "ctrl": true, "meta": true,
 // comboModifierError says why a key combination will not run, or nil when it will. The kernel
 // refuses a handler it cannot make sense of rather than misfiring, so the mistake is named here,
 // next to the markup.
-// sep is how the modifier is written where it was found: ':' in a data-kit-* attribute name, '.' in a
-// data-kitwork-event pair.
+// sep is how the modifier is written: '.' in a data-kitwork-event pair (':' in a template page's
+// data-kit-* attribute name until 27/10/2026).
 func comboModifierError(modifier, event, sep string) error {
 	if event != "keydown" && event != "keyup" {
 		return fmt.Errorf("%s%s is a key combination, so it belongs on keydown/keyup, not %s", sep, modifier, event)
@@ -143,11 +137,6 @@ func comboModifierError(modifier, event, sep string) error {
 	return nil
 }
 
-// styleAttrRe finds an authored style directive so its PROPERTY can be checked; the expression
-// itself rides the ordinary directive verification. A data-kitwork-style pair goes through the same
-// property check (grouped_check.go).
-var styleAttrRe = regexp.MustCompile(`data-kit-style:([-a-zA-Z0-9_]+)="[^"]*"`)
-
 // styleBlockedProperty holds the property names a value can escape through: three can carry script
 // in some engines, and css-text would let one binding rewrite the whole declaration.
 var styleBlockedProperty = map[string]bool{"css-text": true, "csstext": true, "behavior": true, "-moz-binding": true}
@@ -156,15 +145,10 @@ var stylePlainPropertyRe = regexp.MustCompile(`^-?[a-z][a-z0-9]*(?:-[a-z0-9]+)*$
 var styleCustomPropertyRe = regexp.MustCompile(`^--[A-Za-z_][A-Za-z0-9_-]*$`)
 var styleReservedCustomRe = regexp.MustCompile(`(?i)^--(?:kit|kitwork)-`)
 
-// stylePropertyError reports why the kernel will not write this property, or nil when it will.
-// Custom properties are allowed — a Kitwork site's colours live in them — except the engine's own
-// --kit-/--kitwork- namespace, which the runtime writes and must be able to trust.
-func stylePropertyError(property string) error {
-	return stylePropertyErrorIn("data-kit-style:"+property, property)
-}
-
-// stylePropertyErrorIn is stylePropertyError for a property written in label — "data-kit-style:top"
-// or "data-kitwork-style top" — so the message names what the author wrote.
+// stylePropertyErrorIn reports why the kernel will not write this property, or nil when it will, for
+// a property written in label — "data-kitwork-style top" — so the message names what the author
+// wrote. Custom properties are allowed — a Kitwork site's colours live in them — except the engine's
+// own --kit-/--kitwork- namespace, which the runtime writes and must be able to trust.
 func stylePropertyErrorIn(label, property string) error {
 	if strings.HasPrefix(property, "--") {
 		if !styleCustomPropertyRe.MatchString(property) {
@@ -184,27 +168,12 @@ func stylePropertyErrorIn(label, property string) error {
 	return nil
 }
 
-var eventTypes = map[string]bool{"click": true, "dblclick": true, "submit": true, "input": true, "change": true, "keydown": true, "keyup": true, "pointerdown": true, "pointerup": true, "focusin": true, "focusout": true}
 var outsideEventTypes = map[string]bool{"click": true, "dblclick": true, "pointerdown": true, "pointerup": true, "focusin": true}
 var timingModifierRe = regexp.MustCompile(`^(debounce|throttle)\(([0-9]+)\)$`)
 
-func checkEventModifiers(directive string) error {
-	if directive == "intersect" || strings.HasPrefix(directive, "intersect:") {
-		return checkIntersectModifiers(strings.Split(directive, ":")[1:], ":", "data-kit-intersect", "leave")
-	}
-	parts := strings.Split(directive, ":")
-	if parts[0] == "event" && len(parts) > 1 {
-		// data-kit-event:<name>: the name is the event, and the same modifiers apply.
-		parts = parts[1:]
-	} else if !eventTypes[parts[0]] {
-		return nil
-	}
-	return checkModifierPipeline(parts[0], parts[1:], ":")
-}
-
 // checkModifierPipeline checks the modifiers of one handler of event (the DOM event the kernel
-// listens for). sep is how they are written: ':' in a data-kit-* name, '.' in a data-kitwork-event
-// pair — the rules are the kernel's, one pipeline for both.
+// listens for). sep is how they are written, '.' in a data-kitwork-event pair — the rules are the
+// kernel's.
 func checkModifierPipeline(event string, modifiers []string, sep string) error {
 	seen := map[string]bool{}
 	timing := 0
@@ -305,18 +274,17 @@ func checkIntersectModifiers(modifiers []string, sep, label string, allowed ...s
 	return nil
 }
 
-// presenceRe decides runtime INJECTION: authored data-kit-* forms, including the non-expression
-// attributes — model is a plain scope key, scope/component a boundary — which need the runtime but
-// must never be compile-verified; for's value is a spec, not an expression. (data-kit-api, -live and
-// -remember were removed on 02/10; they bring nothing.)
-var presenceRe = regexp.MustCompile(`data-kit-(?:text|show|if|for|bind:[a-z][a-z0-9-]*|style:[-a-zA-Z0-9_]+|seed(?::[a-z][a-z0-9-]*)?|class|model|scope|component|(?:click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout|event:[a-z][a-z0-9-]*|intersect)(?::[a-z0-9+]+(?:\([^)"]*\))?)*|drag)="`)
+// presenceRe decides runtime INJECTION for the one hand-written attribute that needs it,
+// data-kit-drag (a desktop window's title bar). The template pages' data-kit-* expression grammar
+// brought the runtime until 27/10/2026; the kernel had stopped reading it on 26/10/2026.
+var presenceRe = regexp.MustCompile(`data-kit-drag="`)
 
 // groupedPresenceRe is presenceRe for the engine's form: exactly the eight grouped directives, never
 // a transport marker — data-kitwork-generated sits on nearly every page, and matching the prefix would
 // give every page the kernel.
 var groupedPresenceRe = regexp.MustCompile(`(?:` + strings.Join(GroupedDirectives, "|") + `)="`)
 
-// Check is the server pass for hydrate pages. THE WIRE SHIPS THE SOURCE: authored data-kit-*
+// Check is the server pass for hydrate pages. THE WIRE SHIPS THE SOURCE: the grouped data-kitwork-*
 // attributes ride to the client unchanged (readable DOM, smaller wire) and the client runtime
 // parses them there — no eval, same grammar. What the server does here is VERIFY: every
 // expression is compiled with the Go compiler at render time, so a typo is caught and printed on
@@ -327,10 +295,9 @@ var groupedPresenceRe = regexp.MustCompile(`(?:` + strings.Join(GroupedDirective
 // IR remains the engine's INTERNAL form (ctx.validate, go tests, analysis); it is not a wire
 // mode — the kernel parses source, and only source.
 
-// authoredPrefix is the one substring every hand-written directive shares — the cheap door, with the
-// eight grouped names beside it (hasDirectivePrefix). "data-kit-" is not a substring of
-// "data-kitwork-", so a page whose directives are all grouped needs the second look.
-const authoredPrefix = "data-kit-"
+// authoredPrefix is the hand-written attribute that brings the runtime (presenceRe) — the cheap door,
+// with the eight grouped names beside it (hasDirectivePrefix).
+const authoredPrefix = "data-kit-drag"
 
 // hasDirectivePrefix is the cheap door: a substring test per form, before any regex runs.
 func hasDirectivePrefix(html string) bool {
@@ -385,54 +352,12 @@ func authoringMistakesWith(html string, components ComponentNames) []string {
 	var found []string
 	html = withoutExamples(html)
 	declared := declaredElements(html)
-	for _, m := range directiveRe.FindAllStringSubmatch(html, -1) {
-		expression := authoredAttribute(m[2])
-		ir, err := Compile(expression)
-		if err != nil {
-			found = append(found, fmt.Sprintf("%v — in %s", err, m[0]))
-			continue
-		}
-		if err := checkEventModifiers(m[1]); err != nil {
-			found = append(found, fmt.Sprintf("%v — in %s", err, m[0]))
-			continue
-		}
-		// Two reads the kernel resolves to nothing without a word: a service member markup was
-		// never granted, and an element name nothing declares.
-		checkKitReads(expression, m[0], &found)
-		checkElementReads(expression, m[0], declared, &found)
-		checkBindingWrites(m[1], ir, m[0], &found)
-		// data-kit-class carries an extra obligation the other directives do not: the CSS JIT emits
-		// only classes it can SEE, and it reads them off this expression's literals. A name built by
-		// concatenation is invisible to it, so the class would resolve at runtime to a rule that was
-		// never generated — styling that silently disappears for some values and works for others,
-		// which is far harder to diagnose than an error. Say so at render, next to the markup.
-		if m[1] == "class" && HasConstructedClass(expression) {
-			found = append(found, fmt.Sprintf("class names must be written out in full — the CSS JIT cannot emit a "+
-				"name built with '+', so this rule is never generated. Use a conditional between "+
-				"complete names (color === 'red' ? 'text-red' : 'text-blue') — in %s", m[0]))
-		}
-	}
-	// A style directive names a CSS property in the attribute. The kernel refuses to write one it
-	// cannot vouch for and says nothing further, so say it HERE, next to the markup, where the
-	// author can see which property was refused and why.
-	for _, m := range styleAttrRe.FindAllStringSubmatch(html, -1) {
-		if err := stylePropertyError(m[1]); err != nil {
-			found = append(found, fmt.Sprintf("%v — in %s", err, m[0]))
-		}
-	}
 	// The grouped form the engine writes — data-kitwork-component, -scope, -bind, -class, -style,
 	// -event, -if and -for — is read pair by pair and held to the same rules (grouped_check.go).
 	found = append(found, groupedMistakes(html, declared)...)
 	// The costliest mistake an authored page can make is a name nothing declares: the kernel reads
 	// it as 0 and the markup looks right. The tree and the expressions are both here, so say it.
 	found = append(found, undeclaredWarningsWith(html, components)...)
-	// A seed's value is a state target, not an expression; name a malformed one at render, as the
-	// kernel would only report it in the browser.
-	for _, m := range seedAttrRe.FindAllStringSubmatch(html, -1) {
-		if err := seedTargetError(strings.TrimSpace(authoredAttribute(m[2]))); err != nil {
-			found = append(found, fmt.Sprintf("%v — in %s", err, m[0]))
-		}
-	}
 	return found
 }
 

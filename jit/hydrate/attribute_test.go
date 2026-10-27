@@ -1,12 +1,10 @@
 package hydrate
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
+// An attribute's value is compiled as the browser reads it, its character references decoded once.
 func TestCompileAuthoredAttributeUsesBrowserValue(t *testing.T) {
-	node, err := compileAuthoredAttribute(`email.includes('@') &amp;&amp; count &gt;= 1`)
+	node, err := Compile(authoredAttribute(`email.includes('@') &amp;&amp; count &gt;= 1`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,30 +26,5 @@ func TestAuthoredAttributeUsesAttributeContextAndHTMLPreprocessing(t *testing.T)
 	}
 	if got := authoredAttribute("'&notin;'"); got != "'∉'" {
 		t.Fatalf("authoredAttribute named entity = %q", got)
-	}
-}
-
-func TestPreRenderDecodesExpressionAndModelEntitiesOnce(t *testing.T) {
-	input := marker +
-		`<input data-kit-model="name" value="Tom &amp; Jerry">` +
-		`<input type="number" data-kit-model="count" value="1">` +
-		`<b data-kit-text="count &gt; 0 ? name : 'empty'">pending</b>`
-
-	output := PreRender(input)
-	if !strings.Contains(output, `>Tom &amp; Jerry</b>`) {
-		t.Fatalf("attribute entities were not decoded exactly once:\n%s", output)
-	}
-	if strings.Contains(output, `&amp;amp;`) {
-		t.Fatalf("model value was double escaped:\n%s", output)
-	}
-}
-
-func TestPreRenderBindDecodesExpressionEntities(t *testing.T) {
-	tag := `<button data-kit-component="counter" data-kit-bind:disabled="count &lt; 1">`
-	output := PreRenderBind(tag, map[string]map[string]any{
-		"counter": {"count": 0.0},
-	})
-	if !strings.Contains(output, `disabled=""`) {
-		t.Fatalf("encoded bind comparison was not evaluated:\n%s", output)
 	}
 }

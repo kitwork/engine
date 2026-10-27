@@ -3,14 +3,13 @@ package hydrate
 import (
 	"fmt"
 	"regexp"
-	"sort"
 	"strings"
 )
 
 // A name nothing declares is the most expensive mistake an authored page can make.
 //
 // The kernel reads it as 0 and carries on — correct at runtime, since a half-built page must not
-// explode — so `data-kit-show="dark"` against a boundary holding `darkMode` simply never shows.
+// explode — so `data-kitwork-bind="show: dark"` against a boundary holding `darkMode` simply never shows.
 // No error, no clue, and the markup looks right. Measured across this repo, the boundary that owns
 // a name sits a median of 87 lines away from the expression that reads it, and at the 90th
 // percentile a thousand lines away: nobody can hold that in their head while editing.
@@ -28,12 +27,12 @@ import (
 //     follow) stays opaque, and anything inside it is never reported.
 //   - a page that writes its own page scope from a script (kit.set, kit.scope.x = …) → skip the
 //     page scope entirely, since a name can then arrive from somewhere the markup does not show.
-//     Every other page HAS a readable page scope: a data-kit-model or data-kit-seed written outside
-//     any boundary declares a name there, and a nested boundary reads it by falling through, which
-//     is exactly what the kernel does.
+//     Every other page HAS a readable page scope: a two-way data-kitwork-bind written outside any
+//     boundary declares a name there, and a nested boundary reads it by falling through, which is
+//     exactly what the kernel does.
 //   - markup the scanner cannot read confidently → stop the whole pass.
 //
-// What remains is the case that is actually knowable: a plain data-kit-scope boundary, whose names
+// What remains is the case that is actually knowable: a plain data-kitwork-scope boundary, whose names
 // are all written down in the markup itself, and a component whose source says what it holds.
 //
 // The same goes for a component reached from OUTSIDE its host, through its alias: `$sidebar.close()`
@@ -51,34 +50,24 @@ var reservedReadNames = map[string]bool{
 	"Math": true, "Date": true, "JSON": true, "Number": true, "String": true, "Boolean": true,
 	"Array": true, "Object": true, "parseInt": true, "parseFloat": true,
 	"encodeURIComponent": true, "decodeURIComponent": true, "isNaN": true, "isFinite": true,
-	// the row overlay data-kit-for adds beside the author's own item/index names
+	// the row overlay data-kitwork-for adds beside the author's own item/index names
 	"count": true, "first": true, "last": true, "even": true, "odd": true,
 }
 
-var (
-	// scopeLiteralKeyRe reads the top-level keys of a scope literal: `count: 0, open: true`.
-	scopeLiteralKeyRe = regexp.MustCompile(`(?:^|[,{])\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*:`)
-	// forNamesRe reads the names data-kit-for binds: `item, index of items` or `item of items`.
-	forNamesRe = regexp.MustCompile(`^\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*(?:,\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*)?\bof\b`)
-	// expressionAttrRe finds the attributes whose value reads scope names.
-	expressionAttrRe = regexp.MustCompile(`^data-kit-(?:text|show|if|class|bind:[a-z][a-z0-9-]*|style:[-a-zA-Z0-9_]+|click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout|event:[a-z][a-z0-9-]*|intersect)(?::[a-z0-9+]+(?:\([^)"]*\))?)*$`)
-)
-
-// boundary is one data-kit-scope element while the scan is inside it.
+// boundary is one data-kitwork-scope or data-kitwork-component element while the scan is inside it.
 type boundary struct {
 	tag      string
 	depth    int
 	declared map[string]bool
 	opaque   bool      // a component boundary whose names are not knowable here
 	parent   *boundary // reads fall through to it, exactly as the kernel's scope chain does
-	// component is the data-kit-component value of a host whose names ARE known — so a report can
-	// say which component lacks the name, and what it does have.
+	// component is the component a data-kitwork-component host names, when its names ARE known — so a
+	// report can say which component lacks the name, and what it does have.
 	component string
 	names     []string
-	// literal is the keys a data-kit-scope literal (or a data-kitwork-scope) on a component host
-	// sets: parameters, each one a name the component must have. literalFrom is the attribute.
-	literal     []string
-	literalFrom string
+	// literal is the keys a data-kitwork-scope on a component host sets: parameters, each one a name
+	// the component must have.
+	literal []string
 }
 
 // aliasRead is `$alias.member` in an expression, checked against the alias's host once the whole
@@ -88,7 +77,7 @@ type aliasRead struct {
 }
 
 // undeclaredRead is one reported read, kept until the whole document is scanned because a name may
-// be declared by a data-kit-model or data-kit-seed further down inside the same boundary.
+// be declared by a two-way data-kitwork-bind further down inside the same boundary.
 type undeclaredRead struct {
 	name      string
 	attribute string
@@ -261,10 +250,10 @@ func scanUndeclaredNames(html string, components ComponentNames) (scan undeclare
 			current = opened
 			// A literal on a component host sets the component's parameters (counter's min, max), so
 			// a key it does not have is a typo — or state of the page's own, which belongs on a
-			// data-kit-scope inside the host. Only a component whose names are known is checked.
+			// data-kitwork-scope inside the host. Only a component whose names are known is checked.
 			for _, key := range opened.literal {
 				if !containsName(opened.names, key) {
-					scan.strayParameters = append(scan.strayParameters, undeclaredRead{name: key, attribute: opened.literalFrom, tag: shortTag(tag), boundary: opened})
+					scan.strayParameters = append(scan.strayParameters, undeclaredRead{name: key, attribute: "data-kitwork-scope", tag: shortTag(tag), boundary: opened})
 				}
 			}
 			if alias := boundaryAlias(tag); alias != "" && opened.component != "" {
@@ -312,48 +301,34 @@ func pageScopeIsWritten(html string) bool {
 		strings.Contains(html, "kitwork.set(") || strings.Contains(html, "kitwork.scope.")
 }
 
-// readBoundary returns the boundary a tag opens, or nil when it opens none. A component host whose
-// names cannot be read opens an OPAQUE boundary: the scan keeps walking so nesting stays right, but
-// nothing inside it is ever reported.
-//
-// Both forms open one: data-kit-scope (a comma literal) and data-kit-component, or the engine's
-// data-kitwork-scope ("name: value; …") and data-kitwork-component ("name[@version][: $alias]").
+// readBoundary returns the boundary a tag opens, or nil when it opens none: a data-kitwork-scope
+// ("name: value; …") or a data-kitwork-component ("name[: $alias]"). A component host whose names
+// cannot be read opens an OPAQUE boundary: the scan keeps walking so nesting stays right, but nothing
+// inside it is ever reported. (A template page's data-kit-scope and data-kit-component opened one too
+// until 27/10/2026.)
 func readBoundary(tag string, depth int, components ComponentNames) *boundary {
-	scope, hasScope := attributeValue(tag, "data-kit-scope")
-	component, isComponent := attributeValue(tag, "data-kit-component")
-	groupedScope, hasGroupedScope := attributeValue(tag, "data-kitwork-scope")
-	groupedComponent, isGroupedComponent := attributeValue(tag, "data-kitwork-component")
-	if !hasScope && !isComponent && !hasGroupedScope && !isGroupedComponent {
+	scope, hasScope := attributeValue(tag, "data-kitwork-scope")
+	component, isComponent := attributeValue(tag, "data-kitwork-component")
+	if !hasScope && !isComponent {
 		return nil
 	}
 	declared := map[string]bool{}
 	var literal []string
-	literalFrom := "data-kit-scope"
-	if hasScope {
-		for _, match := range scopeLiteralKeyRe.FindAllStringSubmatch("{"+authoredAttribute(scope)+"}", -1) {
-			declared[match[1]] = true
-			literal = append(literal, match[1])
-		}
-	}
-	// A grouped scope that does not split declares nothing anyone can be sure of, so what it holds
-	// stays unknown — the verify pass names the mistake itself.
+	// A scope that does not split declares nothing anyone can be sure of, so what it holds stays
+	// unknown — the verify pass names the mistake itself.
 	unreadable := false
-	if hasGroupedScope {
-		pairs, err := Pairs(authoredAttribute(groupedScope))
+	if hasScope {
+		pairs, err := Pairs(authoredAttribute(scope))
 		unreadable = err != nil
-		literalFrom = "data-kitwork-scope"
 		for _, pair := range pairs {
 			declared[pair.Name] = true
 			literal = append(literal, pair.Name)
 		}
 	}
-	opened := &boundary{tag: tagName(tag), depth: depth, declared: declared, opaque: isComponent || isGroupedComponent || unreadable}
+	opened := &boundary{tag: tagName(tag), depth: depth, declared: declared, opaque: isComponent || unreadable}
 	name := ""
-	switch {
-	case isComponent:
-		name = strings.TrimSpace(authoredAttribute(component))
-	case isGroupedComponent:
-		name, _, _ = ComponentValue(authoredAttribute(groupedComponent))
+	if isComponent {
+		name, _, _ = ComponentValue(authoredAttribute(component))
 	}
 	if name != "" && components != nil && !unreadable {
 		if names, known := components(name); known {
@@ -364,18 +339,14 @@ func readBoundary(tag string, depth int, components ComponentNames) *boundary {
 			opened.component = name
 			opened.names = names
 			opened.literal = literal
-			opened.literalFrom = literalFrom
 		}
 	}
 	return opened
 }
 
-// boundaryAlias is the $alias a component host registers: its data-kit-alias, or the part of its
-// data-kitwork-component after the ':'. "" when it has none.
+// boundaryAlias is the $alias a component host registers: the part of its data-kitwork-component after
+// the ':'. "" when it has none.
 func boundaryAlias(tag string) string {
-	if alias, has := attributeValue(tag, "data-kit-alias"); has {
-		return strings.TrimSpace(authoredAttribute(alias))
-	}
 	if value, has := attributeValue(tag, "data-kitwork-component"); has {
 		if _, alias, err := ComponentValue(authoredAttribute(value)); err == nil {
 			return alias
@@ -385,73 +356,11 @@ func boundaryAlias(tag string) string {
 }
 
 // collectTagNames records what this tag declares into its boundary, and what it reads for checking.
+// data-kitwork-for binds its item and index, and a two-way `value: name` or `checked: name` in
+// data-kitwork-bind writes its name into the boundary — both declare. Every bind, class, style and
+// event pair, and the if, reads. (A scope's values, and a for's list, are not read-checked.)
 func collectTagNames(tag string, current *boundary, reads *[]undeclaredRead, aliasReads *[]aliasRead) {
-	if current == nil {
-		return
-	}
-	// data-kit-model and data-kit-seed WRITE a name into the nearest boundary, so they declare it
-	// for the whole boundary — including expressions written above them.
-	if value, has := attributeValue(tag, "data-kit-model"); has {
-		if name := leadingName(authoredAttribute(value)); name != "" {
-			current.declared[name] = true
-		}
-	}
-	// data-kit-for binds its own names for the subtree. Attributing them to the boundary is wider
-	// than the truth, which is the safe direction: it can only silence a warning, never invent one.
-	if value, has := attributeValue(tag, "data-kit-for"); has {
-		if match := forNamesRe.FindStringSubmatch(authoredAttribute(value)); match != nil {
-			current.declared[match[1]] = true
-			if match[2] != "" {
-				current.declared[match[2]] = true
-			}
-		}
-	}
-	for _, attribute := range attributeNames(tag) {
-		if strings.HasPrefix(attribute, "data-kit-seed") {
-			if value, has := attributeValue(tag, attribute); has {
-				if name := leadingName(authoredAttribute(value)); name != "" {
-					current.declared[name] = true
-				}
-			}
-			continue
-		}
-		if !expressionAttrRe.MatchString(attribute) {
-			continue
-		}
-		value, has := attributeValue(tag, attribute)
-		if !has || strings.TrimSpace(value) == "" {
-			continue
-		}
-		recordReads(authoredAttribute(value), attribute, tag, current, reads, aliasReads)
-	}
-	collectGroupedNames(tag, current, reads, aliasReads)
-}
-
-// recordReads notes every scope name an expression reads, and every $alias.member, for checking once
-// the whole document is scanned. label is what a report calls the expression's place.
-func recordReads(expression, label, tag string, current *boundary, reads *[]undeclaredRead, aliasReads *[]aliasRead) {
-	names, err := ReadNames(expression)
-	if err != nil {
-		return // a malformed expression is already reported by the verify pass
-	}
-	for _, match := range aliasMemberRe.FindAllStringSubmatch(withoutStringLiterals(expression), -1) {
-		*aliasReads = append(*aliasReads, aliasRead{alias: match[1], member: match[2], attribute: label, tag: shortTag(tag)})
-	}
-	for _, name := range names {
-		if reservedReadNames[name] || strings.HasPrefix(name, "$") {
-			continue
-		}
-		*reads = append(*reads, undeclaredRead{name: name, attribute: label, tag: shortTag(tag), boundary: current})
-	}
-}
-
-// collectGroupedNames is collectTagNames for the grouped attributes. data-kitwork-for binds its item
-// and index, and a two-way `value: name` or `checked: name` in data-kitwork-bind writes its name into
-// the boundary as data-kit-model does — both declare. Every bind, class, style and event pair, and the
-// if, reads. (A scope's values, and a for's list, are not read-checked, as their data-kit-* forms are
-// not.)
-func collectGroupedNames(tag string, current *boundary, reads *[]undeclaredRead, aliasReads *[]aliasRead) {
-	if !strings.Contains(tag, "data-kitwork-") {
+	if current == nil || !strings.Contains(tag, "data-kitwork-") {
 		return
 	}
 	if value, has := attributeValue(tag, "data-kitwork-for"); has {
@@ -481,6 +390,24 @@ func collectGroupedNames(tag string, current *boundary, reads *[]undeclaredRead,
 	}
 	if value, has := attributeValue(tag, "data-kitwork-if"); has && strings.TrimSpace(value) != "" {
 		recordReads(authoredAttribute(value), "data-kitwork-if", tag, current, reads, aliasReads)
+	}
+}
+
+// recordReads notes every scope name an expression reads, and every $alias.member, for checking once
+// the whole document is scanned. label is what a report calls the expression's place.
+func recordReads(expression, label, tag string, current *boundary, reads *[]undeclaredRead, aliasReads *[]aliasRead) {
+	names, err := ReadNames(expression)
+	if err != nil {
+		return // a malformed expression is already reported by the verify pass
+	}
+	for _, match := range aliasMemberRe.FindAllStringSubmatch(withoutStringLiterals(expression), -1) {
+		*aliasReads = append(*aliasReads, aliasRead{alias: match[1], member: match[2], attribute: label, tag: shortTag(tag)})
+	}
+	for _, name := range names {
+		if reservedReadNames[name] || strings.HasPrefix(name, "$") {
+			continue
+		}
+		*reads = append(*reads, undeclaredRead{name: name, attribute: label, tag: shortTag(tag), boundary: current})
 	}
 }
 
@@ -571,17 +498,6 @@ func tagName(tag string) string {
 		end++
 	}
 	return strings.ToLower(tag[1:end])
-}
-
-var attributeNameRe = regexp.MustCompile(`(?:^|\s)([A-Za-z_:][-A-Za-z0-9_:.+]*)\s*=\s*"`)
-
-func attributeNames(tag string) []string {
-	var out []string
-	for _, match := range attributeNameRe.FindAllStringSubmatch(tag, -1) {
-		out = append(out, strings.ToLower(match[1]))
-	}
-	sort.Strings(out)
-	return out
 }
 
 // attributeValue reads one double-quoted attribute from a tag.

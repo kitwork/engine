@@ -166,15 +166,10 @@ const (
 var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 // classAttrRe captures the value of each static class="…" attribute so scan can tokenise it. The
-// leading white space keeps it off every attribute that ENDS in class: data-kit-class is an
-// expression (dynamicClassRe below), and data-kitwork-class="icon-sun: dark" is a list of pairs whose
-// keys hydrate.ToggledClasses reads and whose values are conditions, not classes (as jit/css).
+// leading white space keeps it off every attribute that ENDS in class: data-kitwork-class="icon-sun:
+// dark" is a list of pairs whose keys hydrate.ToggledClasses reads and whose values are conditions,
+// not classes.
 var classAttrRe = regexp.MustCompile(`(?:^|\s)class="([^"]*)"`)
-
-// dynamicClassRe captures a data-kit-class="…" expression. Its string literals are classes too —
-// `open ? 'icon-x' : 'icon-menu-2'` — and both branches must resolve, not whichever one the first
-// paint takes, so they are read off the compiled expression the way jitcss reads its colours.
-var dynamicClassRe = regexp.MustCompile(`data-kit-class="([^"]*)"`)
 
 // uriEncode escapes the characters that matter inside a CSS url("data:image/svg+xml,…"). The SVG is
 // authored with single quotes (see dataURI) so double quotes never appear. strings.Replacer is a
@@ -283,16 +278,6 @@ func scan(html string) []string {
 	}
 	for _, m := range classAttrRe.FindAllStringSubmatch(html, -1) {
 		for _, tok := range htmlattr.ClassTokens(m[1]) {
-			add(tok)
-		}
-	}
-	for _, m := range dynamicClassRe.FindAllStringSubmatch(html, -1) {
-		names, err := hydrate.ClassLiteralsAttribute(m[1])
-		if err != nil {
-			// The hydrate render pass already reports a malformed expression by attribute.
-			continue
-		}
-		for _, tok := range names {
 			add(tok)
 		}
 	}

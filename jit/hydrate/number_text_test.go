@@ -30,7 +30,7 @@ func TestNonFiniteNumbersPrintAsJavaScript(t *testing.T) {
 		if got := toStr(row.in); got != row.want {
 			t.Errorf("text of %v = %q, want %q", row.in, got, row.want)
 		}
-		if got := attrText(row.in); got != row.want {
+		if got := Text(row.in); got != row.want { // an attribute's value (attrText of the pre-render until 27/10/2026, which was Text)
 			t.Errorf("attribute of %v = %q, want %q", row.in, got, row.want)
 		}
 	}

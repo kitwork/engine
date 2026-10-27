@@ -47,19 +47,23 @@ func TestGroupedDirectivesAreTheGrammarAndTransportIsNot(t *testing.T) {
 		if hasDirectivePrefix(page(body)) {
 			t.Errorf("the cheap door must stay shut for transport: %s", body)
 		}
-		// past the cheap door too: a Kitwork UI link's data-kit-reload (Drive's opt-out, no directive)
-		// lets the substring test through, so the regex itself must not take transport for grammar
+		// beside a Kitwork UI link's data-kit-reload (Drive's opt-out, no directive) too: until 27/10/2026
+		// it let the substring test through, so the regex itself must not take transport for grammar
 		if reload := page(`<a data-kit-reload="true" href="/x">x</a>` + body); UsesGrammar(reload) {
 			t.Errorf("transport beside data-kit-reload is not grammar: %s", body)
 		}
 	}
-	// a grouped directive shown in an example block is text, as data-kit-* is
+	// a grouped directive shown in an example block is text
 	if UsesGrammar(page(`<pre><code>&lt;b data-kitwork-bind="text: x"&gt;</code></pre>`)) {
 		t.Error("a grouped directive printed in <pre><code> is an example, not grammar")
 	}
-	// control: the hand-written form is still the grammar, and an example of it is still not
-	if !UsesGrammar(page(`<b data-kit-text="total">0</b>`)) {
-		t.Error("data-kit-* is still the grammar")
+	// the one hand-written attribute that brings the runtime is data-kit-drag (its drag file); a
+	// template page's data-kit-* expression brings nothing since 27/10/2026
+	if !UsesGrammar(page(`<header data-kit-drag="true">x</header>`)) {
+		t.Error("data-kit-drag brings the runtime")
+	}
+	if UsesGrammar(page(`<b data-kit-text="total">0</b>`)) {
+		t.Error("a template page's data-kit-text is not the grammar any more")
 	}
 }
 
@@ -141,6 +145,18 @@ func TestGroupedValuesAreVerified(t *testing.T) {
 		{"a margin with nothing in it", `<b data-kitwork-event="intersect-enter.margin(): x()"></b>`, []string{".margin() needs a CSS margin, like .margin(-2rem)"}},
 		{"a timing out of range", `<b data-kitwork-event="input.debounce(0): search()"></b>`, []string{"debounce(0): the delay is 1–60000 milliseconds"}},
 		{"an empty modifier", `<b data-kitwork-event="click..once: go()"></b>`, []string{"has an empty modifier"}},
+		// the pipeline's rules the template pages' data-kit-<event>:… form was tested on until 27/10/2026
+		{"a key combination on a click", `<b data-kitwork-event="click.mod+k: go()"></b>`, []string{".mod+k is a key combination, so it belongs on keydown/keyup, not click"}},
+		{"a modifier said twice", `<b data-kitwork-event="click.once.once: go()"></b>`, []string{"modifier .once is repeated"}},
+		{"two thresholds", `<b data-kitwork-event="intersect-enter.half.full: x()"></b>`, []string{".half and .full name two thresholds; pick one"}},
+		{"mod beside ctrl", `<b data-kitwork-event="keydown.mod+ctrl+k: x()"></b>`, []string{".mod+ctrl+k mixes mod with ctrl/meta"}},
+		{"two keys in a combination", `<b data-kitwork-event="keydown.mod+k+j: x()"></b>`, []string{".mod+k+j names two keys (k and j)"}},
+		{"a combination with a key filter", `<b data-kitwork-event="keydown.mod+k.escape: x()"></b>`, []string{"a key combination is already the filter"}},
+		{"two timings", `<b data-kitwork-event="input.debounce(100).throttle(100): search()"></b>`, []string{".debounce and .throttle cannot both time one handler"}},
+		{"two key filters", `<b data-kitwork-event="keydown.escape.enter: x()"></b>`, []string{".escape and .enter cannot both be the filter"}},
+		{"two targets", `<b data-kitwork-event="click.window.document: x()"></b>`, []string{".window and .document name two targets; pick one"}},
+		{"self beside outside", `<b data-kitwork-event="click.self.outside: x()"></b>`, []string{".self keeps the handler to its own element; it cannot combine with .outside"}},
+		{"self beside window", `<b data-kitwork-event="click.self.window: x()"></b>`, []string{".self keeps the handler to its own element"}},
 		{"an unknown event name", `<b data-kitwork-event="hover: peek()"></b>`,
 			[]string{`data-kitwork-event hover: "hover" is not an event the kernel knows`, "custom event", "(at character 1)"}},
 		{"an unknown event name is a warning, so its value is still compiled", `<b data-kitwork-event="hover: a +"></b>`,

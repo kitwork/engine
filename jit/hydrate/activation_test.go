@@ -11,7 +11,9 @@ import (
 // with no marker attribute; a page that merely PRINTS the grammar — a documentation page showing an
 // example inside <pre> or <code> — is left byte-for-byte alone.
 //
-// This replaces the root marker (data-kit-app / data-kit-hydrate), which asked every author to say
+// (The examples are the grouped form the engine writes; a template page's data-kit-* expressions
+// bring nothing since 27/10/2026.) This replaces the root marker (data-kit-app / data-kit-hydrate),
+// which asked every author to say
 // twice what the markup already said once. Measured across this repo: 157 pages said it once and
 // the engine never looked at them, while exactly 3 files depend on the example/usage distinction.
 func TestRenderRecognisesAPageByItsMarkup(t *testing.T) {
@@ -22,20 +24,20 @@ func TestRenderRecognisesAPageByItsMarkup(t *testing.T) {
 	}{
 		{
 			name:      "a real directive, no marker anywhere",
-			html:      `<head></head><body><b data-kit-text="title">t</b></body>`,
+			html:      `<head></head><body><b data-kitwork-bind="text: title">t</b></body>`,
 			recognise: true,
 		},
 		{
 			name: "only an example inside <pre>",
-			html: `<head></head><body><pre>data-kit-click="n = n + 1"</pre></body>`,
+			html: `<head></head><body><pre>data-kitwork-event="click: n = n + 1"</pre></body>`,
 		},
 		{
 			name: "only an example inside <code>",
-			html: `<head></head><body><p>Write <code>data-kit-show="open"</code> on it.</p></body>`,
+			html: `<head></head><body><p>Write <code>data-kitwork-bind="show: open"</code> on it.</p></body>`,
 		},
 		{
 			name:      "an example AND a real one",
-			html:      `<head></head><body><pre>data-kit-click="x"</pre><b data-kit-text="title">t</b></body>`,
+			html:      `<head></head><body><pre>data-kitwork-event="click: x = 1"</pre><b data-kitwork-bind="text: title">t</b></body>`,
 			recognise: true,
 		},
 		{
@@ -60,7 +62,7 @@ func TestRenderRecognisesAPageByItsMarkup(t *testing.T) {
 // The marker is not merely optional now — it is not read at all. A page carrying one behaves exactly
 // like the same page without it, so nothing hinges on remembering to write it.
 func TestRootMarkerNoLongerDecidesAnything(t *testing.T) {
-	const body = `<b data-kit-text="title">t</b>`
+	const body = `<b data-kitwork-bind="text: title">t</b>`
 	if !UsesGrammar(`<head></head><body>`+body+`</body>`) || !UsesGrammar(`<head></head><body data-kit-hydrate="v1">`+body+`</body>`) {
 		t.Fatal("a page with a directive is recognised, marker or not")
 	}
@@ -73,7 +75,7 @@ func TestRootMarkerNoLongerDecidesAnything(t *testing.T) {
 // scan is not free and nobody reads the log. The proof WATCHES stdout, because "printed nothing" is
 // the whole claim.
 func TestDiagnosticsAreDevelopmentOnly(t *testing.T) {
-	const page = `<head></head><body><b data-kit-text="nameNobodyDeclares">t</b></body>`
+	const page = `<head></head><body><b data-kitwork-bind="text: nameNobodyDeclares">t</b></body>`
 	previous := Diagnostics
 	defer func() { Diagnostics = previous }()
 

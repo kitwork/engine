@@ -8,36 +8,37 @@ import (
 const marker = `<body data-kitwork-hydrate="v1.0.0">`
 
 // A page that writes the grammar is a Kitwork page: it is checked, and jit/js Deliver gives it its
-// JavaScript. (Rendering used to inject /kit.js here; the route went on 03/10.)
+// JavaScript. The grammar is the eight grouped data-kitwork-* attributes the engine writes, and one
+// hand-written attribute, data-kit-drag (a desktop window's title bar). The template pages'
+// hand-written data-kit-* expressions bring nothing: the kernel stopped reading them on 26/10/2026,
+// and this check on 27/10/2026. CONTROL: the same page in the grouped form is recognised.
 func TestPagesWithTheGrammarAreRecognised(t *testing.T) {
-	in := `<head><title>x</title></head><body>` + marker +
-		`<b data-kit-text="n * qty">0</b>` +
-		`<button data-kit-click="n = n + 1">+</button>` +
-		`<span data-kit-show="n > 3">ok</span>` +
-		`<form data-kit-bind:disabled="sending"></form>` +
-		`<input data-kit-model="name">` +
-		`</section></body>`
-	if !UsesGrammar(in) {
-		t.Error("a page with text, click, show, bind and model directives must be recognised")
+	page := func(body string) string {
+		return `<head><title>x</title></head><body>` + marker + body + `</section></body>`
+	}
+	if !UsesGrammar(page(`<b data-kitwork-bind="text: n * qty">0</b><button data-kitwork-event="click: n = n + 1">+</button>`)) {
+		t.Error("a page with grouped bind and event directives must be recognised")
+	}
+	if !UsesGrammar(page(`<header data-kit-drag="true">x</header>`)) {
+		t.Error("a page whose only directive is data-kit-drag needs the runtime for its drag file")
+	}
+	template := `<b data-kit-text="n * qty">0</b><button data-kit-click="n = n + 1">+</button>` +
+		`<span data-kit-show="n > 3">ok</span><form data-kit-bind:disabled="sending"></form>` +
+		`<input data-kit-model="name"><div data-kit-scope="n: 0"><p data-kit-for="i of items"></p></div>`
+	if UsesGrammar(page(template)) {
+		t.Error("a template page's data-kit-* expressions bring no runtime any more")
+	}
+	if found := authoringMistakes(page(`<b data-kit-text="n +">x</b>`)); len(found) != 0 {
+		t.Errorf("a template page's data-kit-* expression is no longer checked, got %q", found)
 	}
 }
 
-// The event family — data-kit-<event>[:modifier…] (ideaship-final §2–§4) — is verified and injected
-// like any expression directive: the expression compiles, the modifiers are the pipeline's, the
-// source rides unchanged, and a page whose ONLY directive is one of them still ships the runtime.
-// The old dedicated directives (data-kit-away / data-kit-escape) and companions (data-kit-guard)
-// are no longer names the server knows: their jobs are :outside, :escape:window, :prevent.
-// data-kit-seed brings the runtime and has its target checked at render: a key, a dotted path, or
-// list[] — the client's rule, said on the server.
 // data-kit-validate is gone (22/09, B answer): 0 sites wrote one, required/pattern/type give the
 // same live feedback natively, and the SERVER half stays (ctx.validate, work/validate.go) because a
 // browser can be told anything. The kernel's submit gate still blocks a form holding
 // data-state="invalid" — it only reads that state now, whoever wrote it.
 func TestValidateIsNoLongerAClientDirective(t *testing.T) {
 	const authored = `data-kit-validate="password.length >= 6"`
-	if directiveRe.MatchString(authored) {
-		t.Error("data-kit-validate must not be verified as an expression directive any more")
-	}
 	if presenceRe.MatchString(authored) {
 		t.Error("data-kit-validate must not bring the runtime on its own any more")
 	}
@@ -53,108 +54,6 @@ func TestValidateIsNoLongerAClientDirective(t *testing.T) {
 	}
 }
 
-func TestRenderSeedIsInjectedAndItsTargetChecked(t *testing.T) {
-	for _, ok := range []string{"title", "user.email", "tags[]", "a.b.c"} {
-		if err := seedTargetError(ok); err != nil {
-			t.Errorf("seedTargetError(%q) = %v, want nil", ok, err)
-		}
-	}
-	for target, reason := range map[string]string{"items[1]": "must be", "a b": "must be", "$title": "must be", "user.__proto__": "blocked"} {
-		if err := seedTargetError(target); err == nil || !strings.Contains(err.Error(), reason) {
-			t.Errorf("seedTargetError(%q) = %v, want an error naming %q", target, err, reason)
-		}
-	}
-	for _, authored := range []string{`data-kit-seed="title"`, `data-kit-seed:value="user.email"`} {
-		if !presenceRe.MatchString(authored) {
-			t.Errorf("%s must bring the runtime", authored)
-		}
-		if directiveRe.MatchString(authored) {
-			t.Errorf("%s is a state target, not an expression to verify", authored)
-		}
-	}
-	in := `<head></head><body>` + marker + `<h1 data-kit-seed="title">x</h1></section></body>`
-	if !UsesGrammar(in) {
-		t.Error("a page whose only directive is a seed still needs the runtime")
-	}
-}
-
-func TestRenderEventFamilyIsVerifiedAndInjected(t *testing.T) {
-	for _, authored := range []string{
-		`data-kit-click="open = false"`,
-		`data-kit-click:outside="open = false"`,
-		`data-kit-keydown:escape:window:prevent="open = false"`,
-		`data-kit-input:debounce(250)="query = query.trim()"`,
-		`data-kit-submit:prevent:once="saved = true"`,
-		`data-kit-pointerdown:throttle(100):stop="drag = true"`,
-		`data-kit-click:self="pick = true"`,
-	} {
-		m := directiveRe.FindStringSubmatch(authored)
-		if m == nil {
-			t.Errorf("%s must be verified as an authored expression directive", authored)
-			continue
-		}
-		if err := checkEventModifiers(m[1]); err != nil {
-			t.Errorf("%s: modifiers should be accepted, got %v", authored, err)
-		}
-	}
-	for _, gone := range []string{`data-kit-away="open = false"`, `data-kit-escape="open = false"`, `data-kit-error="failed = $error.message"`} {
-		if directiveRe.MatchString(gone) || presenceRe.MatchString(gone) {
-			t.Errorf("%s is not a directive any more (its job is a modifier)", gone)
-		}
-	}
-	// A modifier the kernel would disable is named at render.
-	for directive, reason := range map[string]string{
-		"click:mystery":                  "unknown modifier",
-		"click:escape":                   "belong on keydown/keyup",
-		"keydown:escape:enter":           "cannot both",
-		"input:outside":                  ":outside applies to",
-		"click:prevent:prevent":          "repeated",
-		"click:debounce(10):throttle(5)": "cannot both time",
-		"click:debounce(0)":              "1–60000",
-		"click:window:document":          "pick one",
-		"click:self:outside":             "cannot combine",
-		"click:self:window":              "cannot combine",
-	} {
-		err := checkEventModifiers(directive)
-		if err == nil || !strings.Contains(err.Error(), reason) {
-			t.Errorf("checkEventModifiers(%q) = %v, want an error naming %q", directive, err, reason)
-		}
-	}
-	// injection: a page whose only directive is a modified handler still ships the runtime, and the
-	// authored attribute rides unchanged.
-	in := `<head></head><body>` + marker +
-		`<div data-kit-click:outside="open = false"><a data-kit-keydown:escape:window="open = false">x</a></div>` +
-		`</section></body>`
-	if !UsesGrammar(in) {
-		t.Error("a page whose only directive is a modified event handler still needs the runtime injected")
-	}
-}
-
-// data-kit-if and data-kit-for are structural directives shipped in the client kernel; the server
-// twin must know them too. `if`'s value is an expression → verified like text/show; `for`'s value is
-// a spec ("item, i of items"), not a compilable expression → NOT verified, but both must still inject
-// the runtime (a page whose only directive is for/if cannot hydrate without /kit.js). Regression here
-// = a for/if-only page silently ships dead markup.
-func TestRenderIfAndForInject(t *testing.T) {
-	// if is a verified expression directive; for is not (its value is a spec).
-	if !directiveRe.MatchString(`data-kit-if="open"`) {
-		t.Error("data-kit-if must be verified as an expression directive")
-	}
-	if directiveRe.MatchString(`data-kit-for="item, i of items"`) {
-		t.Error("data-kit-for value is a spec, not a compilable expression — must NOT be in directiveRe")
-	}
-	// both inject, even alone.
-	for _, only := range []string{
-		`<li data-kit-for="item, i of items"><b data-kit-text="item.name"></b></li>`,
-		`<div data-kit-if="open">panel</div>`,
-	} {
-		in := `<head></head><body>` + marker + only + `</section></body>`
-		if !UsesGrammar(in) {
-			t.Errorf("a page whose only directive is for/if must inject the runtime: %s", only)
-		}
-	}
-}
-
 func TestRenderNoDirectivesIsNoop(t *testing.T) {
 	in := `<head></head><body>` + marker + `<div class="card">hello</div></section></body>`
 	if UsesGrammar(in) {
@@ -162,39 +61,22 @@ func TestRenderNoDirectivesIsNoop(t *testing.T) {
 	}
 }
 
-// A malformed expression is still shipped as authored (visible, greppable) — the server logs the
+// A malformed expression is still shipped as written (visible, greppable) — the server logs the
 // compile error at render time; the client runtime simply skips what it cannot parse.
 func TestRenderMalformedKeptAndStillInjects(t *testing.T) {
-	in := `<head></head><body>` + marker + `<b data-kit-text="n +">x</b></section></body>`
+	in := `<head></head><body>` + marker + `<b data-kitwork-bind="text: n +">x</b></section></body>`
 	if !UsesGrammar(in) {
 		t.Error("page uses a directive, so the runtime should be injected")
 	}
 }
 
-// model is not an expression — it must trigger runtime injection but never be compile-verified, and
-// it rides the wire unchanged like everything else.
-func TestRenderModelInjects(t *testing.T) {
-	in := `<head></head><body>` + marker +
-		`<div><b data-kit-model="x"></b></div>` +
-		`</section></body>`
-	if !UsesGrammar(in) {
-		t.Error("a page with only model still needs the runtime injected")
-	}
-}
-
-// TWO SPELLINGS, ONE GRAMMAR (11/10/2026, KITWORK_UI.md §11): data-kit-* is what a person writes by
-// hand, and the EIGHT grouped data-kitwork-* attributes — component, scope, bind, class, style, event,
-// if, for — are what the engine writes for a Kitwork UI page. Each of the eight alone makes a page use
-// the grammar. Every other data-kitwork-* name stays inert: the transport markers the engine hangs on
+// ONE GRAMMAR (KITWORK_UI.md §11): the EIGHT grouped data-kitwork-* attributes — component, scope, bind,
+// class, style, event, if, for — are what the engine writes for a Kitwork UI page (data-kit-*, what a
+// person wrote by hand on a template page, went with those pages). Each of the eight alone makes a page
+// use the grammar. Every other data-kitwork-* name stays inert: the transport markers the engine hangs on
 // nearly every page (generated, layout, current, delay, transition) and the retired per-directive
 // spellings (data-kitwork-click, data-kitwork-text — now pairs inside event and bind).
 func TestRenderStrictPrefixOrigin(t *testing.T) {
-	if directiveRe.MatchString(`data-kitwork-click="n = n + 1"`) {
-		t.Error("data-kitwork-click must NOT be matched as authored source: a grouped click is a pair of data-kitwork-event")
-	}
-	if !directiveRe.MatchString(`data-kit-click="n = n + 1"`) {
-		t.Error("data-kit-click must be matched as authored source")
-	}
 	page := func(body string) string { return `<head></head><body>` + marker + body + `</section></body>` }
 	for _, grouped := range []string{
 		`<div data-kitwork-component="counter: $counter"></div>`,

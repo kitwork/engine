@@ -101,3 +101,12 @@ func TestCompileKitServicesAndAppComponent(t *testing.T) {
 		}
 	}
 }
+
+// Object keys are plain names or strings: a key computed at runtime, `{ ['bg-' + shade]: true }`, does
+// not compile at all. (Pinned in classes_test.go until 27/10/2026, as the reason a class name could not
+// hide from the CSS scan in a computed key.)
+func TestComputedObjectKeyIsRejectedByTheGrammar(t *testing.T) {
+	if _, err := Compile(`{ ['bg-' + shade]: true }`); err == nil {
+		t.Fatal("a computed object key must not compile")
+	}
+}

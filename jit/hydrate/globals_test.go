@@ -51,12 +51,12 @@ console.log("globals resolve inside a boundary, and a declared name wins");
 
 // The verify pass must not call a global a name nothing declares.
 func TestVerifyDoesNotReportAGlobal(t *testing.T) {
-	report := strings.Join(authoringMistakes(`<html><body><div data-kit-scope="{ n: 7 }"><b data-kit-text="Math.ceil(n / 2) + parseInt('3')"></b></div></body></html>`), "\n")
+	report := strings.Join(authoringMistakes(`<html><body><div data-kitwork-scope="n: 7"><b data-kitwork-bind="text: Math.ceil(n / 2) + parseInt('3')"></b></div></body></html>`), "\n")
 	if report != "" {
 		t.Errorf("a global was reported as undeclared:\n%s", report)
 	}
 	// CONTROL: a real undeclared name next to it is still reported.
-	report = strings.Join(authoringMistakes(`<html><body><div data-kit-scope="{ n: 7 }"><b data-kit-text="Math.ceil(nn / 2)"></b></div></body></html>`), "\n")
+	report = strings.Join(authoringMistakes(`<html><body><div data-kitwork-scope="n: 7"><b data-kitwork-bind="text: Math.ceil(nn / 2)"></b></div></body></html>`), "\n")
 	if !strings.Contains(report, `"nn"`) {
 		t.Errorf("an undeclared name beside a global should still be reported:\n%s", report)
 	}

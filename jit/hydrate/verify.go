@@ -117,23 +117,13 @@ func declaredElements(html string) map[string]bool {
 	return declared
 }
 
-// A binding runs on every paint. data-kit-text, show, if, class, bind:<name> and style:<property>
-// answer the question "what should this look like now?", and one that also WRITES state changes the
-// data each time the page is drawn — which draws again. The standalone KitJS put it as a rule of the
-// grammar: a binding is read-only; an action (an event handler) may assign or apply ++/--. The
-// kernel has no action/binding distinction at runtime to hang that on, so the rule lives here.
-//
-// A write inside a lambda counts too. It is tempting to say `() => count++` only DEFINES an action,
-// but in a binding a lambda is there to be called — items.map((x) => seen++) runs the write once
-// per item, on every paint. The first version of this check skipped lambda bodies and missed that.
-func bindingDirective(kind string) bool {
-	switch kind {
-	case "text", "show", "if", "class":
-		return true
-	}
-	return strings.HasPrefix(kind, "bind:") || strings.HasPrefix(kind, "style:")
-}
-
+// A binding runs on every paint: it answers the question "what should this look like now?", and one
+// that also WRITES state changes the data each time the page is drawn — which draws again. The
+// standalone KitJS put it as a rule of the grammar: a binding is read-only; an action (an event
+// handler) may assign or apply ++/--. The kernel has no action/binding distinction at runtime to hang
+// that on, so the rule lives here (checkGroupedBindingWrite, grouped_check.go). A write inside a lambda
+// counts too: in a binding a lambda is there to be called — items.map((x) => seen++) runs the write
+// once per item, on every paint. firstWrite is the first name an expression writes, "" for none.
 func firstWrite(node any) string {
 	parts, ok := node.([]any)
 	if !ok || len(parts) == 0 {
@@ -159,14 +149,12 @@ func firstWrite(node any) string {
 	return ""
 }
 
-func checkBindingWrites(kind string, ir any, where string, into *[]string) {
-	if !bindingDirective(kind) {
-		return
+// isNode distinguishes an IR NODE (["op", …]) from a plain LIST of nodes (the payload of "[]" and
+// "{}"), which is the only ambiguity in the encoding: both are []any.
+func isNode(v []any) bool {
+	if len(v) == 0 {
+		return false
 	}
-	if name := firstWrite(ir); name != "" {
-		*into = append(*into, fmt.Sprintf(
-			"data-kit-%s writes to %q, but a binding runs on every paint — it would change the state "+
-				"each time the page is drawn. Move the write to an event (data-kit-click) or give the "+
-				"value its start in data-kit-scope — in %s", kind, name, where))
-	}
+	_, ok := v[0].(string)
+	return ok
 }

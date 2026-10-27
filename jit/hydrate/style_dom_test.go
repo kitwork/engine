@@ -5,13 +5,15 @@ import (
 	"testing"
 )
 
-// data-kit-style:<property>="expr" — one property per attribute, the same shape as bind and seed.
-// A component with a continuous value says it in markup instead of writing element.style from
-// JavaScript, which is what makes it visible to the server and to a reader.
+// A style pair names one CSS property — data-kitwork-style="width: w" — so a component with a continuous
+// value says it in markup instead of writing element.style from JavaScript, which is what makes it
+// visible to the server and to a reader. The property is held to the kernel's rule at render. (The
+// template pages' data-kit-style:<property> was tested here until 27/10/2026.)
 func TestStylePropertyRuleAtRender(t *testing.T) {
+	check := func(property string) error { return stylePropertyErrorIn("data-kitwork-style "+property, property) }
 	for _, ok := range []string{"width", "opacity", "grid-template-columns", "-webkit-line-clamp", "--brand-shift", "--x_1"} {
-		if err := stylePropertyError(ok); err != nil {
-			t.Errorf("stylePropertyError(%q) = %v, want nil", ok, err)
+		if err := check(ok); err != nil {
+			t.Errorf("%s = %v, want nil", ok, err)
 		}
 	}
 	for property, reason := range map[string]string{
@@ -23,22 +25,13 @@ func TestStylePropertyRuleAtRender(t *testing.T) {
 		"--kitwork-bar": "engine's own namespace",
 		"--9lives":      "not a custom property name",
 	} {
-		err := stylePropertyError(property)
+		err := check(property)
 		if err == nil || !strings.Contains(err.Error(), reason) {
-			t.Errorf("stylePropertyError(%q) = %v, want an error naming %q", property, err, reason)
+			t.Errorf("%s = %v, want an error naming %q", property, err, reason)
 		}
 	}
-
-	// The expression itself is verified like any other directive, and the presence of one brings
-	// the runtime — a page whose only directive is a style still needs the kernel.
-	const authored = `data-kit-style:width="value + '%'"`
-	if !directiveRe.MatchString(authored) {
-		t.Error("a style expression must be verified at render")
-	}
-	if !presenceRe.MatchString(authored) {
-		t.Error("a style directive must bring the runtime")
-	}
-	in := `<head></head><body>` + marker + `<span data-kit-style:width="value + '%'"></span></section></body>`
+	// a page whose only directive is a style still needs the kernel
+	in := `<head></head><body>` + marker + `<span data-kitwork-style="width: value"></span></section></body>`
 	if !UsesGrammar(in) {
 		t.Error("a page whose only directive is a style still needs the runtime")
 	}
