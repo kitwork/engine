@@ -11,11 +11,11 @@ func parseSrc(src string) (*Program, *Parser) {
 // Native import/export must lower to existing AST nodes (no esbuild).
 func TestNativeImportLowering(t *testing.T) {
 	cases := []struct{ src, want string }{
-		{`import { router, log } from "kitwork";`, `const { router, log } = kitwork();`},
+		{`import { http, log } from "kitwork";`, `const { http, log } = kitwork();`},
 		// Named imports now honor the subpath too (previously dropped it): a subpath specifier
 		// destructures from that sub-module, matching default-import behavior. This is what makes
 		// `import { connection, desc } from "kitwork/database"` resolves to the `database` namespace.
-		{`import { router } from "kitwork/router";`, `const { router } = kitwork().router;`},
+		{`import { get } from "kitwork/http";`, `const { get } = kitwork().http;`},
 		{`import { connection, desc } from "kitwork/database";`, `const { connection, desc } = kitwork().database;`},
 		{`import http from "kitwork/http";`, `const http = kitwork().http;`},
 		{`export const x = 5;`, `const x = 5;`},
@@ -34,7 +34,7 @@ func TestNativeImportLowering(t *testing.T) {
 // `export default <expr>` lowers to `const __kw_default = <expr>` (keeps the
 // side effect; the bundler exposes it under the "default" key) and flags Program.
 func TestExportDefaultLowersToConst(t *testing.T) {
-	prog, p := parseSrc(`export default router.get("/x");`)
+	prog, p := parseSrc(`export default greet("x");`)
 	if len(p.Errors()) > 0 {
 		t.Fatalf("unexpected parser errors: %v", p.Errors())
 	}
@@ -62,9 +62,9 @@ func TestRelativeImportIsNativeNode(t *testing.T) {
 		wantDef    bool
 		wantSideFx bool
 	}{
-		{`import { greet } from "./lib/greet.kitwork.js";`, 1, false, false},
-		{`import helper from "../helper.kitwork.js";`, 0, true, false},
-		{`import "./routes/hello.kitwork.js";`, 0, false, true},
+		{`import { greet } from "./lib/greet.work";`, 1, false, false},
+		{`import helper from "../helper.work";`, 0, true, false},
+		{`import "./routes/hello.work";`, 0, false, true},
 	}
 	for _, c := range cases {
 		prog, p := parseSrc(c.src)
@@ -84,7 +84,7 @@ func TestRelativeImportIsNativeNode(t *testing.T) {
 // `as` aliases are now NATIVE: kitwork aliases lower to a GroupStatement of
 // `const local = kitwork().imported` member bindings.
 func TestKitworkAliasLowersToMemberConsts(t *testing.T) {
-	prog, p := parseSrc(`import { router as r, log as l } from "kitwork";`)
+	prog, p := parseSrc(`import { http as r, log as l } from "kitwork";`)
 	if len(p.Errors()) > 0 {
 		t.Fatalf("unexpected errors: %v", p.Errors())
 	}
@@ -108,7 +108,7 @@ func TestKitworkAliasLowersToMemberConsts(t *testing.T) {
 
 // Relative aliases ride along on the ImportStatement spec (imported vs local).
 func TestRelativeAliasCarriesSpec(t *testing.T) {
-	prog, p := parseSrc(`import { greet as g } from "./lib/x.kitwork.js";`)
+	prog, p := parseSrc(`import { greet as g } from "./lib/x.work";`)
 	if len(p.Errors()) > 0 {
 		t.Fatalf("unexpected errors: %v", p.Errors())
 	}
@@ -132,7 +132,7 @@ func TestBarePackageRejected(t *testing.T) {
 
 // The lowered nodes must actually compile to bytecode (end to end, no esbuild).
 func TestNativeImportCompiles(t *testing.T) {
-	src := `import { router, log } from "kitwork"; const x = router;`
+	src := `import { http, log } from "kitwork"; const x = http;`
 	prog, p := parseSrc(src)
 	if len(p.Errors()) > 0 {
 		t.Fatalf("parse errors: %v", p.Errors())

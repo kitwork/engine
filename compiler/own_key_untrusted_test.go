@@ -68,13 +68,13 @@ const result = [body.text ? "truthy" : "falsy", body.has("text"), Object.keys(bo
 // as null, length as the number of exports).
 func TestImportedNameOfABuiltinIsTheExport(t *testing.T) {
 	entry := writeTenant(t, map[string]string{
-		"helper.kitwork.js": "export const has = (x) => \"own-has:\" + x\n" +
+		"helper.work": "export const has = (x) => \"own-has:\" + x\n" +
 			"export const text = \"own-text\"\n" +
 			"export const keys = 5\n" +
 			"export const error = (message) => \"error:\" + message\n" +
 			"export const length = 99\n" +
 			"export const isError = \"own-isError\"\n",
-		"app.kitwork.js": "import { has, text, keys, error, length, isError } from \"./helper.kitwork.js\"\n" +
+		"main.work": "import { has, text, keys, error, length, isError } from \"./helper.work\"\n" +
 			"const result = [[has(1), text, keys], [error(\"x\"), length, isError]]\n",
 	})
 	bytecode, err := CompileFile(entry)

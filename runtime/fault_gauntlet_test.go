@@ -275,7 +275,7 @@ func mutatedProgramBinary(t testing.TB, mutation string) []byte {
 			[]runtime.DebugEntry{{
 				IP: 0,
 				SourceLocation: runtime.SourceLocation{
-					File:   "fault.kitwork.js",
+					File:   "fault.work",
 					Line:   1,
 					Column: 1,
 				},

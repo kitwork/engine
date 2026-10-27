@@ -31,13 +31,11 @@ func TestNamespaceImportLowersLikeDefault(t *testing.T) {
 	}
 }
 
-// A namespace import compiles through the whole native path and its name reads the module.
+// A namespace import compiles through the whole native path and its name reads the module: the router's,
+// in the one file that takes it, a router.work (compileAppRoute, environment_test.go).
 func TestNamespaceImportCompiles(t *testing.T) {
-	entry := writeTenant(t, map[string]string{
-		"app.kitwork.js": `import * as router from "kitwork/router";
-router.get((ctx) => ctx.text("x"));`,
-	})
-	if _, err := CompileFile(entry); err != nil {
+	if _, err := compileAppRoute(t, `import * as router from "kitwork/router";
+router.get((context) => context.text("x"));`); err != nil {
 		t.Fatalf("compile: %v", err)
 	}
 }
@@ -46,7 +44,7 @@ router.get((ctx) => ctx.text("x"));`,
 func TestNamespaceImportErrors(t *testing.T) {
 	cases := []struct{ src, want string }{
 		{`import * from "kitwork/router";`, `import * as router from "kitwork/router"`},
-		{`import * as lib from "./lib.kitwork.js";`, `import { a, b } from "./lib.kitwork.js"`},
+		{`import * as lib from "./lib.work";`, `import { a, b } from "./lib.work"`},
 		{`import * as function from "kitwork/router";`, `import * as tên_khác`},
 	}
 	for _, c := range cases {
@@ -73,7 +71,7 @@ func TestSecondExportDefaultNamesBothLines(t *testing.T) {
 		}
 	}
 
-	entry := writeTenant(t, map[string]string{"app.kitwork.js": src})
+	entry := writeTenant(t, map[string]string{"main.work": src})
 	_, err := CompileFile(entry)
 	if err == nil {
 		t.Fatal("two export default compiled")

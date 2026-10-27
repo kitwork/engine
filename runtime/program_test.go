@@ -11,7 +11,7 @@ func TestProgramCopiesOwnedStorage(t *testing.T) {
 	template := &value.Lambda{
 		Address:      0,
 		Name:         "greet",
-		SourceFile:   "router.kitwork.js",
+		SourceFile:   "router.work",
 		SourceLine:   7,
 		SourceColumn: 3,
 		Params:       []string{"name"},
@@ -29,7 +29,7 @@ func TestProgramCopiesOwnedStorage(t *testing.T) {
 	code[0] = byte(HALT)
 	template.Address = 3
 	template.Name = "mutated"
-	template.SourceFile = "mutated.kitwork.js"
+	template.SourceFile = "mutated.work"
 	template.SourceLine = 99
 	template.SourceColumn = 99
 	template.Params[0] = "mutated"
@@ -41,7 +41,7 @@ func TestProgramCopiesOwnedStorage(t *testing.T) {
 	ownedTemplate := program.Constants()[0].V.(*value.Lambda)
 	if ownedTemplate.Address != 0 ||
 		ownedTemplate.Name != "greet" ||
-		ownedTemplate.SourceFile != "router.kitwork.js" ||
+		ownedTemplate.SourceFile != "router.work" ||
 		ownedTemplate.SourceLine != 7 ||
 		ownedTemplate.SourceColumn != 3 ||
 		ownedTemplate.Params[0] != "name" {
@@ -63,7 +63,7 @@ func TestProgramCompressesAndCopiesDebugTable(t *testing.T) {
 			{
 				IP: 0,
 				SourceLocation: SourceLocation{
-					File:   "router.kitwork.js",
+					File:   "router.work",
 					Line:   2,
 					Column: 1,
 				},
@@ -71,7 +71,7 @@ func TestProgramCompressesAndCopiesDebugTable(t *testing.T) {
 			{
 				IP: 3,
 				SourceLocation: SourceLocation{
-					File:   "router.kitwork.js",
+					File:   "router.work",
 					Line:   3,
 					Column: 4,
 				},
@@ -83,7 +83,7 @@ func TestProgramCompressesAndCopiesDebugTable(t *testing.T) {
 	}
 
 	if got := program.SourceAt(2); got != (SourceLocation{
-		File:   "router.kitwork.js",
+		File:   "router.work",
 		Line:   2,
 		Column: 1,
 	}) {
@@ -97,8 +97,8 @@ func TestProgramCompressesAndCopiesDebugTable(t *testing.T) {
 	if len(entries) != 2 {
 		t.Fatalf("debug entries = %d, want 2", len(entries))
 	}
-	entries[0].File = "mutated.kitwork.js"
-	if got := program.DebugEntries()[0].File; got != "router.kitwork.js" {
+	entries[0].File = "mutated.work"
+	if got := program.DebugEntries()[0].File; got != "router.work" {
 		t.Fatalf("debug accessor exposed program storage: %q", got)
 	}
 }

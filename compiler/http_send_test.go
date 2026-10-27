@@ -19,7 +19,7 @@ func TestUnsentRequestIsACompileError(t *testing.T) {
 		{"import * as http from \"kitwork/http\";\nhttp.post(\"/orders\").header(\"Accept\", \"application/json\").timeout(\"5s\");",
 			"<source>:2:1: " + say + "http.post(url).send()"},
 		// inside a handler, through the bare "kitwork" import
-		{"import { router, http } from \"kitwork\";\nrouter.get((context) => {\n  http.delete(\"/orders/1\");\n  return context.json({});\n});",
+		{"import { http } from \"kitwork\";\nconst handle = (context) => {\n  http.delete(\"/orders/1\");\n  return context.json({});\n};",
 			"<source>:3:3: " + say + "http.delete(url).send()"},
 		// the name the import gave the module
 		{"import { http as client } from \"kitwork\";\nclient.put(\"/x\").retry(1);",

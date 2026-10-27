@@ -11,7 +11,7 @@ import (
 
 func TestFileCacheLoadsAndRepairsArtifacts(t *testing.T) {
 	root := t.TempDir()
-	entry := filepath.Join(root, "router.kitwork.js")
+	entry := filepath.Join(root, "router.work")
 	if err := os.WriteFile(entry, []byte(`const answer = 42;`), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestFileCacheLoadsAndRepairsArtifacts(t *testing.T) {
 
 func TestFileCacheInvalidatesOnSourceChange(t *testing.T) {
 	root := t.TempDir()
-	entry := filepath.Join(root, "router.kitwork.js")
+	entry := filepath.Join(root, "router.work")
 	cacheDirectory := filepath.Join(root, "cache")
 	cache := NewFileCache(cacheDirectory)
 
@@ -90,13 +90,13 @@ func TestFileCacheInvalidatesOnSourceChange(t *testing.T) {
 
 func TestFileCacheInvalidatesOnNativeImportChange(t *testing.T) {
 	root := t.TempDir()
-	entry := filepath.Join(root, "router.kitwork.js")
-	module := filepath.Join(root, "answer.kitwork.js")
+	entry := filepath.Join(root, "router.work")
+	module := filepath.Join(root, "answer.work")
 	cache := NewFileCache(filepath.Join(root, "cache"))
 
 	if err := os.WriteFile(
 		entry,
-		[]byte(`import { answer } from "./answer.kitwork.js"; const result = answer;`),
+		[]byte(`import { answer } from "./answer.work"; const result = answer;`),
 		0o644,
 	); err != nil {
 		t.Fatal(err)
@@ -157,7 +157,7 @@ func TestFileCacheRefusesArtifactsOfSchema3(t *testing.T) {
 	}
 
 	root := t.TempDir()
-	entry := filepath.Join(root, "router.kitwork.js")
+	entry := filepath.Join(root, "router.work")
 	if err := os.WriteFile(entry, []byte(`const o = { undefined: 1 }; const result = o.undefined;`), 0o644); err != nil {
 		t.Fatal(err)
 	}

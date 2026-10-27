@@ -183,11 +183,11 @@ recurse()`)
 
 func TestNativeImportDiagnosticPreservesSourceFiles(t *testing.T) {
 	entry := writeTenant(t, map[string]string{
-		"app.kitwork.js": `import { outer } from "./lib/outer.kitwork.js";
+		"main.work": `import { outer } from "./lib/outer.work";
 outer()`,
-		"lib/outer.kitwork.js": `import { inner } from "./inner.kitwork.js";
+		"lib/outer.work": `import { inner } from "./inner.work";
 export const outer = () => inner()`,
-		"lib/inner.kitwork.js": `export const inner = () => {
+		"lib/inner.work": `export const inner = () => {
 	failHost()
 }`,
 	})
@@ -217,15 +217,15 @@ export const outer = () => inner()`,
 		t.Fatalf("stack functions = %#v, want %#v", gotNames, want)
 	}
 	if want := []string{
-		"lib/inner.kitwork.js",
-		"lib/outer.kitwork.js",
-		"app.kitwork.js",
+		"lib/inner.work",
+		"lib/outer.work",
+		"main.work",
 	}; !reflect.DeepEqual(gotFiles, want) {
 		t.Fatalf("stack files = %#v, want %#v", gotFiles, want)
 	}
 	if !strings.Contains(
 		result.Text(),
-		"at inner (lib/inner.kitwork.js:2:2",
+		"at inner (lib/inner.work:2:2",
 	) {
 		t.Fatalf("formatted diagnostic = %q", result.Text())
 	}

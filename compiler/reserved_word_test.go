@@ -223,7 +223,7 @@ func TestReservedWordIsNotABindingName(t *testing.T) {
 		// An import names a variable too, but the way out is another name, not an object key.
 		{"import-named", "import { @ } from \"kitwork\"", "đặt tên khác: import { @ as tên_khác } from …"},
 		{"import-alias", "import { http as @ } from \"kitwork\"", "đặt tên khác: import { http as tên_khác } from …"},
-		{"import-default", "import @ from \"./module.kitwork.js\"", "đặt tên khác: import tên_khác from …"},
+		{"import-default", "import @ from \"./module.work\"","đặt tên khác: import tên_khác from …"},
 		{"template-interpolation", "const s = `${ (@) => 1 }`", ""},
 		// An escape is shorter once unescaped; the column still counts the source as written.
 		{"template-after-escape", "const s = `\\u00e9\\u00e9${ (@) => 1 }`", ""},

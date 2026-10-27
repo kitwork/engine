@@ -15,7 +15,7 @@ func mustWrite(tb testing.TB, path, content string) {
 // Baseline: a single-file script with no imports (native, no esbuild).
 func BenchmarkCompile_NoImports(b *testing.B) {
 	dir := b.TempDir()
-	entry := filepath.Join(dir, "app.kitwork.js")
+	entry := filepath.Join(dir, "main.work")
 	mustWrite(b, entry, `const x = 1 + 2; const y = x * 10; const z = y + x;`)
 
 	b.ReportAllocs()
@@ -30,9 +30,9 @@ func BenchmarkCompile_NoImports(b *testing.B) {
 // Native path: `import … from "kitwork"` lowered to kitwork() — NO esbuild.
 func BenchmarkCompile_NativeKitworkImport(b *testing.B) {
 	dir := b.TempDir()
-	entry := filepath.Join(dir, "app.kitwork.js")
-	mustWrite(b, entry, `import { router, log, http, database } from "kitwork";`+"\n"+
-		`const a = router; const b = log; const c = http; const d = database;`)
+	entry := filepath.Join(dir, "main.work")
+	mustWrite(b, entry, `import { richtext, log, http, database } from "kitwork";`+"\n"+
+		`const a = richtext; const b = log; const c = http; const d = database;`)
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -47,10 +47,10 @@ func BenchmarkCompile_NativeKitworkImport(b *testing.B) {
 // esbuild. (Was ~3,200µs via esbuild before; now ~177µs.)
 func BenchmarkCompile_NativeRelativeImport(b *testing.B) {
 	dir := b.TempDir()
-	helper := filepath.Join(dir, "helper.kitwork.js")
-	entry := filepath.Join(dir, "app.kitwork.js")
+	helper := filepath.Join(dir, "helper.work")
+	entry := filepath.Join(dir, "main.work")
 	mustWrite(b, helper, `export const getHello = () => "Hello from modular helper!";`)
-	mustWrite(b, entry, `import { getHello } from "./helper.kitwork.js";`+"\n"+
+	mustWrite(b, entry, `import { getHello } from "./helper.work";`+"\n"+
 		`const greeting = getHello();`)
 
 	b.ReportAllocs()
@@ -65,8 +65,8 @@ func BenchmarkCompile_NativeRelativeImport(b *testing.B) {
 // Native path: `as` aliases lower to member bindings (was esbuild-only before).
 func BenchmarkCompile_NativeAliasImport(b *testing.B) {
 	dir := b.TempDir()
-	entry := filepath.Join(dir, "app.kitwork.js")
-	mustWrite(b, entry, `import { router as r, log as l } from "kitwork";`+"\n"+
+	entry := filepath.Join(dir, "main.work")
+	mustWrite(b, entry, `import { http as r, log as l } from "kitwork";`+"\n"+
 		`const a = r; const b = l;`)
 
 	b.ReportAllocs()

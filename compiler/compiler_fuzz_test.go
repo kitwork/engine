@@ -11,7 +11,7 @@ func FuzzCompiler(f *testing.F) {
 	seeds := []string{
 		`const x = 10;`,
 		`let f = (a, b) => a + b;`,
-		`import { router } from "kitwork"; router.get("/test", ctx => ctx.text("ok"));`,
+		`import * as router from "kitwork/router"; router.get((context) => context.text("ok"));`,
 		`var obj = { name: "test", count: 123 };`,
 		`switch (2) { case 1: result = "one"; break; case 2: result = "two"; break; default: result = "other"; }`,
 		`..`,

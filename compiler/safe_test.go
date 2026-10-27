@@ -114,7 +114,7 @@ func TestTheBundlesOwnSafeTurnsTheCheckOff(t *testing.T) {
 		"safe = (x) => x; const r = safe(load());",
 		"import { fail as safe } from \"kitwork\"; const r = safe(load());",
 		"import { safe } from \"kitwork/http\"; const r = safe(load());",
-		"import { safe, router } from \"kitwork\"; const g = () => { const safe = (x) => x; return safe(1); }; const r = safe(load());",
+		"import { safe, log } from \"kitwork\"; const g =() => { const safe = (x) => x; return safe(1); }; const r = safe(load());",
 		"const g = () => { let safe = 1; return safe; }; const r = safe(load());",
 	} {
 		if _, err := CompileSource(source); err != nil {
@@ -123,15 +123,15 @@ func TestTheBundlesOwnSafeTurnsTheCheckOff(t *testing.T) {
 	}
 	// a module of the bundle that declares safe turns it off for the entry as well
 	entry := writeTenant(t, map[string]string{
-		"app.kitwork.js":  "import { wrap } from \"./lib.kitwork.js\";\nconst r = safe(load());\n",
-		"lib.kitwork.js":  "const safe = (x) => x;\nexport const wrap = (x) => safe(x);\n",
-		"good.kitwork.js": "const r = safe(load());\n",
+		"main.work": "import { wrap } from \"./lib.work\";\nconst r = safe(load());\n",
+		"lib.work":  "const safe = (x) => x;\nexport const wrap = (x) => safe(x);\n",
+		"good.work": "const r = safe(load());\n",
 	})
 	if _, err := CompileFile(entry); err != nil {
 		t.Fatalf("a module declaring safe: %v", err)
 	}
-	if _, err := CompileFile(filepath.Join(filepath.Dir(entry), "good.kitwork.js")); err == nil ||
-		!strings.Contains(err.Error(), "good.kitwork.js:1:11: safe nhận một hàm") {
+	if _, err := CompileFile(filepath.Join(filepath.Dir(entry), "good.work")); err == nil ||
+		!strings.Contains(err.Error(), "good.work:1:11: safe nhận một hàm") {
 		t.Fatalf("control, a bundle with no safe of its own: %v", err)
 	}
 }
@@ -143,7 +143,7 @@ func TestTheBundlesOwnSafeTurnsTheCheckOff(t *testing.T) {
 func TestImportingTheGlobalSafeKeepsTheCheck(t *testing.T) {
 	for _, c := range []struct{ source, at string }{
 		{"import { safe } from \"kitwork\";\nconst r = safe(load());", "<source>:2:11: safe nhận một hàm: viết safe(() => load())"},
-		{"import { router, safe } from \"kitwork\";\nconst r = safe(1);", "<source>:2:11: safe nhận một hàm: viết safe(() => 1)"},
+		{"import { log, safe } from \"kitwork\";\nconst r = safe(1);","<source>:2:11: safe nhận một hàm: viết safe(() => 1)"},
 		{"import { safe, fail as stop } from \"kitwork\";\nconst r = safe({ a: 1 });", "<source>:2:11: safe nhận một hàm: viết safe(() => ({ a: 1 }))"},
 	} {
 		if _, err := CompileSource(c.source); err == nil || !strings.Contains(err.Error(), c.at) {
@@ -151,10 +151,10 @@ func TestImportingTheGlobalSafeKeepsTheCheck(t *testing.T) {
 		}
 	}
 	entry := writeTenant(t, map[string]string{
-		"app.kitwork.js": "import { wrap } from \"./lib.kitwork.js\";\nconst r = safe(load());\n",
-		"lib.kitwork.js": "import { safe } from \"kitwork\";\nexport const wrap = (f) => safe(f);\n",
+		"main.work": "import { wrap } from \"./lib.work\";\nconst r = safe(load());\n",
+		"lib.work":  "import { safe } from \"kitwork\";\nexport const wrap = (f) => safe(f);\n",
 	})
-	if _, err := CompileFile(entry); err == nil || !strings.Contains(err.Error(), "app.kitwork.js:2:11: safe nhận một hàm") {
+	if _, err := CompileFile(entry); err == nil || !strings.Contains(err.Error(), "main.work:2:11: safe nhận một hàm") {
 		t.Fatalf("a module importing the global safe: %v, want the check on in the entry", err)
 	}
 	if _, err := CompileSource("import { safe } from \"kitwork\";\nconst r = safe(() => load());"); err != nil {
@@ -166,11 +166,11 @@ func TestImportingTheGlobalSafeKeepsTheCheck(t *testing.T) {
 // debug table, so an error's at never shows the machine's path.
 func TestASourceNameIsNeverAnAbsolutePath(t *testing.T) {
 	b := &bundler{debugRoot: t.TempDir()}
-	if got := b.sourceName(filepath.Join("relative", "dir", "store.kitwork.js")); got != "store.kitwork.js" {
+	if got := b.sourceName(filepath.Join("relative", "dir", "store.work")); got != "store.work" {
 		t.Fatalf("sourceName = %q, want the file's name", got)
 	}
-	inside := filepath.Join(b.debugRoot, "_core", "users.kitwork.js")
-	if got := b.sourceName(inside); got != "_core/users.kitwork.js" {
+	inside := filepath.Join(b.debugRoot, ".shared", "users.work")
+	if got := b.sourceName(inside); got != ".shared/users.work" {
 		t.Fatalf("control: a file under the entry's folder = %q", got)
 	}
 }

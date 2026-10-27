@@ -16,7 +16,7 @@ func TestSafeResultRescuesOnlyRuntimeErrors(t *testing.T) {
 		CauseCode: value.FailCode,
 		Message:   "boom",
 		IP:        -1,
-		File:      "router.kitwork.js",
+		File:      "router.work",
 		Line:      4,
 		Column:    7,
 	})
@@ -25,7 +25,7 @@ func TestSafeResultRescuesOnlyRuntimeErrors(t *testing.T) {
 	if rescued.K != value.Map || rescued.Get("value").K != value.Nil || rescued.Get("ok").K != value.Bool ||
 		rescued.Get("ok").Truthy() || len(rescued.Map()) != 3 ||
 		failure.Get("message").Text() != "boom" || failure.Get("code").Text() != value.FailCode ||
-		failure.Get("at").Text() != "router.kitwork.js:4:7" {
+		failure.Get("at").Text() != "router.work:4:7" {
 		t.Fatalf("runtime failure was not rescued: %s", rescued.Text())
 	}
 	// cause is always a key, null while nothing wraps another failure (KITWORK_LANG.md mục 6)
@@ -107,8 +107,8 @@ func TestSafeResultCarriesProgressForPartial(t *testing.T) {
 // A diagnostic leads its printed text with where it is; its message never holds the place.
 func TestDiagnosticPrintsItsPlaceBeforeItsMessage(t *testing.T) {
 	diagnostic := &Diagnostic{Code: DiagnosticRuntimeError, Message: "o.x không phải hàm (là số): không gọi được",
-		File: "router.kitwork.js", Line: 12, Column: 5}
-	if got := diagnostic.Error(); got != "router.kitwork.js:12:5: o.x không phải hàm (là số): không gọi được" {
+		File: "router.work", Line: 12, Column: 5}
+	if got := diagnostic.Error(); got != "router.work:12:5: o.x không phải hàm (là số): không gọi được" {
 		t.Fatalf("Error() = %q", got)
 	}
 	// control: a diagnostic of a source with no name keeps the line after the message

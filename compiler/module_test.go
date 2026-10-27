@@ -10,8 +10,8 @@ import (
 // Today this resolves via the esbuild fallback (relative module).
 func TestRelativeImportAnotherFile(t *testing.T) {
 	dir := t.TempDir()
-	helper := filepath.Join(dir, "helper.kitwork.js")
-	entry := filepath.Join(dir, "app.kitwork.js")
+	helper := filepath.Join(dir, "helper.work")
+	entry := filepath.Join(dir, "main.work")
 
 	if err := os.WriteFile(helper, []byte(
 		`export const getHello = () => "Hello from modular helper!";`,
@@ -19,7 +19,7 @@ func TestRelativeImportAnotherFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(entry, []byte(
-		`import { getHello } from "./helper.kitwork.js";`+"\n"+
+		`import { getHello } from "./helper.work";`+"\n"+
 			`const greeting = getHello();`,
 	), 0644); err != nil {
 		t.Fatal(err)

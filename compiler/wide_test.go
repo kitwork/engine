@@ -238,7 +238,7 @@ func TestAProgramPastTheEnvelopeIsACompileErrorAtItsPlace(t *testing.T) {
 		return c.ByteCodeResult()
 	}
 
-	short := "m.kitwork.js"
+	short := "m.work"
 	control, err := compile(short)
 	if err != nil {
 		t.Fatalf("CONTROL: %v", err)

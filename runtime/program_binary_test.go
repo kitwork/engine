@@ -45,7 +45,7 @@ func TestProgramBinaryRoundTrip(t *testing.T) {
 			value.New(&value.Lambda{
 				Address:      3,
 				Name:         "answer",
-				SourceFile:   "router.kitwork.js",
+				SourceFile:   "router.work",
 				SourceLine:   2,
 				SourceColumn: 7,
 				Params:       []string{"input"},
@@ -56,7 +56,7 @@ func TestProgramBinaryRoundTrip(t *testing.T) {
 			{
 				IP: 0,
 				SourceLocation: SourceLocation{
-					File:   "router.kitwork.js",
+					File:   "router.work",
 					Line:   1,
 					Column: 1,
 				},
@@ -64,7 +64,7 @@ func TestProgramBinaryRoundTrip(t *testing.T) {
 			{
 				IP: 7,
 				SourceLocation: SourceLocation{
-					File:   "router.kitwork.js",
+					File:   "router.work",
 					Line:   5,
 					Column: 3,
 				},
@@ -219,7 +219,7 @@ func TestEncodedSizeIsWhatMarshalBinaryWrites(t *testing.T) {
 			code = append(code, byte(PUSH), 0, 1, byte(POP))
 		}
 		code = append(code, byte(PUSH), 0, 0, byte(RETURN))
-		lambda := value.New(&value.Lambda{Address: 0, Name: "answer", SourceFile: "router.kitwork.js", SourceLine: 2, Params: []string{"input", "limit"}})
+		lambda := value.New(&value.Lambda{Address: 0, Name: "answer", SourceFile: "router.work", SourceLine: 2, Params: []string{"input", "limit"}})
 		built, err := NewProgramWithDebug(code, []value.Value{value.New(42), value.New("text"), lambda}, entries)
 		if err != nil {
 			t.Fatal(err)

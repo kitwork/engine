@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// writeTenant lays out module files in a temp dir and returns the entry path.
+// writeTenant lays out module files in a temp dir and returns the entry path, main.work.
 func writeTenant(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -20,21 +20,21 @@ func writeTenant(t *testing.T, files map[string]string) string {
 			t.Fatal(err)
 		}
 	}
-	return filepath.Join(dir, "app.kitwork.js")
+	return filepath.Join(dir, "main.work")
 }
 
 // nativeBundle must resolve relative imports by IIFE-wrapping each module —
 // no ImportStatement left, no esbuild — and the result must compile to bytecode.
 func TestNativeBundleResolvesRelative(t *testing.T) {
 	entry := writeTenant(t, map[string]string{
-		"app.kitwork.js": `import router from "kitwork/router";
-import "./routes/hello.kitwork.js";
-import { greet } from "./lib/greet.kitwork.js";
-router.get("/x").handle((res) => { return res.text(greet("x")); });`,
-		"routes/hello.kitwork.js": `import router from "kitwork/router";
-import { greet } from "../lib/greet.kitwork.js";
-router.get("/hello").handle((res) => { return res.text(greet("world")); });`,
-		"lib/greet.kitwork.js": `export const greet = (name) => "Hello, " + name + "!";`,
+		"main.work": `import http from "kitwork/http";
+import "./routes/hello.work";
+import { greet } from "./lib/greet.work";
+const request = http.get("/x").header("X-Greeting", greet("x"));`,
+		"routes/hello.work": `import http from "kitwork/http";
+import { greet } from "../lib/greet.work";
+const request = http.get("/hello").header("X-Greeting", greet("world"));`,
+		"lib/greet.work": `export const greet = (name) => "Hello, " + name + "!";`,
 	})
 
 	content, err := os.ReadFile(entry)
@@ -66,7 +66,7 @@ router.get("/hello").handle((res) => { return res.text(greet("world")); });`,
 
 	// The wrapped module + binding must be present (proves IIFE strategy).
 	out := combined.String()
-	for _, want := range []string{"__kw_mod_", "= kitwork().router", "greet"} {
+	for _, want := range []string{"__kw_mod_", "= kitwork().http", "greet"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("combined program missing %q\n---\n%s", want, out)
 		}
@@ -85,10 +85,11 @@ router.get("/hello").handle((res) => { return res.text(greet("world")); });`,
 // `as` aliases (kitwork + relative) must compile through the whole native path.
 func TestNativeAliasImportsCompile(t *testing.T) {
 	entry := writeTenant(t, map[string]string{
-		"app.kitwork.js": `import { router as r, log as l } from "kitwork";
-import { greet as g } from "./lib/greet.kitwork.js";
-r.get("/x").handle((res) => { l("hi"); return res.text(g("x")); });`,
-		"lib/greet.kitwork.js": `export const greet = (name) => "Hi " + name;`,
+		"main.work": `import { http as r, log as l } from "kitwork";
+import { greet as g } from "./lib/greet.work";
+const request = r.get("/x").header("X-Greeting", g("x"));
+l.print("hi");`,
+		"lib/greet.work": `export const greet = (name) => "Hi " + name;`,
 	})
 	bc, err := CompileFile(entry)
 	if err != nil {
@@ -102,8 +103,8 @@ r.get("/x").handle((res) => { l("hi"); return res.text(g("x")); });`,
 // CompileFile() must drive the whole native path for a modular tenant.
 func TestBytecodeNativeForModularTenant(t *testing.T) {
 	entry := writeTenant(t, map[string]string{
-		"app.kitwork.js":       `import { greet } from "./lib/greet.kitwork.js"; const msg = greet("kit");`,
-		"lib/greet.kitwork.js": `export const greet = (name) => "Hi " + name;`,
+		"main.work":      `import { greet } from "./lib/greet.work"; const msg = greet("kit");`,
+		"lib/greet.work": `export const greet = (name) => "Hi " + name;`,
 	})
 	bc, err := CompileFile(entry)
 	if err != nil {
@@ -116,10 +117,10 @@ func TestBytecodeNativeForModularTenant(t *testing.T) {
 
 func TestNativeBundleDirectoryImport(t *testing.T) {
 	entry := writeTenant(t, map[string]string{
-		"app.kitwork.js":      `import "./routes/";`,
-		"routes/a.kitwork.js": `import { log } from "kitwork"; log.print("route a loaded");`,
-		"routes/b.kitwork.js": `import { log } from "kitwork"; log.print("route b loaded");`,
-		"routes/c.js":         `import { log } from "kitwork"; log.print("route c should not load");`,
+		"main.work":     `import "./routes/";`,
+		"routes/a.work": `import { log } from "kitwork"; log.print("route a loaded");`,
+		"routes/b.work": `import { log } from "kitwork"; log.print("route b loaded");`,
+		"routes/c.js":   `import { log } from "kitwork"; log.print("route c should not load");`,
 	})
 
 	content, err := os.ReadFile(entry)
@@ -140,7 +141,7 @@ func TestNativeBundleDirectoryImport(t *testing.T) {
 	}
 
 	out := combined.String()
-	// Should contain messages from a.kitwork.js and b.kitwork.js
+	// Should contain messages from a.work and b.work
 	if !strings.Contains(out, "route a loaded") {
 		t.Errorf("expected route a to be bundled, got: %s", out)
 	}
@@ -154,8 +155,8 @@ func TestNativeBundleDirectoryImport(t *testing.T) {
 
 	// Verify that named imports from directory fail compilation
 	entryFail := writeTenant(t, map[string]string{
-		"app.kitwork.js":      `import { something } from "./routes/";`,
-		"routes/a.kitwork.js": `export const something = 123;`,
+		"main.work":     `import { something } from "./routes/";`,
+		"routes/a.work": `export const something = 123;`,
 	})
 	contentFail, _ := os.ReadFile(entryFail)
 	progFail, _ := parseProgram(string(contentFail))

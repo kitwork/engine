@@ -185,7 +185,7 @@ func TestRedeclarationInOneBlockIsACompileError(t *testing.T) {
 		{"switch-cases", "switch (1) { case 1: const a = 1; break; case 2: const a = 2; }", []string{"<source>:1:56: a đã được khai báo trong cùng khối ở <source>:1:28"}},
 		{"parameter", "const f = (a) => {\n  const a = 1;\n};", []string{"<source>:2:9: a đã là tham số của hàm (<source>:1:12)"}},
 		{"parameters", "const f = (a, a) => a;", []string{"<source>:1:15: hàm có hai tham số cùng tên a (tham số kia ở <source>:1:12)"}},
-		{"import-twice", "import { router } from \"kitwork\";\nimport { router } from \"kitwork\";", []string{"đã được khai báo trong cùng khối ở <source>:1:1"}},
+		{"import-twice", "import { log } from \"kitwork\";\nimport { log } from \"kitwork\";",[]string{"đã được khai báo trong cùng khối ở <source>:1:1"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -232,10 +232,10 @@ func TestNotAFunctionNamesTheVariableAsWritten(t *testing.T) {
 // module; the module still exports it under its name.
 func TestBundledModuleKeepsItsExportNames(t *testing.T) {
 	entry := writeTenant(t, map[string]string{
-		"app.kitwork.js": `import { label, count } from "./lib.kitwork.js";
+		"main.work": `import { label, count } from "./lib.work";
 const total = count();
 var result = [label, total];`,
-		"lib.kitwork.js": `export const label = "lib";
+		"lib.work": `export const label = "lib";
 let calls = 0;
 export const count = () => { const label = "inner"; calls = calls + 1; return label + calls; };`,
 	})
