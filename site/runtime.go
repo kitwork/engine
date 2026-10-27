@@ -30,11 +30,10 @@ type Runtime struct {
 	current      *Generation
 	nextVersion  uint64
 
-	resourceMu    sync.Mutex
-	resourceRoot  string
-	persistStore  *persist.Store
-	limiter       *ratelimit.Limiter
-	contentAssets *contentAssetStore
+	resourceMu   sync.Mutex
+	resourceRoot string
+	persistStore *persist.Store
+	limiter      *ratelimit.Limiter
 
 	closeOnce sync.Once
 	closed    atomic.Bool
@@ -42,11 +41,10 @@ type Runtime struct {
 
 func NewRuntime(parent App, root, domain string) *Runtime {
 	return &Runtime{
-		app:           parent,
-		root:          root,
-		domain:        domain,
-		limiter:       ratelimit.New(),
-		contentAssets: newContentAssetStore(),
+		app:     parent,
+		root:    root,
+		domain:  domain,
+		limiter: ratelimit.New(),
 	}
 }
 
@@ -127,19 +125,6 @@ func (r *Runtime) ActivateGeneration(next *Generation) (*Generation, error) {
 	if next.published {
 		return nil, fmt.Errorf("site generation %d is already published", next.version)
 	}
-	var assets []ContentAsset
-	if provider, ok := next.renderPlan.(ContentAssetProvider); ok {
-		var err error
-		assets, err = provider.ContentAssets()
-		if err != nil {
-			return nil, fmt.Errorf("prepare immutable site assets for generation %d: %w", next.version, err)
-		}
-	}
-	assetHashes, err := r.contentAssets.retain(assets)
-	if err != nil {
-		return nil, fmt.Errorf("retain immutable site assets for generation %d: %w", next.version, err)
-	}
-	next.contentAssets = assetHashes
 	next.published = true
 	next.presentation.Freeze()
 	next.sources.Freeze()
@@ -158,23 +143,6 @@ func (r *Runtime) CurrentGeneration() *Generation {
 	return current
 }
 
-// ContentAsset returns a detached immutable artifact from the site-lifetime
-// CAS. Presence of an exact retained hash is the route authority across
-// generation handoffs; a site that never published KitJS has an empty CAS.
-func (r *Runtime) ContentAsset(contentHash string) (ContentAsset, bool) {
-	if r == nil || r.closed.Load() {
-		return ContentAsset{}, false
-	}
-	return r.contentAssets.lookup(contentHash)
-}
-
-func (r *Runtime) releaseContentAssets(hashes []string) {
-	if r == nil {
-		return
-	}
-	r.contentAssets.release(hashes)
-}
-
 func (r *Runtime) Close() {
 	if r == nil {
 		return
@@ -188,7 +156,6 @@ func (r *Runtime) Close() {
 		if current != nil {
 			current.Retire()
 		}
-		r.contentAssets.close()
 	})
 }
 

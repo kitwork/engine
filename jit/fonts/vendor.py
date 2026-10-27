@@ -23,20 +23,16 @@ FAMILIES = {
         "fallback": "ui-sans-serif, system-ui, -apple-system, sans-serif",
         # the weight axis of its variable font: Google serves one file per subset for every weight
         "weights": (100, 900),
-        # the template path (Render) and Lookup know it by name: one of the two families vendored
-        # before router.fonts could name any Google font
-        "template": True,
     },
     "fira-code": {
         "name": "Fira Code",
         "css": "https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&display=swap",
         "fallback": "ui-monospace, SFMono-Regular, Menlo, monospace",
         "weights": (300, 700),
-        "template": True,
     },
     # The engine's default typefaces (fonts.DefaultBody, fonts.DefaultCode), embedded so the default
     # works offline, and JetBrains Mono, the code face before Google Sans Code, kept for a site that
-    # names it. Reached through Find / FaceCSS by name, not through Render or Lookup.
+    # names it. Reached through Find / FaceCSS by name, like every family here.
     "google-sans-flex": {
         "name": "Google Sans Flex",
         "css": "https://fonts.googleapis.com/css2?family=Google+Sans+Flex:opsz,wght@6..144,1..1000&display=swap",
@@ -157,8 +153,6 @@ def main():
         out.append("\t\tfallback: %s," % goquote(info["fallback"]))
         if "weights" in info:
             out.append("\t\tweights:  [2]int{%d, %d}," % info["weights"])
-        if info.get("template"):
-            out.append("\t\ttemplate: true,")
         out.append("\t\tfaces: []face{")
         for f in entries[slug]:
             through = "through: %s, " % f["through"] if f["through"] else ""

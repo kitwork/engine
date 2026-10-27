@@ -65,15 +65,21 @@ func TestEachFaceIsNamedByItsFaceAndItsBytes(t *testing.T) {
 }
 
 // What a page writes points at those names: each @font-face src and the preload link are the
-// served names, and nothing on the page names the vendored folder layout any more.
+// served names, and nothing on the page names the vendored folder layout any more. (FaceCSS and
+// PreloadFace, a Kitwork UI page's; the template path's Render until 27/10/2026.)
 func TestThePageNamesTheHashedFiles(t *testing.T) {
-	out := Render(`<html><head></head><body><p class="font-outfit">x</p></body></html>`)
+	need := Need{Weights: []int{400}}
+	css, err := FaceCSS("Outfit", need)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := css + PreloadFace("Outfit", need)
 	var named []string
 	for _, m := range regexp.MustCompile(`src:url\(([^)]+)\)`).FindAllStringSubmatch(out, -1) {
 		named = append(named, m[1])
 	}
-	if len(named) != len(catalog["outfit"].faces) {
-		t.Fatalf("want one src per Outfit face (%d), got %d: %s", len(catalog["outfit"].faces), len(named), out)
+	if len(named) != 2 {
+		t.Fatalf("want one src per Outfit subset (latin-ext, latin), got %d: %s", len(named), out)
 	}
 	preload := regexp.MustCompile(`<link rel="preload" as="font" type="font/woff2" href="([^"]+)" crossorigin>`).FindStringSubmatch(out)
 	if preload == nil {

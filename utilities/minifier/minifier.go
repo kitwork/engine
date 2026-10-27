@@ -1,7 +1,5 @@
 // Package minifier is the engine's content-type-aware minifier for everything that can be
 // embedded in an HTML document — the markup itself plus inline CSS, JS, JSON(-LD), SVG and XML.
-// TemplateHTML prepares immutable Kitwork templates before request data is
-// bound, so authored presentation and inline assets are processed once.
 //
 // Two implementations are selected at build time, exposing the SAME package-level functions
 // (HTML, CSS, JS, JSStrict, JSON, SVG, XML, Type) so callers are build-tag-agnostic:
@@ -17,7 +15,3 @@
 // while the stdminify build deliberately returns the input unchanged with no error because that
 // build explicitly opts out of JavaScript minification.
 package minifier
-
-// AllTypes is the full set turned on by render.minify() with no args, and by
-// router.context({ minify: true }). render.minify("css", "js") selects a subset instead.
-var AllTypes = []string{"html", "css", "js", "json", "svg"}

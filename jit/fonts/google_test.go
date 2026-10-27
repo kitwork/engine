@@ -136,44 +136,21 @@ func TestDefaultsAreEmbedded(t *testing.T) {
 	}
 }
 
-// Embedding the defaults changed no template page: the template path (Render) and Lookup know Outfit
-// and Fira Code by name, as before, and none of the families embedded since — a template page that
-// names Google Sans Code, Google Sans Flex or JetBrains Mono keeps what it had. A Kitwork UI page
-// reaches them through Find, FaceCSS and PreloadFace (work/router_ui.go). CONTROL: Outfit still is.
-func TestEmbeddingTheDefaultsChangesNoPage(t *testing.T) {
-	for _, page := range []string{
-		`<html><head><style>code{font-family: "JetBrains Mono", monospace}</style></head><body><code>x</code></body></html>`,
-		`<html><head><style>code{font-family: "Google Sans Code", monospace}</style></head><body><code>x</code></body></html>`,
-		`<html><head></head><body><p class="font-google-sans-flex">x</p></body></html>`,
-		`<html><head></head><body><code class="font-google-sans-code">x</code></body></html>`,
-	} {
-		if got := Render(page); got != page {
-			t.Errorf("the page changed:\n%s\n%s", page, got)
-		}
-	}
-	for _, name := range []string{DefaultBody, DefaultCode, "JetBrains Mono"} {
-		if slug, ok := Lookup(name); ok {
-			t.Errorf("Lookup(%q) = %s: the template path would know it", name, slug)
-		}
-	}
-	if slug, ok := Lookup("Outfit"); !ok || slug != "outfit" || !strings.Contains(Render(`<head></head><p class="font-outfit">x</p>`), "@font-face{font-family:'Outfit'") {
-		t.Errorf("Outfit is found by name as before")
-	}
-}
-
 // A vendored face that is a whole weight range (Google's answer to wght@1..1000) is written with its
-// range, and the face preloaded is the latin one that draws 400 — not the first subset listed.
+// range, one face per subset whatever the weights a page draws, and the face preloaded is the latin
+// one. (Until 27/10/2026 this read the template path's CSS, Preload and Faces.)
 func TestVendoredRangeFaces(t *testing.T) {
-	css := CSS([]string{"google-sans-flex"}, nil)
-	if strings.Count(css, "font-weight:1 1000;") != 3 {
-		t.Errorf("one face per subset, written with its range:\n%s", css)
+	need := Need{Weights: []int{400, 700}}
+	css, err := FaceCSS(DefaultBody, need)
+	if err != nil || strings.Count(css, "font-weight:1 1000;") != 3 || strings.Count(css, "@font-face") != 3 {
+		t.Errorf("one face per subset, written with its range (%v):\n%s", err, css)
 	}
-	if preload := Preload("google-sans-flex"); !strings.Contains(preload, "/_kitwork/fonts/google-sans-flex-1-1000-latin.") {
+	if preload := PreloadFace(DefaultBody, need); !strings.Contains(preload, "/_kitwork/fonts/google-sans-flex-1-1000-latin.") {
 		t.Errorf("the latin face is the one preloaded: %s", preload)
 	}
-	faces := Faces("jetbrains-mono", []int{400, 700})
-	if strings.Count(faces, "font-weight:400;") != 3 || strings.Count(faces, "font-weight:700;") != 3 || strings.Count(faces, "jetbrains-mono-100-800-latin.") != 2 {
-		t.Errorf("Faces points every weight at the subset's one file:\n%s", faces)
+	mono, err := FaceCSS("JetBrains Mono", need)
+	if err != nil || strings.Count(mono, "font-weight:100 800;") != 3 || strings.Count(mono, "jetbrains-mono-100-800-latin.") != 1 {
+		t.Errorf("every weight of a subset is the subset's one file (%v):\n%s", err, mono)
 	}
 }
 
