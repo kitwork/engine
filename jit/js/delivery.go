@@ -154,6 +154,17 @@ func DriveAsset() *Asset {
 	return cachedAsset("drive", func() *Asset { return buildAsset("drive", "drive", hydrate.DriveFile()) })
 }
 
+// CallAsset is router.view's bridge in the browser, call.<hash>.js (28/10/2026): a page that calls a job of
+// its view loads it.
+func CallAsset() *Asset {
+	return cachedAsset("call", func() *Asset { return buildAsset("call", "call", hydrate.CallFile()) })
+}
+
+// callsJobs reports whether a page calls a job of router.view (ui/view_bridge.go writes the attribute).
+func callsJobs(html string) bool {
+	return strings.Contains(html, "data-kitwork-job-")
+}
+
 // wrapComponent gives a component a scope of its own. A component file is written as a plain script
 // — top-level `var` and `function` — and joined bare, every one of those became a global, so two
 // components with a helper of the same name overwrote each other: tree's nameOf replaced tabs',
@@ -237,12 +248,19 @@ func partsNamed(source, self string) string {
 // no directive and no component.
 func PageAssets(html string, options Options) []*Asset {
 	keys := scanComponents(html)
+	calls := callsJobs(html)
 	if len(keys) == 0 && !hydrate.UsesGrammar(html) && !options.Drive {
+		if calls {
+			return []*Asset{CallAsset()}
+		}
 		return nil
 	}
 	assets := []*Asset{KernelAsset()}
 	if options.Drive {
 		assets = append(assets, DriveAsset())
+	}
+	if calls {
+		assets = append(assets, CallAsset())
 	}
 	var components []*Asset
 	sources := []string{hydrate.WithoutExamples(html)} // a service a docs page prints is not one it calls
@@ -330,6 +348,8 @@ func AssetAt(path string) (asset *Asset, exact bool) {
 		asset = KernelAsset()
 	case label == "drive":
 		asset = DriveAsset()
+	case label == "call":
+		asset = CallAsset()
 	case strings.HasPrefix(label, "directives/"):
 		asset = directiveAsset(strings.TrimPrefix(label, "directives/"))
 	case label == "services/assembly":

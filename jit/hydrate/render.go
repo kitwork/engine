@@ -32,6 +32,15 @@ var driveJS string
 //go:embed boot.js
 var bootJS string
 
+//go:embed call.js
+var callJS string
+
+// CallFile is router.view's bridge in the browser (28/10/2026): a page that calls a job of its view loads it
+// (ui/view_bridge.go writes the events, work/view_call.go answers them). It stands alone, the kernel or not.
+func CallFile() string {
+	return callJS
+}
+
 // KernelFile is the kernel as a file of its own — the first of the separate files a page loads
 // (jit/js Deliver): the bridge when the app runs in a shell, the kernel, the platform modules and
 // boot. Boot can close this file rather than the whole composition because it waits for
