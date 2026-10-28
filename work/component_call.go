@@ -420,7 +420,9 @@ func (t *Tenant) serveComponentCall(vm *runtime.VM, ctxObj *Context, reqRouter *
 			if revs := staleRevs(call.revs, before, now, pageVars, patch, lists); len(revs) > 0 {
 				answer["revs"] = revs
 			}
+			t.rowsSince(leaf, call.revs, patch, lists) // a list the tab held older comes by row (view_rows.go)
 		}
+		t.keepViewRows(leaf, now)
 		if len(patch) > 0 {
 			answer["patch"] = patch
 		}

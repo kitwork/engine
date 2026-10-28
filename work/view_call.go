@@ -345,7 +345,9 @@ func (t *Tenant) serveViewCall(vm *runtime.VM, ctxObj *Context, reqRouter *Route
 		if revs := staleRevs(call.revs, before, after, isVar, patch, lists); len(revs) > 0 {
 			answer["revs"] = revs
 		}
+		t.rowsSince(leaf, call.revs, patch, lists) // a list the tab held older comes by row, when kept (view_rows.go)
 	}
+	t.keepViewRows(leaf, after)
 	if len(patch) > 0 {
 		answer["patch"] = patch
 	}
@@ -353,7 +355,7 @@ func (t *Tenant) serveViewCall(vm *runtime.VM, ctxObj *Context, reqRouter *Route
 		answer["lists"] = lists
 	}
 	if viewDataChanged(before, after, isVar) {
-		t.tellViewChanged(leaf, stamp) // the tabs listening to the page ask for what changed (view_listen.go)
+		t.tellViewChanged(leaf, stamp) // the tabs holding a ticket for the page ask for what changed (view_changes.go)
 	}
 	answerViewCall(reqRouter, answer)
 }
@@ -477,8 +479,14 @@ func (t *Tenant) serveViewRefresh(vm *runtime.VM, reqRouter *Router, leaf *Folde
 	}
 	answer := map[string]any{"seq": call.seq, "stamp": reqRouter.viewStamp}
 	t.answerTickets(answer, reqRouter, leaf, call.marks)
+	lists := map[string]any{}
+	t.rowsSince(leaf, call.revs, patch, lists) // a list the tab holds at a kept revision comes by row (view_rows.go)
+	t.keepViewRows(leaf, now)
 	if len(revs) > 0 {
 		answer["patch"], answer["revs"] = patch, revs
+	}
+	if len(lists) > 0 {
+		answer["lists"] = lists
 	}
 	answerViewCall(reqRouter, answer)
 }

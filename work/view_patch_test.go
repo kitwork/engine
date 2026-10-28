@@ -151,9 +151,10 @@ func TestViewPatch(t *testing.T) {
 
 // Two tabs of one page (28/10/2026): tab B was drawn, then tab A added rows. A call of tab B is computed on
 // the rows the server has, which tab B never saw; a patch for those rows would leave tab B half new (the
-// count of three rows over the one it shows). Its revisions say so: it gets the list whole, and every tab
-// gets the new revision of what changed. A var has no revision.
-func TestStalePageGetsWholeValues(t *testing.T) {
+// count of three rows over the one it shows). Its revisions say so: it gets what it missed, by row since its
+// revision when that version is kept (view_rows.go, 28/10/2026), whole when it is not, and every tab gets the
+// new revision of what changed. A var has no revision.
+func TestStalePageGetsWhatItMissed(t *testing.T) {
 	tn := patchTodoSite(t)
 	page := serveGet(tn, "/todo", nil).Body.String()
 	m := regexp.MustCompile(`data-kitwork-page>(.*?)</script>`).FindStringSubmatch(page)
@@ -220,10 +221,14 @@ func TestStalePageGetsWholeValues(t *testing.T) {
 		t.Errorf("tab B should hold the new revision of todos now: %v", tabB)
 	}
 
-	// tab A, one call behind tab B, gets the list whole too; a call that changes nothing sends nothing
+	// tab A, one call behind tab B, gets what it missed by row: its version is kept; a call that changes
+	// nothing sends nothing
 	answer, body = call(tabA, "toggle", "[3,true]")
-	if patch, _ := answer["patch"].(map[string]any); patch["todos"] == nil {
-		t.Errorf("tab A, behind tab B's tick, should get the rows whole: %s", body)
+	if lists, _ := answer["lists"].(map[string]any); lists["todos"] == nil {
+		t.Errorf("tab A, behind tab B's tick, should get the rows it missed by row: %s", body)
+	}
+	if patch, _ := answer["patch"].(map[string]any); patch["todos"] != nil {
+		t.Errorf("tab A, holding a kept version, should not get the rows whole: %s", body)
 	}
 	answer, body = call(tabA, "toggle", "[3,true]")
 	if answer["patch"] != nil || answer["lists"] != nil {
@@ -231,13 +236,23 @@ func TestStalePageGetsWholeValues(t *testing.T) {
 	}
 
 	// a row tab A removed, ticked in tab B (a ghost row there): the job finds nothing, and tab B, behind, gets
-	// the rows whole, so the ghost leaves
+	// the removal by row, so the ghost leaves
 	call(tabA, "remove", "[1]")
 	answer, body = call(tabB, "toggle", "[1,false]")
+	lists, _ := answer["lists"].(map[string]any)
+	change, _ := lists["todos"].(map[string]any)
+	if removed, _ := change["remove"].([]any); len(removed) != 1 || removed[0] != float64(1) {
+		t.Fatalf("a tick on a row removed elsewhere should bring its removal, so the ghost leaves: %s", body)
+	}
+
+	// a tab holding a revision no longer kept gets the list whole
+	stale := copyRevs(tabB)
+	stale["todos"] = "not-kept"
+	answer, body = call(stale, "toggle", "[2,false]")
 	patch, _ = answer["patch"].(map[string]any)
 	rows, _ = patch["todos"].([]any)
 	if len(rows) != 2 {
-		t.Fatalf("a tick on a row removed elsewhere should bring the rows whole (2), got %s", body)
+		t.Fatalf("a tab holding a revision not kept should get the rows whole (2), got %s", body)
 	}
 	for _, row := range rows {
 		if row.(map[string]any)["id"] == float64(1) {

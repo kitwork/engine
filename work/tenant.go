@@ -78,6 +78,8 @@ type Tenant struct {
 
 	// viewCalls holds one lock per page of router.view: its jobs' calls run one at a time (view_call.go)
 	viewCalls sync.Map
+	// viewRows keeps the last versions of each keyed list of a page, by revision (view_rows.go)
+	viewRows sync.Map
 
 	appRuntime  *app.Runtime
 	siteRuntime *site.Runtime

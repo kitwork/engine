@@ -1117,9 +1117,11 @@ func (t *Tenant) respondUI(reqRouter *Router, node *RouteNode, scope map[string]
 		Appearance:  routeAppearance(node),
 		Favicon:     folderFavicon(node),
 	}
-	if reqRouter.viewRevs != nil && compiled.page != nil && compiled.page.Live() {
-		request.Revs = reqRouter.viewRevs() // the revisions of its data, for its calls (view_patch.go)
-		request.Stamp = reqRouter.viewStamp // the moment its data was read (view_call.go)
+	if reqRouter.viewSnapshot != nil && compiled.page != nil && compiled.page.Live() {
+		snapshot := reqRouter.viewSnapshot()
+		request.Revs = viewRevs(snapshot)     // the revisions of its data, for its calls (view_patch.go)
+		t.keepViewRows(node.folder, snapshot) // its lists as drawn, for a refresh by row (view_rows.go)
+		request.Stamp = reqRouter.viewStamp   // the moment its data was read (view_call.go)
 		if node.folder != nil {
 			request.Tickets = t.viewTickets(reqRouter, node.folder) // what it is told of (view_changes.go)
 		}

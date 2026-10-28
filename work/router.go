@@ -54,9 +54,9 @@ type Router struct {
 	// call is the job of router.view this request runs through the bridge, nil when it draws the page
 	// (view_call.go)
 	call *viewCall
-	// viewRevs are the revisions of the data a page of router.view is drawn with, read only when the page
-	// runs in the kernel (view_patch.go)
-	viewRevs func() map[string]string
+	// viewSnapshot is the data a page of router.view is drawn with, as JSON reads it back, read only when the
+	// page holds its data in the browser: its revisions (view_patch.go), its lists' versions (view_rows.go)
+	viewSnapshot func() map[string]any
 	// viewStamp is the moment the data of a page of router.view is read, taken before its function runs
 	// (view_call.go, nextViewStamp): written in the page's data block, and the stamp of a refresh's answer
 	viewStamp int64

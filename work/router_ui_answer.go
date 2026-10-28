@@ -113,7 +113,7 @@ func (t *Tenant) serveUIAnswer(vm *runtime.VM, ctxObj *Context, reqRouter *Route
 		reqRouter.fail(err, http.StatusInternalServerError)
 		return
 	}
-	reqRouter.viewRevs = func() map[string]string { return viewRevs(viewSnapshot(data)) }
+	reqRouter.viewSnapshot = func() map[string]any { return viewSnapshot(data) }
 	t.respondUI(reqRouter, node, scope)
 	if failure := converter.fatal; failure.Failed() {
 		// a function of the page that hit what nothing catches (energy, cancellation) ends the request,
