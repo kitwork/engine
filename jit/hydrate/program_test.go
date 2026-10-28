@@ -206,3 +206,35 @@ func TestProgramRowsFormAndErrors(t *testing.T) {
 })().catch(function (e) { console.error(e && e.stack || e); process.exit(1); });
 `))
 }
+
+// A page's revisions (work/view_patch.go): seeded from its data block, sent with each call, replaced by those
+// an answer brings; a name an answer sends whole replaces the page's value.
+func TestProgramSendsAndKeepsRevisions(t *testing.T) {
+	page := strings.Replace(programPage, `program: "p1" });`, `program: "p1", revs: { todos: "r0", left: "l0" } });`, 1)
+	if page == programPage {
+		t.Fatal("the data block of the test page moved: update this test")
+	}
+	script := strings.Replace(page, "__CALL_JS__", callJS, 1) + `
+(async function () {
+  var sent = [];
+  global.fetch = function (url, options) {
+    var body = JSON.parse(options.body);
+    sent.push(body.revs);
+    var answer = sent.length === 1
+      ? { seq: body.seq, patch: { left: 7, todos: [{ id: 1, title: "Một", done: false }] }, revs: { todos: "r1", left: "l1" } }
+      : { seq: body.seq, revs: {} };
+    return Promise.resolve({ redirected: false, ok: true, status: 200, headers: { get: function () { return "application/json"; } }, json: function () { return Promise.resolve(answer); } });
+  };
+  var view = kit.page.view();
+  view.state.toggle(1, true);
+  await tick(); await tick(); await tick();
+  view.state.toggle(1, false);
+  await tick(); await tick(); await tick();
+  if (JSON.stringify(sent[0]) !== JSON.stringify({ todos: "r0", left: "l0" })) throw new Error("the first call should send the page's revisions, sent " + JSON.stringify(sent[0]));
+  if (JSON.stringify(sent[1]) !== JSON.stringify({ todos: "r1", left: "l1" })) throw new Error("the next call should send the answer's revisions, sent " + JSON.stringify(sent[1]));
+  if (rows().length !== 1 || view.state.left !== 7) throw new Error("a list sent whole replaces the page's: " + rows().length + " rows, left " + view.state.left);
+  console.log("revisions seeded, sent and kept; a whole list replaces the page's");
+})().catch(function (e) { console.error(e && e.stack || e); process.exit(1); });
+`
+	runNodeDOMScript(t, "program_revs.test.js", script)
+}

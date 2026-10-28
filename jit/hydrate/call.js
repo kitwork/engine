@@ -43,6 +43,7 @@
   var flying = null; // the call in flight
   var track = {};    // job → { pending, error, rows: { row → { pending, error } } }
   var current = null; // the element whose binding or event the program runs now
+  var revs = {};      // the revision of each name of the page's data it holds, sent with each call
 
   function acting() { return current || (typeof kit.element === "function" ? kit.element() : null); }
   function get(name) { return view ? view.state[name] : kit.scope.$[name]; }
@@ -159,6 +160,7 @@
     var data;
     try { data = JSON.parse(el.textContent || "{}"); } catch (e) { return; }
     page = { jobs: data.jobs || [], vars: data.vars || [], program: data.program || "" };
+    revs = data.revs || {};
     var state = {};
     Object.keys(data.state || {}).forEach(function (k) { state[k] = data.state[k]; });
     page.jobs.forEach(function (name) { state[name] = job(name); });
@@ -188,7 +190,7 @@
     call.seq = ++seq;
     var vars = {};
     if (page) page.vars.forEach(function (k) { vars[k] = get(k); });
-    var body = { args: call.args, vars: vars, seq: call.seq };
+    var body = { args: call.args, vars: vars, seq: call.seq, revs: revs };
     if (call.at) {
       // the instance's vars, read as the call leaves; its inputs never go: the server reads them where it stands
       var own = {}, instance = instanceOf(call.host) || {};
@@ -242,7 +244,13 @@
       paint();
       return;
     }
-    var patch = answer.patch || {}, lists = answer.lists || {};
+    var patch = answer.patch || {}, lists = answer.lists || {}, held = answer.revs || {};
+    // a name this page held at another revision than the job ran on comes whole; every name that changed
+    // brings its new revision
+    Object.keys(held).forEach(function (k) {
+      if (held[k]) revs[k] = held[k];
+      else delete revs[k];
+    });
     Object.keys(patch).forEach(function (k) { put(k, patch[k]); });
     Object.keys(lists).forEach(function (k) { put(k, applyList(get(k), lists[k])); });
     var mine = call.at && answer.components ? answer.components[call.at] : null, instance = mine ? instanceOf(call.host) : null;

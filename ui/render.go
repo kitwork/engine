@@ -45,6 +45,8 @@ type run struct {
 	// instances, when not nil, gathers each component whose jobs go through the bridge as it is drawn
 	// (Page.Instances)
 	instances map[string]Instance
+	// revs are the revisions of the page's data, written in its data block (Request.Revs)
+	revs map[string]string
 }
 
 type crumb struct {
@@ -444,7 +446,7 @@ func (o *elemOp) renderOne(r *run, scope map[string]any) {
 		r.b.WriteString(newTabNote(r.language))
 	}
 	if o.pageState != nil {
-		o.pageState.writeState(&r.b, scope)
+		o.pageState.writeState(&r.b, scope, r.revs)
 	}
 	if o.components != nil {
 		(*o.components).write(&r.b)

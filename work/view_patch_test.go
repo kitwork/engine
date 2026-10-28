@@ -3,6 +3,7 @@ package work
 import (
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -142,5 +143,102 @@ func TestViewPatch(t *testing.T) {
 	// a short list is sent whole when that is shorter
 	if patch, lists := viewPatch(map[string]any{"l": []any{}}, map[string]any{"l": []any{map[string]any{"id": float64(1)}}}, map[string]string{"l": "id"}); len(lists) != 0 || patch["l"] == nil {
 		t.Errorf("a list shorter whole should be sent whole: %v %v", patch, lists)
+	}
+}
+
+// Two tabs of one page (28/10/2026): tab B was drawn, then tab A added rows. A call of tab B is computed on
+// the rows the server has, which tab B never saw; a patch for those rows would leave tab B half new (the
+// count of three rows over the one it shows). Its revisions say so: it gets the list whole, and every tab
+// gets the new revision of what changed. A var has no revision.
+func TestStalePageGetsWholeValues(t *testing.T) {
+	tn := patchTodoSite(t)
+	page := serveGet(tn, "/todo", nil).Body.String()
+	m := regexp.MustCompile(`data-kitwork-page>(.*?)</script>`).FindStringSubmatch(page)
+	if m == nil {
+		t.Fatalf("no data block:\n%.2000s", page)
+	}
+	var block struct {
+		Revs map[string]string `json:"revs"`
+	}
+	if err := json.Unmarshal([]byte(m[1]), &block); err != nil {
+		t.Fatal(err)
+	}
+	if block.Revs["todos"] == "" || block.Revs["left"] == "" {
+		t.Fatalf("the page should carry the revision of each name of its data: %v", block.Revs)
+	}
+	if _, has := block.Revs["title"]; has {
+		t.Errorf("a var has no revision: %v", block.Revs)
+	}
+	copyRevs := func(r map[string]string) map[string]string {
+		out := map[string]string{}
+		for k, v := range r {
+			out[k] = v
+		}
+		return out
+	}
+	tabA, tabB := copyRevs(block.Revs), copyRevs(block.Revs)
+	call := func(revs map[string]string, job, args string) (map[string]any, string) {
+		held, _ := json.Marshal(revs)
+		answer, body := callAnswer(t, tn, job, `{"args":`+args+`,"vars":{"title":"row"},"seq":1,"revs":`+string(held)+`}`)
+		if got, ok := answer["revs"].(map[string]any); ok {
+			for k, v := range got {
+				revs[k], _ = v.(string)
+			}
+		}
+		return answer, body
+	}
+	for i := 0; i < 3; i++ {
+		call(tabA, "add", "[]")
+	}
+
+	// tab A holds what the server holds: a tick is its row
+	answer, body := call(tabA, "toggle", "[1,true]")
+	if lists, _ := answer["lists"].(map[string]any); lists["todos"] == nil {
+		t.Errorf("a tab that holds the server's rows gets its tick by row: %s", body)
+	}
+	if patch, _ := answer["patch"].(map[string]any); patch["todos"] != nil {
+		t.Errorf("a tab that holds the server's rows does not get them whole: %s", body)
+	}
+
+	// tab B was drawn before the rows: its tick gets the list whole, and the count with it
+	answer, body = call(tabB, "toggle", "[2,true]")
+	patch, _ := answer["patch"].(map[string]any)
+	rows, _ := patch["todos"].([]any)
+	if len(rows) != 3 {
+		t.Fatalf("a tab drawn before the rows should get them whole (3), got %s", body)
+	}
+	if lists, _ := answer["lists"].(map[string]any); lists["todos"] != nil {
+		t.Errorf("a whole list is not also sent by row: %s", body)
+	}
+	if patch["left"] != float64(1) {
+		t.Errorf("the count should come with the rows (1 left): %s", body)
+	}
+	if tabB["todos"] == block.Revs["todos"] {
+		t.Errorf("tab B should hold the new revision of todos now: %v", tabB)
+	}
+
+	// tab A, one call behind tab B, gets the list whole too; a call that changes nothing sends nothing
+	answer, body = call(tabA, "toggle", "[3,true]")
+	if patch, _ := answer["patch"].(map[string]any); patch["todos"] == nil {
+		t.Errorf("tab A, behind tab B's tick, should get the rows whole: %s", body)
+	}
+	answer, body = call(tabA, "toggle", "[3,true]")
+	if answer["patch"] != nil || answer["lists"] != nil {
+		t.Errorf("a call that changes nothing a tab does not hold sends nothing: %s", body)
+	}
+
+	// a row tab A removed, ticked in tab B (a ghost row there): the job finds nothing, and tab B, behind, gets
+	// the rows whole, so the ghost leaves
+	call(tabA, "remove", "[1]")
+	answer, body = call(tabB, "toggle", "[1,false]")
+	patch, _ = answer["patch"].(map[string]any)
+	rows, _ = patch["todos"].([]any)
+	if len(rows) != 2 {
+		t.Fatalf("a tick on a row removed elsewhere should bring the rows whole (2), got %s", body)
+	}
+	for _, row := range rows {
+		if row.(map[string]any)["id"] == float64(1) {
+			t.Errorf("the removed row should not come back: %s", body)
+		}
 	}
 }

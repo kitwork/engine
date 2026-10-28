@@ -48,6 +48,9 @@ type Request struct {
 	// nil writes Head as it is, and those icons have no CSS. Classes from data never need it: every
 	// class a value from data can make is in the page's stylesheet.
 	IconsHead func(icons []string) string
+	// Revs are the revisions of the data of a page that runs in the kernel, by name (work/view_patch.go): its
+	// data block carries them, and its calls send them back.
+	Revs map[string]string
 	// Warn hears, while developing, of a value from data that made no class (a colour that is no token
 	// of the palette): file:line:col of the attribute, once per page. nil says nothing.
 	Warn func(message string)
@@ -80,7 +83,7 @@ func (p *Page) renderWith(req Request, instances map[string]Instance) (string, [
 			scope[a.alias] = a.start(scope)
 		}
 	}
-	r := &run{path: req.Path, origin: req.Origin, page: p, language: req.Language, warn: req.Warn, instances: instances}
+	r := &run{path: req.Path, origin: req.Origin, page: p, language: req.Language, warn: req.Warn, instances: instances, revs: req.Revs}
 	p.root.render(r, scope)
 	extra := make([]string, 0, len(r.extra))
 	for c := range r.extra {

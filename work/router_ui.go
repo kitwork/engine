@@ -1117,6 +1117,9 @@ func (t *Tenant) respondUI(reqRouter *Router, node *RouteNode, scope map[string]
 		Appearance:  routeAppearance(node),
 		Favicon:     folderFavicon(node),
 	}
+	if reqRouter.viewRevs != nil && compiled.page != nil && compiled.page.Live() {
+		request.Revs = reqRouter.viewRevs() // the revisions of its data, for its calls (view_patch.go)
+	}
 	if request.Title == "" {
 		request.Title = metaText(meta, "site")
 	}

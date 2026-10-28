@@ -2,6 +2,8 @@ package work
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -20,6 +22,61 @@ import (
 // keyed list as the rows it removes (by key), the rows it sets (new, or changed: whole), and its order when
 // that is not the old one's without the removed rows and with the new ones at the end. A list's rows are
 // written whole when that is shorter.
+
+// A page's revisions (28/10/2026): each name of its data has one, a hash of its value as JSON, written with the
+// page and sent back with every call. The run before the job is what the patch is computed from; a page whose
+// revision of a name is not that run's held another value (another tab changed the data since it was drawn),
+// and a patch made for the run before would leave it half new: the count of one list, the rows of another.
+// Such a page gets that name's value whole, and every page gets the new revision of what changed.
+
+// revOf is the revision of a value read back from JSON.
+func revOf(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])[:12]
+}
+
+// viewRevs are the revisions of a run's data, by name.
+func viewRevs(snapshot map[string]any) map[string]string {
+	revs := make(map[string]string, len(snapshot))
+	for name, v := range snapshot {
+		revs[name] = revOf(v)
+	}
+	return revs
+}
+
+// staleRevs makes the patch right for a page that held the revisions held: a name it held at another revision
+// than the run before the job is sent whole, a name it already holds at the new one is not sent, and the new
+// revision of every other name the page does not hold yet is returned. vars are the page's own: never sent
+// whole, never given a revision.
+func staleRevs(held map[string]string, before, after map[string]any, vars map[string]bool, patch, lists map[string]any) map[string]string {
+	revs := map[string]string{}
+	for name, now := range after {
+		if vars[name] {
+			continue
+		}
+		rev := revOf(now)
+		if held[name] == rev {
+			delete(patch, name)
+			delete(lists, name)
+			continue
+		}
+		revs[name] = rev
+		if was, had := before[name]; !had || held[name] != revOf(was) {
+			delete(lists, name)
+			patch[name] = now
+		}
+	}
+	for name := range before {
+		if _, kept := after[name]; !kept && !vars[name] {
+			revs[name] = ""
+		}
+	}
+	return revs
+}
 
 // viewSnapshot is the data of one run of the view's function: each name the page can read that is no
 // function, as JSON reads it back, so a job that changes a value in place still differs from what was

@@ -19,7 +19,7 @@ import (
 //
 //	POST /todo
 //	Kitwork-Call: remove
-//	{ "args": [3], "vars": { "title": "" }, "seq": 4 }
+//	{ "args": [3], "vars": { "title": "" }, "seq": 4, "revs": { "todos": "3f1a…", "left": "9c0e…" } }
 //
 // The folder's guards and the origin check run as for any POST of the folder. Then the view's function runs
 // with the vars the browser sent (context.viewVar, written by the compiler, compiler/router_view.go), the job
@@ -27,7 +27,10 @@ import (
 // is the data the job changed, never the page: what differs between the two runs (view_patch.go), which the
 // page, running in the kernel, paints (jit/hydrate/call.js):
 //
-//	{ "seq": 4, "patch": { "left": 1 }, "lists": { "todos": { "key": "id", "remove": [3] } } }
+//	{ "seq": 4, "patch": { "left": 1 }, "lists": { "todos": { "key": "id", "remove": [3] } }, "revs": { … } }
+//
+// revs are the page's revision of each name of its data (view_patch.go): a page that held another value than
+// the one the job ran on (another tab changed the data) gets that name whole, so no page is left half new.
 //
 // A job that sends the page away (context.redirect) answers { seq, redirect }; one that fails answers
 // { seq, error: { code, message } } with that code. A job's return value is dropped.
@@ -69,6 +72,8 @@ type viewCall struct {
 	seq   float64
 	at    string
 	scope map[string]value.Value
+	// revs are the revisions the page holds, nil when it sent none
+	revs map[string]string
 }
 
 // readViewCall reads the call of a POST that names a job; an error is the request's own (400).
@@ -85,18 +90,19 @@ func readViewCall(r *http.Request) (*viewCall, error) {
 		return nil, fmt.Errorf("lời gọi quá %d byte", viewCallLimit)
 	}
 	var sent struct {
-		Args  []any          `json:"args"`
-		Vars  map[string]any `json:"vars"`
-		Seq   float64        `json:"seq"`
-		At    string         `json:"at"`
-		Scope map[string]any `json:"scope"`
+		Args  []any             `json:"args"`
+		Vars  map[string]any    `json:"vars"`
+		Seq   float64           `json:"seq"`
+		At    string            `json:"at"`
+		Scope map[string]any    `json:"scope"`
+		Revs  map[string]string `json:"revs"`
 	}
 	if len(bytes.TrimSpace(body)) > 0 {
 		if err := json.Unmarshal(body, &sent); err != nil {
 			return nil, fmt.Errorf("lời gọi không phải JSON { args, vars, seq }")
 		}
 	}
-	call := &viewCall{name: name, vars: map[string]value.Value{}, seq: sent.Seq}
+	call := &viewCall{name: name, vars: map[string]value.Value{}, seq: sent.Seq, revs: sent.Revs}
 	for _, arg := range sent.Args {
 		call.args = append(call.args, value.New(arg))
 	}
@@ -201,13 +207,16 @@ func (t *Tenant) serveViewCall(vm *runtime.VM, ctxObj *Context, reqRouter *Route
 	}
 	// the vars after the job: the page keeps what it holds, but for what the job changed
 	vars := make(map[string]value.Value, len(call.vars))
+	isVar := map[string]bool{}
 	for name, v := range call.vars {
 		vars[name] = v
+		isVar[name] = true
 	}
 	if state != nil {
 		if after := vm.ExecuteLambda(state, nil); after.IsMap() {
 			for name, v := range after.Map() {
 				vars[name] = v
+				isVar[name] = true
 			}
 		}
 	}
@@ -221,8 +230,14 @@ func (t *Tenant) serveViewCall(vm *runtime.VM, ctxObj *Context, reqRouter *Route
 		answerViewCallError(reqRouter, http.StatusInternalServerError, "trang không vẽ lại được sau việc "+call.name)
 		return
 	}
-	patch, lists := viewPatch(before, viewSnapshot(response.Data()), t.viewListKeys(node))
+	after := viewSnapshot(response.Data())
+	patch, lists := viewPatch(before, after, t.viewListKeys(node))
 	answer := map[string]any{"seq": call.seq}
+	if call.revs != nil {
+		if revs := staleRevs(call.revs, before, after, isVar, patch, lists); len(revs) > 0 {
+			answer["revs"] = revs
+		}
+	}
 	if len(patch) > 0 {
 		answer["patch"] = patch
 	}

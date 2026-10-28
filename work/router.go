@@ -54,6 +54,9 @@ type Router struct {
 	// call is the job of router.view this request runs through the bridge, nil when it draws the page
 	// (view_call.go)
 	call *viewCall
+	// viewRevs are the revisions of the data a page of router.view is drawn with, read only when the page
+	// runs in the kernel (view_patch.go)
+	viewRevs func() map[string]string
 
 	// JIT stylesheet route: serve the tenant's site-wide JIT CSS (no JS handler, no VM).
 	// Set by .jit(); the path defaults to /jitcss.
