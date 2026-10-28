@@ -78,6 +78,8 @@ type Tenant struct {
 
 	// viewCalls holds one lock per page of router.view: its jobs' calls run one at a time (view_call.go)
 	viewCalls sync.Map
+	// viewListen holds the tabs listening to each page of router.view (view_listen.go)
+	viewListen sync.Map
 
 	appRuntime  *app.Runtime
 	siteRuntime *site.Runtime

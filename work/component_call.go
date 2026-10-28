@@ -410,6 +410,9 @@ func (t *Tenant) serveComponentCall(vm *runtime.VM, ctxObj *Context, reqRouter *
 	if page := t.viewPage(node); page != nil && page.Live() {
 		answer["stamp"] = stamp // a tab takes no data read before the data it holds (call.js)
 		now := viewSnapshot(after)
+		if viewDataChanged(before, now, pageVars) {
+			t.tellViewChanged(leaf, stamp) // the tabs listening to the page ask for what changed (view_listen.go)
+		}
 		patch, lists := viewPatch(before, now, t.viewListKeys(node))
 		if call.revs != nil {
 			if revs := staleRevs(call.revs, before, now, pageVars, patch, lists); len(revs) > 0 {

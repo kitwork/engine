@@ -45,6 +45,7 @@
   var current = null; // the element whose binding or event the program runs now
   var revs = {};      // the revision of each name of the page's data it holds, sent with each call
   var stamp = 0;      // the moment the server read the data the page holds: no data read before it is taken
+  var told = 0;       // the newest stamp the server told while the page listens, not asked about yet
 
   function acting() { return current || (typeof kit.element === "function" ? kit.element() : null); }
   function get(name) { return view ? view.state[name] : kit.scope.$[name]; }
@@ -189,6 +190,12 @@
     if (flying || !queue.length) return;
     var call = flying = queue.shift();
     if (call.epoch !== epoch) { flying = null; pump(); return; }
+    if (call.refresh) {
+      // a refresh asks for all that changed till now, what the server told included; one asked for only
+      // because the server told is left when the page already holds data as new
+      if (call.told && told <= stamp) { told = 0; flying = null; pump(); return; }
+      told = 0;
+    }
     call.seq = ++seq;
     var vars = {};
     if (page) page.vars.forEach(function (k) { vars[k] = get(k); });
@@ -327,9 +334,38 @@
     pump();
   }
   document.addEventListener("visibilitychange", function () {
-    if (document.visibilityState === "visible") refresh();
+    if (document.visibilityState === "visible") {
+      refresh();
+      listen();
+    } else {
+      unlisten();
+    }
   });
   window.addEventListener("focus", refresh);
+
+  // ---- the page told when its data changes, while it is seen ----
+
+  // a tab seen listens to its page (GET ?kitwork-listen=1, work/view_listen.go), a stream that carries only
+  // the stamp of the data a job of the page left; a stamp newer than the data the tab holds asks for what
+  // changed, through the queue of its calls, with its cookies and past the guards. A hidden tab does not
+  // listen, it asks when seen again: a browser holds few connections to one host.
+  var listener = null;
+  function want(at) {
+    if (!page || !(at > stamp)) return;
+    if (at > told) told = at;
+    if (queue.some(function (c) { return c.refresh; })) return; // the refresh waiting asks for it
+    queue.push({ refresh: true, told: true, name: "", args: [], row: "", el: null, epoch: epoch });
+    pump();
+  }
+  function listen() {
+    if (listener || !page || !stamp || typeof EventSource !== "function" || document.visibilityState === "hidden") return;
+    listener = new EventSource(location.pathname + (location.search ? location.search + "&" : "?") + "kitwork-listen=1");
+    listener.onmessage = function (e) { want(Number(e.data)); };
+  }
+  function unlisten() {
+    if (listener) listener.close();
+    listener = null;
+  }
 
   // a keyed list's change by row: the rows removed, the rows set (changed in place, or new at the end), and
   // the order when the server sent one; a row nothing changed stays the same object
@@ -688,6 +724,8 @@
   // Drive leaves the page: its calls are dropped; the page it brings is seeded from its own data
   document.addEventListener("kitwork:before-swap", function () {
     epoch++;
+    unlisten();
+    told = 0;
     queue = [];
     track = {};
     view = null;
@@ -698,8 +736,10 @@
   document.addEventListener("kitwork:load", function () {
     seed();
     paint();
+    listen();
   });
 
   seedComponents();
   seed();
+  listen();
 })();

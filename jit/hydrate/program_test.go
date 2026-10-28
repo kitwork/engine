@@ -395,6 +395,87 @@ func TestCallsNamingTheJobInAHeaderAreCaught(t *testing.T) {
 	}
 }
 
+// A tab seen listens to its page (28/10/2026, work/view_listen.go): a stream that carries only stamps. A stamp
+// older than the data the tab holds asks nothing; a newer one asks once for what changed; one told while that
+// ask is on its way asks once more after it; a hidden tab stops listening and listens again when seen. The
+// page was drawn at 100; the server answers a refresh with data read at 300.
+const listenerPrefix = `
+global.__sources = [];
+global.EventSource = function (url) { this.url = url; this.closed = false; global.__sources.push(this); };
+global.EventSource.prototype.close = function () { this.closed = true; };
+`
+
+const listenAssertions = `
+(async function () {
+  var asked = function () { return global.__sent.filter(function (s) { return s.url.indexOf("kitwork-refresh=1") >= 0; }).length; };
+  var source = global.__sources[0];
+  if (!source || source.url !== "/?kitwork-listen=1" || source.closed) throw new Error("a tab seen should listen to its page, opened " + JSON.stringify(global.__sources.map(function (s) { return s.url; })));
+  source.onmessage({ data: "50" });
+  await tick(); await tick();
+  if (asked() !== 0) throw new Error("a stamp older than the data the tab holds should ask nothing, asked " + asked());
+  source.onmessage({ data: "400" });
+  source.onmessage({ data: "500" });
+  await tick(); await tick(); await tick(); await tick();
+  if (asked() !== 2) throw new Error("a newer stamp should ask once, and one told while it is on its way once more after it: asked " + asked());
+  var view = kit.page.view();
+  if (rows().length !== 2 || view.state.left !== 1) throw new Error("what changed should be taken: " + rows().length + " rows, left " + view.state.left);
+  source.onmessage({ data: "250" });
+  await tick(); await tick();
+  if (asked() !== 2) throw new Error("a stamp older than the data taken should ask nothing, asked " + asked());
+  document.visibilityState = "hidden";
+  document.dispatchEvent({ type: "visibilitychange" });
+  if (!source.closed) throw new Error("a hidden tab should stop listening");
+  document.visibilityState = "visible";
+  document.dispatchEvent({ type: "visibilitychange" });
+  var again = global.__sources[global.__sources.length - 1];
+  if (global.__sources.length !== 2 || again.closed) throw new Error("a tab seen again should listen again, opened " + global.__sources.length);
+  console.log("a tab listens while seen and asks once for each change it does not hold");
+})().catch(function (e) { console.error(e && e.stack || e); process.exit(1); });
+`
+
+func listenScript(callJS string) string {
+	page := strings.Replace(programPage, `program: "p1" });`, `program: "p1", revs: { todos: "r0", left: "l0" }, stamp: 100 });`, 1)
+	return strings.Replace(page, "__CALL_JS__", keptAcrossTabsPage+listenerPrefix+callJS, 1) + listenAssertions
+}
+
+func TestTabsListenToTheirPageWhileSeen(t *testing.T) {
+	runNodeDOMScript(t, "listen.test.js", listenScript(callJS))
+}
+
+// The controls: a tab that never listens; one that asks for any stamp told; one that drops a stamp told while
+// its ask is on its way, as a refresh of a tab seen again does.
+func TestTabsThatListenWrongAreCaught(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		swaps [][2]string
+		want  string
+	}{
+		{"never listens", [][2]string{{"if (listener || !page || !stamp", "if (true || listener || !page || !stamp"}}, "should listen to its page"},
+		{"asks for any stamp", [][2]string{
+			{"if (!page || !(at > stamp)) return;", "if (!page) return;"},
+			{"if (call.told && told <= stamp) { told = 0; flying = null; pump(); return; }", ""},
+		}, "should ask nothing"},
+		{"drops what is told meanwhile", [][2]string{
+			{"if (queue.some(function (c) { return c.refresh; })) return; // the refresh waiting asks for it",
+				"if ((flying && flying.refresh) || queue.some(function (c) { return c.refresh; })) return;"},
+		}, "once more after it"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			js := callJS
+			for _, swap := range c.swaps {
+				if !strings.Contains(js, swap[0]) {
+					t.Fatal("the listener of call.js moved: update this control")
+				}
+				js = strings.Replace(js, swap[0], swap[1], 1)
+			}
+			out, err := runNodeDOMWith(t, composedRuntime(), listenScript(js))
+			if err == nil || !strings.Contains(out, c.want) {
+				t.Fatalf("the control should be caught (%s); got err=%v\n%s", c.want, err, out)
+			}
+		})
+	}
+}
+
 // The control: a tab that does not take what it is told keeps its old rows.
 func TestTabsThatDoNotTakeWhatTheyAreToldStayOld(t *testing.T) {
 	take := "        put(k, m.values[k]);\n"

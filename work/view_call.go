@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -53,11 +54,7 @@ import (
 // waits for nothing. A page's jobs are the page's to order; writes of two pages to the same data are the
 // store's (an atomic statement), not this lock's.
 func (t *Tenant) lockViewCalls(leaf *FolderRouter) func() {
-	key := ""
-	if leaf != nil && leaf.node != nil {
-		key = leaf.node.relPath()
-	}
-	lock, _ := t.viewCalls.LoadOrStore(key, &sync.Mutex{})
+	lock, _ := t.viewCalls.LoadOrStore(viewPageKey(leaf), &sync.Mutex{})
 	mu := lock.(*sync.Mutex)
 	mu.Lock()
 	return mu.Unlock
@@ -95,32 +92,48 @@ const ViewCallParameter = "kitwork-call"
 // a call, through the folder's guards and the page's lock, and runs the view's function once.
 const ViewRefreshParameter = "kitwork-refresh"
 
-// takeViewCall takes out of a POST's URL the job it names (kitwork-call) or its ask for what changed
-// (kitwork-refresh), before anything reads the URL: the guards and the view's function read the page's own,
-// the rest of its query as it was written. call is true when the URL names a job, refresh when it asks with
-// none.
-func takeViewCall(r *http.Request) (name string, call, refresh bool) {
-	if !strings.Contains(r.URL.RawQuery, "kitwork-") {
-		return "", false, false
+// viewPageKey names a page of router.view among a tenant's: its folder.
+func viewPageKey(leaf *FolderRouter) string {
+	if leaf == nil || leaf.node == nil {
+		return ""
 	}
+	return leaf.node.relPath()
+}
+
+// takeViewCall takes out of a POST's URL the job it names (kitwork-call) or its ask for what changed
+// (kitwork-refresh), before anything reads the URL: the guards and the view's function read the page's own.
+// call is true when the URL names a job, refresh when it asks with none.
+func takeViewCall(r *http.Request) (name string, call, refresh bool) {
+	found := takeFromQuery(r, ViewCallParameter, ViewRefreshParameter)
+	name, call = found[ViewCallParameter]
+	_, refresh = found[ViewRefreshParameter]
+	return name, call, refresh && !call
+}
+
+// takeFromQuery takes keys out of a request's query, the rest as it was written, and answers the value of each
+// it found ("" for one with none); nil when it found none.
+func takeFromQuery(r *http.Request, keys ...string) map[string]string {
+	if !strings.Contains(r.URL.RawQuery, "kitwork-") {
+		return nil
+	}
+	var found map[string]string
 	kept := make([]string, 0, 4)
 	for _, part := range strings.Split(r.URL.RawQuery, "&") {
 		key, v, _ := strings.Cut(part, "=")
-		switch key, err := url.QueryUnescape(key); {
-		case err == nil && key == ViewCallParameter:
-			name, _ = url.QueryUnescape(v)
-			call = true
-		case err == nil && key == ViewRefreshParameter:
-			refresh = true
-		default:
-			kept = append(kept, part)
+		if name, err := url.QueryUnescape(key); err == nil && slices.Contains(keys, name) {
+			if found == nil {
+				found = map[string]string{}
+			}
+			found[name], _ = url.QueryUnescape(v)
+			continue
 		}
+		kept = append(kept, part)
 	}
-	if call || refresh {
+	if found != nil {
 		r.URL.RawQuery = strings.Join(kept, "&")
 		r.RequestURI = r.URL.RequestURI()
 	}
-	return name, call, refresh && !call
+	return found
 }
 
 // viewCallLimit is the most a call's body may hold: the arguments and the page's vars.
@@ -333,6 +346,9 @@ func (t *Tenant) serveViewCall(vm *runtime.VM, ctxObj *Context, reqRouter *Route
 	}
 	if len(lists) > 0 {
 		answer["lists"] = lists
+	}
+	if viewDataChanged(before, after, isVar) {
+		t.tellViewChanged(leaf, stamp) // the tabs listening to the page ask for what changed (view_listen.go)
 	}
 	answerViewCall(reqRouter, answer)
 }
