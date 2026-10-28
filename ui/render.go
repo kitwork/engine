@@ -36,6 +36,12 @@ type run struct {
 	warn func(string)
 	// language is the page's lang ("vi" when empty): the words the engine itself writes are in it
 	language string
+	// lists counts the lists a page that runs in the kernel draws, for their ids (renderLive); mark is
+	// what the next element writes after its own attributes, and markHidden that it is hidden: a row's
+	// id and key, or the template's for (page_live.go)
+	lists      int
+	mark       string
+	markHidden bool
 }
 
 type crumb struct {
@@ -125,7 +131,6 @@ type dynAttr struct {
 	name    string
 	in      *interpolation
 	boolean bool
-	json    bool // written as JSON: the arguments of a job of router.view (view_bridge.go)
 	image   bool // an image's src: a value from data that is not an image address is not written
 }
 
@@ -198,6 +203,10 @@ type elemOp struct {
 	// after is HTML written right after the element, whether or not it is there: the pre-paint of a
 	// group of tabs (tabs.go)
 	after string
+	// liveFor: the for of a page that runs in the kernel, drawn as the kernel adopts it (renderLive);
+	// pageState: the root of that page's content, which ends with the data the kernel repaints from
+	liveFor   bool
+	pageState bool
 }
 
 func (o *elemOp) render(r *run, scope map[string]any) {
@@ -206,6 +215,10 @@ func (o *elemOp) render(r *run, scope map[string]any) {
 	}
 	if o.forEach == nil {
 		o.renderOne(r, scope)
+		return
+	}
+	if o.liveFor {
+		o.renderLive(r, scope)
 		return
 	}
 	list, _ := o.forEach.list.eval(scope).([]any)
@@ -233,6 +246,9 @@ func restore(scope map[string]any, name string, old any, had bool) {
 }
 
 func (o *elemOp) renderOne(r *run, scope map[string]any) {
+	// what a list of a page that runs in the kernel has this element write: its own, never a child's
+	mark, markHidden := r.mark, r.markHidden
+	r.mark, r.markHidden = "", false
 	// read where the call stands: whether the host is there, whether it shows, what goes in
 	if o.callerIf != nil && !truthy(o.callerIf.eval(scope)) {
 		return
@@ -314,6 +330,8 @@ func (o *elemOp) renderOne(r *run, scope map[string]any) {
 	r.b.WriteString(o.tag)
 	o.writeClass(r, scope)
 	r.b.WriteString(o.staticAttrs)
+	r.b.WriteString(mark)
+	hidden = hidden || markHidden
 	if inputs != "" {
 		writeAttr(&r.b, "data-kitwork-scope", inputs)
 	}
@@ -356,12 +374,6 @@ func (o *elemOp) renderOne(r *run, scope map[string]any) {
 	}
 	for _, a := range o.dynAttrs {
 		v := a.in.value(scope)
-		if a.json {
-			if text, err := json.Marshal(v); err == nil {
-				writeAttr(&r.b, a.name, string(text))
-			}
-			continue
-		}
 		if a.boolean {
 			if truthy(v) {
 				r.b.WriteByte(' ')
@@ -419,6 +431,9 @@ func (o *elemOp) renderOne(r *run, scope map[string]any) {
 	}
 	if o.newTab && href != "" {
 		r.b.WriteString(newTabNote(r.language))
+	}
+	if o.pageState && r.page != nil && r.page.live != nil {
+		r.page.live.writeState(&r.b, scope)
 	}
 	r.b.WriteString("</")
 	r.b.WriteString(o.tag)

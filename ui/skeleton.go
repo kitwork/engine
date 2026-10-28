@@ -80,13 +80,14 @@ func writeSkeleton(b *strings.Builder, o op) {
 			writeAttr(b, "class", strings.Join(classes, " "))
 		}
 		b.WriteString(o.staticAttrs)
-		for _, d := range o.dynAttrs {
-			// a job of router.view's page: the head links the bridge for it (view_bridge.go, jit/js callsJobs)
-			if strings.HasPrefix(d.name, "data-kitwork-job-") {
-				writeAttr(b, d.name, "")
-			}
+		if o.liveFor {
+			b.WriteString(` data-kitwork-for=""`) // a list the kernel adopts: the head links the kernel
 		}
 		b.WriteByte('>')
+		if o.pageState {
+			// a page that runs in the kernel: the head links the bridge for it (page_live.go, jit/js PageAssets)
+			b.WriteString(`<script type="application/json" data-kitwork-page></script>`)
+		}
 		if o.void {
 			return
 		}

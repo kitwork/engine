@@ -95,8 +95,9 @@ func TestRouterViewJobErrors(t *testing.T) {
 	}
 }
 
-// The page of a router.view writes each event that calls one of its jobs as the bridge reads it, the
-// arguments read on the server where the element is drawn, marks the field of a var, and loads call.js.
+// The page of a router.view that binds jobs runs in the kernel (docs/KITWORK_BRIDGE.md): its events call the
+// jobs by name, its list is drawn as the kernel adopts it, its data closes its content, and it loads the
+// kernel and call.js.
 func TestRouterViewPageWiresItsJobs(t *testing.T) {
 	tn := NewTenant(writeSite(t, map[string]string{
 		"router.work": `import * as router from "kitwork/router";`,
@@ -121,9 +122,9 @@ func TestRouterViewPageWiresItsJobs(t *testing.T) {
 		t.Fatalf("/todo: %d\n%.1500s", r.Code, body)
 	}
 	for _, part := range []string{
-		`data-kitwork-job-submit="add"`, `data-kitwork-args-submit="[]"`,
-		`data-kitwork-job-click="remove"`, `data-kitwork-args-click="[1]"`, `data-kitwork-args-click="[7]"`,
-		`data-kitwork-var="title"`, `/_kitwork/call.`,
+		`data-kitwork-event="submit.prevent: add()"`, `data-kitwork-event="click: remove(todo.id)"`,
+		`<!--kit-for:start id=s1-->`, `data-kitwork-item="s1" data-kitwork-key="7"`, `data-kitwork-bind="value: title"`,
+		`<script type="application/json" data-kitwork-page>`, `/_kitwork/kernel.`, `/_kitwork/call.`,
 	} {
 		if !strings.Contains(body, part) {
 			t.Errorf("/todo lacks %q\n%.3000s", part, body)

@@ -40,6 +40,8 @@ type Page struct {
 	// aliases are the page's aliases of a component the browser runs: on the server $files.selected
 	// reads the instance as it starts, the value the kernel starts it from (render)
 	aliases []aliasStart
+	// live is set on a page that runs in the kernel: its router.view binds a job or a var (page_live.go)
+	live *livePage
 }
 
 // element is what the class rules need to know about the element being compiled.
@@ -244,6 +246,10 @@ type compiler struct {
 	// the component's host. given says where the names come from, for that error
 	view  map[string]bool
 	given pageGiven
+	// page is the frame of a page that runs in the kernel, nil for any other: every name of its bind is
+	// live in the browser (page_live.go); listKeys is the key of each list of the bind it draws by key
+	page     *frame
+	listKeys map[string]string
 	// aliasUses are the $alias reads of the page, checked once every as is known
 	aliasUses []aliasUse
 	// wired are the aliases read by what is written for the kernel, checked once every as is known to
@@ -380,6 +386,7 @@ func (s *Site) compile(routeDir, contentFile, kind string) (*Page, error) {
 		out: &Page{palette: s.Palette, rightToLeft: rightToLeft(s.Language)}}
 	c.given = s.given(routeDir, kind)
 	c.view = c.given.names
+	c.startLivePage(kind) // a page whose router.view binds a job or a var runs in the kernel (page_live.go)
 	if c.given.file != "" {
 		c.files[c.given.file] = true
 	}
@@ -418,7 +425,7 @@ func (s *Site) compile(routeDir, contentFile, kind string) (*Page, error) {
 	}
 
 	pageAliases := &aliasFrame{set: map[string]string{}}
-	root, err := c.element(page, ctx{file: page.File, kept: true, aliases: pageAliases}, nil)
+	root, err := c.element(page, ctx{file: page.File, kept: true, aliases: pageAliases, scope: c.page}, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -461,6 +468,14 @@ func (s *Site) compile(routeDir, contentFile, kind string) (*Page, error) {
 		return nil, err
 	}
 	out := c.out
+	if out.live != nil {
+		out.live.keys = map[string]string{}
+		for name, key := range c.listKeys {
+			if key != "" {
+				out.live.keys[name] = key
+			}
+		}
+	}
 	out.root, out.rules, out.uses, out.aliases = root, c.rules, c.uses, c.aliasStarts
 	for f := range c.files {
 		out.Files = append(out.Files, f)
@@ -526,7 +541,15 @@ func (c *compiler) element(n *Node, cx ctx, site *callSite) (op, error) {
 	// an element's own for: what it holds, and its own attributes, are read once per row
 	if a := attrNamed(n, "for"); a.Name == "for" {
 		if each, err := parseFor(a.Value, n, a); err == nil {
+			around := cx.scope
 			cx.scope = rowFrame(each, cx.scope)
+			if c.page != nil && !around.inComponent() {
+				// a list of a page that runs in the kernel: its rows are the kernel's too (page_live.go)
+				if live, _ := around.onClient(each.list, n, a); live {
+					cx.scope.client = true
+					c.noteLiveList(each)
+				}
+			}
 			cx.forAt = &forSite{node: n, attr: a}
 			if cx.toast != nil && cx.toast.template == n {
 				// the blueprint of a notice: its rows are the kernel's, so the notice is live (toast.go)
@@ -877,7 +900,7 @@ func (c *compiler) region(n *Node, cx ctx) (op, error) {
 			merged.Attrs = append(merged.Attrs, a)
 		}
 	}
-	rootCtx := ctx{file: root.File, kept: n.Tag != "content", container: cx.container, aliases: cx.aliases, pageBackground: cx.pageBackground, paint: cx.paint}
+	rootCtx := ctx{file: root.File, kept: n.Tag != "content", container: cx.container, aliases: cx.aliases, pageBackground: cx.pageBackground, paint: cx.paint, scope: c.page}
 	if a := componentAttribute(&merged); a != nil {
 		return nil, componentWritten(&merged, a) // a component is a tag inside the region (host.go)
 	}
@@ -885,7 +908,17 @@ func (c *compiler) region(n *Node, cx ctx) (op, error) {
 		return nil, err
 	}
 	info := catalog[root.Tag]
-	return c.generic(&merged, info, rootCtx, site)
+	compiled, err := c.generic(&merged, info, rootCtx, site)
+	if err != nil || n.Tag != "content" || c.page == nil {
+		return compiled, err
+	}
+	// the page's data, written at the end of <content /> so a move without reload brings the new page's
+	o, ok := compiled.(*elemOp)
+	if !ok || o.fragment {
+		return nil, errAt(root, "trang này chạy ở trình duyệt (router.view có việc hay var): gốc <%s> của nó phải là một phần tử", root.Tag)
+	}
+	o.pageState = true
+	return o, nil
 }
 
 // camel turns an input's attribute name into the name the component reads: old-price → oldPrice.
@@ -2359,7 +2392,6 @@ func (c *compiler) attrValue(n *Node, a *Attr, htmlName string, boolean bool, o 
 		return nil
 	}
 	o.dynAttrs = append(o.dynAttrs, dynAttr{name: htmlName, in: in, boolean: boolean})
-	c.viewVarField(htmlName, a.Value, w)
 	return nil
 }
 

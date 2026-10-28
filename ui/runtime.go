@@ -182,6 +182,11 @@ func (f *frame) onClient(e *expr, n *Node, a *Attr) (bool, error) {
 		sort.Strings(page)
 		message := f.within() + " biểu thức " + e.source + " đọc cả tên của component lẫn " + strings.Join(page, ", ") +
 			" của trang; phần chạy ở trình duyệt mới chỉ có tên của component (trang chạy ở client là bước 2)"
+		if !f.inComponent() {
+			// a page that runs in the kernel: what the browser has is its bind, its rows and the aliases
+			message = "trang này chạy ở trình duyệt (router.view có việc hay var): biểu thức " + e.source + " đọc " +
+				strings.Join(page, ", ") + ", mà trình duyệt chỉ có tên của bind, của dòng và alias"
+		}
 		if a != nil {
 			return false, errAttr(n, a, "%s", message)
 		}
@@ -323,13 +328,28 @@ func (s *frame) wireEvents(n *Node, events []Attr) ([]string, error) {
 		head, modifiers, _ := strings.Cut(a.Name, ":")
 		for _, event := range strings.Split(head, ",") {
 			name := strings.TrimSpace(event)
-			if modifiers != "" {
-				name += "." + modifiers
+			mods := modifiers
+			if name == "submit" && !s.inComponent() && !hasModifier(mods, "prevent") {
+				// a form of a page that runs in the kernel calls its job and stays on the page (page_live.go)
+				mods = strings.Trim("prevent."+mods, ".")
+			}
+			if mods != "" {
+				name += "." + mods
 			}
 			pairs = append(pairs, name+": "+e.source)
 		}
 	}
 	return pairs, nil
+}
+
+// hasModifier reports whether the modifiers of an event (once.debounce(300)) hold one.
+func hasModifier(modifiers, name string) bool {
+	for _, m := range splitModifiers(modifiers) {
+		if m == name {
+			return true
+		}
+	}
+	return false
 }
 
 // eventExpression reads an event attribute: its handler, and what follows the ':' of its name, the
@@ -521,6 +541,24 @@ func pipelineProblem(event string, modifiers []string) string {
 // kernel hides with the hidden attribute, the way the server's first paint does (render.go).
 func (s *frame) bindPairs(n *Node, o *elemOp) ([]string, error) {
 	var pairs []string
+	if o.ifExpr != nil && !s.inComponent() {
+		// an if of a page that runs in the kernel follows its data the way a show does: the server draws
+		// the element hidden when false and the kernel shows it when true (page_live.go)
+		if client, err := s.onClient(o.ifExpr, n, nil); err != nil {
+			return nil, err
+		} else if client {
+			if o.showExpr == nil {
+				o.showExpr = o.ifExpr
+			} else {
+				both, err := compileExpr("("+o.showExpr.source+") && ("+o.ifExpr.source+")", n, nil)
+				if err != nil {
+					return nil, err
+				}
+				o.showExpr = both
+			}
+			o.ifExpr = nil
+		}
+	}
 	for _, d := range o.dynAttrs {
 		source, client, err := s.interpolationOnClient(n, d.in)
 		if err != nil {
@@ -553,7 +591,10 @@ func (s *frame) bindPairs(n *Node, o *elemOp) ([]string, error) {
 		if client, err := s.onClient(o.forEach.list, n, nil); err != nil {
 			return nil, err
 		} else if client {
-			return nil, errAt(n, "%s for theo trạng thái của component chưa chạy ở trình duyệt", s.within())
+			if s.inComponent() || o.fragment {
+				return nil, errAt(n, "%s for theo trạng thái của component chưa chạy ở trình duyệt", s.within())
+			}
+			o.liveFor = true // a list of a page that runs in the kernel (page_live.go)
 		}
 	}
 	return pairs, nil
@@ -756,14 +797,7 @@ func (c *compiler) runtimeAttributes(n *Node, p *attrPlan, o *elemOp, scope *fra
 		return pairs, err
 	}
 	var err error
-	events := p.events
-	if scope.live() == nil {
-		// a job of router.view's page, called through the bridge (view_bridge.go)
-		if events, err = c.viewJobEvents(n, events, o); err != nil {
-			return pairs, err
-		}
-	}
-	if pairs.events, err = scope.wireEvents(n, events); err != nil {
+	if pairs.events, err = scope.wireEvents(n, p.events); err != nil {
 		return pairs, err
 	}
 	if pairs.binds, err = scope.bindPairs(n, o); err != nil {
