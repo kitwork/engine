@@ -157,6 +157,12 @@ func (t *Tenant) loadComponents(reqRouter *Router, logic string) (*componentFile
 	vm.Builtins[0] = kitworkFunc
 	vm.Globals[kitwork] = kitworkFunc
 	vm.MaxEnergy = t.MaxEnergy
+	// the request this VM runs, as the page's own: what a component reads gives the page a ticket for it
+	// (view_changes.go), and observe() binds to the request (stream.go)
+	requestVMs.Store(vm, reqRouter)
+	if reqRouter.requestScope == nil || !reqRouter.requestScope.AddCleanup(func() { requestVMs.Delete(vm) }) {
+		requestVMs.Delete(vm)
+	}
 	if out := vm.Run(); out.K == value.Invalid {
 		t.recordRuntimeFailure(reqRouter, bc, "component", out)
 		return nil, http.StatusInternalServerError, out.Text()

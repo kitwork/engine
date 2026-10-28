@@ -55,8 +55,8 @@ type Request struct {
 	// page takes no data read before it
 	Stamp int64
 	// Tickets are what the page's channel holds to be told when its data changes (work/view_changes.go), in
-	// its data block
-	Tickets []string
+	// its data block: asked for as the block is written, after the components drawn before it ran
+	Tickets func() []string
 	// Warn hears, while developing, of a value from data that made no class (a colour that is no token
 	// of the palette): file:line:col of the attribute, once per page. nil says nothing.
 	Warn func(message string)

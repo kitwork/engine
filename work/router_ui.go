@@ -1122,8 +1122,10 @@ func (t *Tenant) respondUI(reqRouter *Router, node *RouteNode, scope map[string]
 		request.Revs = viewRevs(snapshot)     // the revisions of its data, for its calls (view_patch.go)
 		t.keepViewRows(node.folder, snapshot) // its lists as drawn, for a refresh by row (view_rows.go)
 		request.Stamp = reqRouter.viewStamp   // the moment its data was read (view_call.go)
-		if node.folder != nil {
-			request.Tickets = t.viewTickets(reqRouter, node.folder) // what it is told of (view_changes.go)
+		if leaf := node.folder; leaf != nil {
+			// what it is told of (view_changes.go), made as its data block is written: after the components
+			// drawn before it ran, so what they read is in
+			request.Tickets = func() []string { return t.viewTickets(reqRouter, leaf) }
 		}
 	}
 	if request.Title == "" {

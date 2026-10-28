@@ -255,3 +255,49 @@ func TestAnAnswerBringsTicketsOnlyWhenThePageHoldsOthers(t *testing.T) {
 		}
 	}
 }
+
+// What a component reads gives its page a ticket too (28/10/2026): a component runs on a VM of its own, which
+// is the request's as the page's is. A badge reads the signed-in name; another page writes it; a tab of the
+// badge's page, holding its tickets, is told.
+//
+// CONTROL (by hand, 28/10/2026): with loadComponents not making its VM the request's, the page gave one ticket
+// (its own) and the tab was told nothing.
+func TestWhatAComponentReadsGivesItsPageATicket(t *testing.T) {
+	logic := "import * as component from \"kitwork/component\";\nimport { datastore } from \"kitwork/storage\";\n" +
+		"const me = datastore(\"users\").segment(\"me\");\n" +
+		"component.define(\"user-badge\", (context) => {\n" +
+		"  var open = false;\n  const name = me.get() ?? \"khách\";\n  const toggle = () => { open = !open; };\n" +
+		"  return context.bind({ open, name, toggle });\n});\n"
+	tn := NewTenant(writeSite(t, map[string]string{
+		"router.work":     `import * as router from "kitwork/router";`,
+		"view.ui":         "<view><content /></view>",
+		"components.work": logic,
+		"p/content.ui":    `<content><input value="{{ note }}" /><user-badge><text>{{ name }}</text></user-badge></content>`,
+		"p/router.work":   "import * as router from \"kitwork/router\";\nrouter.view((context) => {\n  var note = \"\";\n  return context.bind({ note });\n});\n",
+		"w/content.ui":    `<content><input value="{{ note }}" /></content>`,
+		"w/router.work": "import * as router from \"kitwork/router\";\nimport { datastore } from \"kitwork/storage\";\n" +
+			"const me = datastore(\"users\").segment(\"me\");\n" +
+			"router.view((context) => {\n  var note = \"\";\n  const rename = (name) => { me.set(name); };\n" +
+			"  return context.bind({ note, rename });\n});\n",
+	}), "localhost")
+	if err := tn.Run(); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(tn.Serve))
+	defer server.Close()
+	tickets := pageTickets(t, serveGet(tn, "/p", nil).Body.String())
+	if len(tickets) != 2 {
+		t.Fatalf("the page should give a ticket for itself and one for what its badge read, gave %d", len(tickets))
+	}
+	id, frames, stop := openChanges(t, server)
+	defer stop()
+	holdOn(t, server, id, tickets, nil)
+	call, err := http.Post(server.URL+"/w?kitwork-call=rename", "application/json", strings.NewReader(`{"args":["An"],"vars":{"note":""},"seq":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	call.Body.Close()
+	if frame, ok := frameWithin(frames, 3*time.Second); !ok || frame == "" {
+		t.Fatalf("a write of what the badge read should tell the tab of its page, told %q", frame)
+	}
+}
