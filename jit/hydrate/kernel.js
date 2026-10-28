@@ -643,6 +643,13 @@
     var live = LIVE_PROPERTY[name];
     if (live) {
       var next = LIVE_BOOLEAN[name] ? !!v : v == null ? "" : v;
+      // Written only when the value changed since the kernel last wrote it (28/10/2026): what the person
+      // did to the field stays until the data says otherwise. A box ticked while the call it made is out
+      // is not unticked by the paint that shows the call pending; kit.forget(el) is how a failed call puts
+      // the field back to its data.
+      var written = state(el).written || (state(el).written = {});
+      if (has(written, name) && written[name] === next) return;
+      written[name] = next;
       if (el[live] !== next) el[live] = next;
       return;
     }
@@ -1126,6 +1133,16 @@
   }
   // First sight of a for element: capture it as a template, replace it with a comment anchor.
   // The anchor is where materialised rows are inserted; the source element itself never renders.
+  //
+  // A list the server drew (a page of router.view that runs here, 28/10/2026, ui/render.go) arrives as the
+  // marker pair already, its template hidden right after the start marker (data-kitwork-template) and its
+  // rows after that, each with the list's id and its key:
+  //
+  //   <!--kit-for:start id=s1--><li data-kitwork-for="todo of todos; key: todo.id" data-kitwork-template hidden>…</li>
+  //   <li data-kitwork-item="s1" data-kitwork-key="45">…</li>…<!--kit-for:end-->
+  //
+  // Those markers are kept and the rows adopted by key: the first pass moves and rebuilds nothing the
+  // server drew, so a row keeps its focus and what was typed in it from the first paint on.
   function collectFor() {
     document.querySelectorAll(FOR).forEach(function (el) {
       var parent = el.parentNode;
@@ -1134,7 +1151,21 @@
       try { spec = parseFor(el.getAttribute("data-kitwork-for")); } catch (e) { reportError(e, el, "data-kitwork-for"); }
       el.removeAttribute("data-kitwork-for");
       if (!spec) return;
+      var drawn = el.hasAttribute("data-kitwork-template");
       var template = el.cloneNode(true);
+      if (drawn) {
+        template.removeAttribute("data-kitwork-template");
+        template.removeAttribute("hidden");
+        var start = el.previousSibling;
+        var opened = start && start.nodeType === 8 && /^kit-for:start id=(\S+)$/.exec(start.nodeValue);
+        var close = el.nextSibling;
+        while (close && !(close.nodeType === 8 && close.nodeValue === "kit-for:end")) close = close.nextSibling;
+        if (opened && close) {
+          parent.removeChild(el);
+          forRegistry.push({ id: opened[1], anchor: start, end: close, template: template, spec: spec, keyIR: spec.keyIR });
+          return;
+        }
+      }
       // The list's place in the document is the marker pair of ideaship-final §7 — the same shape
       // a server-rendered list arrives in — and every row carries the list's id in data-kitwork-item.
       var id = "f" + (++forSerial);
@@ -1402,9 +1433,23 @@
   function reportError(error, el, directive) {
     if (typeof console !== "undefined" && console.error) console.error(error, directive || "", el || "");
   }
+  // acting is the element whose directive runs now (a binding painted, an event handled), null between:
+  // kit.element() lets a function the markup calls know where it was called from, and a value it reads
+  // know where it is painted (a job's pending, read in a row, is that row's call: call.js).
+  var acting = null;
   function guarded(el, directive, fn) {
-    try { return fn(); } catch (error) { reportError(error, el, directive); }
+    var was = acting;
+    acting = el;
+    try { return fn(); } catch (error) { reportError(error, el, directive); } finally { acting = was; }
   }
+  kit.element = function () { return acting; };
+  // kit.forget(el): the fields at and under el are written again by the next paint, whatever the person
+  // did to them (writeBinding).
+  kit.forget = function (el) {
+    if (!el || el.nodeType !== 1) return;
+    delete state(el).written;
+    el.querySelectorAll("[data-kitwork-bind]").forEach(function (x) { delete state(x).written; });
+  };
 
   // ---- the event family: data-kitwork-event="<event>[.modifier...]: expr; …" (KITWORK_UI.md §11) ----
   // Dispatch is delegated at the document, one listener per event type; the attribute is read once

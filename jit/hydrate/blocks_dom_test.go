@@ -83,6 +83,15 @@ function makeNode(nodeType) {
     var i = this.parentNode.childNodes.indexOf(this);
     return this.parentNode.childNodes[i + 1] || null;
   } });
+  Object.defineProperty(node, "previousSibling", { get: function () {
+    if (!this.parentNode) return null;
+    var i = this.parentNode.childNodes.indexOf(this);
+    return i > 0 ? this.parentNode.childNodes[i - 1] : null;
+  } });
+  Object.defineProperty(node, "nodeValue", { // a comment's text, as a real comment node gives it
+    get: function () { return this.nodeType === 8 ? this._text : null; },
+    set: function (v) { if (this.nodeType === 8) this._text = String(v); }
+  });
   Object.defineProperty(node, "parentElement", { get: function () {
     var p = this.parentNode; while (p && p.nodeType !== 1) p = p.parentNode; return p;
   } });
