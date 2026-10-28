@@ -504,7 +504,7 @@ var staleBundle = sync.OnceValue(func() engineScript {
 // /_kitwork/<role>.<16 hex>.js; false for anything else. Whether that name is a file is the
 // generation's store's to say.
 func generationScriptName(p string) (string, bool) {
-	for _, role := range []string{warningsRole, bundleRole} {
+	for _, role := range []string{warningsRole, bundleRole, pageScriptRole} {
 		rest, ok := strings.CutPrefix(p, jitjs.AssetPrefix+role+".")
 		hash, isScript := strings.CutSuffix(rest, ".js")
 		if !ok || !isScript || len(hash) != pageStylesheetHash {

@@ -742,6 +742,9 @@ func (u *uiSite) warningsScript(page *ui.Page) string {
 // warningsRole is the role of a page's warnings file, /_kitwork/warnings.<hash>.js.
 const warningsRole = "warnings"
 
+// pageScriptRole is the role of a page's program, /_kitwork/page.<hash>.js (28/10/2026, ui/page_program.go).
+const pageScriptRole = "page"
+
 // script is the generation's script a name names (warnings.<hash> while developing, bundle.<hash> of
 // router.bundle javascript "split", generationScriptName), or false when this generation made none by
 // that name.
@@ -936,6 +939,11 @@ func (u *uiSite) buildHead(compiled *uiCompiled) string {
 		scripts = `<script data-kitwork-generated="scrolled" src="` + scrolledScript().path + `" defer></script>`
 	}
 	scripts = u.pageScripts(compiled.style.bundle.javascript, &built, scripts)
+	if program := page.Script(); program != nil {
+		// a page that runs in the kernel with a program (ui/page_program.go): page.<hash>.js, kept for good; it
+		// registers the program under its id, so it may run before or after call.js
+		scripts += `<script data-kitwork-generated="page" src="` + u.storeScript(pageScriptRole, program) + `" defer></script>`
+	}
 	// the font preloads first, so the browser asks for the faces before it reads the CSS (a page block
 	// can be past the first window)
 	preloads := fontPreloads(compiled.style, page.UsesCode())

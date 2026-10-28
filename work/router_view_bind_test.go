@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -100,7 +101,7 @@ func TestRouterViewJobErrors(t *testing.T) {
 
 // The page of a router.view that binds jobs runs in the browser on its program (docs/KITWORK_BRIDGE.md,
 // ui/page_program.go): its elements carry marks, its list is drawn as the program adopts it, its data closes
-// its content and names its program, and it loads the kernel and call.js.
+// its content and names its program, and it loads the kernel, call.js and its program, page.<hash>.js.
 func TestRouterViewPageWiresItsJobs(t *testing.T) {
 	tn := NewTenant(writeSite(t, map[string]string{
 		"router.work": `import * as router from "kitwork/router";`,
@@ -138,5 +139,14 @@ func TestRouterViewPageWiresItsJobs(t *testing.T) {
 		if strings.Contains(body, expression) {
 			t.Errorf("a page with a program carries no expression on its elements, found %q\n%.3000s", expression, body)
 		}
+	}
+	src := regexp.MustCompile(`src="?(/_kitwork/page\.[0-9a-f]{16}\.js)`).FindStringSubmatch(body)
+	if src == nil {
+		t.Fatalf("/todo should load its program, page.<hash>.js\n%.3000s", body)
+	}
+	program := serveGet(tn, src[1], nil)
+	if program.Code != http.StatusOK || !strings.Contains(program.Body.String(), "k.pages") ||
+		!strings.Contains(program.Header().Get("Cache-Control"), "immutable") {
+		t.Errorf("%s: %d %s %.300s", src[1], program.Code, program.Header().Get("Cache-Control"), program.Body.String())
 	}
 }
