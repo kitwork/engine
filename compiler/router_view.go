@@ -27,6 +27,51 @@ func rewriteRouterViews(prog *Program) {
 	}
 }
 
+// rewriteComponentDefines readies each component.define("shop-cart", (context) => { … }) of a components.work
+// the same way (28/10/2026, KITWORK_COMPONENTS.md mục 8): a var at the top of its function takes what the
+// instance holds when a job of it is called, var items = [] becoming var items = context.viewVar("items", []),
+// and the object it binds gains __state. The context is the component's (work/component_call.go).
+func rewriteComponentDefines(prog *Program) {
+	for _, statement := range prog.Statements {
+		line, ok := statement.(*ExpressionStatement)
+		if !ok {
+			continue
+		}
+		if fn := componentDefineFunction(line.Expression); fn != nil {
+			rewriteViewFunction(fn)
+		}
+	}
+}
+
+// componentDefineFunction is the function written in component.define("name", fn) at the head of a line; nil
+// for any other line, and for a function defined elsewhere and passed by its name.
+func componentDefineFunction(e Expression) *FunctionLiteral {
+	var object Expression
+	var method *Identifier
+	var arguments []Expression
+	switch call := e.(type) {
+	case *MethodCallExpression:
+		if call.Method == nil {
+			return nil
+		}
+		object, method, arguments = call.Object, call.Method, call.Arguments
+	case *CallExpression:
+		member, ok := call.Function.(*MemberExpression)
+		if !ok || member.Property == nil {
+			return nil
+		}
+		object, method, arguments = member.Object, member.Property, call.Arguments
+	default:
+		return nil
+	}
+	name, ok := object.(*Identifier)
+	if !ok || name.Value != "component" || method.Value != "define" || len(arguments) != 2 {
+		return nil
+	}
+	fn, _ := arguments[1].(*FunctionLiteral)
+	return fn
+}
+
 // routerViewFunction is the function of router.view(fn) at the head of a line, the rules chained after it
 // (.guard(…), .limit(…)) or not; nil for any other line.
 func routerViewFunction(e Expression) *FunctionLiteral {

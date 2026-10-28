@@ -97,6 +97,10 @@ type bundler struct {
 	queue *QueueBundle
 	// schedule is the same of the files of .schedule/.
 	schedule *ScheduleBundle
+	// rewrite readies the program of the file entry before anything is bundled into it (CompileComponentFile);
+	// nil for any other compile
+	entry   string
+	rewrite func(*Program)
 }
 
 // schemaModule reports a file of the app's .shared/schema/, and its name from the app's folder. The
@@ -273,6 +277,9 @@ func (b *bundler) ensureModule(absPath string) (string, error) {
 		if err := refuseRouterImport(prog, src); err != nil {
 			return "", err
 		}
+	}
+	if b.rewrite != nil && absPath == b.entry {
+		b.rewrite(prog)
 	}
 	if b.exports == nil {
 		b.exports = map[string][]string{}

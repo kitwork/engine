@@ -357,6 +357,19 @@ func namedExportReturn(prog *Program, origin Token, module, word string) Stateme
 // .schedule/ its schedules). The loaders of .shared/queue/ and .schedule/ run it to find the jobs and the
 // schedules a file exports, and under which names.
 func CompileModuleFileInApp(appRoot, path string) (*Bytecode, error) {
+	return compileModuleFile(appRoot, path, nil)
+}
+
+// CompileComponentFile compiles a site's components.work as a module, each component.define readied for the
+// bridge (router_view.go, rewriteComponentDefines): the loader of a component's job runs it to find the
+// function a name defines (work/component_call.go).
+func CompileComponentFile(appRoot, path string) (*Bytecode, error) {
+	return compileModuleFile(appRoot, path, rewriteComponentDefines)
+}
+
+// compileModuleFile is CompileModuleFileInApp, rewrite (when not nil) readying the file's own program before
+// anything is bundled into it.
+func compileModuleFile(appRoot, path string, rewrite func(*Program)) (*Bytecode, error) {
 	absolute, err := filepath.Abs(path)
 	if err != nil {
 		absolute = path
@@ -373,6 +386,8 @@ func CompileModuleFileInApp(appRoot, path string) (*Bytecode, error) {
 		sources:   map[string]string{},
 		debugRoot: filepath.Dir(absolute),
 		appRoot:   root,
+		entry:     absolute,
+		rewrite:   rewrite,
 	}
 	module, err := b.ensureModule(absolute)
 	if err != nil {
