@@ -223,6 +223,9 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 			}
 			reqRouter.call = call
 			method = get
+			// one call of a page's jobs at a time, from the run before the job to the run after it: a job
+			// writes on what the one before it wrote, never on what both read (view_call.go)
+			defer t.lockViewCalls(leaf)()
 		}
 	}
 

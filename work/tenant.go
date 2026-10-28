@@ -76,6 +76,9 @@ type Tenant struct {
 	AppScope
 	SiteScope
 
+	// viewCalls holds one lock per page of router.view: its jobs' calls run one at a time (view_call.go)
+	viewCalls sync.Map
+
 	appRuntime  *app.Runtime
 	siteRuntime *site.Runtime
 	generation  *site.Generation

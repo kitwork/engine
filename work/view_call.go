@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/runtime"
@@ -37,6 +38,23 @@ import (
 //
 // A job of a component of the site the page draws is called the same way, named shop-cart.checkout, with the
 // place the instance is called from and its vars (component_call.go).
+
+// lockViewCalls waits for the calls of a page's jobs before this one and returns what lets the next one go.
+// The page's function runs before its job and the job writes on what it read: two calls that both read before
+// either wrote would keep one write of the two (twenty adds at once kept two rows). One call at a time per
+// page, from the run before the job to the run after it, the guards and the answer included; drawing the page
+// waits for nothing. A page's jobs are the page's to order; writes of two pages to the same data are the
+// store's (an atomic statement), not this lock's.
+func (t *Tenant) lockViewCalls(leaf *FolderRouter) func() {
+	key := ""
+	if leaf != nil && leaf.node != nil {
+		key = leaf.node.relPath()
+	}
+	lock, _ := t.viewCalls.LoadOrStore(key, &sync.Mutex{})
+	mu := lock.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
 
 // ViewCallHeader names the job of a call; the page's URL is the address (KITWORK_ROUTER_VIEW.md câu 7b is
 // still open between this header and a query).
