@@ -9,35 +9,36 @@ import (
 	"github.com/kitwork/engine/compiler"
 )
 
-// router.view is gone (KITWORK_ROUTER.md, 23/10/2026): a page is router.get((context) => context.view({ … })).
-// Written in a router.work it stops the boot where the compiler sees it; in a template site's
-// router.kitwork.js it stops the boot at the call, file:line:column, in the same words. Each names the
-// spelling to write. Another name for the router in a router.work (const r = router) is itself refused where
-// it is written since 24/10/2026: the router is read only at the head of a line's call (compiler/router_rules.go).
+// router.view is a door again (28/10/2026, KITWORK_ROUTER_VIEW.md): written as a call at the head of a line of
+// a router.work it boots, its function answering context.bind({ … }) (router_view_bind_test.go). Taken apart or
+// read under another name it is still refused where it is written, naming the one spelling: another name for
+// the router (const r = router) is refused since 24/10/2026 (compiler/router_rules.go).
 //
-// CONTROL (23/10/2026, go test -overlay, the tree untouched): with FolderRouter.View declaring a GET again
-// and the compiler's routerMember and routerDeclaration refusing nothing, the three sites booted:
-// "router.work: run = <nil>, want … router.view đã bỏ"; with only the compiler's refusal off, the first
-// failed at the call instead, "router.work:2:7: call view: router.view đã bỏ …", not at the word (2:8), so
-// the row of the compiler's place went red alone.
-func TestRouterViewIsGone(t *testing.T) {
-	const view = "{\n  const note = \"x\";\n}"
+// It was gone from 23/10 to 28/10/2026, when a page was only router.get((context) => context.view({ … })).
+func TestRouterViewIsACallOfItsLine(t *testing.T) {
+	const head = "import * as router from \"kitwork/router\";\n"
+	const view = "{\n  const note = \"x\";\n  return context.bind({ note });\n}"
+	if _, err := bootUISite(t, map[string]string{
+		"localhost/router.work": head + "router.view((context) => " + view + ");\n",
+		"localhost/content.ui":  "<content><text>{{ note }}</text></content>",
+	}, true); err != nil {
+		t.Errorf("router.view((context) => …): run = %v, want it to boot", err)
+	}
 	for _, c := range []struct {
-		name, file, source, at, want string
+		name, source, at, want string
 	}{
-		{"router.work", "router.work", "import * as router from \"kitwork/router\";\nrouter.view((context) => " + view + ");\n", "router.work:2:8: ", compiler.RouterViewRemoved},
-		{"another name", "router.work", "import * as router from \"kitwork/router\";\nconst r = router;\nr.view((context) => " + view + ");\n", "router.work:2:11: ", compiler.RouterAsValue("router")},
-		{"template", "router.kitwork.js", "import { router } from \"kitwork\";\nrouter.view((ctx) => " + view + ");\n", "router.kitwork.js:2:", compiler.RouterViewRemoved},
+		{"another name", head + "const r = router;\nr.view((context) => " + view + ");\n", "router.work:2:11: ", compiler.RouterAsValue("router")},
+		{"taken apart", head + "const { view } = router;\nview((context) => " + view + ");\n", "router.work:2:", compiler.RouterViewRemoved},
 	} {
 		_, err := bootUISite(t, map[string]string{
-			"localhost/" + c.file:  c.source,
-			"localhost/content.ui": "<content><text>{{ note }}</text></content>",
+			"localhost/router.work": c.source,
+			"localhost/content.ui":  "<content><text>{{ note }}</text></content>",
 		}, true)
 		if err == nil || !strings.Contains(err.Error(), c.at) || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: run = %v, want %q at %s", c.name, err, c.want, c.at)
 		}
 	}
-	if !strings.Contains(compiler.RouterViewRemoved, "router.get((context) => context.title(\"…\").view({ … }))") {
+	if !strings.Contains(compiler.RouterViewRemoved, "router.view((context) => context.bind({ … }))") {
 		t.Errorf("the error does not name the spelling to write: %s", compiler.RouterViewRemoved)
 	}
 }

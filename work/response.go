@@ -246,6 +246,15 @@ func (r *Response) View(data value.Value, options ...any) (*Response, error) {
 	return r.answer(data, "render", options), nil
 }
 
+// Bind is router.view's answer after the page's edits, context.title("…").bind({ … }) (28/10/2026): the page
+// drawn with the names of the object, as View draws it for router.get.
+func (r *Response) Bind(data value.Value, options ...any) (*Response, error) {
+	if !r.inUISite() {
+		return r, templatePagesGone("context.bind(…)")
+	}
+	return r.View(data, options...)
+}
+
 func (r *Response) NotFound() (*Response, error) {
 	if err := r.answering("notFound"); err != nil {
 		return r, err
@@ -328,9 +337,6 @@ func (r *Response) Language(v value.Value) (*Response, error) {
 }
 func (r *Response) Meta(v value.Value) (*Response, error) {
 	return r.head("meta", func(b *ViewBuilder) { b.Meta(v) })
-}
-func (r *Response) Bind(v value.Value) (*Response, error) {
-	return r, templatePagesGone("response.bind(…)")
 }
 func (r *Response) Jsonld(args ...value.Value) (*Response, error) {
 	return r.head("jsonld", func(b *ViewBuilder) { b.Jsonld(args...) })

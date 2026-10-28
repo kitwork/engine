@@ -51,6 +51,10 @@ type Router struct {
 
 	isNotfound bool // the request answers 404 (context.notFound(), or no route)
 
+	// call is the job of router.view this request runs through the bridge, nil when it draws the page
+	// (view_call.go)
+	call *viewCall
+
 	// JIT stylesheet route: serve the tenant's site-wide JIT CSS (no JS handler, no VM).
 	// Set by .jit(); the path defaults to /jitcss.
 	isJIT bool

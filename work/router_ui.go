@@ -22,7 +22,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/jit/fonts"
 	"github.com/kitwork/engine/jit/hydrate"
 	"github.com/kitwork/engine/jit/icons"
@@ -33,17 +32,17 @@ import (
 	"github.com/kitwork/engine/value"
 )
 
-// View is router.view, the page of a folder fed by every name its function and its file declared, gone
-// since 23/10/2026: a page is the answer of a method, and it reads exactly the names of the object its view
-// is given (KITWORK_ROUTER.md mục 1, 6),
+// View is router.view, the door of a screen (28/10/2026, KITWORK_ROUTER_VIEW.md): its function runs each time
+// the page is drawn and answers context.bind({ … }); the page reads exactly the names of that object, and a
+// function in it is a job of the page, called through the bridge (view_call.go):
 //
-//	router.get((context) => context.title(product.name).view({ product }));
+//	router.view((context) => context.title("Việc cần làm").bind({ todos, add }));
 //
-// The compiler refuses router.view where it is written in a router.work (compiler.RouterViewRemoved); a
-// name it cannot follow (const r = router; r.view(…)) and a template site's router.kitwork.js fail here,
-// at the call, when the router runs at boot.
-func (f *FolderRouter) View(args ...value.Value) (*FolderMethod, error) {
-	return nil, fmt.Errorf("%s", compiler.RouterViewRemoved)
+// It is the folder's GET; a POST naming a job (Kitwork-Call) runs the same function again, then the job.
+func (f *FolderRouter) View(args ...value.Value) *FolderMethod {
+	m := f.declare("router.view", "GET", args...)
+	m.view = true
+	return m
 }
 
 // Transition says how <content /> changes when a link moves to a page of this folder (and its

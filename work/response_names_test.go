@@ -47,11 +47,11 @@ func TestReadingAMemberDoesNotAnswer(t *testing.T) {
 // not have — cache among them, the route's since 20/10/2026. A template site keeps every name it has.
 // view is not probed here: in router.work it is only ever called with an object written in place, and
 // typeof response.view, a read of it, is a compile error since 24/10/2026 (compiler/router_rules.go); every
-// page test calls it.
+// page test calls it. bind is the answer of router.view since 28/10/2026 (KITWORK_ROUTER_VIEW.md).
 func TestUIResponseShowsOnlyTheSpecNames(t *testing.T) {
 	listed := []string{"status", "type", "header", "headers", "cookie", "title", "description", "image", "meta",
-		"json", "html", "text", "svg", "file", "redirect", "notFound", "error", "url", "language", "jsonld"}
-	unlisted := []string{"cache", "persist", "bind", "send", "contentType", "isError", "isSend", "return", "errorString",
+		"json", "html", "text", "svg", "file", "redirect", "notFound", "error", "url", "language", "jsonld", "bind"}
+	unlisted := []string{"cache", "persist", "send", "contentType", "isError", "isSend", "return", "errorString",
 		"directory", "layout", "template", "string", "bytes", "setCookie", "deleteCookie", "render", "helloWorld",
 		"data", "kind", "code", "css"}
 	probe := func(names []string) string {

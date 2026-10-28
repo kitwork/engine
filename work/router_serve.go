@@ -212,6 +212,19 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 	if method == nil {
 		method = leaf.methods[r.Method]
 	}
+	// a job of router.view's page, called through the bridge: a POST to the page's URL naming it (view_call.go)
+	if method == nil && ui && r.Method == http.MethodPost && r.Header.Get(ViewCallHeader) != "" {
+		if get := leaf.methods[http.MethodGet]; get != nil && get.view {
+			call, err := readViewCall(r)
+			if err != nil {
+				answerViewCallError(reqRouter, http.StatusBadRequest, err.Error())
+				finalize()
+				return
+			}
+			reqRouter.call = call
+			method = get
+		}
+	}
 
 	// A Kitwork UI site (KITWORK_ROUTER §2, 20/10/2026): HEAD runs as GET and drops the body; a method
 	// the folder did not declare is 405 with Allow, OPTIONS is Allow. A template site keeps its 404s.
@@ -323,6 +336,9 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 					reqRouter.response.kind = ""
 					reqRouter.viewBuilder = nil
 				}
+			} else if uiRoute(match.Node) && reqRouter.response.Kind() == "render" && reqRouter.call != nil {
+				// router.view's page called a job through the bridge (view_call.go)
+				t.serveViewCall(vm, ctxObj, reqRouter, match.Node, leaf, method.handle)
 			} else if uiRoute(match.Node) && reqRouter.response.Kind() == "render" {
 				// router.work: the handler answered with context.view({ … }): the folder's .ui page
 				t.serveUIAnswer(vm, ctxObj, reqRouter, match.Node, method.handle)

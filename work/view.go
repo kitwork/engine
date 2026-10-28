@@ -58,7 +58,32 @@ func (r *Router) refuseGuardAnswer(answer string) error {
 	return errors.New(compiler.ContextAnswerInGuard("context." + answer + "(…)"))
 }
 
-func (c *Context) Bind(v value.Value) (any, error) { return nil, templatePagesGone("ctx.bind(…)") }
+// Bind is the answer of router.view (28/10/2026, KITWORK_ROUTER_VIEW.md): the folder's .ui page drawn with the
+// names of the object, as View draws it for router.get; a function among them is a job of the page, which the
+// bridge calls (view_call.go).
+func (c *Context) Bind(args ...value.Value) (*Response, error) {
+	response := c.Response()
+	if response.inUISite() {
+		data := value.New(map[string]value.Value{})
+		for _, arg := range args {
+			if arg.IsMap() {
+				data = arg
+			}
+		}
+		return response.View(data)
+	}
+	if err := response.answering("view"); err != nil {
+		return response, err
+	}
+	return response, templatePagesGone("ctx.bind(…)")
+}
+
+// ViewVar is the value of a var of router.view's function: what the page holds when the bridge calls a job,
+// initial otherwise. The compiler writes the call, var title = "" becoming var title = context.viewVar("title",
+// ""); an author never writes it (view_call.go).
+func (c *Context) ViewVar(name value.Value, initial value.Value) value.Value {
+	return c.viewVar(name, initial)
+}
 func (c *Context) Data(v value.Value) (any, error) { return nil, templatePagesGone("ctx.data(…)") }
 
 // The page's text from the context. In router.work each is the response's edit, before the answer:
