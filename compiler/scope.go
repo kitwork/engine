@@ -123,6 +123,11 @@ type binding struct {
 	kitworkEnvironment bool
 	kitworkRoot        bool
 	environmentHeld    environmentHeld
+	// sqlText: a const or a let whose every value so far is constant text (sqlConstant), which may join SQL
+	// text; sqlGlued: the first value its text glues in (sqlGlue), nil when none. Read where query(…) takes
+	// its SQL (database_injection.go).
+	sqlText  bool
+	sqlGlued Expression
 }
 
 type lexicalScope struct {
@@ -568,6 +573,7 @@ func (r *resolver) statement(statement Statement) {
 		}
 		r.holdEnvironment(node)
 		r.bindHTTP(node)
+		r.holdSQL(node)
 	case *ExpressionStatement:
 		r.expression(node.Expression)
 	case *GroupStatement:
@@ -783,6 +789,7 @@ func (r *resolver) expression(expression Expression) {
 	case *AssignmentExpression:
 		r.target(node.Name)
 		r.expression(node.Value)
+		r.assignSQL(node)
 		if object, key := onceParts(node); object || key {
 			r.onces = append(r.onces, node)
 		}

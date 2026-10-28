@@ -348,6 +348,10 @@ func (r *resolver) externalQuery(root *Identifier, links []*MethodCallExpression
 			r.where(query.Method.Token), root.Value, root.Value))
 		return true
 	}
+	if glued := r.sqlGlue(query.Arguments[0]); glued != nil {
+		r.fail(r.sqlInjection(root, query, glued))
+		return true
+	}
 	if len(links) > 1 {
 		// crm.query(…).map(…): the resolver reads the outer calls and comes back to query
 		return false
