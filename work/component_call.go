@@ -27,7 +27,7 @@ import (
 //
 //	POST /cart
 //	Kitwork-Call: shop-cart.checkout
-//	{ "args": [], "vars": { …the page's }, "seq": 5, "at": "c1", "scope": { "items": [ … ] } }
+//	{ "args": [], "vars": { …the page's }, "seq": 5, "revs": { …the page's }, "at": "c1", "scope": { "items": [ … ] } }
 //
 // The folder's guards and the origin check run as for any POST of it, then the view's function. The server
 // draws the page from what it bound to find the instance at that place, the component it is and the inputs
@@ -35,9 +35,10 @@ import (
 // theirs. The page does not draw that component there: 404, as for a job the page does not have. Then the
 // component's function runs with those inputs and the instance's vars, the job runs on what it bound, the vars
 // are read back (__state), the view's function and the component's run again, and the answer is what changed:
-// the page's data as for a job of the page, and the instance's under its place.
+// the page's data as for a job of the page (with its revisions, on a page that holds its data in the browser),
+// and the instance's under its place.
 //
-//	{ "seq": 5, "components": { "c1": { "patch": { "items": [], "done": true } } } }
+//	{ "seq": 5, "patch": { "count": 2 }, "revs": { "count": "9c0e…" }, "components": { "c1": { "patch": { "items": [], "done": true } } } }
 
 // componentModule is "kitwork/component" (KITWORK_ENGINE.md mục 6): define, which only the loader of a
 // component's job reads (componentDefines); anywhere else it says where a component is defined.
@@ -224,6 +225,22 @@ func (t *Tenant) serveComponentCall(vm *runtime.VM, ctxObj *Context, reqRouter *
 	component, name, _ := strings.Cut(call.name, ".")
 	data := response.Data()
 	before := viewSnapshot(data)
+	// the page's vars: its own, never sent whole, never given a revision (view_patch.go staleRevs)
+	pageVars := map[string]bool{}
+	for key := range call.vars {
+		pageVars[key] = true
+	}
+	if data.IsMap() {
+		if v, ok := data.Map()[compiler.ViewStateName]; ok && v.K == value.Func {
+			if fn, _ := v.V.(*value.Lambda); fn != nil {
+				if held := vm.ExecuteLambda(fn, nil); held.IsMap() {
+					for key := range held.Map() {
+						pageVars[key] = true
+					}
+				}
+			}
+		}
+	}
 	instance, found := t.viewInstances(vm, reqRouter, node, handler, data)[call.at]
 	if !found || instance.Name != component {
 		answerViewCallError(reqRouter, http.StatusNotFound, fmt.Sprintf("trang này không vẽ %s ở chỗ %s", component, call.at))
@@ -290,13 +307,24 @@ func (t *Tenant) serveComponentCall(vm *runtime.VM, ctxObj *Context, reqRouter *
 		return
 	}
 	after := response.Data()
-	patch, lists := viewPatch(before, viewSnapshot(after), t.viewListKeys(node))
 	answer := map[string]any{"seq": call.seq}
-	if len(patch) > 0 {
-		answer["patch"] = patch
-	}
-	if len(lists) > 0 {
-		answer["lists"] = lists
+	// the page's data the job changed, for a page that holds its data in the browser (one that runs in the
+	// kernel), as a job of the page answers it (view_call.go): by name, a list by row, and whole for a name the
+	// page held at another revision than the run before the job; a page the server draws whole holds none
+	if page := t.viewPage(node); page != nil && page.Live() {
+		now := viewSnapshot(after)
+		patch, lists := viewPatch(before, now, t.viewListKeys(node))
+		if call.revs != nil {
+			if revs := staleRevs(call.revs, before, now, pageVars, patch, lists); len(revs) > 0 {
+				answer["revs"] = revs
+			}
+		}
+		if len(patch) > 0 {
+			answer["patch"] = patch
+		}
+		if len(lists) > 0 {
+			answer["lists"] = lists
+		}
 	}
 	// the instance again, its inputs read where it stands on the page as it is now; a page that no longer
 	// draws it there has nothing of it to change

@@ -3,6 +3,7 @@ package work
 import (
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -200,5 +201,124 @@ func TestComponentJobOnAPageWithJobsOfItsOwn(t *testing.T) {
 	}
 	if _, has := cart["patch"]; has {
 		t.Errorf("the cart's job changed nothing of the page: %v", cart)
+	}
+}
+
+// ordersSite is a page that runs in the kernel and holds the cart, whose checkout writes the orders the page
+// counts: a job of the cart changes the page's data.
+func ordersSite(t *testing.T) *Tenant {
+	t.Helper()
+	logic := "import * as component from \"kitwork/component\";\nimport { datastore } from \"kitwork/storage\";\n" +
+		"const orders = datastore(\"shop\").segment(\"orders\");\n" +
+		"component.define(\"shop-cart\", (context) => {\n" +
+		"  var items = [];\n" +
+		"  const add = (name) => { items = items.concat([{ id: items.length + 1, name: name }]); };\n" +
+		"  const checkout = () => { orders.set((orders.get() ?? []).concat([items.length])); items = []; };\n" +
+		"  return context.bind({ items, add, checkout });\n" +
+		"});\n"
+	tn := NewTenant(writeSite(t, map[string]string{
+		"router.work":     `import * as router from "kitwork/router";`,
+		"view.ui":         "<view><content /></view>",
+		"components.work": logic,
+		"shop/content.ui": `<content><input value="{{ note }}" /><text>{{ count }} đơn</text>` +
+			`<shop-cart><button click="add('trà')">Thêm</button><button click="checkout()">Đặt</button></shop-cart></content>`,
+		"shop/router.work": "import * as router from \"kitwork/router\";\nimport { datastore } from \"kitwork/storage\";\n" +
+			"const orders = datastore(\"shop\").segment(\"orders\");\n" +
+			"router.view((context) => {\n  var note = \"\";\n  const count = (orders.get() ?? []).length;\n" +
+			"  return context.bind({ note, count });\n});\n",
+	}), "localhost")
+	if err := tn.Run(); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	return tn
+}
+
+// A job of a component answers the page's revisions as a job of the page does (view_patch.go staleRevs): the
+// tab that called holds the new revision of what the job changed of the page, a call that changes nothing of
+// the page sends nothing of it to a tab up to date, and a tab drawn before another tab's checkout gets the
+// count whole on its next call of the cart, though that call changed nothing of the page. A var has no
+// revision.
+//
+// CONTROL (go test -overlay, 28/10/2026): with serveComponentCall answering the page's data without revisions
+// (the staleRevs block taken out), this test went red: the checkout answered no revision of count, and tab B's
+// add answered no count, the tab left showing "0 đơn" over two orders.
+func TestComponentJobAnswersThePagesRevisions(t *testing.T) {
+	tn := ordersSite(t)
+	page := serveGet(tn, "/shop", nil).Body.String()
+	m := regexp.MustCompile(`data-kitwork-page>(.*?)</script>`).FindStringSubmatch(page)
+	if m == nil {
+		t.Fatalf("no data block:\n%.2000s", page)
+	}
+	var block struct {
+		Revs map[string]string `json:"revs"`
+	}
+	if err := json.Unmarshal([]byte(m[1]), &block); err != nil || block.Revs["count"] == "" {
+		t.Fatalf("the page should carry the revision of count: %v %s", err, m[1])
+	}
+	tabA, tabB := map[string]string{}, map[string]string{}
+	for k, v := range block.Revs {
+		tabA[k], tabB[k] = v, v
+	}
+	call := func(revs map[string]string, job string) (map[string]any, string) {
+		held, _ := json.Marshal(revs)
+		r := postCall(tn, "/shop", job, `{"args":["trà"],"vars":{"note":""},"seq":1,"revs":`+string(held)+`,"at":"c1","scope":{"items":[{"id":1,"name":"trà"}]}}`)
+		if r.Code != http.StatusOK {
+			t.Fatalf("%s: %d %s", job, r.Code, r.Body.String())
+		}
+		answer := componentAnswer(t, r.Body.String())
+		if got, ok := answer["revs"].(map[string]any); ok {
+			for k, v := range got {
+				revs[k], _ = v.(string)
+			}
+		}
+		return answer, r.Body.String()
+	}
+
+	answer, body := call(tabA, "shop-cart.checkout")
+	if patch, _ := answer["patch"].(map[string]any); patch["count"] != float64(1) {
+		t.Errorf("the checkout changed the page's count: %s", body)
+	}
+	revs, _ := answer["revs"].(map[string]any)
+	if revs["count"] == nil || revs["count"] == block.Revs["count"] {
+		t.Errorf("the tab that called should get the new revision of count: %s", body)
+	}
+	if _, has := revs["note"]; has {
+		t.Errorf("a var has no revision: %s", body)
+	}
+	if components, _ := answer["components"].(map[string]any); components["c1"] == nil {
+		t.Errorf("the cart's own data comes as before: %s", body)
+	}
+	call(tabA, "shop-cart.checkout") // two orders now
+
+	// tab A holds the count as it is: an add changes nothing of the page, and nothing of it comes
+	answer, body = call(tabA, "shop-cart.add")
+	if answer["patch"] != nil || answer["revs"] != nil {
+		t.Errorf("a tab up to date gets nothing of the page from a job that changed none of it: %s", body)
+	}
+
+	// tab B was drawn before both orders: its add brings the count whole, and its revision
+	answer, body = call(tabB, "shop-cart.add")
+	if patch, _ := answer["patch"].(map[string]any); patch["count"] != float64(2) {
+		t.Errorf("a tab drawn before the orders should get the count whole (2): %s", body)
+	}
+	if tabB["count"] != tabA["count"] {
+		t.Errorf("tab B should hold tab A's revision of count now: %v %v", tabA, tabB)
+	}
+}
+
+// A page the server draws whole (no var, no job of its own) holds none of its data in the browser: a job of the
+// cart on it sends nothing of the page's data, though the browser sends revisions.
+//
+// CONTROL (go test -overlay, 28/10/2026): with serveComponentCall answering the page's data on every page (the
+// Live check taken out), this test went red: the answer carried user whole and its revision.
+func TestComponentJobOnAPageDrawnWholeSendsNoPageData(t *testing.T) {
+	tn := cartSite(t)
+	r := postCall(tn, "/cart", "shop-cart.checkout", `{"args":[],"vars":{},"seq":1,"revs":{},"at":"c1","scope":{"items":[]}}`)
+	answer := componentAnswer(t, r.Body.String())
+	if answer["patch"] != nil || answer["revs"] != nil || answer["lists"] != nil {
+		t.Errorf("a page drawn whole gets nothing of its data: %s", r.Body.String())
+	}
+	if components, _ := answer["components"].(map[string]any); components["c1"] == nil {
+		t.Errorf("the cart's own data comes as before: %s", r.Body.String())
 	}
 }
