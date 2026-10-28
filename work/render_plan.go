@@ -18,6 +18,8 @@ type RenderPlan struct {
 	base   string
 	ui     *uiSite
 	closed bool
+	// components holds each components.work compiled for the bridge, by its path (component_call.go)
+	components sync.Map
 }
 
 func newRenderPlan(t *Tenant, tree *RouteTree) (*RenderPlan, error) {

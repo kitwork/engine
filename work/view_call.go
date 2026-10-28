@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/runtime"
@@ -30,6 +31,9 @@ import (
 //
 // A job that sends the page away (context.redirect) answers { seq, redirect }; one that fails answers
 // { seq, error: { code, message } } with that code. A job's return value is dropped.
+//
+// A job of a component of the site the page draws is called the same way, named shop-cart.checkout, with the
+// place the instance is called from and its vars (component_call.go).
 
 // ViewCallHeader names the job of a call; the page's URL is the address (KITWORK_ROUTER_VIEW.md câu 7b is
 // still open between this header and a query).
@@ -56,12 +60,15 @@ func (c *Context) viewVar(name value.Value, initial value.Value) value.Value {
 
 // viewCall is one call of a job of the page: its name, its arguments and the vars the page held, as the
 // browser sent them, none of them trusted, like any argument; seq is the call's number, sent back with its
-// answer.
+// answer. A job of a component (shop-cart.checkout) also names the place its instance is called from (at)
+// and carries the instance's vars (scope).
 type viewCall struct {
-	name string
-	args []value.Value
-	vars map[string]value.Value
-	seq  float64
+	name  string
+	args  []value.Value
+	vars  map[string]value.Value
+	seq   float64
+	at    string
+	scope map[string]value.Value
 }
 
 // readViewCall reads the call of a POST that names a job; an error is the request's own (400).
@@ -78,9 +85,11 @@ func readViewCall(r *http.Request) (*viewCall, error) {
 		return nil, fmt.Errorf("lời gọi quá %d byte", viewCallLimit)
 	}
 	var sent struct {
-		Args []any          `json:"args"`
-		Vars map[string]any `json:"vars"`
-		Seq  float64        `json:"seq"`
+		Args  []any          `json:"args"`
+		Vars  map[string]any `json:"vars"`
+		Seq   float64        `json:"seq"`
+		At    string         `json:"at"`
+		Scope map[string]any `json:"scope"`
 	}
 	if len(bytes.TrimSpace(body)) > 0 {
 		if err := json.Unmarshal(body, &sent); err != nil {
@@ -96,11 +105,41 @@ func readViewCall(r *http.Request) (*viewCall, error) {
 			call.vars[key] = value.New(v)
 		}
 	}
+	if strings.Contains(name, ".") {
+		// a job of a component: the place of its instance on the page, and the instance's vars
+		if !componentPlace(sent.At) {
+			return nil, fmt.Errorf("việc %s của component cần chỗ gọi của instance (at)", name)
+		}
+		call.at, call.scope = sent.At, map[string]value.Value{}
+		for key, v := range sent.Scope {
+			if visibleName(key) {
+				call.scope[key] = value.New(v)
+			}
+		}
+	}
 	return call, nil
 }
 
-// jobName reports whether name can be a job's: a name the page reads, letters, digits, _ and $, at most 64.
+// componentPlace reports whether at can be the place a component is called from, as the page writes it: c and a
+// number.
+func componentPlace(at string) bool {
+	if len(at) < 2 || len(at) > 12 || at[0] != 'c' {
+		return false
+	}
+	for _, r := range at[1:] {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// jobName reports whether name can be a job's: a name the page reads, letters, digits, _ and $, at most 64; or
+// a job of a component, its name, a dot and the job's (shop-cart.checkout).
 func jobName(name string) bool {
+	if component, job, ok := strings.Cut(name, "."); ok {
+		return len(component) <= 64 && siteComponentName(component) && jobName(job)
+	}
 	if name == "" || len(name) > 64 || !visibleName(name) {
 		return false
 	}
@@ -119,6 +158,10 @@ func jobName(name string) bool {
 // again and answers what changed; called after the function answered context.bind({ … }), on the VM it ran on.
 func (t *Tenant) serveViewCall(vm *runtime.VM, ctxObj *Context, reqRouter *Router, node *RouteNode, leaf *FolderRouter, handler *value.Lambda) {
 	call := reqRouter.call
+	if call.at != "" {
+		t.serveComponentCall(vm, ctxObj, reqRouter, node, leaf, handler) // a job of a component (component_call.go)
+		return
+	}
 	response := reqRouter.response
 	data := response.Data()
 	before := viewSnapshot(data) // as JSON reads it back: a job that changes a value in place still differs
@@ -237,4 +280,19 @@ func answerViewCallError(reqRouter *Router, code int, message string) {
 		"seq":   value.New(seq),
 		"error": value.New(map[string]value.Value{"code": value.New(code), "message": value.New(message)}),
 	}), code)
+}
+
+// siteComponentName reports whether name is a component of the site's: lowercase words and digits joined by
+// single dashes, at least one dash (ui componentName, siteName).
+func siteComponentName(name string) bool {
+	if name == "" || name[0] < 'a' || name[0] > 'z' || !strings.Contains(name, "-") || strings.HasSuffix(name, "-") || strings.Contains(name, "--") {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
+			return false
+		}
+	}
+	return true
 }

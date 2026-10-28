@@ -93,6 +93,9 @@ type KitWork struct {
 	// folderSettings collects the calls the config.work of .shared/queue/ or of .schedule/ makes while the
 	// loader runs it (background_config.go): queue.parallel(4), schedule.keep("7d").
 	folderSettings *folderSettings
+	// componentDefines collects the components components.work defines while the loader of a component's
+	// job runs it (component_call.go)
+	componentDefines *componentDefines
 }
 
 // MissingMember is a word the module kitwork has not. An older word of it (sqlite, removed on 22/10/2026;

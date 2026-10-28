@@ -1,0 +1,204 @@
+package work
+
+import (
+	"encoding/json"
+	"net/http"
+	"strings"
+	"testing"
+)
+
+// cartComponent is a component of the site whose jobs go through the bridge (28/10/2026, KITWORK_COMPONENTS.md
+// mục 8): an input the page passes (owner, required), one with a default the call overrides (shippingFee), vars,
+// and jobs; checkout writes what it read of its inputs into a var, for the tests to see where they came from.
+const cartComponent = "import * as component from \"kitwork/component\";\n" +
+	"component.define(\"shop-cart\", (context) => {\n" +
+	"  const { owner, shippingFee = 15000 } = context.attributes();\n" +
+	"  var items = [];\n" +
+	"  var done = false;\n" +
+	"  var receipt = \"\";\n" +
+	"  const add = (name) => { items = items.concat([{ id: items.length + 1, name: name }]); done = false; };\n" +
+	"  const checkout = () => { receipt = owner + \":\" + shippingFee + \":\" + items.length; items = []; done = true; };\n" +
+	"  return context.bind({ items, done, receipt, shippingFee, add, checkout });\n" +
+	"});\n"
+
+// cartSite is a site whose page /cart draws the cart; /plain draws no cart, /locked draws it behind a guard
+// that refuses everyone.
+func cartSite(t *testing.T) *Tenant {
+	t.Helper()
+	cart := `<content><shop-cart owner="{{ user }}" shipping-fee="{{ 20000 }}" flex="column">` +
+		`<list><item for="line of items; key: line.id"><text>{{ line.name }}</text></item></list>` +
+		`<button click="add('cà phê')">Thêm</button><button click="checkout()" disabled="{{ checkout.pending }}">Đặt</button>` +
+		`<text show="done">Đã nhận</text><text>{{ receipt }}</text></shop-cart></content>`
+	view := "import * as router from \"kitwork/router\";\nrouter.view((context) => {\n  const user = \"an\";\n  return context.bind({ user });\n});\n"
+	tn := NewTenant(writeSite(t, map[string]string{
+		"router.work":       `import * as router from "kitwork/router";`,
+		"view.ui":           "<view><content /></view>",
+		"components.work":   cartComponent,
+		"cart/content.ui":   cart,
+		"cart/router.work":  view,
+		"plain/content.ui":  `<content><text>{{ user }}</text></content>`,
+		"plain/router.work": view,
+		"locked/content.ui": cart,
+		"locked/router.work": "import * as router from \"kitwork/router\";\nrouter.guard((context) => false);\n" +
+			"router.view((context) => {\n  const user = \"an\";\n  return context.bind({ user });\n});\n",
+	}), "localhost")
+	if err := tn.Run(); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	return tn
+}
+
+// The page draws the cart as a component the browser runs: its host names it and the place it is called from,
+// what is written inside it is the kernel's, the components the page holds close its content, and the page loads
+// the kernel and call.js though its own view binds no job.
+func TestComponentWithJobsIsDrawnForTheBridge(t *testing.T) {
+	tn := cartSite(t)
+	r := serveGet(tn, "/cart", nil)
+	body := r.Body.String()
+	if r.Code != http.StatusOK {
+		t.Fatalf("/cart: %d\n%.1500s", r.Code, body)
+	}
+	for _, part := range []string{
+		`data-kitwork-component="shop-cart"`, `data-kitwork-at="c1"`, `data-kitwork-scope="shippingFee: 20000"`,
+		`data-kitwork-event="click: checkout()"`, `data-kitwork-event="click: add(&#39;cà phê&#39;)"`,
+		`<!--kit-for:start id=s1-->`, `<script type="application/json" data-kitwork-components>`,
+		`"jobs":["add","checkout"]`, `"vars":["done","items","receipt"]`, `/_kitwork/kernel.`, `/_kitwork/call.`,
+	} {
+		if !strings.Contains(body, part) {
+			t.Errorf("/cart lacks %q\n%.3000s", part, body)
+		}
+	}
+	if strings.Contains(body, "owner") {
+		t.Errorf("owner is an input the look does not read: it stays on the server\n%.3000s", body)
+	}
+}
+
+// componentAnswer reads a call's JSON answer.
+func componentAnswer(t *testing.T, body string) map[string]any {
+	t.Helper()
+	var answer map[string]any
+	if err := json.Unmarshal([]byte(body), &answer); err != nil {
+		t.Fatalf("no JSON: %v %.300s", err, body)
+	}
+	return answer
+}
+
+// A job of the cart runs on the instance the page draws at that place: its inputs read where the call stands
+// (owner from the page's user, shippingFee 20000 as the call writes it), its vars as the browser sent them; the
+// answer is what changed of that instance, never the page, never the page's data it did not touch.
+//
+// CONTROL (go test -overlay, 28/10/2026): with runComponent handing the function the vars the browser sent as its
+// inputs (attributes: value.New(call.scope)), this test went red: receipt "mallory:0:2", the inputs the browser
+// forged.
+func TestComponentJobRunsOnTheInstanceThePageDraws(t *testing.T) {
+	tn := cartSite(t)
+	// the browser sends owner and shippingFee among the vars: they are no vars, and inputs never come from it
+	r := postCall(tn, "/cart", "shop-cart.checkout",
+		`{"args":[],"vars":{},"seq":5,"at":"c1","scope":{"items":[{"id":1,"name":"a"},{"id":2,"name":"b"}],"done":false,"receipt":"","owner":"mallory","shippingFee":0}}`)
+	if r.Code != http.StatusOK {
+		t.Fatalf("checkout: %d %.600s", r.Code, r.Body.String())
+	}
+	answer := componentAnswer(t, r.Body.String())
+	if answer["seq"] != float64(5) {
+		t.Errorf("seq %v, want the call's 5", answer["seq"])
+	}
+	components, _ := answer["components"].(map[string]any)
+	mine, _ := components["c1"].(map[string]any)
+	patch, _ := mine["patch"].(map[string]any)
+	if patch["receipt"] != "an:20000:2" {
+		t.Errorf("receipt %v, want an:20000:2 (inputs where the call stands, items as sent)", patch["receipt"])
+	}
+	if patch["done"] != true || len(patch["items"].([]any)) != 0 {
+		t.Errorf("patch %v, want done true and items []", patch)
+	}
+	if _, has := patch["shippingFee"]; has {
+		t.Errorf("shippingFee did not change: %v", patch)
+	}
+	if _, has := answer["patch"]; has {
+		t.Errorf("the page's data did not change: %.300s", r.Body.String())
+	}
+	if strings.Contains(r.Body.String(), "<") {
+		t.Errorf("the answer is data, never HTML: %.300s", r.Body.String())
+	}
+}
+
+// What the page does not draw is no door: a place where it draws nothing, another component's name at the
+// cart's place, a name the cart does not bind as a job, the cart's job on a page that does not draw it; and a
+// call of a component with no place is the request's error.
+//
+// CONTROL (go test -overlay, 28/10/2026): with serveComponentCall running what components.work defines under the
+// name whether the page draws it there or not, this test went red: /plain answered 200, the cart's job run through a
+// page that does not draw it, c9 on /cart 200, and other-cart a 404 of components.work, not of the page.
+func TestComponentJobOnlyWhereThePageDrawsIt(t *testing.T) {
+	tn := cartSite(t)
+	for _, c := range []struct {
+		path, job, body, says string
+		code                  int
+	}{
+		{"/cart", "shop-cart.checkout", `{"at":"c9"}`, "không vẽ shop-cart ở chỗ c9", http.StatusNotFound},
+		{"/cart", "other-cart.checkout", `{"at":"c1"}`, "không vẽ other-cart ở chỗ c1", http.StatusNotFound},
+		{"/cart", "shop-cart.save", `{"at":"c1"}`, "shop-cart không có việc save", http.StatusNotFound},
+		{"/cart", "shop-cart.items", `{"at":"c1"}`, "shop-cart không có việc items", http.StatusNotFound},
+		{"/plain", "shop-cart.checkout", `{"at":"c1"}`, "không vẽ shop-cart ở chỗ c1", http.StatusNotFound},
+		{"/cart", "shop-cart.checkout", `{}`, "cần chỗ gọi", http.StatusBadRequest},
+		{"/cart", "shop-cart.checkout", `{"at":"../c1"}`, "cần chỗ gọi", http.StatusBadRequest},
+	} {
+		r := postCall(tn, c.path, c.job, c.body)
+		if r.Code != c.code || !strings.Contains(r.Body.String(), c.says) {
+			t.Errorf("%s %s %s: %d %s, want %d saying %q", c.path, c.job, c.body, r.Code, r.Body.String(), c.code, c.says)
+		}
+	}
+}
+
+// A job of a component runs under the guard of the page that draws it: a guard that refuses refuses the job.
+func TestComponentJobRunsUnderThePagesGuard(t *testing.T) {
+	tn := cartSite(t)
+	r := postCall(tn, "/locked", "shop-cart.checkout", `{"at":"c1","scope":{"items":[]}}`)
+	if r.Code != http.StatusForbidden {
+		t.Fatalf("locked checkout: %d %.300s, want 403", r.Code, r.Body.String())
+	}
+	if strings.Contains(r.Body.String(), "components") {
+		t.Errorf("a refused job changes nothing: %.300s", r.Body.String())
+	}
+}
+
+// A page whose own view binds a var and a job, and that holds the cart: the page is compiled for the kernel, not
+// to a program (a page holding a component is not, yet), and both the page's job and the cart's run through the
+// bridge, each answering its own data.
+func TestComponentJobOnAPageWithJobsOfItsOwn(t *testing.T) {
+	tn := NewTenant(writeSite(t, map[string]string{
+		"router.work":     `import * as router from "kitwork/router";`,
+		"view.ui":         "<view><content /></view>",
+		"components.work": cartComponent,
+		"shop/content.ui": `<content><input value="{{ note }}" /><button click="save()">Lưu</button><text>{{ saved }}</text>` +
+			`<shop-cart owner="{{ user }}"><button click="checkout()">Đặt</button><text>{{ receipt }}</text></shop-cart></content>`,
+		"shop/router.work": "import * as router from \"kitwork/router\";\nrouter.view((context) => {\n" +
+			"  var note = \"\";\n  var saved = \"\";\n  const user = \"an\";\n" +
+			"  const save = () => { saved = note; };\n" +
+			"  return context.bind({ note, saved, user, save });\n});\n",
+	}), "localhost")
+	if err := tn.Run(); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	body := serveGet(tn, "/shop", nil).Body.String()
+	for _, part := range []string{`data-kitwork-component="shop-cart" data-kitwork-at="c1"`, `data-kitwork-components>`, `data-kitwork-page>`, `data-kitwork-event="click: save()"`} {
+		if !strings.Contains(body, part) {
+			t.Errorf("/shop lacks %q\n%.3000s", part, body)
+		}
+	}
+	if strings.Contains(body, `"program"`) {
+		t.Errorf("a page holding a component has no program yet\n%.3000s", body)
+	}
+	page := componentAnswer(t, postCall(tn, "/shop", "save", `{"args":[],"vars":{"note":"giao trước 9 giờ","saved":""},"seq":1}`).Body.String())
+	if patch, _ := page["patch"].(map[string]any); patch["saved"] != "giao trước 9 giờ" {
+		t.Errorf("the page's job: %v", page)
+	}
+	cart := componentAnswer(t, postCall(tn, "/shop", "shop-cart.checkout", `{"args":[],"vars":{"note":"x","saved":""},"seq":2,"at":"c1","scope":{"items":[{"id":1}],"done":false,"receipt":""}}`).Body.String())
+	mine, _ := cart["components"].(map[string]any)["c1"].(map[string]any)
+	if patch, _ := mine["patch"].(map[string]any); patch["receipt"] != "an:15000:1" {
+		t.Errorf("the cart's job: %v", cart)
+	}
+	if _, has := cart["patch"]; has {
+		t.Errorf("the cart's job changed nothing of the page: %v", cart)
+	}
+}
