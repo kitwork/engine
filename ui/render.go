@@ -43,8 +43,10 @@ type run struct {
 	mark       string
 	markHidden bool
 	// instances, when not nil, gathers each component whose jobs go through the bridge as it is drawn
-	// (Page.Instances); component runs a component's function as its call is drawn (Request.Component)
+	// (Page.Instances), but for those under an if false for this render (falseIfs, component_live.go);
+	// component runs a component's function as its call is drawn (Request.Component)
 	instances map[string]Instance
+	falseIfs  int
 	component func(Instance) map[string]any
 	// revs are the revisions of the page's data, written in its data block (Request.Revs)
 	revs map[string]string
@@ -225,6 +227,9 @@ type elemOp struct {
 	at         string
 	instanceOf *componentDef
 	components **liveComponents
+	// liveIf: an if of a page that runs in the kernel, drawn as a show (runtime.go bindPairs); while false, what
+	// the element holds is drawn hidden and is no instance a job may be called on (component_live.go)
+	liveIf *expr
 }
 
 func (o *elemOp) render(r *run, scope map[string]any) {
@@ -280,6 +285,12 @@ func (o *elemOp) renderOne(r *run, scope map[string]any) {
 		for i, b := range o.bindings {
 			values[i] = b.in.value(scope)
 		}
+	}
+	// an if the browser keeps up to date, false for this render: what it holds is drawn hidden, and is no
+	// instance a job may be called on (component_live.go)
+	if o.liveIf != nil && !truthy(o.liveIf.eval(scope)) {
+		r.falseIfs++
+		defer func() { r.falseIfs-- }()
 	}
 	// a component of the site, run for this request: the data of its bind, and on the host of one the browser
 	// runs, every name of it for the kernel to start the instance from (component_live.go)

@@ -3,6 +3,7 @@ package work
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
@@ -416,5 +417,53 @@ func TestComponentThatFailsAsThePageIsDrawnFailsTheRequest(t *testing.T) {
 	}
 	if strings.Contains(r.Body.String(), "trước") {
 		t.Errorf("no page half drawn: %.600s", r.Body.String())
+	}
+}
+
+// A page that runs in the kernel draws the admin tools inside an if of its data, hidden for a visitor: their job
+// is no visitor's to call (404, as for a component the page does not draw), and an admin's call runs.
+//
+// CONTROL (go test -overlay, 28/10/2026): with noteInstance counting an instance under a false if, the visitor's
+// wipe answered 200 and ran.
+func TestComponentJobUnderAFalseIfIsNotFound(t *testing.T) {
+	logic := "import * as component from \"kitwork/component\";\n" +
+		"component.define(\"admin-tools\", (context) => {\n  var done = false;\n  const wipe = () => { done = true; };\n" +
+		"  return context.bind({ done, wipe });\n});\n"
+	tn := NewTenant(writeSite(t, map[string]string{
+		"router.work":     `import * as router from "kitwork/router";`,
+		"view.ui":         "<view><content /></view>",
+		"components.work": logic,
+		"admin/content.ui": `<content><input value="{{ note }}" /><box if="isAdmin"><admin-tools><button click="wipe()">Xoá hết</button>` +
+			`<text show="done">Đã xoá</text></admin-tools></box></content>`,
+		"admin/router.work": "import * as router from \"kitwork/router\";\nrouter.view((context) => {\n  var note = \"\";\n" +
+			"  const isAdmin = context.cookie(\"role\") == \"admin\";\n  return context.bind({ note, isAdmin });\n});\n",
+	}), "localhost")
+	if err := tn.Run(); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if body := serveGet(tn, "/admin", nil).Body.String(); !strings.Contains(body, `data-kitwork-at="c1"`) {
+		t.Fatalf("the page draws the tools hidden for the browser:\n%.2000s", body)
+	}
+	call := func(cookie string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "http://localhost/admin?"+ViewCallParameter+"=admin-tools.wipe",
+			strings.NewReader(`{"args":[],"vars":{"note":""},"seq":1,"at":"c1","scope":{"done":false}}`))
+		req.Header.Set("Content-Type", "application/json")
+		if cookie != "" {
+			req.Header.Set("Cookie", cookie)
+		}
+		rec := httptest.NewRecorder()
+		tn.Serve(rec, req)
+		return rec
+	}
+	if r := call(""); r.Code != http.StatusNotFound || !strings.Contains(r.Body.String(), "không vẽ admin-tools ở chỗ c1") {
+		t.Errorf("a visitor's wipe: %d %s, want 404", r.Code, r.Body.String())
+	}
+	r := call("role=admin")
+	if r.Code != http.StatusOK {
+		t.Fatalf("an admin's wipe: %d %s", r.Code, r.Body.String())
+	}
+	mine, _ := componentAnswer(t, r.Body.String())["components"].(map[string]any)["c1"].(map[string]any)
+	if patch, _ := mine["patch"].(map[string]any); patch["done"] != true {
+		t.Errorf("an admin's wipe runs: %s", r.Body.String())
 	}
 }

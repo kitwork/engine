@@ -561,6 +561,7 @@ func (s *frame) bindPairs(n *Node, o *elemOp) ([]string, error) {
 		if client, err := s.onClient(o.ifExpr, n, nil); err != nil {
 			return nil, err
 		} else if client {
+			o.liveIf = o.ifExpr // false, what it holds is no instance a job may be called on (component_live.go)
 			if o.showExpr == nil {
 				o.showExpr = o.ifExpr
 			} else {

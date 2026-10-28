@@ -364,9 +364,13 @@ func (o *elemOp) instancePairs(own map[string]any) string {
 	return strings.Join(pairs, "; ")
 }
 
-// noteInstance records the instance of a call as the page draws it.
+// noteInstance records the instance of a call as the page draws it. One under an if that is false for this
+// render is none: on a page that runs in the kernel such an if is drawn hidden, so that the browser can show it
+// without a reload, but the page does not draw it for this request, and its jobs are not this caller's to call
+// (<box if="isAdmin"><admin-tools>…</admin-tools></box>). Once the data makes the if true, the page the server
+// draws for the call holds it, and its jobs answer.
 func (o *elemOp) noteInstance(r *run, values []any) {
-	if o.at == "" || r.instances == nil {
+	if o.at == "" || r.instances == nil || r.falseIfs > 0 {
 		return
 	}
 	inputs := make(map[string]any, len(o.bindings))

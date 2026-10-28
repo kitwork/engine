@@ -231,3 +231,37 @@ component.define("shop-badge", (context) => {
 	mustContain(t, plain, `data-kitwork-scope="shippingFee: 20000"`, `>Giỏ hàng</p>`)
 	mustNotContain(t, plain, "Giỏ của an", "2 đơn")
 }
+
+// On a page that runs in the kernel an if of the page's data is drawn hidden, for the browser to show it without a
+// reload; a component it holds is drawn too, hidden. While the if is false for the request, that component is no
+// instance a job may be called on: the server finds none at its place. True, it is.
+//
+// CONTROL (go test -overlay, 28/10/2026): with noteInstance counting an instance under a false if, this test went
+// red: the admin tools were an instance at c1 for a visitor who is not an admin, and their job answered.
+func TestInstanceUnderAFalseIfIsNone(t *testing.T) {
+	logic := `import * as component from "kitwork/component";
+component.define("admin-tools", (context) => {
+  var done = false;
+  const wipe = () => { done = true; };
+  return context.bind({ done, wipe });
+});
+`
+	route := "import * as router from \"kitwork/router\";\nrouter.view((context) => {\n  var note = \"\";\n  const isAdmin = false;\n" +
+		"  return context.bind({ note, isAdmin });\n});\n"
+	content := `<content><input value="{{ note }}" /><box if="isAdmin"><admin-tools><button click="wipe()">Xoá hết</button></admin-tools></box></content>`
+	page, err := compileLiveCart(t, liveCartFiles(logic, route, content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	visitor := map[string]any{"note": "", "isAdmin": false}
+	if html := page.Render(Request{Path: "/cart", Scope: visitor}); !strings.Contains(html, `data-kitwork-at="c1"`) {
+		t.Fatalf("the page still draws the tools, hidden, for the browser to show them without a reload:\n%s", html)
+	}
+	if instances := page.Instances(Request{Path: "/cart", Scope: visitor}); len(instances) != 0 {
+		t.Errorf("under a false if the tools are no instance: %+v", instances)
+	}
+	admin := map[string]any{"note": "", "isAdmin": true}
+	if tools, ok := page.Instances(Request{Path: "/cart", Scope: admin})["c1"]; !ok || tools.Name != "admin-tools" {
+		t.Errorf("under a true if the tools are the instance at c1: %+v", tools)
+	}
+}
