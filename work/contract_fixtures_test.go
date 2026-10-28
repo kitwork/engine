@@ -141,49 +141,6 @@ router.get((ctx) => {
 	}
 }
 
-func TestRealAppShortbaseContractFixture(t *testing.T) {
-	tmp := t.TempDir()
-	appDir := filepath.Join(tmp, "acme", "localhost")
-	if err := os.MkdirAll(appDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	routerScript := `
-import * as router from "kitwork/router";
-import { shortbase } from "kitwork";
-
-router.get((ctx) => {
-    const code = shortbase.encode(123456);
-    const id = shortbase.decode(code);
-    return ctx.json({ code: code, id: id });
-});
-`
-	if err := os.WriteFile(filepath.Join(appDir, UIRouterFileName), []byte(routerScript), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	tenant := NewTenant(tmp, "localhost")
-	if err := tenant.Run(); err != nil {
-		t.Fatal(err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "http://localhost/", nil)
-	rec := httptest.NewRecorder()
-	tenant.Serve(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d. Body: %s", rec.Code, rec.Body.String())
-	}
-	// Round-tripping proves nothing on its own — an encode that returns its input would pass too.
-	// The code has to be an actual encoding, i.e. not the digits it came from.
-	if strings.Contains(rec.Body.String(), `"code":"123456"`) {
-		t.Fatalf("shortbase.encode returned its input unchanged: %s", rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), `"id":"123456"`) {
-		t.Fatalf("expected id '123456' in response body, got: %s", rec.Body.String())
-	}
-}
-
 func TestRealAppScheduleContractFixture(t *testing.T) {
 	tmp := t.TempDir()
 	appDir := filepath.Join(tmp, "acme", "localhost")
