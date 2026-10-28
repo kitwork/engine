@@ -356,14 +356,14 @@ func (c *compiler) componentCall(n *Node, cx ctx) (op, error) {
 			// a component without a UI: the tag's own words stay the tag's
 			name := camel(a.Name)
 			if chain != "" || isEvent(a.Name) || presentation(base, n.Tag) || tagWord(n.Tag, a.Name) || a.Name == "align" {
-				if _, declared := def.state[name]; declared && chain == "" {
+				if def.takes(name) && chain == "" {
 					return nil, errAttr(n, a, "%s là thuộc tính của <%s> (%s dựng một <%s>) và cũng là tên %s khai: một chữ một nghĩa trên một thẻ; đổi tên trong %s",
 						a.Name, n.Tag, called(n), n.Tag, def.name, logicFileName(c, def))
 				}
 				host.Attrs = append(host.Attrs, *a)
 				continue
 			}
-			if _, declared := def.state[name]; !declared {
+			if !def.takes(name) {
 				if message := c.webWord(n, a); message != "" {
 					// a word of the web (onoffline, href, class) is told the .ui word, as on any tag (compile.go)
 					return nil, errAttr(n, a, "%s", message)
@@ -393,6 +393,18 @@ func (c *compiler) componentCall(n *Node, cx ctx) (op, error) {
 	if err := c.liveCall(n, cx, site, def, forAttr); err != nil {
 		return nil, err
 	}
+	// a component whose jobs go through the bridge: what it requires, and its place on the page
+	// (component_live.go)
+	passed := make(map[string]bool, len(site.bindings))
+	for _, b := range site.bindings {
+		passed[b.name] = true
+	}
+	if err := c.missingInputs(n, def, passed); err != nil {
+		return nil, err
+	}
+	if err := c.liveSiteCall(n, cx, site); err != nil {
+		return nil, err
+	}
 	if site.showExpr != nil {
 		client, err := cx.scope.onClient(site.showExpr, n, attrNamed(n, "show"))
 		if err != nil {
@@ -416,6 +428,9 @@ func (c *compiler) componentCall(n *Node, cx ctx) (op, error) {
 	}
 	if def.delivered() {
 		for _, b := range site.bindings {
+			if _, bound := def.state[b.name]; def.live() && !bound {
+				continue // an input the look does not read stays the server's (KITWORK_COMPONENTS.md mục 5)
+			}
 			source, client, err := cx.scope.interpolationOnClient(n, b.in)
 			if err != nil {
 				return nil, err
@@ -591,7 +606,7 @@ func (c *compiler) liveCall(n *Node, cx ctx, site *callSite, def *componentDef, 
 // takesInput reports whether name can be an input of a component with a UI: a name it declares or
 // one its .ui reads.
 func (c *compiler) takesInput(def *componentDef, name string) bool {
-	if _, declared := def.state[name]; declared {
+	if def.takes(name) {
 		return true
 	}
 	return c.uiReads(def, map[string]bool{})[name]

@@ -61,6 +61,12 @@ func (p *Page) Render(req Request) string {
 
 // render writes the body and returns the names of the icons only this request's data named, sorted.
 func (p *Page) render(req Request) (string, []string) {
+	return p.renderWith(req, nil)
+}
+
+// renderWith is render, gathering into instances, when not nil, each component it draws whose jobs go
+// through the bridge (component_live.go).
+func (p *Page) renderWith(req Request, instances map[string]Instance) (string, []string) {
 	scope := make(map[string]any, len(req.Scope)+4)
 	for name, fn := range formatHelpers() {
 		scope[name] = fn
@@ -74,7 +80,7 @@ func (p *Page) render(req Request) (string, []string) {
 			scope[a.alias] = a.start(scope)
 		}
 	}
-	r := &run{path: req.Path, origin: req.Origin, page: p, language: req.Language, warn: req.Warn}
+	r := &run{path: req.Path, origin: req.Origin, page: p, language: req.Language, warn: req.Warn, instances: instances}
 	p.root.render(r, scope)
 	extra := make([]string, 0, len(r.extra))
 	for c := range r.extra {

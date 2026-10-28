@@ -42,6 +42,9 @@ type run struct {
 	lists      int
 	mark       string
 	markHidden bool
+	// instances, when not nil, gathers each component whose jobs go through the bridge as it is drawn
+	// (Page.Instances)
+	instances map[string]Instance
 }
 
 type crumb struct {
@@ -208,6 +211,12 @@ type elemOp struct {
 	liveFor   bool
 	liveList  *liveListRef // the list in the page's program, on a page that has one (page_program.go)
 	pageState *livePage
+	// at and instanceOf: the host of a component whose jobs go through the bridge, the place it is called
+	// from and its name (component_live.go); components: on the root of the page's content, the components
+	// of the site the page holds that the browser runs, written at its end once the compile knows them all
+	at         string
+	instanceOf *componentDef
+	components **liveComponents
 }
 
 func (o *elemOp) render(r *run, scope map[string]any) {
@@ -268,6 +277,7 @@ func (o *elemOp) renderOne(r *run, scope map[string]any) {
 	if len(o.inputs) > 0 {
 		inputs = o.inputPairs(scope, values)
 	}
+	o.noteInstance(r, values)
 	if len(o.bindings) > 0 {
 		saved := make([]any, len(o.bindings))
 		had := make([]bool, len(o.bindings))
@@ -435,6 +445,9 @@ func (o *elemOp) renderOne(r *run, scope map[string]any) {
 	}
 	if o.pageState != nil {
 		o.pageState.writeState(&r.b, scope)
+	}
+	if o.components != nil {
+		(*o.components).write(&r.b)
 	}
 	r.b.WriteString("</")
 	r.b.WriteString(o.tag)

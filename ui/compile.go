@@ -44,6 +44,10 @@ type Page struct {
 	live *livePage
 	// fellBack says a compile for a program met what the program cannot run yet (compileProgram)
 	fellBack bool
+	// components are the components of the site the page holds whose jobs go through the bridge
+	// (component_live.go); contentRoot says the root of its content writes them
+	components  *liveComponents
+	contentRoot bool
 }
 
 // element is what the class rules need to know about the element being compiled.
@@ -217,6 +221,9 @@ type callSite struct {
 	network *networkSpec
 	// carousel is the host of a carousel (carousel.go); nil for every other call
 	carousel *carouselScope
+	// at is the place a component whose jobs go through the bridge is called from, fixed as the page is
+	// built: its host carries it and its calls name it (component_live.go); "" for every other call
+	at string
 }
 
 type compiler struct {
@@ -458,6 +465,15 @@ func (s *Site) compileProgram(routeDir, contentFile, kind string, program bool) 
 	if err := c.wiredAliases(); err != nil { // an alias the kernel reads names a component it runs
 		return nil, err
 	}
+	if c.out.components != nil && !c.out.contentRoot {
+		// call.js reads what it registers at the end of <content /> (component_live.go)
+		names := make([]string, 0, len(c.out.components.defs))
+		for name := range c.out.components.defs {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		return nil, errAt(page, "trang có component chạy ở trình duyệt (%s): gốc của content.ui phải là một phần tử, nơi trang viết chúng cho trình duyệt", strings.Join(names, ", "))
+	}
 	if err := c.strayNames(); err != nil { // a component's name read outside its host (copy())
 		return nil, err
 	}
@@ -580,6 +596,12 @@ func (c *compiler) element(n *Node, cx ctx, site *callSite) (op, error) {
 					if c.program != nil {
 						cx.scope.list = c.program.addList(each, c.page)
 					}
+				}
+			} else if around.readsLiveSite(each.list) {
+				// a list of the state of a site component the browser runs: its rows are the kernel's, drawn as
+				// the kernel adopts them (component_live.go)
+				if live, _ := around.onClient(each.list, n, a); live {
+					cx.scope.client = true
 				}
 			}
 			cx.forAt = &forSite{node: n, attr: a}
@@ -941,6 +963,14 @@ func (c *compiler) region(n *Node, cx ctx) (op, error) {
 	}
 	info := catalog[root.Tag]
 	compiled, err := c.generic(&merged, info, rootCtx, site)
+	if err == nil && n.Tag == "content" {
+		if o, ok := compiled.(*elemOp); ok && !o.fragment {
+			// the components of the site the page holds that the browser runs are written here, once every
+			// one is known (component_live.go)
+			o.components = &c.out.components
+			c.out.contentRoot = true
+		}
+	}
 	if err != nil || n.Tag != "content" || c.page == nil {
 		return compiled, err
 	}
@@ -2060,6 +2090,9 @@ func mergeCallSite(o *elemOp, site *callSite) {
 		o.callerIf, o.callerShow = site.ifExpr, site.showExpr
 		o.bindings = append(o.bindings, site.bindings...)
 		o.inputs = site.inputs
+		if site.at != "" {
+			o.at, o.instanceOf = site.at, site.def // its instance, as the server finds it (component_live.go)
+		}
 		if site.state != nil {
 			o.state = make(map[string]any, len(site.state))
 			for name, v := range site.state {
@@ -3460,6 +3493,9 @@ func writeHost(w *strings.Builder, site *callSite) {
 		value += ": " + site.alias
 	}
 	writeAttr(w, "data-kitwork-component", value)
+	if site.at != "" {
+		writeAttr(w, "data-kitwork-at", site.at) // where its jobs are called from (component_live.go)
+	}
 }
 
 // progressThickness is how thick the line is when view.ui does not say, and the most it may be: a

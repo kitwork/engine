@@ -90,6 +90,10 @@ func writeSkeleton(b *strings.Builder, o op) {
 			// and the names of its page scope are declared for the check of what the page reads
 			o.pageState.writeNames(b)
 		}
+		if o.components != nil {
+			// the components of the site the browser runs: the head links the bridge for them too
+			(*o.components).write(b)
+		}
 		if o.void {
 			return
 		}

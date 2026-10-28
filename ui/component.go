@@ -47,8 +47,16 @@ type componentDef struct {
 	root *Node
 	// logic is the file whose component.define("name", …) it is, "" when it has none of its own
 	logic string
-	// state is what it declares, with the starting values the source spells out
+	// state is what it declares, with the starting values the source spells out; for a component whose
+	// function answers context.bind({ … }), the names of that object alone (component_live.go)
 	state map[string]any
+	// bound, jobs, vars, inputs and required are what the logic's context.bind({ … }) and
+	// context.attributes() say (component_live.go): bound false for a function that answers no bind
+	bound    bool
+	jobs     map[string]bool
+	vars     map[string]bool
+	inputs   map[string]any
+	required map[string]bool
 	// kitwork is one of Kitwork's own components (appearance, dropdown, toast, progressbar, terminal)
 	kitwork *kitworkComponent
 }
@@ -100,11 +108,12 @@ func (d *componentDef) logicPlace(s *Site) string {
 	return ".components/" + filepath.Base(d.logic)
 }
 
-// delivered reports whether the browser runs the component: the kernel has its file, so its host
-// carries data-kitwork-component and its names are live there. A site or identity component's logic
-// does not reach the browser until the engine runs component.define (step 4): its host is not marked
-// (the kernel would report a component it cannot find), and its names cover the page's on the server.
-func (d *componentDef) delivered() bool { return d.kitwork != nil }
+// delivered reports whether the browser runs the component: its host carries data-kitwork-component
+// and its names are live there. One of Kitwork's is a file of the kernel; a site component whose bind
+// holds a job or a var is registered by call.js, its jobs called through the bridge (component_live.go).
+// Any other site or identity component's logic does not reach the browser: its host is not marked (the
+// kernel would report a component it cannot find), and its names cover the page's on the server.
+func (d *componentDef) delivered() bool { return d.kitwork != nil || d.live() }
 
 // names are the names the component declares.
 func (d *componentDef) names() map[string]bool {
@@ -404,7 +413,7 @@ func (c *compiler) componentNamed(n *Node, a *Attr, dir, name string) (*componen
 	}
 
 	def := &componentDef{name: name}
-	logicFile, state, err := s.componentLogic(name, filepath.Join(root, "components.work"), filepath.Join(root, name+".work"),
+	logicFile, names, err := s.componentLogic(name, filepath.Join(root, "components.work"), filepath.Join(root, name+".work"),
 		filepath.Join(s.identityDir(), name+".work"))
 	if err != nil {
 		return nil, err
@@ -419,7 +428,8 @@ func (c *compiler) componentNamed(n *Node, a *Attr, dir, name string) (*componen
 	switch {
 	case logicFile != "":
 		// a site or identity .ui pairs with site or identity logic
-		def.logic, def.state, def.ui = logicFile, state, tierUI
+		def.logic, def.ui = logicFile, tierUI
+		def.take(names)
 	case tierUI != "":
 		def.ui = tierUI
 	}
@@ -471,11 +481,12 @@ func (c *compiler) componentAtPath(n *Node, a *Attr, dir, value string) (*compon
 	switch {
 	case strings.HasPrefix(value, ".components/") && len(segments) == 2:
 		identity := s.identityDir()
-		var err error
-		def.logic, def.state, err = s.componentLogic(name, filepath.Join(identity, name+".work"))
+		logicFile, names, err := s.componentLogic(name, filepath.Join(identity, name+".work"))
 		if err != nil {
 			return nil, err
 		}
+		def.logic = logicFile
+		def.take(names)
 		if candidate := filepath.Join(identity, name+".ui"); s.exists(candidate) {
 			def.ui = candidate
 		}
@@ -495,11 +506,12 @@ func (c *compiler) componentAtPath(n *Node, a *Attr, dir, value string) (*compon
 		}
 		if folder == root {
 			// logic is defined at the site root only: a path to the root takes the root's logic
-			var err error
-			def.logic, def.state, err = s.componentLogic(name, filepath.Join(root, "components.work"), filepath.Join(root, name+".work"))
+			logicFile, names, err := s.componentLogic(name, filepath.Join(root, "components.work"), filepath.Join(root, name+".work"))
 			if err != nil {
 				return nil, err
 			}
+			def.logic = logicFile
+			def.take(names)
 		}
 	default:
 		return nil, errAttr(n, a, "đường dẫn bắt đầu bằng ./ hoặc ../ (từ file đang viết) hoặc .components/ (của identity), không phải %q", value)
@@ -513,7 +525,7 @@ func (c *compiler) componentAtPath(n *Node, a *Attr, dir, value string) (*compon
 // componentLogic finds the logic of the component <name> in the first of files that defines it: a
 // <name>.work holds the component <name> (the name in define is the file's name), components.work
 // may hold several. It returns the file and the names the define declares; "" when none defines it.
-func (s *Site) componentLogic(name string, files ...string) (string, map[string]any, error) {
+func (s *Site) componentLogic(name string, files ...string) (string, *logicNames, error) {
 	for _, file := range files {
 		if !s.exists(file) {
 			continue
@@ -522,12 +534,17 @@ func (s *Site) componentLogic(name string, files ...string) (string, map[string]
 		if err != nil {
 			return "", nil, err
 		}
-		state, found, err := componentNames(string(source), name)
+		names, found, err := componentNames(string(source), name)
 		if err != nil {
 			return "", nil, &Error{File: rel(s, file), Line: 1, Column: 1, Message: err.Error()}
 		}
 		if found {
-			return file, state, nil
+			if problem := names.problem; problem != nil && names.live() {
+				// a name of a bind the page would draw wrong (component_live.go)
+				line, column := lineColumn(string(source), problem.position)
+				return "", nil, &Error{File: rel(s, file), Line: line, Column: column, Message: problem.message}
+			}
+			return file, names, nil
 		}
 		if filepath.Base(file) != "components.work" {
 			return "", nil, &Error{File: rel(s, file), Line: 1, Column: 1,
@@ -538,19 +555,23 @@ func (s *Site) componentLogic(name string, files ...string) (string, map[string]
 }
 
 // componentNames parses a logic file and returns the names component.define(name, …) declares at the
-// top of its body. found is false when the file defines no component of that name.
-func componentNames(source, name string) (map[string]any, bool, error) {
+// top of its body, or binds when it answers context.bind({ … }) (component_live.go). found is false when
+// the file defines no component of that name.
+func componentNames(source, name string) (*logicNames, bool, error) {
 	parser := logic.NewParser(logic.NewLexer(source))
 	program := parser.ParseProgram()
 	if errs := parser.Errors(); len(errs) > 0 {
 		return nil, false, fmt.Errorf("logic của component không đọc được: %s", errs[0])
 	}
 	for _, statement := range program.Statements {
-		body := defineBody(statement, name)
-		if body == nil {
+		fn := defineFunction(statement, name)
+		if fn == nil || fn.Body == nil {
 			continue
 		}
-		return declaredNames(body.Statements), true, nil
+		if names, ok := boundNames(fn); ok {
+			return names, true, nil
+		}
+		return &logicNames{state: declaredNames(fn.Body.Statements)}, true, nil
 	}
 	return nil, false, nil
 }
@@ -596,8 +617,9 @@ func declaredNames(statements []logic.Statement) map[string]any {
 	return state
 }
 
-// defineBody returns the body of component.define("<name>", () => { … }) when the statement is that call.
-func defineBody(statement logic.Statement, name string) *logic.BlockStatement {
+// defineFunction returns the function of component.define("<name>", () => { … }) when the statement is that
+// call.
+func defineFunction(statement logic.Statement, name string) *logic.FunctionLiteral {
 	expression, ok := statement.(*logic.ExpressionStatement)
 	if !ok {
 		return nil
@@ -609,10 +631,8 @@ func defineBody(statement logic.Statement, name string) *logic.BlockStatement {
 	if literal, ok := arguments[0].(*logic.Literal); !ok || !literal.Value.IsString() || literal.Value.Text() != name {
 		return nil
 	}
-	if function, ok := arguments[1].(*logic.FunctionLiteral); ok {
-		return function.Body
-	}
-	return nil
+	function, _ := arguments[1].(*logic.FunctionLiteral)
+	return function
 }
 
 // callArguments returns the arguments of <object>.<method>(…) when e is that call; object "" takes
