@@ -44,6 +44,7 @@
   var track = {};    // job → { pending, error, rows: { row → { pending, error } } }
   var current = null; // the element whose binding or event the program runs now
   var revs = {};      // the revision of each name of the page's data it holds, sent with each call
+  var stamp = 0;      // the moment the server read the data the page holds: no data read before it is taken
 
   function acting() { return current || (typeof kit.element === "function" ? kit.element() : null); }
   function get(name) { return view ? view.state[name] : kit.scope.$[name]; }
@@ -161,6 +162,7 @@
     try { data = JSON.parse(el.textContent || "{}"); } catch (e) { return; }
     page = { jobs: data.jobs || [], vars: data.vars || [], program: data.program || "" };
     revs = data.revs || {};
+    stamp = data.stamp || 0;
     var state = {};
     Object.keys(data.state || {}).forEach(function (k) { state[k] = data.state[k]; });
     page.jobs.forEach(function (name) { state[name] = job(name); });
@@ -190,7 +192,7 @@
     call.seq = ++seq;
     var vars = {};
     if (page) page.vars.forEach(function (k) { vars[k] = get(k); });
-    var body = { args: call.args, vars: vars, seq: call.seq, revs: revs };
+    var body = call.refresh ? { seq: call.seq, revs: revs } : { args: call.args, vars: vars, seq: call.seq, revs: revs };
     if (call.at) {
       // the instance's vars, read as the call leaves; its inputs never go: the server reads them where it stands
       var own = {}, instance = instanceOf(call.host) || {};
@@ -207,7 +209,7 @@
       pump();
     }, function (error) {
       flying = null;
-      if (window.console) console.error("kitwork: áp câu trả lời của việc " + call.name + " không thành", error);
+      if (window.console) console.error("kitwork: áp câu trả lời của " + (call.refresh ? "lần lấy lại" : "việc " + call.name) + " không thành", error);
       pump();
     });
   }
@@ -217,7 +219,9 @@
     return fetch(location.pathname + location.search, {
       method: "POST",
       credentials: "same-origin",
-      headers: { "Content-Type": "application/json", "Accept": "application/json", "Kitwork-Call": call.name },
+      headers: call.refresh
+        ? { "Content-Type": "application/json", "Accept": "application/json", "Kitwork-Refresh": "1" }
+        : { "Content-Type": "application/json", "Accept": "application/json", "Kitwork-Call": call.name },
       body: JSON.stringify(body)
     }).then(function (response) {
       if (response.redirected) return { redirect: response.url }; // a guard sent the page away
@@ -235,6 +239,10 @@
     if (call.epoch !== epoch) return; // the page it was made on is gone
     if (answer.redirect) { location.href = answer.redirect; return; }
     if (answer.reload) { location.reload(); return; }
+    if (answer.error && call.refresh) {
+      if (window.console) console.error("kitwork: lấy lại dữ liệu của trang không thành", answer.error);
+      return;
+    }
     if (answer.error) {
       mark(call, false, { code: answer.error.code, message: answer.error.message || "" });
       var back = call.el && call.el.closest && call.el.closest("[data-kitwork-item]") || call.el;
@@ -245,6 +253,17 @@
       return;
     }
     var patch = answer.patch || {}, lists = answer.lists || {}, held = answer.revs || {};
+    if (answer.stamp && answer.stamp <= stamp) {
+      // another tab told this page data read after this answer's: the data it holds is newer, and of the
+      // answer only the page's own vars are taken
+      var own = {};
+      if (page) page.vars.forEach(function (k) { if (Object.prototype.hasOwnProperty.call(patch, k)) own[k] = patch[k]; });
+      patch = own;
+      lists = {};
+      held = {};
+    } else if (answer.stamp) {
+      stamp = answer.stamp;
+    }
     // a name this page held at another revision than the job ran on comes whole; every name that changed
     // brings its new revision
     Object.keys(held).forEach(function (k) {
@@ -255,9 +274,61 @@
     Object.keys(lists).forEach(function (k) { put(k, applyList(get(k), lists[k])); });
     var mine = call.at && answer.components ? answer.components[call.at] : null, instance = mine ? instanceOf(call.host) : null;
     if (instance) Object.keys(mine.patch || {}).forEach(function (k) { instance[k] = mine.patch[k]; });
-    mark(call, false, null);
+    if (!call.refresh) mark(call, false, null);
+    tell(held);
     paint();
   }
+
+  // ---- the page kept the same across the tabs of the browser and the moments it is not seen ----
+
+  // the data this page holds, told to the other tabs of the browser on the same page when an answer changed
+  // it, with the moment the server read it: a tab takes it, whole, only when the data it holds was read
+  // before, so a message or an answer that arrives late never takes a tab back. A tab sees what another did
+  // without a request.
+  var channel = typeof BroadcastChannel === "function" ? new BroadcastChannel("kitwork:page") : null;
+  function here() { return location.pathname + location.search; }
+  function tell(held) {
+    if (!channel || !page || !stamp || !Object.keys(held || {}).length) return;
+    var values = {};
+    Object.keys(revs).forEach(function (k) { values[k] = get(k); });
+    try { channel.postMessage({ page: here(), stamp: stamp, values: values, revs: revs }); } catch (e) { /* a value that does not clone */ }
+  }
+  if (channel) {
+    channel.onmessage = function (e) {
+      var m = e && e.data;
+      if (!m || !page || m.page !== here() || !m.revs || !(m.stamp > stamp)) return;
+      stamp = m.stamp;
+      var changed = false;
+      Object.keys(m.revs).forEach(function (k) {
+        if (revs[k] === m.revs[k]) return; // this tab holds it already
+        put(k, m.values[k]);
+        revs[k] = m.revs[k];
+        changed = true;
+      });
+      Object.keys(revs).forEach(function (k) {
+        if (Object.prototype.hasOwnProperty.call(m.revs, k)) return;
+        put(k, null); // a name the page's data no longer has
+        delete revs[k];
+        changed = true;
+      });
+      if (changed) paint();
+    };
+  }
+
+  // a tab seen again asks for what changed since its revisions while it was not seen: another device, another
+  // person, a tab of another browser; one request, through the page's guards, answered with only what changed
+  var lastRefresh = 0;
+  function refresh() {
+    if (!page || Date.now() - lastRefresh < 500) return;
+    if ((flying && flying.refresh) || queue.some(function (c) { return c.refresh; })) return;
+    lastRefresh = Date.now();
+    queue.push({ refresh: true, name: "", args: [], row: "", el: null, epoch: epoch });
+    pump();
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible") refresh();
+  });
+  window.addEventListener("focus", refresh);
 
   // a keyed list's change by row: the rows removed, the rows set (changed in place, or new at the end), and
   // the order when the server sent one; a row nothing changed stays the same object

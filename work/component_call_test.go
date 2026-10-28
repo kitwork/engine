@@ -237,7 +237,7 @@ func ordersSite(t *testing.T) *Tenant {
 // tab that called holds the new revision of what the job changed of the page, a call that changes nothing of
 // the page sends nothing of it to a tab up to date, and a tab drawn before another tab's checkout gets the
 // count whole on its next call of the cart, though that call changed nothing of the page. A var has no
-// revision.
+// revision. The answer carries the moment the page's data was read (stamp), after the page's own.
 //
 // CONTROL (go test -overlay, 28/10/2026): with serveComponentCall answering the page's data without revisions
 // (the staleRevs block taken out), this test went red: the checkout answered no revision of count, and tab B's
@@ -250,7 +250,8 @@ func TestComponentJobAnswersThePagesRevisions(t *testing.T) {
 		t.Fatalf("no data block:\n%.2000s", page)
 	}
 	var block struct {
-		Revs map[string]string `json:"revs"`
+		Revs  map[string]string `json:"revs"`
+		Stamp float64           `json:"stamp"`
 	}
 	if err := json.Unmarshal([]byte(m[1]), &block); err != nil || block.Revs["count"] == "" {
 		t.Fatalf("the page should carry the revision of count: %v %s", err, m[1])
@@ -288,6 +289,9 @@ func TestComponentJobAnswersThePagesRevisions(t *testing.T) {
 	if components, _ := answer["components"].(map[string]any); components["c1"] == nil {
 		t.Errorf("the cart's own data comes as before: %s", body)
 	}
+	if stamp, _ := answer["stamp"].(float64); block.Stamp <= 0 || stamp <= block.Stamp {
+		t.Errorf("the answer should carry the moment the page's data was read, after the page's own (%.0f): %s", block.Stamp, body)
+	}
 	call(tabA, "shop-cart.checkout") // two orders now
 
 	// tab A holds the count as it is: an add changes nothing of the page, and nothing of it comes
@@ -315,7 +319,7 @@ func TestComponentJobOnAPageDrawnWholeSendsNoPageData(t *testing.T) {
 	tn := cartSite(t)
 	r := postCall(tn, "/cart", "shop-cart.checkout", `{"args":[],"vars":{},"seq":1,"revs":{},"at":"c1","scope":{"items":[]}}`)
 	answer := componentAnswer(t, r.Body.String())
-	if answer["patch"] != nil || answer["revs"] != nil || answer["lists"] != nil {
+	if answer["patch"] != nil || answer["revs"] != nil || answer["lists"] != nil || answer["stamp"] != nil {
 		t.Errorf("a page drawn whole gets nothing of its data: %s", r.Body.String())
 	}
 	if components, _ := answer["components"].(map[string]any); components["c1"] == nil {

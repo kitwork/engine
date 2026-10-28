@@ -3,6 +3,7 @@ package work
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
@@ -240,5 +241,60 @@ func TestStalePageGetsWholeValues(t *testing.T) {
 		if row.(map[string]any)["id"] == float64(1) {
 			t.Errorf("the removed row should not come back: %s", body)
 		}
+	}
+}
+
+// A tab seen again asks, with no job, for what changed since its revisions (Kitwork-Refresh, 28/10/2026): the
+// names whose revision is not its own come whole with their new revisions, a var never; a tab that holds the
+// data as it is gets nothing.
+func TestRefreshAnswersWhatChangedSinceTheRevisions(t *testing.T) {
+	tn := patchTodoSite(t)
+	page := serveGet(tn, "/todo", nil).Body.String()
+	m := regexp.MustCompile(`data-kitwork-page>(.*?)</script>`).FindStringSubmatch(page)
+	var block struct {
+		Revs map[string]string `json:"revs"`
+	}
+	if m == nil || json.Unmarshal([]byte(m[1]), &block) != nil || block.Revs["todos"] == "" {
+		t.Fatalf("no revisions in the page:\n%.2000s", page)
+	}
+	old, _ := json.Marshal(block.Revs)
+	for i := 0; i < 2; i++ { // another tab adds two rows
+		callAnswer(t, tn, "add", `{"args":[],"vars":{"title":"row"},"seq":1}`)
+	}
+	refresh := func(revs []byte) (map[string]any, string) {
+		req := httptest.NewRequest(http.MethodPost, "http://localhost/todo", strings.NewReader(`{"seq":3,"revs":`+string(revs)+`}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set(ViewRefreshHeader, "1")
+		rec := httptest.NewRecorder()
+		tn.Serve(rec, req)
+		var answer map[string]any
+		if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &answer) != nil {
+			t.Fatalf("refresh: %d %q", rec.Code, rec.Body.String())
+		}
+		return answer, rec.Body.String()
+	}
+	answer, body := refresh(old)
+	patch, _ := answer["patch"].(map[string]any)
+	rows, _ := patch["todos"].([]any)
+	if len(rows) != 2 || patch["left"] != float64(2) {
+		t.Fatalf("a tab drawn before two rows were added should get them whole, and the count: %s", body)
+	}
+	if _, has := patch["title"]; has {
+		t.Errorf("a var is the tab's own, never sent back: %s", body)
+	}
+	revs, _ := answer["revs"].(map[string]any)
+	if revs["todos"] == "" || revs["todos"] == block.Revs["todos"] {
+		t.Errorf("the new revision of todos should come with it: %s", body)
+	}
+	held := map[string]string{}
+	for k, v := range block.Revs {
+		held[k] = v
+	}
+	for k, v := range revs {
+		held[k], _ = v.(string)
+	}
+	now, _ := json.Marshal(held)
+	if answer, body = refresh(now); answer["patch"] != nil || answer["revs"] != nil {
+		t.Errorf("a tab that holds the data as it is should get nothing: %s", body)
 	}
 }

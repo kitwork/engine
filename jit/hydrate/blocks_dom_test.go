@@ -135,9 +135,15 @@ global.localStorage = { getItem: function () { return null; }, setItem: function
 global.history = { back: function () {}, forward: function () {}, replaceState: function () {}, pushState: function () {} };
 global.location = { href: "http://x/", pathname: "/", search: "", origin: "http://x", reload: function () {}, assign: function () {} };
 global.MutationObserver = function () { this.observe = function () {}; this.disconnect = function () {}; };
+// A BroadcastChannel of the test's own: node's keeps the process open, and a test reads what was told here
+// (global.__channels) and tells a tab something by calling a channel's onmessage.
+global.__channels = [];
+global.BroadcastChannel = function (name) { this.name = name; this.sent = []; this.onmessage = null; global.__channels.push(this); };
+global.BroadcastChannel.prototype.postMessage = function (m) { this.sent.push(JSON.parse(JSON.stringify(m))); };
+global.BroadcastChannel.prototype.close = function () {};
 global.CustomEvent = function () {};
 window.document = document; window.navigator = navigator; window.localStorage = localStorage;
-window.history = history; window.location = location;
+window.history = history; window.location = location; window.BroadcastChannel = global.BroadcastChannel;
 `
 
 // requireNode returns the node binary. Locally it SKIPS when node is absent (a convenience). In CI it

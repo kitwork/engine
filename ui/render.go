@@ -47,6 +47,8 @@ type run struct {
 	instances map[string]Instance
 	// revs are the revisions of the page's data, written in its data block (Request.Revs)
 	revs map[string]string
+	// stamp is the moment the page's data was read, written with them (Request.Stamp)
+	stamp int64
 }
 
 type crumb struct {
@@ -446,7 +448,7 @@ func (o *elemOp) renderOne(r *run, scope map[string]any) {
 		r.b.WriteString(newTabNote(r.language))
 	}
 	if o.pageState != nil {
-		o.pageState.writeState(&r.b, scope, r.revs)
+		o.pageState.writeState(&r.b, scope, r.revs, r.stamp)
 	}
 	if o.components != nil {
 		(*o.components).write(&r.b)

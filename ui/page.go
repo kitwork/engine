@@ -51,6 +51,9 @@ type Request struct {
 	// Revs are the revisions of the data of a page that runs in the kernel, by name (work/view_patch.go): its
 	// data block carries them, and its calls send them back.
 	Revs map[string]string
+	// Stamp is the moment that data was read (work/view_call.go), in its data block with the revisions: the
+	// page takes no data read before it
+	Stamp int64
 	// Warn hears, while developing, of a value from data that made no class (a colour that is no token
 	// of the palette): file:line:col of the attribute, once per page. nil says nothing.
 	Warn func(message string)
@@ -83,7 +86,7 @@ func (p *Page) renderWith(req Request, instances map[string]Instance) (string, [
 			scope[a.alias] = a.start(scope)
 		}
 	}
-	r := &run{path: req.Path, origin: req.Origin, page: p, language: req.Language, warn: req.Warn, instances: instances, revs: req.Revs}
+	r := &run{path: req.Path, origin: req.Origin, page: p, language: req.Language, warn: req.Warn, instances: instances, revs: req.Revs, stamp: req.Stamp}
 	p.root.render(r, scope)
 	extra := make([]string, 0, len(r.extra))
 	for c := range r.extra {

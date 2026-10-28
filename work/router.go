@@ -57,6 +57,9 @@ type Router struct {
 	// viewRevs are the revisions of the data a page of router.view is drawn with, read only when the page
 	// runs in the kernel (view_patch.go)
 	viewRevs func() map[string]string
+	// viewStamp is the moment the data of a page of router.view is read, taken before its function runs
+	// (view_call.go, nextViewStamp): written in the page's data block, and the stamp of a refresh's answer
+	viewStamp int64
 	// callChain and callGuards are the folders and the router.view guards a job's call passed, for the run
 	// after the job to pass again (view_call.go, guardsAgain)
 	callChain  []*RouteNode

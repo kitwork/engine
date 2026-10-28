@@ -238,3 +238,132 @@ func TestProgramSendsAndKeepsRevisions(t *testing.T) {
 `
 	runNodeDOMScript(t, "program_revs.test.js", script)
 }
+
+// A tab seen again (28/10/2026) asks the server, with its revisions, for what changed while it was not seen,
+// and takes what comes whole; tabs of one browser tell each other the data an answer brought.
+const keptAcrossTabsPage = `
+global.__sent = [];
+global.fetch = function (url, options) {
+  var body = JSON.parse(options.body);
+  global.__sent.push({ headers: options.headers, body: body });
+  var answer = options.headers["Kitwork-Refresh"]
+    ? { seq: body.seq, patch: { left: 1, todos: [{ id: 1, title: "Một", done: false }, { id: 2, title: "Hai", done: true }] }, revs: { todos: "r2", left: "l2" }, stamp: 300 }
+    : { seq: body.seq, patch: { left: 0, title: "" }, lists: { todos: { key: "id", set: [{ id: 1, title: "Việc số 1", done: true }] } }, revs: { todos: "r1", left: "l1" }, stamp: 200 };
+  return Promise.resolve({ redirected: false, ok: true, status: 200, headers: { get: function () { return "application/json"; } }, json: function () { return Promise.resolve(answer); } });
+};
+`
+
+func keptAcrossTabsScript(callJS, assertions string) string {
+	page := strings.Replace(programPage, `program: "p1" });`, `program: "p1", revs: { todos: "r0", left: "l0" }, stamp: 100 });`, 1)
+	return strings.Replace(page, "__CALL_JS__", keptAcrossTabsPage+callJS, 1) + assertions
+}
+
+const seenAgainAssertions = `
+(async function () {
+  var view = kit.page.view();
+  document.visibilityState = "visible";
+  document.dispatchEvent({ type: "visibilitychange" });
+  await tick(); await tick(); await tick();
+  var asked = global.__sent.filter(function (s) { return s.headers["Kitwork-Refresh"]; });
+  if (asked.length !== 1) throw new Error("a tab seen again should ask for what changed, asked " + asked.length + " times");
+  if (JSON.stringify(asked[0].body.revs) !== JSON.stringify({ todos: "r0", left: "l0" })) throw new Error("it should send its revisions, sent " + JSON.stringify(asked[0].body));
+  if (rows().length !== 2 || view.state.left !== 1) throw new Error("what changed should replace the page's: " + rows().length + " rows, left " + view.state.left);
+  console.log("a tab seen again asks with its revisions and takes what changed");
+})().catch(function (e) { console.error(e && e.stack || e); process.exit(1); });
+`
+
+func TestTabSeenAgainAsksForWhatChanged(t *testing.T) {
+	runNodeDOMScript(t, "seen_again.test.js", keptAcrossTabsScript(callJS, seenAgainAssertions))
+}
+
+// The control: with no listener for the tab being seen again, it never asks.
+func TestTabSeenAgainWithoutTheListenerAsksNothing(t *testing.T) {
+	listener := `document.addEventListener("visibilitychange", function () {`
+	if !strings.Contains(callJS, listener) {
+		t.Fatal("the visibility listener of call.js moved: update this control")
+	}
+	out, err := runNodeDOMWith(t, composedRuntime(), keptAcrossTabsScript(strings.Replace(callJS, listener, `document.addEventListener("not-visibilitychange", function () {`, 1), seenAgainAssertions))
+	if err == nil || !strings.Contains(out, "should ask for what changed") {
+		t.Fatalf("without the listener the tab should not ask; got err=%v\n%s", err, out)
+	}
+}
+
+const tellOtherTabsAssertions = `
+(async function () {
+  var view = kit.page.view();
+  var channel = global.__channels.filter(function (c) { return c.name === "kitwork:page"; })[0];
+  if (!channel) throw new Error("call.js should open the channel kitwork:page");
+  view.state.toggle(1, true);
+  await tick(); await tick(); await tick();
+  var told = channel.sent[channel.sent.length - 1];
+  if (!told || told.page !== "/" || told.stamp !== 200 || told.revs.todos !== "r1" || told.values.left !== 0 || told.values.todos.length !== N) {
+    throw new Error("an answer should be told to the other tabs with its data whole and its stamp: " + JSON.stringify(told && { page: told.page, stamp: told.stamp, revs: told.revs, left: told.values.left }));
+  }
+  // another tab of the browser told this one
+  channel.onmessage({ data: { page: "/", stamp: 250, values: { left: 7, todos: [{ id: 9, title: "Từ tab khác", done: false }] }, revs: { left: "l9", todos: "r9" } } });
+  if (rows().length !== 1 || view.state.left !== 7) throw new Error("what another tab told should replace the page's: " + rows().length + " rows, left " + view.state.left);
+  channel.onmessage({ data: { page: "/khac", stamp: 260, values: { left: 1 }, revs: { left: "x" } } });
+  if (view.state.left !== 7) throw new Error("what another page told is not this page's");
+  console.log("an answer is told to the other tabs, and what they tell is taken");
+})().catch(function (e) { console.error(e && e.stack || e); process.exit(1); });
+`
+
+func TestTabsOfOneBrowserTellEachOther(t *testing.T) {
+	runNodeDOMScript(t, "tell_tabs.test.js", keptAcrossTabsScript(callJS, tellOtherTabsAssertions))
+}
+
+// A message or an answer that arrives late (28/10/2026): every answer carries the moment the server read its
+// data (stamp), and a tab takes no data read before the data it holds. Here the page was drawn at 100, the
+// server answers its calls with data read at 200; another tab tells it data read at 250, then, late, data read
+// at 240; its own call answers after that.
+const olderDataAssertions = `
+(async function () {
+  var view = kit.page.view();
+  var channel = global.__channels.filter(function (c) { return c.name === "kitwork:page"; })[0];
+  channel.onmessage({ data: { page: "/", stamp: 250, values: { left: 7, todos: [{ id: 9, title: "Từ tab khác", done: false }] }, revs: { left: "l9", todos: "r9" } } });
+  if (rows().length !== 1 || view.state.left !== 7) throw new Error("data read after the tab's should be taken: " + rows().length + " rows, left " + view.state.left);
+  channel.onmessage({ data: { page: "/", stamp: 240, values: { left: 3, todos: [] }, revs: { left: "l3", todos: "r3" } } });
+  if (rows().length !== 1 || view.state.left !== 7) throw new Error("a message read before what the tab holds should not take it back: " + rows().length + " rows, left " + view.state.left);
+  view.set("title", "mua sữa");
+  view.state.add();
+  await tick(); await tick(); await tick();
+  if (rows().length !== 1 || view.state.left !== 7) throw new Error("an answer read before what the tab holds should not take it back: " + rows().length + " rows, left " + view.state.left);
+  if (view.state.title !== "") throw new Error("the page's own var still comes from its answer, title " + JSON.stringify(view.state.title));
+  console.log("a tab takes no data read before the data it holds");
+})().catch(function (e) { console.error(e && e.stack || e); process.exit(1); });
+`
+
+func TestTabsTakeNoDataReadBeforeTheirs(t *testing.T) {
+	runNodeDOMScript(t, "older_data.test.js", keptAcrossTabsScript(callJS, olderDataAssertions))
+}
+
+// The controls: a tab that takes what it is told whatever its stamp goes back to the late message's data; one
+// that takes every answer goes back to its own late answer's.
+func TestTabsThatIgnoreTheStampGoBack(t *testing.T) {
+	for _, c := range []struct{ name, drop, keep, want string }{
+		{"a message", " || !(m.stamp > stamp)) return;", ") return;", "a message read before"},
+		{"an answer", "if (answer.stamp && answer.stamp <= stamp) {", "if (false) {", "an answer read before"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if !strings.Contains(callJS, c.drop) {
+				t.Fatal("the stamp's check of call.js moved: update this control")
+			}
+			out, err := runNodeDOMWith(t, composedRuntime(), keptAcrossTabsScript(strings.Replace(callJS, c.drop, c.keep, 1), olderDataAssertions))
+			if err == nil || !strings.Contains(out, c.want) {
+				t.Fatalf("without the check the tab should go back; got err=%v\n%s", err, out)
+			}
+		})
+	}
+}
+
+// The control: a tab that does not take what it is told keeps its old rows.
+func TestTabsThatDoNotTakeWhatTheyAreToldStayOld(t *testing.T) {
+	take := "        put(k, m.values[k]);\n"
+	if !strings.Contains(callJS, take) {
+		t.Fatal("the channel's listener of call.js moved: update this control")
+	}
+	out, err := runNodeDOMWith(t, composedRuntime(), keptAcrossTabsScript(strings.Replace(callJS, take, "", 1), tellOtherTabsAssertions))
+	if err == nil || !strings.Contains(out, "what another tab told should replace") {
+		t.Fatalf("a tab that does not take what it is told should keep its old rows; got err=%v\n%s", err, out)
+	}
+}

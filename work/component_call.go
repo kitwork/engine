@@ -299,6 +299,7 @@ func (t *Tenant) serveComponentCall(vm *runtime.VM, ctxObj *Context, reqRouter *
 	if !t.guardsAgain(vm, ctxObj, reqRouter, leaf, call.seq) {
 		return
 	}
+	stamp := nextViewStamp() // before the run that reads the page's data, under the page's lock (view_call.go)
 	if res := t.execTree(vm, leaf, handler, ctxObj); res.K == value.Invalid || response.Kind() != "render" {
 		if res.K == value.Invalid {
 			t.recordRuntimeFailure(reqRouter, leaf.bytecode, "view", res)
@@ -312,6 +313,7 @@ func (t *Tenant) serveComponentCall(vm *runtime.VM, ctxObj *Context, reqRouter *
 	// kernel), as a job of the page answers it (view_call.go): by name, a list by row, and whole for a name the
 	// page held at another revision than the run before the job; a page the server draws whole holds none
 	if page := t.viewPage(node); page != nil && page.Live() {
+		answer["stamp"] = stamp // a tab takes no data read before the data it holds (call.js)
 		now := viewSnapshot(after)
 		patch, lists := viewPatch(before, now, t.viewListKeys(node))
 		if call.revs != nil {

@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/runtime"
@@ -28,10 +30,12 @@ import (
 // is the data the job changed, never the page: what differs between the two runs (view_patch.go), which the
 // page, running in the kernel, paints (jit/hydrate/call.js):
 //
-//	{ "seq": 4, "patch": { "left": 1 }, "lists": { "todos": { "key": "id", "remove": [3] } }, "revs": { … } }
+//	{ "seq": 4, "patch": { "left": 1 }, "lists": { "todos": { "key": "id", "remove": [3] } }, "revs": { … }, "stamp": 1793174400123456 }
 //
 // revs are the page's revision of each name of its data (view_patch.go): a page that held another value than
 // the one the job ran on (another tab changed the data) gets that name whole, so no page is left half new.
+// stamp is the moment the data of the answer was read (nextViewStamp): a tab takes no data, from an answer or
+// from another tab, read before the data it holds.
 //
 // A job that sends the page away (context.redirect) answers { seq, redirect }; one that fails answers
 // { seq, error: { code, message } } with that code. A job's return value is dropped.
@@ -55,6 +59,33 @@ func (t *Tenant) lockViewCalls(leaf *FolderRouter) func() {
 	mu.Lock()
 	return mu.Unlock
 }
+
+// lastViewStamp is the last stamp nextViewStamp gave.
+var lastViewStamp atomic.Int64
+
+// nextViewStamp is the moment the data of a page of router.view is read, in microseconds, taken before the run
+// that reads it: never twice the same in the process, never smaller than one given before (across a restart,
+// the clock's word). A call's runs hold the page's lock, so of two answers of one page the one with the greater
+// stamp read its data after the other: the tabs of a browser tell each other the data an answer brought, and
+// a tab takes it only when its stamp is greater than the one of the data it holds (call.js), however late a
+// message or an answer arrives.
+func nextViewStamp() int64 {
+	for {
+		last := lastViewStamp.Load()
+		now := time.Now().UnixMicro()
+		if now <= last {
+			now = last + 1
+		}
+		if lastViewStamp.CompareAndSwap(last, now) {
+			return now
+		}
+	}
+}
+
+// ViewRefreshHeader asks, with no job, for the data of a page that changed since the revisions it sends
+// (28/10/2026): a tab seen again after another changed the data (call.js). It goes the way of a call, through
+// the folder's guards and the page's lock, and runs the view's function once.
+const ViewRefreshHeader = "Kitwork-Refresh"
 
 // ViewCallHeader names the job of a call; the page's URL is the address (KITWORK_ROUTER_VIEW.md câu 7b is
 // still open between this header and a query).
@@ -92,12 +123,15 @@ type viewCall struct {
 	scope map[string]value.Value
 	// revs are the revisions the page holds, nil when it sent none
 	revs map[string]string
+	// refresh: no job, the page asks for the data that changed since its revisions (Kitwork-Refresh)
+	refresh bool
 }
 
 // readViewCall reads the call of a POST that names a job; an error is the request's own (400).
 func readViewCall(r *http.Request) (*viewCall, error) {
 	name := r.Header.Get(ViewCallHeader)
-	if !jobName(name) {
+	refresh := name == "" && r.Header.Get(ViewRefreshHeader) != ""
+	if !refresh && !jobName(name) {
 		return nil, fmt.Errorf("%s không phải tên một việc", ViewCallHeader)
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, viewCallLimit+1))
@@ -120,7 +154,7 @@ func readViewCall(r *http.Request) (*viewCall, error) {
 			return nil, fmt.Errorf("lời gọi không phải JSON { args, vars, seq }")
 		}
 	}
-	call := &viewCall{name: name, vars: map[string]value.Value{}, seq: sent.Seq, revs: sent.Revs}
+	call := &viewCall{name: name, vars: map[string]value.Value{}, seq: sent.Seq, revs: sent.Revs, refresh: refresh}
 	for _, arg := range sent.Args {
 		call.args = append(call.args, value.New(arg))
 	}
@@ -182,6 +216,10 @@ func jobName(name string) bool {
 // again and answers what changed; called after the function answered context.bind({ … }), on the VM it ran on.
 func (t *Tenant) serveViewCall(vm *runtime.VM, ctxObj *Context, reqRouter *Router, node *RouteNode, leaf *FolderRouter, handler *value.Lambda) {
 	call := reqRouter.call
+	if call.refresh {
+		serveViewRefresh(vm, reqRouter)
+		return
+	}
 	if call.at != "" {
 		t.serveComponentCall(vm, ctxObj, reqRouter, node, leaf, handler) // a job of a component (component_call.go)
 		return
@@ -243,6 +281,7 @@ func (t *Tenant) serveViewCall(vm *runtime.VM, ctxObj *Context, reqRouter *Route
 	if !t.guardsAgain(vm, ctxObj, reqRouter, leaf, call.seq) {
 		return
 	}
+	stamp := nextViewStamp() // before the run that reads the data the answer brings, under the page's lock
 	if res := t.execTree(vm, leaf, handler, ctxObj); res.K == value.Invalid || response.Kind() != "render" {
 		if res.K == value.Invalid {
 			t.recordRuntimeFailure(reqRouter, leaf.bytecode, "view", res)
@@ -252,7 +291,7 @@ func (t *Tenant) serveViewCall(vm *runtime.VM, ctxObj *Context, reqRouter *Route
 	}
 	after := viewSnapshot(response.Data())
 	patch, lists := viewPatch(before, after, t.viewListKeys(node))
-	answer := map[string]any{"seq": call.seq}
+	answer := map[string]any{"seq": call.seq, "stamp": stamp}
 	if call.revs != nil {
 		if revs := staleRevs(call.revs, before, after, isVar, patch, lists); len(revs) > 0 {
 			answer["revs"] = revs
@@ -348,6 +387,46 @@ func cookiesAsSentNext(req *http.Request, set []*http.Cookie) {
 		b.WriteString((&http.Cookie{Name: name, Value: v}).String())
 	}
 	req.Header.Set("Cookie", b.String())
+}
+
+// serveViewRefresh answers a page that asks for what changed since its revisions: each name of its data
+// (a var's aside) whose revision is not the page's, whole, with its new revision; nothing when it holds the data
+// as it is. Its stamp was taken before the view's function ran, under the page's lock (router_serve.go).
+func serveViewRefresh(vm *runtime.VM, reqRouter *Router) {
+	call := reqRouter.call
+	data := reqRouter.response.Data()
+	now := viewSnapshot(data)
+	vars := map[string]bool{}
+	if data.IsMap() {
+		if v, ok := data.Map()[compiler.ViewStateName]; ok && v.K == value.Func {
+			if state, ok := v.V.(*value.Lambda); ok {
+				if held := vm.ExecuteLambda(state, nil); held.IsMap() {
+					for name := range held.Map() {
+						vars[name] = true
+					}
+				}
+			}
+		}
+	}
+	patch, revs := map[string]any{}, map[string]string{}
+	for name, v := range now {
+		if vars[name] {
+			continue
+		}
+		if rev := revOf(v); call.revs[name] != rev {
+			patch[name], revs[name] = v, rev
+		}
+	}
+	for name := range call.revs {
+		if _, kept := now[name]; !kept {
+			patch[name], revs[name] = nil, ""
+		}
+	}
+	answer := map[string]any{"seq": call.seq, "stamp": reqRouter.viewStamp}
+	if len(revs) > 0 {
+		answer["patch"], answer["revs"] = patch, revs
+	}
+	answerViewCall(reqRouter, answer)
 }
 
 // clearViewAnswer sets aside what the response was answered with, for the next run to answer.

@@ -213,7 +213,7 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 		method = leaf.methods[r.Method]
 	}
 	// a job of router.view's page, called through the bridge: a POST to the page's URL naming it (view_call.go)
-	if method == nil && ui && r.Method == http.MethodPost && r.Header.Get(ViewCallHeader) != "" {
+	if method == nil && ui && r.Method == http.MethodPost && (r.Header.Get(ViewCallHeader) != "" || r.Header.Get(ViewRefreshHeader) != "") {
 		if get := leaf.methods[http.MethodGet]; get != nil && get.view {
 			call, err := readViewCall(r)
 			if err != nil {
@@ -322,6 +322,9 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 			}
 		case method.handle != nil:
 			reqRouter.method, reqRouter.handling = method, true
+			if method.view {
+				reqRouter.viewStamp = nextViewStamp() // before the run that reads the page's data (view_call.go)
+			}
 			res := t.execTree(vm, leaf, method.handle, ctxObj)
 			reqRouter.handling = false
 			if stream := reqRouter.openedStream(); stream != nil && res.K != value.Invalid && !stream.is(res) {
