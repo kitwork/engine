@@ -1445,6 +1445,10 @@
   kit.element = function () { return acting; };
   // kit.forget(el): the fields at and under el are written again by the next paint, whatever the person
   // did to them (writeBinding).
+  // kit.write(el, name, v) and kit.text(el, v): how the kernel writes a bound value and a text, for a page's
+  // program to write the same way (call.js, ui/page_program.go).
+  kit.write = function (el, name, v) { writeBinding(el, String(name).toLowerCase(), v); };
+  kit.text = setText;
   kit.forget = function (el) {
     if (!el || el.nodeType !== 1) return;
     delete state(el).written;

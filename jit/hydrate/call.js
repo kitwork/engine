@@ -1,21 +1,26 @@
 // call.js — the browser side of router.view's bridge (28/10/2026, docs/KITWORK_BRIDGE.md).
 //
-// A page whose view binds a job or a var runs in the kernel as one component: the engine writes what the
-// page reads as the kernel's attributes (ui/runtime.go) and the page's data once, as JSON
-// (<script type="application/json" data-kitwork-page>, ui/render.go). This file puts that data in the
-// page's scope, and each job there as a function the markup calls by name: remove(todo.id).
+// A page whose view binds a job or a var runs in the browser as one component. The server writes the page's
+// data once, as JSON (<script type="application/json" data-kitwork-page>, ui/page_live.go); this file puts
+// it in the page's state, and each job there as a function the markup calls by name: remove(todo.id).
+//
+// Most such pages have a program (ui/page_program.go, /_kitwork/page.<hash>.js): each element whose values
+// follow the data carries one mark, data-k="n", and the program says what mark n writes, from which
+// expression and which names of the page it reads. A name that changes runs again only what reads it; a
+// list changes by row; a row whose item is the same object is left alone. A page with no program (one that
+// holds a component of Kitwork) is painted by the kernel from its data-kitwork-* attributes, as before.
 //
 // A call is a POST to the page's own URL naming the job (Kitwork-Call), its body { args, vars, seq }. The
 // answer is the data the job changed, never the page (work/view_call.go):
 //
 //   { "seq": 4, "patch": { "left": 1 }, "lists": { "todos": { "key": "id", "set": [ … ], "remove": [45] } } }
 //
-// patch is written into the scope name by name, a list by row, and the kernel paints what reads them.
-// Calls go one at a time, in the order they were made: the next leaves when the one before has answered,
-// so an answer never lands on a page newer than the one it was computed from. While a call waits or is
-// out, job.pending is true, read in a row of a for for the call made from that row; job.error is the
-// failed call's { code, message }, null once a call of the job is made again. A call that fails changes
-// nothing, and what the person did to the element that made it (a box ticked) goes back to the data.
+// patch is written into the state name by name, a list by row. Calls go one at a time, in the order they
+// were made: the next leaves when the one before has answered, so an answer never lands on a page newer
+// than the one it was computed from. While a call waits or is out, job.pending is true, read in a row of a
+// list for the call made from that row; job.error is the failed call's { code, message }, null once a call
+// of the job is made again. A call that fails changes nothing, and what the person did to the element that
+// made it (a box ticked) goes back to the data.
 (function () {
   "use strict";
   var kit = window.kitwork || window.kit;
@@ -23,23 +28,32 @@
   window.__kitworkCall = true;
 
   var page = null;   // { jobs, vars } of the page drawn now, null on a page with none
+  var view = null;   // the program running the page drawn now, null on a page the kernel paints
   var epoch = 0;     // the page drawn now: an answer to a page Drive has left is dropped
   var seq = 0;       // the number of the last call sent
   var queue = [];    // calls waiting for the one in flight
   var flying = null; // the call in flight
   var track = {};    // job → { pending, error, rows: { row → { pending, error } } }
+  var current = null; // the element whose binding or event the program runs now
 
-  function scope() { return kit.scope.$; }
-  function paint() { if (typeof kit.render === "function") kit.render(); }
-  function acting() { return typeof kit.element === "function" ? kit.element() : null; }
+  function acting() { return current || (typeof kit.element === "function" ? kit.element() : null); }
+  function get(name) { return view ? view.state[name] : kit.scope.$[name]; }
+  function put(name, value) {
+    if (view) view.set(name, value);
+    else kit.scope.$[name] = value;
+  }
+  function paint() {
+    if (view) view.flush();
+    else if (typeof kit.render === "function") kit.render();
+  }
 
-  // the row of a for an element stands in, "" outside every row: the list's id and the row's key
+  // the row of a list an element stands in, "" outside every row: the list's id and the row's key
   function rowOf(el) {
     var row = el && el.closest ? el.closest("[data-kitwork-item]") : null;
     return row ? row.getAttribute("data-kitwork-item") + ":" + row.getAttribute("data-kitwork-key") : "";
   }
 
-  // job.pending and job.error, read where the kernel paints: in a row, that row's call; outside, any
+  // job.pending and job.error, read where they are painted: in a row, that row's call; outside, any
   function read(name, field) {
     var t = track[name];
     if (!t) return field === "pending" ? false : null;
@@ -62,6 +76,7 @@
       t.error = error;
       if (at) at.error = error;
     }
+    if (view) view.touch(call.name, call.row);
   }
 
   function job(name) {
@@ -77,19 +92,36 @@
     return fn;
   }
 
-  // the page's data and jobs, from what the server wrote with the page
+  // the page's data and jobs, from what the server wrote with the page, and its program when it has one
   function seed() {
     var el = document.querySelector("[data-kitwork-page]");
     page = null;
+    view = null;
     if (!el) return;
     var data;
     try { data = JSON.parse(el.textContent || "{}"); } catch (e) { return; }
-    var s = scope();
-    page = { jobs: data.jobs || [], vars: data.vars || [] };
-    var state = data.state || {};
+    page = { jobs: data.jobs || [], vars: data.vars || [], program: data.program || "" };
+    var state = {};
+    Object.keys(data.state || {}).forEach(function (k) { state[k] = data.state[k]; });
+    page.jobs.forEach(function (name) { state[name] = job(name); });
+    var program = page.program && kit.pages && kit.pages[page.program];
+    if (program) {
+      view = makeView(program, state, page.jobs);
+      return;
+    }
+    if (page.program) return; // its program has not arrived yet: kit.pageReady seeds again when it does
+    var s = kit.scope.$;
     Object.keys(state).forEach(function (k) { s[k] = state[k]; });
-    page.jobs.forEach(function (name) { s[name] = job(name); });
   }
+  // the program running the page drawn now, for a test and the console
+  kit.page = { view: function () { return view; } };
+  // a page's program arrived after this file ran: the page drawn now may be its
+  kit.pageReady = function (id) {
+    if (!view && page && page.program === id) {
+      seed();
+      paint();
+    }
+  };
 
   function pump() {
     if (flying || !queue.length) return;
@@ -97,13 +129,17 @@
     if (call.epoch !== epoch) { flying = null; pump(); return; }
     call.seq = ++seq;
     var vars = {};
-    if (page) page.vars.forEach(function (k) { vars[k] = scope()[k]; });
+    if (page) page.vars.forEach(function (k) { vars[k] = get(k); });
     send(call, { args: call.args, vars: vars, seq: call.seq }).then(function (answer) {
       settle(call, answer);
     }, function (error) {
       settle(call, { error: { code: 0, message: String(error && error.message || error) } });
     }).then(function () {
       flying = null;
+      pump();
+    }, function (error) {
+      flying = null;
+      if (window.console) console.error("kitwork: áp câu trả lời của việc " + call.name + " không thành", error);
       pump();
     });
   }
@@ -133,21 +169,22 @@
     if (answer.reload) { location.reload(); return; }
     if (answer.error) {
       mark(call, false, { code: answer.error.code, message: answer.error.message || "" });
-      if (typeof kit.forget === "function") kit.forget(call.el && call.el.closest && call.el.closest("[data-kitwork-item]") || call.el);
+      var back = call.el && call.el.closest && call.el.closest("[data-kitwork-item]") || call.el;
+      if (view) view.forget(back);
+      else if (typeof kit.forget === "function") kit.forget(back);
       if (window.console) console.error("kitwork: việc " + call.name + " không thành", answer.error);
       paint();
       return;
     }
-    var s = scope();
     var patch = answer.patch || {}, lists = answer.lists || {};
-    Object.keys(patch).forEach(function (k) { s[k] = patch[k]; });
-    Object.keys(lists).forEach(function (k) { s[k] = applyList(s[k], lists[k]); });
+    Object.keys(patch).forEach(function (k) { put(k, patch[k]); });
+    Object.keys(lists).forEach(function (k) { put(k, applyList(get(k), lists[k])); });
     mark(call, false, null);
     paint();
   }
 
   // a keyed list's change by row: the rows removed, the rows set (changed in place, or new at the end), and
-  // the order when the server sent one
+  // the order when the server sent one; a row nothing changed stays the same object
   function applyList(list, change) {
     var path = String(change.key || "").split(".");
     function keyOf(row) {
@@ -181,11 +218,331 @@
     return out;
   }
 
+  // ---- the program: what each mark writes, run again only when a name it reads changes ----
+
+  var POSITION = { count: true, first: true, last: true, even: true, odd: true };
+
+  // names reports whether an expression reads any of the names given
+  function readsAny(ir, names) {
+    if (!(ir instanceof Array) || !ir.length) return false;
+    if (ir[0] === "$") return !!names[ir[1]];
+    if (ir[0] === "#") return false;
+    for (var i = 1; i < ir.length; i++) if (readsAny(ir[i], names)) return true;
+    return false;
+  }
+
+  function makeView(program, state, jobs) {
+    var groups = program.g || [], lists = program.l || [];
+    var isJob = {};
+    jobs.forEach(function (name) { isJob[name] = true; });
+    var v = { state: state, runs: 0 };
+    var dirty = {}, touched = [], dirtyRows = [];
+    var pageEls = {};       // mark → the element of a mark outside every row
+    var pageReaders = {};   // name → marks outside every row that read it
+    var rowReaders = {};    // name → marks in rows that read it
+    var listByName = {};    // name of the page → list it draws
+    var listById = {};      // the list's id on the page (s1) → list
+    var events = {};        // event type → true
+
+    groups.forEach(function (g, n) {
+      var into = g.l < 0 ? pageReaders : rowReaders;
+      [g.b || [], g.c || []].forEach(function (pairs) {
+        pairs.forEach(function (p) {
+          (p.r || []).forEach(function (name) { (into[name] || (into[name] = [])).indexOf(n) < 0 && into[name].push(n); });
+        });
+      });
+      (g.e || []).forEach(function (p) { events[p.n.split(".")[0]] = true; });
+    });
+
+    document.querySelectorAll("[data-k]").forEach(function (el) {
+      var n = +el.getAttribute("data-k"), g = groups[n];
+      if (g && g.l < 0) pageEls[n] = el;
+    });
+
+    lists.forEach(function (spec, i) {
+      var template = document.querySelector('[data-k-for="' + i + '"]');
+      if (!template) return;
+      var start = template.previousSibling, close = template.nextSibling;
+      while (close && !(close.nodeType === 8 && close.nodeValue === "kit-for:end")) close = close.nextSibling;
+      var opened = start && start.nodeType === 8 && /^kit-for:start id=(\S+)$/.exec(start.nodeValue);
+      if (!opened || !close) return;
+      template.parentNode.removeChild(template);
+      template.removeAttribute("data-k-for");
+      template.removeAttribute("data-kitwork-template");
+      template.removeAttribute("hidden");
+      var list = { i: i, spec: spec, id: opened[1], start: start, end: close, template: template, rows: {}, order: [] };
+      list.name = spec.a instanceof Array && spec.a[0] === "$" ? spec.a[1] : null;
+      var position = {};
+      position[spec.i] = false;
+      if (spec.x) position[spec.x] = true;
+      Object.keys(POSITION).forEach(function (k) { position[k] = true; });
+      list.positional = groups.some(function (g) {
+        return g.l === i && [g.b || [], g.c || []].some(function (pairs) {
+          return pairs.some(function (p) { return readsAny(p.x, position); });
+        });
+      });
+      var items = state[list.name] instanceof Array ? state[list.name] : [];
+      var byKey = {};
+      items.forEach(function (item, at) { byKey[keyOf(list, item, at)] = item; });
+      for (var node = start.nextSibling; node && node !== close; node = node.nextSibling) {
+        if (node.nodeType !== 1 || node.getAttribute("data-kitwork-item") !== list.id) continue;
+        var key = node.getAttribute("data-kitwork-key");
+        var row = { el: node, key: key, item: byKey[key], index: list.order.length, marks: marksOf(node) };
+        list.rows[key] = row;
+        list.order.push(key);
+      }
+      listById[list.id] = list;
+      if (list.name) listByName[list.name] = list;
+    });
+
+    // a row's key, kept per item object: a list of a thousand rows that changes by one row reads one key
+    var keys = typeof WeakMap === "function" ? new WeakMap() : null;
+    function keyOf(list, item, at) {
+      if (!list.spec.k) return String(at);
+      var cached = keys && item !== null && typeof item === "object" && !list.spec.x;
+      if (cached && keys.has(item)) return keys.get(item);
+      var s = {};
+      s[list.spec.i] = item;
+      if (list.spec.x) s[list.spec.x] = at;
+      var key = String(kit.run(list.spec.k, s));
+      if (cached) keys.set(item, key);
+      return key;
+    }
+    function marksOf(rowEl) {
+      var marks = {};
+      if (rowEl.hasAttribute("data-k")) (marks[rowEl.getAttribute("data-k")] = []).push(rowEl);
+      rowEl.querySelectorAll("[data-k]").forEach(function (el) {
+        var n = el.getAttribute("data-k");
+        (marks[n] || (marks[n] = [])).push(el);
+      });
+      return marks;
+    }
+    function rowScope(list, row) {
+      var s = {};
+      for (var k in state) s[k] = state[k];
+      var count = list.order.length;
+      s[list.spec.i] = row.item;
+      if (list.spec.x) s[list.spec.x] = row.index;
+      s.count = count;
+      s.first = row.index === 0;
+      s.last = row.index === count - 1;
+      s.even = row.index % 2 === 0;
+      s.odd = row.index % 2 === 1;
+      return s;
+    }
+    function scopeOf(el) {
+      var rowEl = el && el.closest ? el.closest("[data-kitwork-item]") : null;
+      var list = rowEl && listById[rowEl.getAttribute("data-kitwork-item")];
+      var row = list && list.rows[rowEl.getAttribute("data-kitwork-key")];
+      return row ? rowScope(list, row) : state;
+    }
+
+    // run what mark n writes on one element, in a scope: every value, or only those that read a name of only
+    function reads(p, only) {
+      if (!only) return true;
+      for (var i = 0; p.r && i < p.r.length; i++) if (only[p.r[i]]) return true;
+      return false;
+    }
+    function runGroup(n, el, scope, only) {
+      var g = groups[n];
+      if (!g) return;
+      current = el;
+      try {
+        (g.b || []).forEach(function (p) {
+          if (!reads(p, only)) return;
+          v.runs++;
+          var value = kit.run(p.x, scope);
+          if (p.n === "text") kit.text(el, value);
+          else if (p.n === "show") el.hidden = !value;
+          else if ((p.n === "value" || p.n === "checked") && twoWay(el, p)) model(el, p.n, value);
+          else kit.write(el, p.n, value);
+        });
+        (g.c || []).forEach(function (p) {
+          if (!reads(p, only)) return;
+          v.runs++;
+          el.classList.toggle(p.n, !!kit.run(p.x, scope));
+        });
+      } catch (error) {
+        if (window.console) console.error("kitwork:", error, el);
+      } finally {
+        current = null;
+      }
+    }
+    function twoWay(el, p) {
+      return p.x instanceof Array && p.x[0] === "$" && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName);
+    }
+    function model(el, name, value) {
+      if (name === "checked") { if (el.checked !== !!value) el.checked = !!value; }
+      else if (String(value == null ? "" : value) !== el.value) el.value = value == null ? "" : value;
+    }
+    function runRow(list, row) {
+      var scope = rowScope(list, row);
+      Object.keys(row.marks).forEach(function (n) {
+        row.marks[n].forEach(function (el) { runGroup(+n, el, scope); });
+      });
+    }
+
+    // a list against its rows: rows by key, a row whose item is another object runs again, a new row is
+    // made from the template, a row whose key is gone leaves, the rows stand in the list's order
+    function reconcile(list) {
+      var items = state[list.name] instanceof Array ? state[list.name] : [];
+      var parent = list.start.parentNode;
+      if (!parent) return;
+      var keep = {}, order = [], after = list.start;
+      items.forEach(function (item, at) {
+        var key = keyOf(list, item, at);
+        if (keep[key]) return;
+        keep[key] = true;
+        order.push(key);
+        var row = list.rows[key];
+        if (!row) {
+          var el = list.template.cloneNode(true);
+          el.setAttribute("data-kitwork-item", list.id);
+          el.setAttribute("data-kitwork-key", key);
+          row = list.rows[key] = { el: el, key: key, item: item, index: at, marks: marksOf(el) };
+          dirtyRows.push([list, row]);
+        } else if (row.item !== item) {
+          row.item = item;
+          dirtyRows.push([list, row]);
+        } else if (row.index !== at && list.positional) {
+          dirtyRows.push([list, row]);
+        }
+        row.index = at;
+        if (after.nextSibling !== row.el) parent.insertBefore(row.el, after.nextSibling);
+        after = row.el;
+      });
+      list.order.forEach(function (key) {
+        if (!keep[key]) {
+          var gone = list.rows[key];
+          if (gone.el.parentNode) gone.el.parentNode.removeChild(gone.el);
+          delete list.rows[key];
+        }
+      });
+      if (list.positional && order.length !== list.order.length) {
+        order.forEach(function (key) { dirtyRows.push([list, list.rows[key]]); });
+      }
+      list.order = order;
+    }
+
+    v.set = function (name, value) {
+      state[name] = value;
+      dirty[name] = true;
+    };
+    // a job's call began or ended: what reads the job outside every row, and in the row it was made from
+    v.touch = function (name, row) {
+      touched.push([name, row]);
+    };
+    v.forget = function (el) {
+      if (!el || el.nodeType !== 1) return;
+      if (typeof kit.forget === "function") kit.forget(el);
+      var all = [el];
+      el.querySelectorAll("[data-k]").forEach(function (x) { all.push(x); });
+      all.forEach(function (x) {
+        if (x.hasAttribute("data-k")) runGroup(+x.getAttribute("data-k"), x, scopeOf(x));
+      });
+    };
+    v.flush = function () {
+      var names = Object.keys(dirty);
+      dirty = {};
+      var jobs = touched;
+      touched = [];
+      names.forEach(function (name) { if (listByName[name]) reconcile(listByName[name]); });
+      var rows = dirtyRows;
+      dirtyRows = [];
+      var ran = {};
+      rows.forEach(function (pair) {
+        var id = pair[0].id + ":" + pair[1].key;
+        if (ran[id] || !pair[0].rows[pair[1].key]) return;
+        ran[id] = true;
+        runRow(pair[0], pair[1]);
+      });
+      var pageMarks = {};
+      names.concat(jobs.map(function (t) { return t[0]; })).forEach(function (name) {
+        (pageReaders[name] || []).forEach(function (n) { (pageMarks[n] || (pageMarks[n] = {}))[name] = true; });
+      });
+      Object.keys(pageMarks).forEach(function (n) { if (pageEls[n]) runGroup(+n, pageEls[n], state, pageMarks[n]); });
+      // a name of the page read in rows: every row, but a job: the row its call was made from
+      names.forEach(function (name) {
+        if (!rowReaders[name] || isJob[name]) return;
+        Object.keys(listById).forEach(function (id) {
+          var list = listById[id];
+          list.order.forEach(function (key) {
+            if (ran[id + ":" + key]) return;
+            var row = list.rows[key], scope = rowScope(list, row), only = {};
+            only[name] = true;
+            rowReaders[name].forEach(function (n) {
+              (row.marks[n] || []).forEach(function (el) { runGroup(n, el, scope, only); });
+            });
+          });
+        });
+      });
+      jobs.forEach(function (t) {
+        var name = t[0], at = t[1];
+        if (!rowReaders[name] || !at) return;
+        var cut = at.indexOf(":"), list = listById[at.slice(0, cut)];
+        var row = list && list.rows[at.slice(cut + 1)];
+        if (!row) return;
+        var scope = rowScope(list, row), only = {};
+        only[name] = true;
+        rowReaders[name].forEach(function (n) {
+          (row.marks[n] || []).forEach(function (el) { runGroup(n, el, scope, only); });
+        });
+      });
+    };
+
+    // events: one listener per type for the page, the handlers of the marks from the target up
+    Object.keys(events).forEach(function (type) {
+      if (listening[type]) return;
+      listening[type] = true;
+      document.addEventListener(type, function (e) {
+        if (!view) return;
+        view.handle(type, e);
+      });
+    });
+    v.handle = function (type, e) {
+      for (var el = e.target; el && el.nodeType === 1; el = el.parentElement) {
+        if (!el.hasAttribute("data-k")) continue;
+        var g = groups[+el.getAttribute("data-k")];
+        if (!g || !g.e) continue;
+        var stop = false;
+        for (var i = 0; i < g.e.length; i++) {
+          var p = g.e[i], parts = p.n.split(".");
+          if (parts[0] !== type) continue;
+          if (parts.indexOf("prevent") > 0 && e.preventDefault) e.preventDefault();
+          if (parts.indexOf("stop") > 0) { stop = true; if (e.stopPropagation) e.stopPropagation(); }
+          current = el;
+          try { kit.run(p.x, scopeOf(el)); }
+          catch (error) { if (window.console) console.error("kitwork:", error, el); }
+          finally { current = null; }
+        }
+        if (stop) break;
+      }
+      v.flush();
+    };
+    // a field that holds a var: what is typed is the var, and what reads it runs again
+    v.input = function (e) {
+      var el = e.target;
+      if (!el || !el.hasAttribute || !el.hasAttribute("data-k")) return;
+      var g = groups[+el.getAttribute("data-k")];
+      (g && g.b || []).forEach(function (p) {
+        if ((p.n === "value" || p.n === "checked") && twoWay(el, p)) {
+          var value = p.n === "checked" ? !!el.checked : (el.type === "number" || el.type === "range") ? (parseFloat(el.value) || 0) : (el.value || "");
+          v.set(p.x[1], value);
+        }
+      });
+      v.flush();
+    };
+    return v;
+  }
+  var listening = {};
+  document.addEventListener("input", function (e) { if (view) view.input(e); });
+
   // Drive leaves the page: its calls are dropped; the page it brings is seeded from its own data
   document.addEventListener("kitwork:before-swap", function () {
     epoch++;
     queue = [];
     track = {};
+    view = null;
   });
   document.addEventListener("kitwork:load", function () {
     seed();
