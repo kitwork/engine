@@ -244,7 +244,7 @@ func TestStalePageGetsWholeValues(t *testing.T) {
 	}
 }
 
-// A tab seen again asks, with no job, for what changed since its revisions (Kitwork-Refresh, 28/10/2026): the
+// A tab seen again asks, with no job, for what changed since its revisions (?kitwork-refresh=1, 28/10/2026): the
 // names whose revision is not its own come whole with their new revisions, a var never; a tab that holds the
 // data as it is gets nothing.
 func TestRefreshAnswersWhatChangedSinceTheRevisions(t *testing.T) {
@@ -262,9 +262,8 @@ func TestRefreshAnswersWhatChangedSinceTheRevisions(t *testing.T) {
 		callAnswer(t, tn, "add", `{"args":[],"vars":{"title":"row"},"seq":1}`)
 	}
 	refresh := func(revs []byte) (map[string]any, string) {
-		req := httptest.NewRequest(http.MethodPost, "http://localhost/todo", strings.NewReader(`{"seq":3,"revs":`+string(revs)+`}`))
+		req := httptest.NewRequest(http.MethodPost, "http://localhost/todo?"+ViewRefreshParameter+"=1", strings.NewReader(`{"seq":3,"revs":`+string(revs)+`}`))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set(ViewRefreshHeader, "1")
 		rec := httptest.NewRecorder()
 		tn.Serve(rec, req)
 		var answer map[string]any

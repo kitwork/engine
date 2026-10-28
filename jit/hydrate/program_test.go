@@ -68,7 +68,7 @@ document.body.appendChild(main);
 var server = todos.map(function (t) { return { id: t.id, title: t.title, done: t.done }; });
 var out = [], refuse = false;
 global.fetch = function (url, options) {
-  var body = JSON.parse(options.body), job = options.headers["Kitwork-Call"], answer;
+  var body = JSON.parse(options.body), job = new URL(url, "http://x").searchParams.get("kitwork-call"), answer;
   if (refuse) answer = { seq: body.seq, error: { code: 500, message: "đơn đã khoá" } };
   else if (job === "toggle") {
     server = server.map(function (t) { return t.id === body.args[0] ? { id: t.id, title: t.title, done: body.args[1] } : t; });
@@ -245,8 +245,8 @@ const keptAcrossTabsPage = `
 global.__sent = [];
 global.fetch = function (url, options) {
   var body = JSON.parse(options.body);
-  global.__sent.push({ headers: options.headers, body: body });
-  var answer = options.headers["Kitwork-Refresh"]
+  global.__sent.push({ url: url, headers: options.headers, body: body });
+  var answer = new URL(url, "http://x").searchParams.has("kitwork-refresh")
     ? { seq: body.seq, patch: { left: 1, todos: [{ id: 1, title: "Một", done: false }, { id: 2, title: "Hai", done: true }] }, revs: { todos: "r2", left: "l2" }, stamp: 300 }
     : { seq: body.seq, patch: { left: 0, title: "" }, lists: { todos: { key: "id", set: [{ id: 1, title: "Việc số 1", done: true }] } }, revs: { todos: "r1", left: "l1" }, stamp: 200 };
   return Promise.resolve({ redirected: false, ok: true, status: 200, headers: { get: function () { return "application/json"; } }, json: function () { return Promise.resolve(answer); } });
@@ -264,7 +264,7 @@ const seenAgainAssertions = `
   document.visibilityState = "visible";
   document.dispatchEvent({ type: "visibilitychange" });
   await tick(); await tick(); await tick();
-  var asked = global.__sent.filter(function (s) { return s.headers["Kitwork-Refresh"]; });
+  var asked = global.__sent.filter(function (s) { return s.url.indexOf("kitwork-refresh=1") >= 0; });
   if (asked.length !== 1) throw new Error("a tab seen again should ask for what changed, asked " + asked.length + " times");
   if (JSON.stringify(asked[0].body.revs) !== JSON.stringify({ todos: "r0", left: "l0" })) throw new Error("it should send its revisions, sent " + JSON.stringify(asked[0].body));
   if (rows().length !== 2 || view.state.left !== 1) throw new Error("what changed should replace the page's: " + rows().length + " rows, left " + view.state.left);
@@ -353,6 +353,45 @@ func TestTabsThatIgnoreTheStampGoBack(t *testing.T) {
 				t.Fatalf("without the check the tab should go back; got err=%v\n%s", err, out)
 			}
 		})
+	}
+}
+
+// A call names its job in the page's URL and carries no header of Kitwork's own (KITWORK_ROUTER_VIEW.md câu
+// 7b, 28/10/2026): the shell of a native app passes a request's method, URL and body, and not always its
+// headers (the desktop's none, Android's Content-Type and Accept only). The page's own query stays.
+const namedInTheURLAssertions = `
+(async function () {
+  var view = kit.page.view();
+  view.state.toggle(1, true);
+  await tick(); await tick();
+  var sent = global.__sent[global.__sent.length - 1];
+  if (!sent || sent.url !== "/?kitwork-call=toggle") throw new Error("a call should name its job in the page's URL, sent to " + (sent && sent.url));
+  var names = Object.keys(sent.headers).sort().join(",");
+  if (names !== "Accept,Content-Type") throw new Error("a call should carry no header of Kitwork's own, sent " + names);
+  location.search = "?tab=2";
+  document.visibilityState = "visible";
+  document.dispatchEvent({ type: "visibilitychange" });
+  await tick(); await tick();
+  sent = global.__sent[global.__sent.length - 1];
+  if (sent.url !== "/?tab=2&kitwork-refresh=1") throw new Error("the page's own query should stay, the ask after it, sent to " + sent.url);
+  console.log("a call names its job in the page's URL and carries no header of Kitwork's own");
+})().catch(function (e) { console.error(e && e.stack || e); process.exit(1); });
+`
+
+func TestCallsNameTheJobInThePagesURL(t *testing.T) {
+	runNodeDOMScript(t, "named_in_url.test.js", keptAcrossTabsScript(callJS, namedInTheURLAssertions))
+}
+
+// The control: the job's name in a header, as before, is what a native app's shell does not carry.
+func TestCallsNamingTheJobInAHeaderAreCaught(t *testing.T) {
+	headers := `headers: { "Content-Type": "application/json", "Accept": "application/json" },`
+	if !strings.Contains(callJS, headers) {
+		t.Fatal("the transport of call.js moved: update this control")
+	}
+	old := `headers: { "Content-Type": "application/json", "Accept": "application/json", "Kitwork-Call": call.name },`
+	out, err := runNodeDOMWith(t, composedRuntime(), keptAcrossTabsScript(strings.Replace(callJS, headers, old, 1), namedInTheURLAssertions))
+	if err == nil || !strings.Contains(out, "no header of Kitwork's own") {
+		t.Fatalf("a call with a header of its own should be caught; got err=%v\n%s", err, out)
 	}
 }
 

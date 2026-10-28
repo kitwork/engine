@@ -28,7 +28,7 @@ document.body.appendChild(notice);
 var server = [{ id: 1, title: "Mua sữa", done: false }, { id: 2, title: "Gửi thư", done: true }];
 var out = [], sent = [], refuse = false;
 global.fetch = function (url, options) {
-  var body = JSON.parse(options.body), job = options.headers["Kitwork-Call"];
+  var body = JSON.parse(options.body), job = new URL(url, "http://x").searchParams.get("kitwork-call");
   sent.push({ job: job, body: body });
   var answer;
   if (refuse) {

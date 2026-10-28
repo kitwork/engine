@@ -66,9 +66,8 @@ func TestAnswersOfAPageAreStampedInTheOrderTheirDataWasRead(t *testing.T) {
 		last = a.stamp
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "http://localhost/todo", strings.NewReader(`{"seq":3,"revs":`+string(revs)+`}`))
+	req := httptest.NewRequest(http.MethodPost, "http://localhost/todo?"+ViewRefreshParameter+"=1", strings.NewReader(`{"seq":3,"revs":`+string(revs)+`}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(ViewRefreshHeader, "1")
 	rec := httptest.NewRecorder()
 	tn.Serve(rec, req)
 	var refreshed struct {

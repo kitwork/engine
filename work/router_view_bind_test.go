@@ -51,9 +51,12 @@ func TestRouterViewBindDrawsThePage(t *testing.T) {
 
 // postCall calls a job of a router.view page through the bridge, as the browser does.
 func postCall(tn *Tenant, path, job, body string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(http.MethodPost, "http://localhost"+path, strings.NewReader(body))
+	sep := "?"
+	if strings.Contains(path, "?") {
+		sep = "&"
+	}
+	req := httptest.NewRequest(http.MethodPost, "http://localhost"+path+sep+ViewCallParameter+"="+job, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(ViewCallHeader, job)
 	rec := httptest.NewRecorder()
 	tn.Serve(rec, req)
 	return rec

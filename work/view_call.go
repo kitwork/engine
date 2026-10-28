@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,9 +21,11 @@ import (
 // function of the object its function answers with context.bind({ … }), called from the browser as a POST to
 // the page's own URL.
 //
-//	POST /todo
-//	Kitwork-Call: remove
+//	POST /todo?kitwork-call=remove
 //	{ "args": [3], "vars": { "title": "" }, "seq": 4, "revs": { "todos": "3f1a…", "left": "9c0e…" } }
+//
+// The job's name is in the URL, taken out of it before anything reads it (takeViewCall): the guards and the
+// view's function read the page's own URL.
 //
 // The folder's guards and the origin check run as for any POST of the folder. Then the view's function runs
 // with the vars the browser sent (context.viewVar, written by the compiler, compiler/router_view.go), the job
@@ -82,14 +85,43 @@ func nextViewStamp() int64 {
 	}
 }
 
-// ViewRefreshHeader asks, with no job, for the data of a page that changed since the revisions it sends
-// (28/10/2026): a tab seen again after another changed the data (call.js). It goes the way of a call, through
-// the folder's guards and the page's lock, and runs the view's function once.
-const ViewRefreshHeader = "Kitwork-Refresh"
+// ViewCallParameter names the job of a call in the page's URL, POST /todo?kitwork-call=remove
+// (KITWORK_ROUTER_VIEW.md câu 7b, 28/10/2026): the URL, not a header, because the shell of a native app passes
+// a request's method, URL and body as a browser does, and not always its headers.
+const ViewCallParameter = "kitwork-call"
 
-// ViewCallHeader names the job of a call; the page's URL is the address (KITWORK_ROUTER_VIEW.md câu 7b is
-// still open between this header and a query).
-const ViewCallHeader = "Kitwork-Call"
+// ViewRefreshParameter asks, with no job, for the data of a page that changed since the revisions it sends,
+// POST /todo?kitwork-refresh=1: a tab seen again after another changed the data (call.js). It goes the way of
+// a call, through the folder's guards and the page's lock, and runs the view's function once.
+const ViewRefreshParameter = "kitwork-refresh"
+
+// takeViewCall takes out of a POST's URL the job it names (kitwork-call) or its ask for what changed
+// (kitwork-refresh), before anything reads the URL: the guards and the view's function read the page's own,
+// the rest of its query as it was written. call is true when the URL names a job, refresh when it asks with
+// none.
+func takeViewCall(r *http.Request) (name string, call, refresh bool) {
+	if !strings.Contains(r.URL.RawQuery, "kitwork-") {
+		return "", false, false
+	}
+	kept := make([]string, 0, 4)
+	for _, part := range strings.Split(r.URL.RawQuery, "&") {
+		key, v, _ := strings.Cut(part, "=")
+		switch key, err := url.QueryUnescape(key); {
+		case err == nil && key == ViewCallParameter:
+			name, _ = url.QueryUnescape(v)
+			call = true
+		case err == nil && key == ViewRefreshParameter:
+			refresh = true
+		default:
+			kept = append(kept, part)
+		}
+	}
+	if call || refresh {
+		r.URL.RawQuery = strings.Join(kept, "&")
+		r.RequestURI = r.URL.RequestURI()
+	}
+	return name, call, refresh && !call
+}
 
 // viewCallLimit is the most a call's body may hold: the arguments and the page's vars.
 const viewCallLimit = 1 << 20
@@ -123,16 +155,15 @@ type viewCall struct {
 	scope map[string]value.Value
 	// revs are the revisions the page holds, nil when it sent none
 	revs map[string]string
-	// refresh: no job, the page asks for the data that changed since its revisions (Kitwork-Refresh)
+	// refresh: no job, the page asks for the data that changed since its revisions (kitwork-refresh)
 	refresh bool
 }
 
-// readViewCall reads the call of a POST that names a job; an error is the request's own (400).
-func readViewCall(r *http.Request) (*viewCall, error) {
-	name := r.Header.Get(ViewCallHeader)
-	refresh := name == "" && r.Header.Get(ViewRefreshHeader) != ""
+// readViewCall reads the call of a POST whose URL named a job (name) or asked for what changed (refresh); an
+// error is the request's own (400).
+func readViewCall(r *http.Request, name string, refresh bool) (*viewCall, error) {
 	if !refresh && !jobName(name) {
-		return nil, fmt.Errorf("%s không phải tên một việc", ViewCallHeader)
+		return nil, fmt.Errorf("%s=%q không phải tên một việc", ViewCallParameter, name)
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, viewCallLimit+1))
 	if err != nil {

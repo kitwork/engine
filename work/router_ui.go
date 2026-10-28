@@ -38,7 +38,7 @@ import (
 //
 //	router.view((context) => context.title("Việc cần làm").bind({ todos, add }));
 //
-// It is the folder's GET; a POST naming a job (Kitwork-Call) runs the same function again, then the job.
+// It is the folder's GET; a POST naming a job (?kitwork-call=…) runs the same function again, then the job.
 func (f *FolderRouter) View(args ...value.Value) *FolderMethod {
 	m := f.declare("router.view", "GET", args...)
 	m.view = true

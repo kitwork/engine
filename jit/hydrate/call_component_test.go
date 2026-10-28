@@ -30,7 +30,7 @@ document.body.appendChild(block);
 var out = [], sent = [], refuse = false;
 global.fetch = function (url, options) {
   var body = JSON.parse(options.body);
-  sent.push({ job: options.headers["Kitwork-Call"], body: body });
+  sent.push({ job: new URL(url, "http://x").searchParams.get("kitwork-call"), body: body });
   var answer = refuse ? { seq: body.seq, error: { code: 500, message: "hết hàng" } } : { seq: body.seq, components: {} };
   if (!refuse) answer.components[body.at] = { patch: { items: [], done: true } };
   return new Promise(function (resolve) {

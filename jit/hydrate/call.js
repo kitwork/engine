@@ -10,7 +10,7 @@
 // list changes by row; a row whose item is the same object is left alone. A page with no program (one that
 // holds a component of Kitwork) is painted by the kernel from its data-kitwork-* attributes, as before.
 //
-// A call is a POST to the page's own URL naming the job (Kitwork-Call), its body { args, vars, seq }. The
+// A call is a POST to the page's own URL naming the job (?kitwork-call=remove), its body { args, vars, seq }. The
 // answer is the data the job changed, never the page (work/view_call.go):
 //
 //   { "seq": 4, "patch": { "left": 1 }, "lists": { "todos": { "key": "id", "set": [ … ], "remove": [45] } } }
@@ -214,14 +214,15 @@
     });
   }
 
-  // the transport: the page's own URL, the job's name in Kitwork-Call
+  // the transport: the page's own URL naming the job (kitwork-call) or the ask for what changed
+  // (kitwork-refresh), and no header of Kitwork's own: the shell of a native app passes a request's method,
+  // URL and body as a browser does, and not always its headers
   function send(call, body) {
-    return fetch(location.pathname + location.search, {
+    var named = call.refresh ? "kitwork-refresh=1" : "kitwork-call=" + encodeURIComponent(call.name);
+    return fetch(location.pathname + (location.search ? location.search + "&" : "?") + named, {
       method: "POST",
       credentials: "same-origin",
-      headers: call.refresh
-        ? { "Content-Type": "application/json", "Accept": "application/json", "Kitwork-Refresh": "1" }
-        : { "Content-Type": "application/json", "Accept": "application/json", "Kitwork-Call": call.name },
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
       body: JSON.stringify(body)
     }).then(function (response) {
       if (response.redirected) return { redirect: response.url }; // a guard sent the page away

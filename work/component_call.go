@@ -25,8 +25,7 @@ import (
 // and its job is called as a job of the page is, a POST to the page's URL, named by the component and the job,
 // with the place the instance is called from (data-kitwork-at, ui/component_live.go) and the instance's vars:
 //
-//	POST /cart
-//	Kitwork-Call: shop-cart.checkout
+//	POST /cart?kitwork-call=shop-cart.checkout
 //	{ "args": [], "vars": { …the page's }, "seq": 5, "revs": { …the page's }, "at": "c1", "scope": { "items": [ … ] } }
 //
 // The folder's guards and the origin check run as for any POST of it, then the view's function. The server

@@ -47,9 +47,8 @@ router.view((context) => {
 
 func guardedCall(t *testing.T, tn *Tenant, job string) (map[string]any, *httptest.ResponseRecorder) {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "http://localhost/desk", strings.NewReader(`{"args":[],"vars":{"note":""},"seq":5}`))
+	req := httptest.NewRequest(http.MethodPost, "http://localhost/desk?"+ViewCallParameter+"="+job, strings.NewReader(`{"args":[],"vars":{"note":""},"seq":5}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(ViewCallHeader, job)
 	req.Header.Set("Cookie", "session=in; name=An")
 	rec := httptest.NewRecorder()
 	tn.Serve(rec, req)

@@ -156,6 +156,13 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 			return
 		}
 	}
+	// a call of router.view's page names its job in the URL (kitwork-call=…), taken out of it before any
+	// guard reads it (view_call.go)
+	var callName string
+	var calling, refreshing bool
+	if ui && r.Method == http.MethodPost {
+		callName, calling, refreshing = takeViewCall(r)
+	}
 
 	// Folder-level rate limits (router.limit; router.ratelimit of a template), outside-in: ONE bucket per
 	// client per rule for the folder's whole subtree — a root rule is a site-wide ceiling, a branch's adds
@@ -213,9 +220,9 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 		method = leaf.methods[r.Method]
 	}
 	// a job of router.view's page, called through the bridge: a POST to the page's URL naming it (view_call.go)
-	if method == nil && ui && r.Method == http.MethodPost && (r.Header.Get(ViewCallHeader) != "" || r.Header.Get(ViewRefreshHeader) != "") {
+	if method == nil && ui && r.Method == http.MethodPost && (calling || refreshing) {
 		if get := leaf.methods[http.MethodGet]; get != nil && get.view {
-			call, err := readViewCall(r)
+			call, err := readViewCall(r, callName, refreshing)
 			if err != nil {
 				answerViewCallError(reqRouter, http.StatusBadRequest, err.Error())
 				finalize()
