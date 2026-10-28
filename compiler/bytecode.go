@@ -82,6 +82,9 @@ func prepareFile(appRoot string, paths ...string) (*Program, []string, map[strin
 		if routerCalls, err = readRouterFile(prog, routerKind, routerDepth(appRoot, entryAbs), data, routerPlace{appRoot: appRoot, file: entryAbs}); err != nil {
 			return nil, nil, nil, err
 		}
+		if routerKind == routerWorkFile {
+			rewriteRouterViews(prog) // router.view's vars and __state, for the bridge (router_view.go)
+		}
 	case strings.HasSuffix(sourceName, ".work"):
 		if err := refuseRouterImport(prog, data); err != nil {
 			return nil, nil, nil, err

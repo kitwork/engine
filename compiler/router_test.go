@@ -21,16 +21,15 @@ import (
 //
 // 24/10/2026: the rows that reached the router through import { router } from "kitwork" and { router as r }
 // left this table: that import is itself refused in a router.work now, at its line (router_rules_test.go).
+//
+// 28/10/2026: router.view is a door again (KITWORK_ROUTER_VIEW.md), written as a call at the head of its line
+// and answering context.bind({ … }); only view taken apart or imported by name stays this error, and read as a
+// value it is the error of any word read so.
 func TestRouterViewIsACompileErrorInRouterWork(t *testing.T) {
 	const namespace = "import * as router from \"kitwork/router\";\n"
 	for source, at := range map[string]string{
-		namespace + "router.view((context) => { });":                                     "router.work:2:8",
-		namespace + "router.view(() => {\n  const title = \"x\";\n});":                   "router.work:2:8",
-		namespace + "const { get, view } = router;":                                      "router.work:2:14",
-		"import { view } from \"kitwork/router\";":                                       "router.work:1:1",
-		namespace + "const page = router.view;":                                          "router.work:2:21",
-		"import { kitwork } from \"kitwork\";\nkitwork().router.view((context) => { });": "router.work:2:18",
-		"import { kitwork } from \"kitwork\";\nconst page = kitwork().router.view;":      "router.work:2:31",
+		namespace + "const { get, view } = router;": "router.work:2:14",
+		"import { view } from \"kitwork/router\";":  "router.work:1:1",
 	} {
 		_, err := compileAppRoute(t, source)
 		want := at + ": " + RouterViewRemoved
@@ -38,11 +37,16 @@ func TestRouterViewIsACompileErrorInRouterWork(t *testing.T) {
 			t.Errorf("%q: %v, want %q", source, err, want)
 		}
 	}
-	if !strings.Contains(RouterViewRemoved, `router.get((context) => context.title("…").view({ … }))`) {
+	if _, err := compileAppRoute(t, namespace+"const page = router.view;"); err == nil || !strings.Contains(err.Error(), "router.work:2:21: router.view đọc làm giá trị") {
+		t.Errorf("router.view read as a value: %v", err)
+	}
+	if !strings.Contains(RouterViewRemoved, `router.view((context) => context.bind({ … }))`) {
 		t.Errorf("the error does not name the spelling to write: %s", RouterViewRemoved)
 	}
 
 	for _, source := range []string{
+		namespace + "router.view((context) => context.title(\"x\").bind({ title: \"x\" }));",
+		namespace + "router.view((context) => {\n  var title = \"\";\n  const add = () => { title = \"\"; };\n  return context.bind({ title, add });\n});",
 		namespace + "router.get((context) => context.title(\"x\").view({ title: \"x\" }));",
 		namespace + "const shelf = { view: () => 1 };\nrouter.get((context) => context.json({ n: shelf.view() }));",
 		namespace + "router.get(({ response }) => response.view({ n: 1 }));",

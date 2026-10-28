@@ -284,7 +284,7 @@ func TestRouterClosedVocabulary(t *testing.T) {
 		{"router.GET", routerImport + "router.GET(" + handler + ");\n", "GET", 0, "router.GET không có; ý là router.get?"},
 		{"router.gaurd", routerImport + "router.gaurd(() => true);\n", "gaurd", 0, "router.gaurd không có; ý là router.guard?"},
 		{"router.llmsfull", routerImport + "router.llmsfull(true);\n", "llmsfull", 0, "router.llmsfull không có; ý là router.llmsFull?"},
-		{"router.zzz", routerImport + "router.zzz(1);\n", "zzz", 0, "router.zzz không có; router có get, post, put, patch, delete, proxy, sitemap"},
+		{"router.zzz", routerImport + "router.zzz(1);\n", "zzz", 0, "router.zzz không có; router có get, view, post, put, patch, delete, proxy, sitemap"},
 		{".cahce", routerImport + "router.get(" + handler + ").cahce(\"5m\");\n", "cahce", 0, ".cahce không nối sau router.get(…); ý là .cache?"},
 		{".Guard", routerImport + "router.post(" + handler + ").Guard(() => true);\n", "Guard", 0, ".Guard không nối sau router.post(…); ý là .guard?"},
 		{".type", routerImport + "router.get(" + handler + ").type(\"text/plain\");\n", "type(", 0, ".type không nối sau router.get(…): sau cửa chỉ nối .guard(…), .limit(…), .cache(…), .persist(…)"},
@@ -307,7 +307,7 @@ func TestRouterClosedVocabulary(t *testing.T) {
 	// every old word a line began with names its new spelling
 	for _, word := range []string{"ratelimit", "rateLimit", "title", "description", "image", "url", "type", "theme", "themes",
 		"jittheme", "jitTheme", "css", "jitcss", "middleware", "notfound", "notFound", "error", "cache", "headers", "redirect",
-		"drive", "javascript", "jitjs", "connection", "connect", "view"} {
+		"drive", "javascript", "jitjs", "connection", "connect"} {
 		message, ok := RouterRemovedWord(word)
 		if !ok {
 			t.Fatalf("router.%s is no removed word", word)
@@ -323,7 +323,7 @@ func TestRouterClosedVocabulary(t *testing.T) {
 	for word, spelling := range map[string]string{
 		"ratelimit": "router.limit({ rate, per, by })", "title": "router.meta({", "theme": "router.colors({ … }), phông chữ là router.fonts({ … })",
 		"middleware": "router.guard(…)", "notfound": "notfound.ui", "error": "error.ui", "cache": `.cache("5m")`, "headers": "context.header(…)",
-		"redirect": "context.status(301).redirect", "drive": "router.reload(false)", "jitjs": "router.reload(false)", "view": "router.get((context) =>",
+		"redirect": "context.status(301).redirect", "drive": "router.reload(false)", "jitjs": "router.reload(false)",
 	} {
 		if message, _ := RouterRemovedWord(word); !strings.Contains(message, spelling) {
 			t.Errorf("router.%s: %q does not name %s", word, message, spelling)
@@ -602,7 +602,7 @@ func TestContextViewTakesAnObjectWrittenInPlace(t *testing.T) {
 // at the site only): "router.proxy takes levels 010, want 110", "router.rss takes levels 110, want 010",
 // "router.bundle takes levels 110, want 111".
 func TestRouterVocabularyTable(t *testing.T) {
-	if got := strings.Join(RouterWords(RouterDoor), " "); got != "get post put patch delete proxy" {
+	if got := strings.Join(RouterWords(RouterDoor), " "); got != "get view post put patch delete proxy" {
 		t.Errorf("doors: %s", got)
 	}
 	if got := strings.Join(RouterWords(RouterBuiltIn), " "); got != "sitemap rss robots llms llmsFull manifest" {
@@ -630,7 +630,7 @@ func TestRouterVocabularyTable(t *testing.T) {
 	// as it runs the folders, so none may drift
 	const app, site, branch = RouterApp, RouterSite, RouterBranch
 	levels := map[string]RouterLevel{
-		"get": site | branch, "post": site | branch, "put": site | branch, "patch": site | branch, "delete": site | branch, "proxy": site | branch,
+		"get": site | branch, "view": site | branch, "post": site | branch, "put": site | branch, "patch": site | branch, "delete": site | branch, "proxy": site | branch,
 		"sitemap": site, "rss": site, "robots": site, "llms": site, "llmsFull": site, "manifest": site,
 		"timezone": app, "reload": site,
 		"meta": site | branch, "jsonld": site | branch, "guard": site | branch, "limit": site | branch, "cors": site | branch, "assets": site | branch,

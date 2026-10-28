@@ -12,8 +12,10 @@ import "fmt"
 // RouterFile is the name of a Kitwork UI site's router file.
 const RouterFile = "router.work"
 
-// RouterViewRemoved is the error of router.view, the page of a folder until 23/10/2026.
-const RouterViewRemoved = `router.view đã bỏ: trang là câu trả lời của router.get, router.get((context) => context.title("…").view({ … })); trang đọc đúng những tên trong object của view, không còn mọi tên của hàm và của file (KITWORK_ROUTER.md mục 1, 6)`
+// RouterViewRemoved is the error of router.view taken apart or imported by name (import { view }, const { view } =
+// router, kitwork().router.view): since 28/10/2026 router.view is a door again, written as a call on its own line,
+// its function answering context.bind({ … }) (KITWORK_ROUTER_VIEW.md).
+const RouterViewRemoved = `router.view chỉ viết thành một lời gọi ở cấp file của router.work, sau dòng import * as router from "kitwork/router": router.view((context) => context.bind({ … })) (KITWORK_ROUTER_VIEW.md)`
 
 // markRouter marks a declared variable as the module kitwork/router itself (import * as router from
 // "kitwork/router", import { router } from "kitwork", import { router as r } from "kitwork").
@@ -75,9 +77,8 @@ func (r *resolver) routerDeclaration(node *VarStatement) {
 	}
 }
 
-// routerMember refuses, where it is written in a router.work, router.view read off the router (router.view(…),
-// kitwork().router.view). In a router.work or a router config.work read by readRouterFile it refuses the
-// router read off the module "kitwork" (kitwork().router, k.router) but in the import line itself, and a word
+// routerMember, in a router.work or a router config.work read by readRouterFile, refuses the router read off
+// the module "kitwork" (kitwork().router, k.router) but in the import line itself, and a word
 // read off the router without a call (router.get, helper(router.get)); called is false for that read, true for
 // the word of a call.
 func (r *resolver) routerMember(object Expression, property *Identifier, called bool) bool {
@@ -101,10 +102,6 @@ func (r *resolver) routerMember(object Expression, property *Identifier, called 
 	}
 	if !isModule {
 		return false
-	}
-	if property.Value == "view" {
-		r.fail(fmt.Errorf("%s: %s", r.where(property.Token), RouterViewRemoved))
-		return true
 	}
 	if r.routerCalls == nil || called {
 		return false

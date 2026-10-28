@@ -67,6 +67,7 @@ const everywhere = RouterApp | RouterSite | RouterBranch
 // routerWords are the words a line begins with, router.<word>(…), in the order of the spec.
 var routerWords = []RouterWord{
 	{Word: "get", Kind: RouterDoor, Levels: RouterSite | RouterBranch},
+	{Word: "view", Kind: RouterDoor, Levels: RouterSite | RouterBranch},
 	{Word: "post", Kind: RouterDoor, Levels: RouterSite | RouterBranch},
 	{Word: "put", Kind: RouterDoor, Levels: RouterSite | RouterBranch},
 	{Word: "patch", Kind: RouterDoor, Levels: RouterSite | RouterBranch},
@@ -183,7 +184,6 @@ var routerRemoved = map[string]string{
 	"jitjs":       "router.jitjs đã bỏ (11/10/2026): chuyển trang không tải lại là router.reload(false), component tìm theo tên",
 	"connection":  RouterConnectionRemoved,
 	"connect":     RouterConnectRemoved,
-	"view":        RouterViewRemoved,
 }
 
 // RouterRemovedWord is the error of an old word a line begins with (router.ratelimit), naming the new
