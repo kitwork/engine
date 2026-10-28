@@ -21,6 +21,7 @@ func TestDatabaseOldSpellingsAreCompileErrors(t *testing.T) {
 		{"import { napas } from \"kitwork\";\n", "import { napas", `import { napas } from "kitwork" đã bỏ: không có spec nên engine gỡ ngày 28/10/2026`},
 		{"import { jwt } from \"kitwork\";\n", "import { jwt", `import { jwt } from "kitwork" đã bỏ: không có spec nên engine gỡ ngày 28/10/2026`},
 		{"import { shortbase } from \"kitwork\";\n", "import { shortbase", `import { shortbase } from "kitwork" đã bỏ: không có spec nên engine gỡ ngày 28/10/2026`},
+		{"import { webhook } from \"kitwork\";\n", "import { webhook", `import { webhook } from "kitwork" đã bỏ: không có spec nên engine gỡ ngày 28/10/2026`},
 		{"import { open as file } from \"kitwork/database\";\n", "import { open", `import { open } from "kitwork/database" đã bỏ: database của app khai`},
 		{"import { struct, text } from \"kitwork/database\";\n", "import { struct", `import { struct } from "kitwork/database" đã bỏ: struct import từ "kitwork/schema"`},
 		{"import { text } from \"kitwork/database\";\n", "import { text", `import { text } from "kitwork/database" đã bỏ: kiểu cột import từ "kitwork/schema": import { text } from "kitwork/schema"`},

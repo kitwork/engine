@@ -293,7 +293,7 @@ compile router api/loop/router.work: router.work:5:3: Kitwork không hỗ trợ 
 ```
 
 What `"kitwork"` gives a `.work` file: `router` and `safe`; `collection` for data (databases come
-from `kitwork/schema` and `kitwork/database`, declared in `.shared/schema/`); `http` (also `import * as http from "kitwork/http"`) and `webhook` for the network; `file`, `path` and `cache`; `env` and
+from `kitwork/schema` and `kitwork/database`, declared in `.shared/schema/`); `http` (also `import * as http from "kitwork/http"`) for the network; `file`, `path` and `cache`; `env` and
 `log`; `go` for detached work; `insights`, `palette`,
 `pigment` and `playground` as helpers. The globals are the familiar ones: `Math`, `Date`, `JSON`,
 `console`, `Object`, `Number`, `BigInt`, `String`, `Boolean`, `Array`, `parseInt`, `parseFloat`,
