@@ -276,9 +276,12 @@ func (t *Tenant) serveComponentCall(vm *runtime.VM, ctxObj *Context, reqRouter *
 			}
 		}
 	}
-	// the page the job left: the view's function again, holding the page's vars as they were
+	// the page the job left: the view's function again, holding the page's vars as they were, past the guards
+	// again (view_call.go)
 	reqRouter.call = &viewCall{vars: call.vars, seq: call.seq}
-	clearViewAnswer(reqRouter)
+	if !t.guardsAgain(vm, ctxObj, reqRouter, leaf, call.seq) {
+		return
+	}
 	if res := t.execTree(vm, leaf, handler, ctxObj); res.K == value.Invalid || response.Kind() != "render" {
 		if res.K == value.Invalid {
 			t.recordRuntimeFailure(reqRouter, leaf.bytecode, "view", res)

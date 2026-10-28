@@ -57,6 +57,10 @@ type Router struct {
 	// viewRevs are the revisions of the data a page of router.view is drawn with, read only when the page
 	// runs in the kernel (view_patch.go)
 	viewRevs func() map[string]string
+	// callChain and callGuards are the folders and the router.view guards a job's call passed, for the run
+	// after the job to pass again (view_call.go, guardsAgain)
+	callChain  []*RouteNode
+	callGuards []*value.Lambda
 
 	// JIT stylesheet route: serve the tenant's site-wide JIT CSS (no JS handler, no VM).
 	// Set by .jit(); the path defaults to /jitcss.

@@ -341,6 +341,7 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 				}
 			} else if uiRoute(match.Node) && reqRouter.response.Kind() == "render" && reqRouter.call != nil {
 				// router.view's page called a job through the bridge (view_call.go)
+				reqRouter.callChain, reqRouter.callGuards = match.Chain, method.guards
 				t.serveViewCall(vm, ctxObj, reqRouter, match.Node, leaf, method.handle)
 			} else if uiRoute(match.Node) && reqRouter.response.Kind() == "render" {
 				// router.work: the handler answered with context.view({ … }): the folder's .ui page

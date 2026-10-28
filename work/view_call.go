@@ -238,9 +238,11 @@ func (t *Tenant) serveViewCall(vm *runtime.VM, ctxObj *Context, reqRouter *Route
 			}
 		}
 	}
-	// the page the job left: the view's function again, holding those vars
+	// the page the job left: the view's function again, holding those vars, past the guards again
 	reqRouter.call = &viewCall{vars: vars, seq: call.seq}
-	clearViewAnswer(reqRouter)
+	if !t.guardsAgain(vm, ctxObj, reqRouter, leaf, call.seq) {
+		return
+	}
 	if res := t.execTree(vm, leaf, handler, ctxObj); res.K == value.Invalid || response.Kind() != "render" {
 		if res.K == value.Invalid {
 			t.recordRuntimeFailure(reqRouter, leaf.bytecode, "view", res)
@@ -263,6 +265,89 @@ func (t *Tenant) serveViewCall(vm *runtime.VM, ctxObj *Context, reqRouter *Route
 		answer["lists"] = lists
 	}
 	answerViewCall(reqRouter, answer)
+}
+
+// guardsAgain runs the guards of the branch and of router.view before the run after a job
+// (KITWORK_ROUTER_VIEW.md câu 5f, 5g), with the cookies the job set or removed as the browser will send them
+// next: signing out on a page that wants a session sends the page to the guard's /login. True when they let
+// the page be drawn again. Otherwise the call is answered and no data of the page goes: { seq, redirect } for a
+// guard that sends the page away, the page follows; { seq, reload } for one that refuses (false,
+// status(…).json(…)) or fails, the page opens its URL again and meets the guard's answer there. The cookies
+// the job set go with either answer.
+func (t *Tenant) guardsAgain(vm *runtime.VM, ctxObj *Context, reqRouter *Router, leaf *FolderRouter, seq float64) bool {
+	if reqRouter.request != nil {
+		cookiesAsSentNext(reqRouter.request, reqRouter.response.cookies)
+	}
+	pass := func(folder *FolderRouter, guard *value.Lambda) bool {
+		clearViewAnswer(reqRouter)
+		return t.runStage(vm, folder, guard, ctxObj, reqRouter, true)
+	}
+	ok := true
+	for _, node := range reqRouter.callChain {
+		if node == nil || node.folder == nil {
+			continue
+		}
+		for _, guard := range node.folder.guards {
+			if ok && !pass(node.folder, guard) {
+				ok = false
+			}
+		}
+	}
+	for _, guard := range reqRouter.callGuards {
+		if ok && !pass(leaf, guard) {
+			ok = false
+		}
+	}
+	response := reqRouter.response
+	if ok {
+		clearViewAnswer(reqRouter)
+		return true
+	}
+	answer := map[string]any{"seq": seq, "reload": true}
+	if response.Kind() == "redirect" {
+		answer = map[string]any{"seq": seq, "redirect": response.Data().Text()}
+	}
+	reqRouter.err = nil
+	response.uiPage, response.uiMessage = "", ""
+	answerViewCall(reqRouter, answer)
+	return false
+}
+
+// cookiesAsSentNext writes into a request's Cookie header the cookies its response set or removed, as the
+// browser will send them with its next request: what the run after a job reads.
+func cookiesAsSentNext(req *http.Request, set []*http.Cookie) {
+	if len(set) == 0 {
+		return
+	}
+	values, order := map[string]string{}, []string{}
+	for _, c := range req.Cookies() {
+		if _, seen := values[c.Name]; !seen {
+			order = append(order, c.Name)
+		}
+		values[c.Name] = c.Value
+	}
+	for _, c := range set {
+		if c.MaxAge < 0 {
+			delete(values, c.Name)
+			continue
+		}
+		if _, seen := values[c.Name]; !seen {
+			order = append(order, c.Name)
+		}
+		values[c.Name] = c.Value
+	}
+	var b strings.Builder
+	for _, name := range order {
+		v, kept := values[name]
+		if !kept {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteString("; ")
+		}
+		b.WriteString((&http.Cookie{Name: name, Value: v}).String())
+	}
+	req.Header.Set("Cookie", b.String())
 }
 
 // clearViewAnswer sets aside what the response was answered with, for the next run to answer.
