@@ -21,6 +21,14 @@
 // list for the call made from that row; job.error is the failed call's { code, message }, null once a call
 // of the job is made again. A call that fails changes nothing, and what the person did to the element that
 // made it (a box ticked) goes back to the data.
+//
+// A component of the site whose jobs go through the bridge (ui/component_live.go) is registered with the
+// kernel from <script type="application/json" data-kitwork-components>: its starting state, and each job a
+// function that calls shop-cart.checkout on the instance it runs in. That call names the place the instance
+// is called from (data-kitwork-at on its host) and carries the instance's vars in scope; its answer holds
+// the data of that instance the job changed, under the same place, written into the instance:
+//
+//   { "seq": 5, "components": { "c1": { "patch": { "items": [], "done": true } } } }
 (function () {
   "use strict";
   var kit = window.kitwork || window.kit;
@@ -64,7 +72,8 @@
   }
 
   function mark(call, on, error) {
-    var t = track[call.name] || (track[call.name] = { pending: 0, error: null, rows: {} });
+    var key = call.at ? call.name + "@" + call.at : call.name;
+    var t = track[key] || (track[key] = { pending: 0, error: null, rows: {} });
     var at = call.row ? (t.rows[call.row] || (t.rows[call.row] = { pending: 0, error: null })) : null;
     var step = on ? 1 : -1;
     t.pending += step;
@@ -90,6 +99,55 @@
     Object.defineProperty(fn, "pending", { get: function () { return read(name, "pending"); } });
     Object.defineProperty(fn, "error", { get: function () { return read(name, "error"); } });
     return fn;
+  }
+
+  // the host of the component instance a scope belongs to, null outside every one
+  function hostOf(self) {
+    try { return kit.context(self).host; } catch (e) { return null; }
+  }
+  // the place the component host around an element is called from, "" outside every one
+  function atOf(el) {
+    var host = el && el.closest ? el.closest("[data-kitwork-at]") : null;
+    return host ? host.getAttribute("data-kitwork-at") : "";
+  }
+  function instanceOf(host) {
+    var st = host && typeof kit.state === "function" ? kit.state(host) : null;
+    return st && st.scope || null;
+  }
+
+  // a job of a site component: called on the instance whose scope it runs in; .pending and .error are that
+  // instance's, read where the kernel paints
+  function componentJob(component, name, vars) {
+    var wire = component + "." + name;
+    var fn = function () {
+      var host = hostOf(this), at = host ? host.getAttribute("data-kitwork-at") : "";
+      if (!at) {
+        if (window.console) console.error("kitwork: việc " + wire + " gọi ngoài một instance của " + component);
+        return;
+      }
+      var el = acting();
+      var call = { name: wire, at: at, host: host, vars: vars, args: Array.prototype.slice.call(arguments), row: rowOf(el), el: el, epoch: epoch };
+      mark(call, true);
+      queue.push(call);
+      pump();
+    };
+    Object.defineProperty(fn, "pending", { get: function () { return read(wire + "@" + atOf(acting()), "pending"); } });
+    Object.defineProperty(fn, "error", { get: function () { return read(wire + "@" + atOf(acting()), "error"); } });
+    return fn;
+  }
+
+  // the site components the page holds that the browser runs, registered with the kernel
+  function seedComponents() {
+    var el = document.querySelector("[data-kitwork-components]");
+    if (!el) return;
+    var data;
+    try { data = JSON.parse(el.textContent || "{}"); } catch (e) { return; }
+    Object.keys(data).forEach(function (component) {
+      var c = data[component] || {}, def = {}, state = c.state || {};
+      Object.keys(state).forEach(function (k) { def[k] = state[k]; });
+      (c.jobs || []).forEach(function (name) { def[name] = componentJob(component, name, c.vars || []); });
+      kit.component(component, def);
+    });
   }
 
   // the page's data and jobs, from what the server wrote with the page, and its program when it has one
@@ -130,7 +188,15 @@
     call.seq = ++seq;
     var vars = {};
     if (page) page.vars.forEach(function (k) { vars[k] = get(k); });
-    send(call, { args: call.args, vars: vars, seq: call.seq }).then(function (answer) {
+    var body = { args: call.args, vars: vars, seq: call.seq };
+    if (call.at) {
+      // the instance's vars, read as the call leaves; its inputs never go: the server reads them where it stands
+      var own = {}, instance = instanceOf(call.host) || {};
+      call.vars.forEach(function (k) { own[k] = instance[k]; });
+      body.at = call.at;
+      body.scope = own;
+    }
+    send(call, body).then(function (answer) {
       settle(call, answer);
     }, function (error) {
       settle(call, { error: { code: 0, message: String(error && error.message || error) } });
@@ -179,6 +245,8 @@
     var patch = answer.patch || {}, lists = answer.lists || {};
     Object.keys(patch).forEach(function (k) { put(k, patch[k]); });
     Object.keys(lists).forEach(function (k) { put(k, applyList(get(k), lists[k])); });
+    var mine = call.at && answer.components ? answer.components[call.at] : null, instance = mine ? instanceOf(call.host) : null;
+    if (instance) Object.keys(mine.patch || {}).forEach(function (k) { instance[k] = mine.patch[k]; });
     mark(call, false, null);
     paint();
   }
@@ -544,10 +612,14 @@
     track = {};
     view = null;
   });
+  // the components the new page holds are registered before the kernel paints it (its own listener is on the
+  // document; one on the window in the capture phase runs first), so it never looks for one in vain
+  window.addEventListener("kitwork:load", seedComponents, true);
   document.addEventListener("kitwork:load", function () {
     seed();
     paint();
   });
 
+  seedComponents();
   seed();
 })();
