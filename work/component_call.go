@@ -127,6 +127,23 @@ type componentRun struct {
 // runComponent runs components.work (logic) for one call and the function it defines for name, with the inputs
 // of the instance and its vars. A failure is answered as the call's error by the caller: status and message.
 func (t *Tenant) runComponent(reqRouter *Router, ctxObj *Context, logic, name string, inputs map[string]any, vars map[string]value.Value) (*componentRun, int, string) {
+	file, status, message := t.loadComponents(reqRouter, logic)
+	if file == nil {
+		return nil, status, message
+	}
+	return t.callComponent(reqRouter, ctxObj, file, logic, name, inputs, vars)
+}
+
+// componentFile is components.work run for one request: the VM its functions run on, its program, and the
+// function each component.define gave a name.
+type componentFile struct {
+	vm        *runtime.VM
+	bytecode  *compiler.Bytecode
+	functions map[string]*value.Lambda
+}
+
+// loadComponents runs components.work (logic) in a VM of its own for the request, gathering its defines.
+func (t *Tenant) loadComponents(reqRouter *Router, logic string) (*componentFile, int, string) {
 	bc, err := t.componentProgram(logic)
 	if err != nil {
 		return nil, http.StatusInternalServerError, fmt.Sprintf("%s không biên dịch được: %v", t.relativeToSite(logic), err)
@@ -144,7 +161,14 @@ func (t *Tenant) runComponent(reqRouter *Router, ctxObj *Context, logic, name st
 		t.recordRuntimeFailure(reqRouter, bc, "component", out)
 		return nil, http.StatusInternalServerError, out.Text()
 	}
-	fn := defines.functions[name]
+	return &componentFile{vm: vm, bytecode: bc, functions: defines.functions}, 0, ""
+}
+
+// callComponent runs the function components.work defines for name, on the VM it was loaded in, with the inputs
+// of the instance and its vars (nil as the page is drawn: each var takes its first value).
+func (t *Tenant) callComponent(reqRouter *Router, ctxObj *Context, file *componentFile, logic, name string, inputs map[string]any, vars map[string]value.Value) (*componentRun, int, string) {
+	vm, bc := file.vm, file.bytecode
+	fn := file.functions[name]
 	if fn == nil {
 		return nil, http.StatusNotFound, fmt.Sprintf("%s không có component.define(%q, …)", t.relativeToSite(logic), name)
 	}
@@ -161,6 +185,78 @@ func (t *Tenant) runComponent(reqRouter *Router, ctxObj *Context, logic, name st
 		return nil, http.StatusInternalServerError, fmt.Sprintf("hàm của %s không trả context.bind({ … })", name)
 	}
 	return &componentRun{vm: vm, bytecode: bc, bound: context.bound}, 0, ""
+}
+
+// componentRenderer runs, for one request, the function of each component of the site the page draws whose
+// logic answers a bind (ui.Request.Component, KITWORK_COMPONENTS.md mục 9): a const computed on the server is
+// right at the first paint. Each components.work is loaded once for the request; each call runs with the inputs
+// it passes where it stands and the request's context (the cookies, the session of who looks). The first failure
+// fails the request, as a failure of the view's function does.
+type componentRenderer struct {
+	t          *Tenant
+	reqRouter  *Router
+	ctx        *Context
+	files      map[string]*componentFile
+	converters []*uiConverter
+	failure    error
+}
+
+func newComponentRenderer(t *Tenant, reqRouter *Router) *componentRenderer {
+	return &componentRenderer{t: t, reqRouter: reqRouter, ctx: &Context{request: &Request{router: reqRouter}},
+		files: map[string]*componentFile{}}
+}
+
+// run runs one call: the data of its bind as the page reads it, nil after a failure.
+func (c *componentRenderer) run(call ui.Instance) map[string]any {
+	if c.failure != nil {
+		return nil
+	}
+	file := c.files[call.Logic]
+	if file == nil {
+		loaded, _, message := c.t.loadComponents(c.reqRouter, call.Logic)
+		if loaded == nil {
+			c.failure = uncaught(fmt.Sprintf("component %s: %s", call.Name, message))
+			return nil
+		}
+		file = loaded
+		c.files[call.Logic] = file
+	}
+	run, _, message := c.t.callComponent(c.reqRouter, c.ctx, file, call.Logic, call.Name, call.Inputs, nil)
+	if run == nil {
+		c.failure = uncaught(fmt.Sprintf("component %s: %s", call.Name, message))
+		return nil
+	}
+	// a function it binds is a job, no data; a function inside its data runs on its VM when the page calls it
+	converter := &uiConverter{vm: file.vm}
+	c.converters = append(c.converters, converter)
+	out := map[string]any{}
+	for name, v := range run.bound.Map() {
+		if !visibleName(name) || v.K == value.Func {
+			continue
+		}
+		if x, ok := converter.convert(v, 0); ok {
+			out[name] = x
+		}
+		if converter.cycle != nil {
+			c.failure = fmt.Errorf("component %s: dữ liệu %s: %s", call.Name, name, converter.cycle.Error())
+			return nil
+		}
+	}
+	return out
+}
+
+// failed is the failure that ends the request: one a run met, or one that ended a function of a component's
+// data the page called as it was drawn.
+func (c *componentRenderer) failed() error {
+	if c.failure != nil {
+		return c.failure
+	}
+	for _, converter := range c.converters {
+		if converter.fatal.Failed() {
+			return uncaught(converter.fatal.Text())
+		}
+	}
+	return nil
 }
 
 // componentProgram is components.work compiled for the bridge, once per site generation (a change to the

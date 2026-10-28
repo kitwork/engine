@@ -1137,7 +1137,16 @@ func (t *Tenant) respondUI(reqRouter *Router, node *RouteNode, scope map[string]
 		// once per page, in the voice of the compile's warnings (logWarnings)
 		request.Warn = func(message string) { fmt.Printf("cảnh báo: %s\n", message) }
 	}
-	reqRouter.response.HTML(value.New(compiled.page.Document(request)), status)
+	// each component of the site the page draws runs for this request (component_call.go)
+	components := newComponentRenderer(t, reqRouter)
+	request.Component = components.run
+	document := compiled.page.Document(request)
+	if err := components.failed(); err != nil {
+		t.recordFailure(reqRouter, "component", err)
+		reqRouter.fail(err, http.StatusInternalServerError)
+		return
+	}
+	reqRouter.response.HTML(value.New(document), status)
 }
 
 // folderFavicon is the icon a page links: router.favicon of the nearest folder that declares one.

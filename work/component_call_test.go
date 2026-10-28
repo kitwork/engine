@@ -49,9 +49,10 @@ func cartSite(t *testing.T) *Tenant {
 	return tn
 }
 
-// The page draws the cart as a component the browser runs: its host names it and the place it is called from,
-// what is written inside it is the kernel's, the components the page holds close its content, and the page loads
-// the kernel and call.js though its own view binds no job.
+// The page draws the cart as a component the browser runs: its host names it, the place it is called from and the
+// data of its bind as its function gave it for this request (owner, not in its bind, stays on the server), what is
+// written inside it is the kernel's, the components the page holds close its content, and the page loads the
+// kernel and call.js though its own view binds no job.
 func TestComponentWithJobsIsDrawnForTheBridge(t *testing.T) {
 	tn := cartSite(t)
 	r := serveGet(tn, "/cart", nil)
@@ -60,7 +61,7 @@ func TestComponentWithJobsIsDrawnForTheBridge(t *testing.T) {
 		t.Fatalf("/cart: %d\n%.1500s", r.Code, body)
 	}
 	for _, part := range []string{
-		`data-kitwork-component="shop-cart"`, `data-kitwork-at="c1"`, `data-kitwork-scope="shippingFee: 20000"`,
+		`data-kitwork-component="shop-cart"`, `data-kitwork-at="c1"`, `data-kitwork-scope="done: false; items: []; receipt: &#39;&#39;; shippingFee: 20000"`,
 		`data-kitwork-event="click: checkout()"`, `data-kitwork-event="click: add(&#39;cà phê&#39;)"`,
 		`<!--kit-for:start id=s1-->`, `<script type="application/json" data-kitwork-components>`,
 		`"jobs":["add","checkout"]`, `"vars":["done","items","receipt"]`, `/_kitwork/kernel.`, `/_kitwork/call.`,
@@ -324,5 +325,96 @@ func TestComponentJobOnAPageDrawnWholeSendsNoPageData(t *testing.T) {
 	}
 	if components, _ := answer["components"].(map[string]any); components["c1"] == nil {
 		t.Errorf("the cart's own data comes as before: %s", r.Body.String())
+	}
+}
+
+// shelfSite is a page drawing two carts with other inputs, each computing on the server, as the page is drawn,
+// what the source cannot write out: the orders in storage, a label from its input, who looks from a cookie. /broken
+// draws a component whose function fails.
+func shelfSite(t *testing.T) *Tenant {
+	t.Helper()
+	logic := "import * as component from \"kitwork/component\";\nimport { datastore } from \"kitwork/storage\";\n" +
+		"const orders = datastore(\"shelf\").segment(\"orders\");\n" +
+		"component.define(\"shop-cart\", (context) => {\n" +
+		"  const { owner } = context.attributes();\n" +
+		"  var items = [];\n" +
+		"  const placed = (orders.get() ?? []).length;\n" +
+		"  const label = \"Giỏ của \" + owner;\n" +
+		"  const visitor = context.cookie(\"visitor\") ?? \"khách\";\n" +
+		"  const checkout = () => { orders.set((orders.get() ?? []).concat([items.length])); items = []; };\n" +
+		"  return context.bind({ items, placed, label, visitor, checkout });\n" +
+		"});\n" +
+		"component.define(\"broken-box\", (context) => {\n" +
+		"  const nothing = null;\n" +
+		"  const value = nothing();\n" +
+		"  return context.bind({ value });\n" +
+		"});\n"
+	cart := func(owner string) string {
+		return `<shop-cart owner="` + owner + `"><text>{{ label }}</text><text>{{ placed }} đơn</text><text>{{ visitor }}</text>` +
+			`<button click="checkout()">Đặt</button></shop-cart>`
+	}
+	view := "import * as router from \"kitwork/router\";\nrouter.view((context) => context.bind({ shelf: true }));\n"
+	tn := NewTenant(writeSite(t, map[string]string{
+		"router.work":        `import * as router from "kitwork/router";`,
+		"view.ui":            "<view><content /></view>",
+		"components.work":    logic,
+		"shelf/content.ui":   `<content>` + cart("an") + cart("bình") + `</content>`,
+		"shelf/router.work":  view,
+		"broken/content.ui":  `<content><text>trước</text><broken-box><text>{{ value }}</text></broken-box></content>`,
+		"broken/router.work": view,
+	}), "localhost")
+	if err := tn.Run(); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	return tn
+}
+
+// The page runs each cart's function as it draws it (KITWORK_COMPONENTS.md mục 9): the label from each cart's own
+// input, the count of orders in storage, who looks from the request's cookie; each host carries its own data for
+// the kernel. A checkout answers the new count of the cart that called, and the next page draws both carts with it.
+//
+// CONTROL (go test -overlay, 28/10/2026): with respondUI not handing the page the components' runs
+// (request.Component), this test went red: the labels, the count and the visitor drawn empty, the hosts carrying
+// none of that data, and the visitor of a cookie not drawn.
+func TestComponentRunsAsThePageIsDrawn(t *testing.T) {
+	tn := shelfSite(t)
+	body := serveGet(tn, "/shelf", nil).Body.String()
+	for _, part := range []string{
+		`data-kitwork-at="c1" data-kitwork-scope="items: []; label: &#39;Giỏ của an&#39;; placed: 0; visitor: &#39;khách&#39;"`,
+		`data-kitwork-at="c2" data-kitwork-scope="items: []; label: &#39;Giỏ của bình&#39;; placed: 0; visitor: &#39;khách&#39;"`,
+		`>Giỏ của an</p>`, `>Giỏ của bình</p>`, `>0 đơn</p>`, `>khách</p>`,
+	} {
+		if !strings.Contains(body, part) {
+			t.Errorf("/shelf lacks %q\n%.3000s", part, body)
+		}
+	}
+	if seen := serveGet(tn, "/shelf", map[string]string{"Cookie": "visitor=Lan"}).Body.String(); !strings.Contains(seen, `>Lan</p>`) {
+		t.Errorf("who looks is the request's: want Lan\n%.3000s", seen)
+	}
+
+	r := postCall(tn, "/shelf", "shop-cart.checkout", `{"args":[],"vars":{},"seq":1,"at":"c1","scope":{"items":[{"id":1}]}}`)
+	answer := componentAnswer(t, r.Body.String())
+	mine, _ := answer["components"].(map[string]any)["c1"].(map[string]any)
+	if patch, _ := mine["patch"].(map[string]any); patch["placed"] != float64(1) {
+		t.Errorf("the checkout should answer the new count of its cart: %s", r.Body.String())
+	}
+	if body := serveGet(tn, "/shelf", nil).Body.String(); strings.Count(body, `>1 đơn</p>`) != 2 {
+		t.Errorf("the next page draws both carts with the new count\n%.3000s", body)
+	}
+}
+
+// A component whose function fails as the page is drawn fails the request, naming the component, as a failure of
+// the view's function does: no page half drawn.
+func TestComponentThatFailsAsThePageIsDrawnFailsTheRequest(t *testing.T) {
+	saved := AllowLocal
+	AllowLocal = true // developing: a failure answers with its text, which the test reads
+	t.Cleanup(func() { AllowLocal = saved })
+	tn := shelfSite(t)
+	r := serveGet(tn, "/broken", nil)
+	if r.Code != http.StatusInternalServerError || !strings.Contains(r.Body.String(), "component broken-box") {
+		t.Errorf("/broken: %d %.600s, want 500 naming broken-box", r.Code, r.Body.String())
+	}
+	if strings.Contains(r.Body.String(), "trước") {
+		t.Errorf("no page half drawn: %.600s", r.Body.String())
 	}
 }
