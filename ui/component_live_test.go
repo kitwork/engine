@@ -156,3 +156,28 @@ component.define("shop-badge", (context) => {
 	mustContain(t, html, "<p>Mới </p>")
 	mustNotContain(t, html, "data-kitwork-component=\"shop-badge", "data-kitwork-components")
 }
+
+// A call with nothing that changes per request (no input, no if, no show) is still an instance: its host is
+// drawn each time, never folded into the page's fixed HTML, so the server finds it.
+//
+// CONTROL (go test -overlay, 28/10/2026): with fold folding such a host, this test went red: the content's root,
+// fixed with the host in it, folded too and the page did not compile ("gốc của content.ui phải là một phần tử");
+// on a page whose content holds something else that changes, a job of that cart answered 404 "trang này không vẽ
+// shop-cart ở chỗ c1" (work TestComponentJobAnswersThePagesRevisions).
+func TestInstanceOfACallWithNothingThatChanges(t *testing.T) {
+	logic := `import * as component from "kitwork/component";
+component.define("shop-cart", (context) => {
+  var items = [];
+  const checkout = () => { items = []; };
+  return context.bind({ items, checkout });
+});
+`
+	page, err := compileLiveCart(t, liveCartFiles(logic, liveCartRoute,
+		`<content><shop-cart><button click="checkout()">Đặt</button></shop-cart></content>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cart, ok := page.Instances(Request{Path: "/cart", Scope: map[string]any{"user": "an"}})["c1"]; !ok || cart.Name != "shop-cart" {
+		t.Errorf("a call with nothing that changes is still an instance: %+v", cart)
+	}
+}

@@ -2992,8 +2992,10 @@ func mergeStatic(ops []op) []op {
 
 // fold renders an element that depends on nothing into a static string once, at compile time.
 func fold(o *elemOp) op {
+	// the host of a component whose jobs go through the bridge is drawn each time: the server finds its
+	// instance as the page draws it (component_live.go, Page.Instances)
 	if o.forEach != nil || o.ifExpr != nil || o.showExpr != nil || len(o.bindings) > 0 ||
-		o.callerIf != nil || o.callerShow != nil ||
+		o.callerIf != nil || o.callerShow != nil || o.at != "" ||
 		len(o.dynClasses) > 0 || len(o.dynAttrs) > 0 || o.href != nil || o.selectValue != nil ||
 		o.optionValue != nil || o.content != nil || o.crumbLink || o.crumbCurrent || o.breadcrumb ||
 		o.fragment || len(o.emptyOps) > 0 {
