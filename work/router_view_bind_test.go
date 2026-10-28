@@ -58,26 +58,29 @@ func postCall(tn *Tenant, path, job, body string) *httptest.ResponseRecorder {
 	return rec
 }
 
-// A job runs on what the view's function bound with the vars the page sent; the answer is the page drawn
-// again and the vars the job changed.
+// A job runs on what the view's function bound with the vars the page sent; the answer is what changed: the
+// var the job set, nothing of the data it did not touch, never the page.
 func TestRouterViewJobRunsThroughTheBridge(t *testing.T) {
 	tn := viewBindSite(t)
-	r := postCall(tn, "/todo", "add", `{"args":[],"vars":{"title":"buy eggs"}}`)
+	r := postCall(tn, "/todo", "add", `{"args":[],"vars":{"title":"buy eggs"},"seq":3}`)
 	if r.Code != http.StatusOK {
 		t.Fatalf("add: %d %.600s", r.Code, r.Body.String())
 	}
-	var answer struct {
-		HTML string         `json:"html"`
-		Vars map[string]any `json:"vars"`
-	}
+	var answer map[string]any
 	if err := json.Unmarshal(r.Body.Bytes(), &answer); err != nil {
 		t.Fatalf("add answered no JSON: %v %.300s", err, r.Body.String())
 	}
-	if title, ok := answer.Vars["title"]; !ok || title != "" {
-		t.Errorf("add: vars %v, want title \"\"", answer.Vars)
+	if answer["seq"] != float64(3) {
+		t.Errorf("add: seq %v, want the call's 3", answer["seq"])
 	}
-	if !strings.Contains(answer.HTML, "[]") || !strings.Contains(answer.HTML, "buy milk") {
-		t.Errorf("add: page %.600s", answer.HTML)
+	if patch, _ := answer["patch"].(map[string]any); len(patch) != 1 || patch["title"] != "" {
+		t.Errorf("add: patch %v, want only title \"\"", answer["patch"])
+	}
+	if _, has := answer["html"]; has {
+		t.Errorf("add answered the page: %.300s", r.Body.String())
+	}
+	if _, has := answer["lists"]; has {
+		t.Errorf("add changed no list: %.300s", r.Body.String())
 	}
 }
 
