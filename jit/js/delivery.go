@@ -154,15 +154,16 @@ func DriveAsset() *Asset {
 	return cachedAsset("drive", func() *Asset { return buildAsset("drive", "drive", hydrate.DriveFile()) })
 }
 
-// CallAsset is router.view's bridge in the browser, call.<hash>.js (28/10/2026): a page that calls a job of
-// its view loads it.
+// CallAsset is router.view's bridge in the browser, call.<hash>.js (28/10/2026): a page that runs in the
+// kernel because its view binds a job or a var loads it.
 func CallAsset() *Asset {
 	return cachedAsset("call", func() *Asset { return buildAsset("call", "call", hydrate.CallFile()) })
 }
 
-// callsJobs reports whether a page calls a job of router.view (ui/view_bridge.go writes the attribute).
+// callsJobs reports whether a page runs in the kernel as router.view's page, with jobs or vars: it carries
+// its data in data-kitwork-page (ui/page_live.go).
 func callsJobs(html string) bool {
-	return strings.Contains(html, "data-kitwork-job-")
+	return strings.Contains(html, "data-kitwork-page")
 }
 
 // wrapComponent gives a component a scope of its own. A component file is written as a plain script
@@ -248,11 +249,8 @@ func partsNamed(source, self string) string {
 // no directive and no component.
 func PageAssets(html string, options Options) []*Asset {
 	keys := scanComponents(html)
-	calls := callsJobs(html)
-	if len(keys) == 0 && !hydrate.UsesGrammar(html) && !options.Drive {
-		if calls {
-			return []*Asset{CallAsset()}
-		}
+	calls := callsJobs(html) // the bridge runs on the kernel: a page with it has the kernel too
+	if len(keys) == 0 && !hydrate.UsesGrammar(html) && !options.Drive && !calls {
 		return nil
 	}
 	assets := []*Asset{KernelAsset()}

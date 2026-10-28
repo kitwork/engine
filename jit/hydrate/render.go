@@ -35,8 +35,9 @@ var bootJS string
 //go:embed call.js
 var callJS string
 
-// CallFile is router.view's bridge in the browser (28/10/2026): a page that calls a job of its view loads it
-// (ui/view_bridge.go writes the events, work/view_call.go answers them). It stands alone, the kernel or not.
+// CallFile is router.view's bridge in the browser (28/10/2026, docs/KITWORK_BRIDGE.md): a page whose view
+// binds a job or a var runs in the kernel and loads it after the kernel (ui/page_live.go writes the page,
+// work/view_call.go answers its jobs with the data they changed).
 func CallFile() string {
 	return callJS
 }
