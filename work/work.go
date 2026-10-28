@@ -78,7 +78,7 @@ func (w *KitWork) Safe() value.Value { return value.NewSafeFunction() }
 //
 //	router.go    Router()        log.go       Log()         db.go        Database()
 //	http.go      HTTP()          jwt.go       JWT()         render.go    Render()
-//	qrcode.go    Qrcode()        napas.go     Napas()       file.go      File()
+//	napas.go     Napas()       file.go      File()
 //	collection.go Collection()   (directory-backed Markdown content)
 //	browser.go   Browser()       chromedp.go  Chromedp()/Screenshot()   routine.go  Routine()
 //	env.go       Env()           (per-tenant, path-isolated env)

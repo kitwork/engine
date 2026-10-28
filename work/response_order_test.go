@@ -21,7 +21,7 @@ func TestUIResponseOrderErrors(t *testing.T) {
 		"type-view":   `context.type("text/plain").view({ note: 1 })`,
 		"type-json":   `context.type("text/csv").json({ a: 1 })`,
 		"file-number": `context.file(42)`,
-		"after-file":  `context.type("image/png").file(qrcode.data("x").png()).header("X-A", "1")`,
+		"after-file":  `context.type("image/png").file("x.png").header("X-A", "1")`,
 	}
 	want := map[string]string{
 		"view-title":  "`.title()` nối sau `.view()`: mọi chỉnh sửa đứng trước hàm trả lời: `context.title(…).view(…)`",
@@ -35,7 +35,7 @@ func TestUIResponseOrderErrors(t *testing.T) {
 	}
 	files := map[string]string{"router.work": `import * as router from "kitwork/router";`}
 	for name, chain := range routes {
-		files[name+"/router.work"] = "import * as router from \"kitwork/router\";\nimport { qrcode } from \"kitwork\";\n" +
+		files[name+"/router.work"] = "import * as router from \"kitwork/router\";\n" +
 			"router.get((context) => " + chain + ");\n"
 	}
 	tn := NewTenant(writeSite(t, files), "localhost")

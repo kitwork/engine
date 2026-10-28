@@ -83,11 +83,20 @@ func RemovedWord(word string) (string, bool) {
 	return "", false
 }
 
+// helpersRemoved are helpers of the module kitwork the engine took out on 28/10/2026 because no spec stood
+// behind them (KITWORK_ENGINE.md mục 7). One needed again is written as a spec first, then a module.
+var helpersRemoved = map[string]bool{"qrcode": true}
+
+const helperRemoved = "không có spec nên engine gỡ ngày 28/10/2026; cần lại thì viết spec trước, rồi thêm thành một module (KITWORK_ENGINE.md mục 7)"
+
 // RemovedKitworkWord is what the spec writes for word, an older word of the module kitwork itself
 // (import { sqlite } from "kitwork"), and whether it is one.
 func RemovedKitworkWord(word string) (string, bool) {
 	if word == "sqlite" {
 		return declareSQLite, true
+	}
+	if helpersRemoved[word] {
+		return helperRemoved, true
 	}
 	return "", false
 }
