@@ -27,10 +27,11 @@ import (
 // answer is the data of the instance the job changed (work/component_call.go). Its inputs are never sent:
 // the server draws the page again to read them where the call stands (Page.Instances).
 //
-// The engine does not run the component's function as the page is drawn yet: the first paint takes the
-// values the source writes out, as it does for every site component. So a name of the bind whose value is
-// computed as it runs is an error here, not a name drawn empty, and a call of it inside a for (one instance
-// per row, found by a fingerprint) is not there yet.
+// As the page is drawn, the server runs the function of every component of the site whose logic answers a
+// bind (Request.Component): a const computed on the server is right at the first paint, and the host of one
+// the browser runs carries the data of its bind for the kernel to start the instance from (instancePairs).
+// Drawn without (Page.Instances, a test), a name takes the value its source writes out, nil for one computed
+// as it runs. A call of it inside a for (one instance per row, found by a fingerprint) is not there yet.
 
 // logicNames is what a component's logic declares, as the page reads it from its source.
 type logicNames struct {
@@ -40,8 +41,8 @@ type logicNames struct {
 	vars     map[string]bool
 	inputs   map[string]any
 	required map[string]bool
-	// problem is the first name of the bind the page cannot draw before the function runs: an error once
-	// the component is live
+	// problem is the first name of the bind the bridge cannot carry (a var bound under another name, a spread):
+	// an error once the component is live
 	problem *logicProblem
 }
 
@@ -84,7 +85,7 @@ func (d *componentDef) takes(name string) bool {
 
 // boundNames reads a component's function that answers context.bind({ … }) at its end; ok false for one
 // that does not. state holds the names of that object with the value the source writes for each, nil for a
-// job and for a value only the run knows.
+// job and for a value only the run knows (the page draws that one from the run, Request.Component).
 func boundNames(fn *logic.FunctionLiteral) (*logicNames, bool) {
 	if len(fn.Parameters) == 0 || len(fn.Body.Statements) == 0 {
 		return nil, false
@@ -189,11 +190,7 @@ func boundNames(fn *logic.FunctionLiteral) (*logicNames, bool) {
 					continue
 				}
 				names.vars[key] = true
-				value, written := writtenValue(initial)
-				if !written {
-					unknown(at, "var %s bắt đầu từ một giá trị tính lúc chạy, mà engine chưa chạy hàm của component lúc vẽ trang (việc của nó thì đã đi qua cầu nối): trang sẽ vẽ %s rỗng. Viết giá trị đầu sẵn (var %s = [])", key, key, key)
-				}
-				names.state[key] = value
+				names.state[key], _ = writtenValue(initial)
 				continue
 			case inputOf[v.Value] != "":
 				input := inputOf[v.Value]
@@ -204,19 +201,11 @@ func boundNames(fn *logic.FunctionLiteral) (*logicNames, bool) {
 				names.state[key] = names.inputs[input]
 				continue
 			case consts[v.Value] != nil:
-				value, written := writtenValue(consts[v.Value])
-				if !written {
-					unknown(at, "%s tính lúc chạy, mà engine chưa chạy hàm của component lúc vẽ trang (việc của nó thì đã đi qua cầu nối): trang sẽ vẽ %s rỗng. Viết giá trị sẵn (const %s = 15000), hay để %s ngoài bind", key, key, key, key)
-				}
-				names.state[key] = value
+				names.state[key], _ = writtenValue(consts[v.Value])
 				continue
 			}
 		}
-		value, written := writtenValue(entry.Value)
-		if !written {
-			unknown(at, "%s tính lúc chạy, mà engine chưa chạy hàm của component lúc vẽ trang (việc của nó thì đã đi qua cầu nối): trang sẽ vẽ %s rỗng. Viết giá trị sẵn, hay để %s ngoài bind", key, key, key)
-		}
-		names.state[key] = value
+		names.state[key], _ = writtenValue(entry.Value)
 	}
 	return names, true
 }
@@ -342,6 +331,37 @@ func (p *Page) Instances(req Request) map[string]Instance {
 	instances := map[string]Instance{}
 	p.renderWith(req, instances)
 	return instances
+}
+
+// runInstance runs the component of a call for the request (Request.Component), with the inputs the call
+// passes; nil when the page is drawn without (Page.Instances, a test) or the call is no such component.
+func (o *elemOp) runInstance(r *run, values []any) map[string]any {
+	if o.instanceOf == nil || r.component == nil {
+		return nil
+	}
+	inputs := make(map[string]any, len(o.bindings))
+	for i, b := range o.bindings {
+		inputs[b.name] = values[i]
+	}
+	return r.component(Instance{Name: o.instanceOf.name, Logic: o.instanceOf.logic, Inputs: inputs})
+}
+
+// instancePairs writes, for the kernel to start the instance from, every name of the data of its bind as its
+// function gave it this request, over the values its source writes out (call.js registers those): a const
+// computed on the server, a var's first value, an input.
+func (o *elemOp) instancePairs(own map[string]any) string {
+	names := make([]string, 0, len(own))
+	for name := range own {
+		if _, bound := o.instanceOf.state[name]; bound && !o.instanceOf.jobs[name] {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	pairs := make([]string, 0, len(names))
+	for _, name := range names {
+		pairs = append(pairs, name+": "+literal(own[name]))
+	}
+	return strings.Join(pairs, "; ")
 }
 
 // noteInstance records the instance of a call as the page draws it.

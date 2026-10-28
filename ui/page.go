@@ -57,6 +57,10 @@ type Request struct {
 	// Warn hears, while developing, of a value from data that made no class (a colour that is no token
 	// of the palette): file:line:col of the attribute, once per page. nil says nothing.
 	Warn func(message string)
+	// Component runs the function of a component of the site whose logic answers context.bind({ … }) as the
+	// page draws one of its calls, with the inputs the call passes there, and gives the data of its bind by
+	// name (component_live.go); nil, or an answer nil, draws the values the source writes out.
+	Component func(call Instance) map[string]any
 }
 
 // Render writes the page body (<body>…</body>) for one request.
@@ -86,7 +90,8 @@ func (p *Page) renderWith(req Request, instances map[string]Instance) (string, [
 			scope[a.alias] = a.start(scope)
 		}
 	}
-	r := &run{path: req.Path, origin: req.Origin, page: p, language: req.Language, warn: req.Warn, instances: instances, revs: req.Revs, stamp: req.Stamp}
+	r := &run{path: req.Path, origin: req.Origin, page: p, language: req.Language, warn: req.Warn, instances: instances, revs: req.Revs, stamp: req.Stamp,
+		component: req.Component}
 	p.root.render(r, scope)
 	extra := make([]string, 0, len(r.extra))
 	for c := range r.extra {

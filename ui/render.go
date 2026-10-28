@@ -43,8 +43,9 @@ type run struct {
 	mark       string
 	markHidden bool
 	// instances, when not nil, gathers each component whose jobs go through the bridge as it is drawn
-	// (Page.Instances)
+	// (Page.Instances); component runs a component's function as its call is drawn (Request.Component)
 	instances map[string]Instance
+	component func(Instance) map[string]any
 	// revs are the revisions of the page's data, written in its data block (Request.Revs)
 	revs map[string]string
 	// stamp is the moment the page's data was read, written with them (Request.Stamp)
@@ -215,9 +216,10 @@ type elemOp struct {
 	liveFor   bool
 	liveList  *liveListRef // the list in the page's program, on a page that has one (page_program.go)
 	pageState *livePage
-	// at and instanceOf: the host of a component whose jobs go through the bridge, the place it is called
-	// from and its name (component_live.go); components: on the root of the page's content, the components
-	// of the site the page holds that the browser runs, written at its end once the compile knows them all
+	// instanceOf: the host of a component of the site whose logic answers context.bind({ … }), run as the page
+	// draws it; at: of one whose jobs go through the bridge, the place it is called from (component_live.go);
+	// components: on the root of the page's content, the components of the site the page holds that the
+	// browser runs, written at its end once the compile knows them all
 	at         string
 	instanceOf *componentDef
 	components **liveComponents
@@ -277,8 +279,14 @@ func (o *elemOp) renderOne(r *run, scope map[string]any) {
 			values[i] = b.in.value(scope)
 		}
 	}
+	// a component of the site, run for this request: the data of its bind, and on the host of one the browser
+	// runs, every name of it for the kernel to start the instance from (component_live.go)
+	own := o.runInstance(r, values)
 	var inputs string
-	if len(o.inputs) > 0 {
+	switch {
+	case own != nil && o.at != "":
+		inputs = o.instancePairs(own)
+	case len(o.inputs) > 0:
 		inputs = o.inputPairs(scope, values)
 	}
 	o.noteInstance(r, values)
@@ -300,6 +308,9 @@ func (o *elemOp) renderOne(r *run, scope map[string]any) {
 		had := make(map[string]bool, len(o.state))
 		for name, v := range o.state {
 			saved[name], had[name] = scope[name]
+			if value, ran := own[name]; ran {
+				v = value
+			}
 			scope[name] = v
 		}
 		defer func() {

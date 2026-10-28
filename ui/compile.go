@@ -2090,8 +2090,10 @@ func mergeCallSite(o *elemOp, site *callSite) {
 		o.callerIf, o.callerShow = site.ifExpr, site.showExpr
 		o.bindings = append(o.bindings, site.bindings...)
 		o.inputs = site.inputs
-		if site.at != "" {
-			o.at, o.instanceOf = site.at, site.def // its instance, as the server finds it (component_live.go)
+		if site.def.bound && site.def.logic != "" && site.def.kitwork == nil {
+			// a component of the site run as the page draws it, and the place of one the browser runs
+			// (component_live.go)
+			o.at, o.instanceOf = site.at, site.def
 		}
 		if site.state != nil {
 			o.state = make(map[string]any, len(site.state))
@@ -2992,10 +2994,10 @@ func mergeStatic(ops []op) []op {
 
 // fold renders an element that depends on nothing into a static string once, at compile time.
 func fold(o *elemOp) op {
-	// the host of a component whose jobs go through the bridge is drawn each time: the server finds its
-	// instance as the page draws it (component_live.go, Page.Instances)
+	// the host of a component of the site whose logic answers a bind is drawn each time: its function runs
+	// for the request, and the server finds the instance of a job as the page draws it (component_live.go)
 	if o.forEach != nil || o.ifExpr != nil || o.showExpr != nil || len(o.bindings) > 0 ||
-		o.callerIf != nil || o.callerShow != nil || o.at != "" ||
+		o.callerIf != nil || o.callerShow != nil || o.instanceOf != nil ||
 		len(o.dynClasses) > 0 || len(o.dynAttrs) > 0 || o.href != nil || o.selectValue != nil ||
 		o.optionValue != nil || o.content != nil || o.crumbLink || o.crumbCurrent || o.breadcrumb ||
 		o.fragment || len(o.emptyOps) > 0 {

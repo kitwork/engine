@@ -91,23 +91,23 @@ func TestInstancesAreThoseThePageDraws(t *testing.T) {
 	}
 }
 
-// What this slice cannot draw right is a compile error, never a page drawn wrong: a name of the bind only the
-// run knows (the first paint takes the values the source writes), a var bound under another name (the bridge
-// sends a var by its name), a call of it in a for (no fingerprint yet), a page that is no router.view (no bridge
-// to call through), a required input the call does not pass, and a look in a .ui of its own.
+// What the bridge cannot carry is a compile error, never a page drawn wrong: a var bound under another name (the
+// bridge sends a var by its name), a call of it in a for (no fingerprint yet), a page that is no router.view (no
+// bridge to call through), a required input the call does not pass, and a look in a .ui of its own. A name of the
+// bind only the run knows is no error since the page runs the component as it is drawn (Request.Component).
 //
 // CONTROL (go test -overlay, 28/10/2026): with componentLogic not refusing what boundNames found, this test went
-// red: the computed total compiled (to be drawn empty), and the renamed var reached the page as a name of the
-// page, an error of another kind.
+// red: the renamed var reached the page as a name of the page, an error of another kind.
 func TestComponentWithJobsRefusesWhatItCannotDraw(t *testing.T) {
 	computed := strings.Replace(liveCartLogic, "label, shippingFee", "label, total, shippingFee", 1)
+	if _, err := compileLiveCart(t, liveCartFiles(computed, liveCartRoute, liveCartContent)); err != nil {
+		t.Errorf("a name of the bind only the run knows compiles, the page runs the component: %v", err)
+	}
 	renamed := strings.Replace(liveCartLogic, "{ items, done,", "{ lines: items, done,", 1)
 	cases := []struct {
 		name, at, says string
 		files          map[string]string
 	}{
-		{"computed", "components.work:11:45: ", "total tính lúc chạy",
-			liveCartFiles(computed, liveCartRoute, liveCartContent)},
 		{"renamed", "components.work:11:25: ", "var items vào bind dưới tên lines",
 			liveCartFiles(renamed, liveCartRoute, liveCartContent)},
 		{"in a for", "cart/content.ui:1:", "lặp theo for",
@@ -134,8 +134,8 @@ router.get((context) => context.view({ user: "an" }));
 	}
 }
 
-// A component whose bind holds neither a job nor a var is drawn on the server as before, a computed name of it
-// drawn empty: the browser does not run it, so the rule of this slice does not reach it.
+// A component whose bind holds neither a job nor a var is drawn on the server: drawn without Request.Component
+// (here), a computed name of it is empty; the browser does not run it, so its host carries nothing for it.
 func TestComponentWithoutJobsStaysTheServers(t *testing.T) {
 	logic := `import * as component from "kitwork/component";
 component.define("shop-badge", (context) => {
@@ -180,4 +180,54 @@ component.define("shop-cart", (context) => {
 	if cart, ok := page.Instances(Request{Path: "/cart", Scope: map[string]any{"user": "an"}})["c1"]; !ok || cart.Name != "shop-cart" {
 		t.Errorf("a call with nothing that changes is still an instance: %+v", cart)
 	}
+}
+
+// The page runs each component of the site whose logic answers a bind as it draws the call (Request.Component),
+// with the inputs the call passes there: the cart draws the label its function computed for this request, and its
+// host carries every name of its data for the kernel to start the instance from; a badge whose bind holds data
+// only is run too, and drawn with its count, its host carrying nothing (the browser does not run it). Drawn without
+// the hook, the cart takes the values its source writes out. A function of the bind (a job) is not data: a value
+// the hook gives for it is not written.
+//
+// CONTROL (go test -overlay, 28/10/2026): with renderOne not asking Request.Component, this test went red: the
+// label and the count drawn empty, the host carrying only the input shippingFee.
+func TestComponentRunsAsThePageIsDrawn(t *testing.T) {
+	logic := liveCartLogic + `
+component.define("shop-badge", (context) => {
+  const count = [1, 2].length;
+  return context.bind({ count });
+});
+`
+	computed := strings.Replace(logic, "label, shippingFee", "label, total, shippingFee", 1)
+	content := strings.Replace(liveCartContent, "<text>{{ label }}</text>", "<text>{{ label }}</text><text>{{ total }} điểm</text>", 1)
+	content = strings.Replace(content, "</shop-cart></content>", "</shop-cart><shop-badge><text>{{ count }} đơn</text></shop-badge></content>", 1)
+	page, err := compileLiveCart(t, liveCartFiles(computed, liveCartRoute, content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls []Instance
+	run := func(call Instance) map[string]any {
+		calls = append(calls, call)
+		switch call.Name {
+		case "shop-cart":
+			owner, _ := call.Inputs["owner"].(string)
+			return map[string]any{"items": []any{}, "done": false, "label": "Giỏ của " + owner, "total": float64(4),
+				"shippingFee": call.Inputs["shippingFee"], "checkout": "a job is no data"}
+		case "shop-badge":
+			return map[string]any{"count": float64(2)}
+		}
+		return nil
+	}
+	html := page.Render(Request{Path: "/cart", Scope: map[string]any{"user": "an"}, Component: run})
+	mustContain(t, html,
+		`data-kitwork-at="c1" data-kitwork-scope="done: false; items: []; label: &#39;Giỏ của an&#39;; shippingFee: 20000; total: 4"`,
+		`>Giỏ của an</p>`, `>4 điểm</p>`, `<p>2 đơn</p>`)
+	mustNotContain(t, html, `data-kitwork-component="shop-badge`, "a job is no data")
+	if len(calls) != 2 || calls[0].Name != "shop-cart" || calls[0].Inputs["owner"] != "an" || calls[0].Inputs["shippingFee"] != float64(20000) ||
+		!strings.HasSuffix(calls[0].Logic, "components.work") || calls[1].Name != "shop-badge" {
+		t.Errorf("each call runs once, with its inputs where it stands: %+v", calls)
+	}
+	plain := page.Render(Request{Path: "/cart", Scope: map[string]any{"user": "an"}})
+	mustContain(t, plain, `data-kitwork-scope="shippingFee: 20000"`, `>Giỏ hàng</p>`)
+	mustNotContain(t, plain, "Giỏ của an", "2 đơn")
 }
