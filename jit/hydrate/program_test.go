@@ -267,12 +267,14 @@ func keptAcrossTabsScript(callJS, assertions string) string {
 const seenAgainAssertions = `
 (async function () {
   var view = kitwork.page.view();
+  view.set("title", "mua sữa");
   document.visibilityState = "visible";
   document.dispatchEvent({ type: "visibilitychange" });
   await tick(); await tick(); await tick();
   var asked = global.__sent.filter(function (s) { return s.url.indexOf("kitwork-refresh=1") >= 0; });
   if (asked.length !== 1) throw new Error("a tab seen again should ask for what changed, asked " + asked.length + " times");
   if (JSON.stringify(asked[0].body.revs) !== JSON.stringify({ todos: "r0", left: "l0" })) throw new Error("it should send its revisions, sent " + JSON.stringify(asked[0].body));
+  if (!asked[0].body.vars || asked[0].body.vars.title !== "mua sữa") throw new Error("it should send the vars it holds, so data a var reads comes as it shows it, sent " + JSON.stringify(asked[0].body));
   if (rows().length !== 2 || view.state.left !== 1) throw new Error("what changed should replace the page's: " + rows().length + " rows, left " + view.state.left);
   console.log("a tab seen again asks with its revisions and takes what changed");
 })().catch(function (e) { console.error(e && e.stack || e); process.exit(1); });
@@ -280,6 +282,18 @@ const seenAgainAssertions = `
 
 func TestTabSeenAgainAsksForWhatChanged(t *testing.T) {
 	runNodeDOMScript(t, "seen_again.test.js", keptAcrossTabsScript(callJS, seenAgainAssertions))
+}
+
+// The control: a refresh that sends no vars is caught.
+func TestTabSeenAgainWithoutItsVarsIsCaught(t *testing.T) {
+	body := `var body = call.refresh ? { vars: vars, seq: call.seq, revs: revs }`
+	if !strings.Contains(callJS, body) {
+		t.Fatal("the body of a refresh moved: update this control")
+	}
+	out, err := runNodeDOMWith(t, composedRuntime(), keptAcrossTabsScript(strings.Replace(callJS, body, `var body = call.refresh ? { seq: call.seq, revs: revs }`, 1), seenAgainAssertions))
+	if err == nil || !strings.Contains(out, "should send the vars it holds") {
+		t.Fatalf("a refresh without vars should be caught; got err=%v\n%s", err, out)
+	}
 }
 
 // The control: with no listener for the tab being seen again, it never asks.

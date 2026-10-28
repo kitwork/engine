@@ -58,3 +58,47 @@ func pageRevs(t *testing.T, body string) map[string]string {
 	}
 	return block.Revs
 }
+
+// A refresh runs the page with the vars the tab holds, as a job does (28/10/2026): a search's results, which
+// read the query the tab typed, come for that query, not for an empty one, when another tab adds a word.
+func TestARefreshRunsWithTheTabsVars(t *testing.T) {
+	tn := NewTenant(writeSite(t, map[string]string{
+		"router.work":  `import * as router from "kitwork/router";`,
+		"view.ui":      "<view><content /></view>",
+		"s/content.ui": `<content><input value="{{ query }}" /><list><item for="word of found; key: word"><text>{{ word }}</text></item></list></content>`,
+		"s/router.work": `import * as router from "kitwork/router";
+import { datastore } from "kitwork/storage";
+
+const list = datastore("words").segment("all");
+
+router.view((context) => {
+  var query = "";
+  const words = list.get() ?? [];
+  const found = words.filter((word) => word.includes(query));
+  const add = (word) => { list.set(words.concat([word])); };
+  return context.bind({ query, found, add });
+});
+`,
+	}), "localhost")
+	if err := tn.Run(); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	for _, word := range []string{"apple", "banana", "cherry", "blueberry"} {
+		postCall(tn, "/s", "add", `{"args":["`+word+`"],"vars":{"query":""},"seq":1}`)
+	}
+	rec := httptest.NewRecorder()
+	tn.Serve(rec, httptest.NewRequest(http.MethodPost, "http://localhost/s?"+ViewRefreshParameter+"=1", strings.NewReader(`{"seq":2,"revs":{},"vars":{"query":"b"}}`)))
+	var answer struct {
+		Patch map[string]any `json:"patch"`
+	}
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &answer) != nil {
+		t.Fatalf("refresh: %d %q", rec.Code, rec.Body.String())
+	}
+	found, _ := answer.Patch["found"].([]any)
+	if len(found) != 2 || found[0] != "banana" || found[1] != "blueberry" {
+		t.Fatalf("a refresh should run with the tab's query (b): banana and blueberry, got %s", rec.Body.String())
+	}
+	if _, sent := answer.Patch["query"]; sent {
+		t.Errorf("a var is the tab's own, never sent back: %s", rec.Body.String())
+	}
+}

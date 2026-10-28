@@ -200,7 +200,9 @@
     call.seq = ++seq;
     var vars = {};
     if (page) page.vars.forEach(function (k) { vars[k] = get(k); });
-    var body = call.refresh ? { seq: call.seq, revs: revs } : { args: call.args, vars: vars, seq: call.seq, revs: revs };
+    // a refresh runs the page with the vars the tab holds, as a job does: data a var reads (a search's query)
+    // comes as the tab shows it
+    var body = call.refresh ? { vars: vars, seq: call.seq, revs: revs } : { args: call.args, vars: vars, seq: call.seq, revs: revs };
     // the keys its tickets are for, while they are new: the answer brings tickets only when they are not those
     if (tickets().length && Date.now() - ticketsAt < 5 * 60 * 1000) body.marks = marksOf(tickets());
     if (call.at) {
