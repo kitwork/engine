@@ -31,6 +31,9 @@ import (
 // of the queue, a schedule — tells every channel holding a ticket for it. The tab, told a stamp newer than
 // the data it holds, asks for what changed with its cookies, past the page's guards (kitwork-refresh).
 //
+// The channel is answered before the route tree (work.go): it leases no VM, holds no request's run, only a
+// stream and the marks of its keys.
+//
 // A ticket is the server's: it names its key by a mark only the server can make (the key itself never
 // reaches the browser), it runs out ten minutes after it was made, and it holds for the cookies it was made
 // with, so a tab that signed out holds tickets for nothing. A browser can only hold a ticket for data a page

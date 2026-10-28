@@ -301,3 +301,24 @@ func TestWhatAComponentReadsGivesItsPageATicket(t *testing.T) {
 		t.Fatalf("a write of what the badge read should tell the tab of its page, told %q", frame)
 	}
 }
+
+// A tab's channel holds no VM (28/10/2026): it is answered before the route tree, which is what leases one,
+// so a thousand tabs seen hold a thousand streams and no VM; the per-page listener before it held the VM of
+// its request for as long as it was open.
+//
+// CONTROL (by hand, 28/10/2026): with serveChanges holding a VM of the pool while open, five channels held
+// five VMs and this test went red.
+func TestAChannelHoldsNoVM(t *testing.T) {
+	tn := sharedKeySite(t)
+	server := httptest.NewServer(http.HandlerFunc(tn.Serve))
+	defer server.Close()
+	serveGet(tn, "/a", nil) // the pool warm, the site's storage made
+	before := enginePool.Active()
+	for i := 0; i < 5; i++ {
+		_, _, stop := openChanges(t, server)
+		defer stop()
+	}
+	if held := enginePool.Active() - before; held != 0 {
+		t.Fatalf("five open channels hold %d VMs, want none", held)
+	}
+}
