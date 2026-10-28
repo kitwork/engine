@@ -1120,6 +1120,9 @@ func (t *Tenant) respondUI(reqRouter *Router, node *RouteNode, scope map[string]
 	if reqRouter.viewRevs != nil && compiled.page != nil && compiled.page.Live() {
 		request.Revs = reqRouter.viewRevs() // the revisions of its data, for its calls (view_patch.go)
 		request.Stamp = reqRouter.viewStamp // the moment its data was read (view_call.go)
+		if node.folder != nil {
+			request.Tickets = t.viewTickets(reqRouter, node.folder) // what it is told of (view_changes.go)
+		}
 	}
 	if request.Title == "" {
 		request.Title = metaText(meta, "site")

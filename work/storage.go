@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kitwork/engine/compiler"
@@ -87,6 +88,10 @@ type appStorage struct {
 	streams streamSlots
 
 	places placeSet
+
+	// changeHub tells the tabs that read a key when it is written (view_changes.go), made on first use
+	changesOnce sync.Once
+	changeHub   *changeHub
 }
 
 // Close ends every observer of the app (its streams end with their requests) and closes disk() and
@@ -373,6 +378,8 @@ func (h *storageHandle) get(caller *runtime.VM, args []value.Value) value.Value 
 		return failure
 	}
 	key := h.key.Encoded()
+	// a page's run that reads a key is told when it is written (view_changes.go)
+	requestRouterOf(caller).readBy(storageChangeKey(string(h.key.Place), key))
 	if len(args) == 0 {
 		return h.read(place, key)
 	}
@@ -500,6 +507,7 @@ func (h *storageHandle) set(args []value.Value) value.Value {
 	if failure := h.write(place, h.key.Encoded(), args[0]); failure.Failed() {
 		return failure
 	}
+	h.tenant.changes().tell(storageChangeKey(string(h.key.Place), h.key.Encoded()), nextViewStamp())
 	return value.Value{K: value.Nil}
 }
 
@@ -563,6 +571,9 @@ func (h *storageHandle) remove(args []value.Value) value.Value {
 	removed, err := place.remove(h.key.Encoded())
 	if err != nil {
 		return storageFailure(h.spelling(), err)
+	}
+	if removed {
+		h.tenant.changes().tell(storageChangeKey(string(h.key.Place), h.key.Encoded()), nextViewStamp())
 	}
 	return value.New(removed)
 }

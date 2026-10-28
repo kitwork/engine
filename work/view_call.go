@@ -170,6 +170,8 @@ type viewCall struct {
 	revs map[string]string
 	// refresh: no job, the page asks for the data that changed since its revisions (kitwork-refresh)
 	refresh bool
+	// marks are the keys the page holds tickets for, made lately, "" when it holds none (view_changes.go)
+	marks string
 }
 
 // readViewCall reads the call of a POST whose URL named a job (name) or asked for what changed (refresh); an
@@ -192,13 +194,14 @@ func readViewCall(r *http.Request, name string, refresh bool) (*viewCall, error)
 		At    string            `json:"at"`
 		Scope map[string]any    `json:"scope"`
 		Revs  map[string]string `json:"revs"`
+		Marks string            `json:"marks"`
 	}
 	if len(bytes.TrimSpace(body)) > 0 {
 		if err := json.Unmarshal(body, &sent); err != nil {
 			return nil, fmt.Errorf("lời gọi không phải JSON { args, vars, seq }")
 		}
 	}
-	call := &viewCall{name: name, vars: map[string]value.Value{}, seq: sent.Seq, revs: sent.Revs, refresh: refresh}
+	call := &viewCall{name: name, vars: map[string]value.Value{}, seq: sent.Seq, revs: sent.Revs, refresh: refresh, marks: sent.Marks}
 	for _, arg := range sent.Args {
 		call.args = append(call.args, value.New(arg))
 	}
@@ -261,7 +264,7 @@ func jobName(name string) bool {
 func (t *Tenant) serveViewCall(vm *runtime.VM, ctxObj *Context, reqRouter *Router, node *RouteNode, leaf *FolderRouter, handler *value.Lambda) {
 	call := reqRouter.call
 	if call.refresh {
-		serveViewRefresh(vm, reqRouter)
+		t.serveViewRefresh(vm, reqRouter, leaf)
 		return
 	}
 	if call.at != "" {
@@ -326,6 +329,7 @@ func (t *Tenant) serveViewCall(vm *runtime.VM, ctxObj *Context, reqRouter *Route
 		return
 	}
 	stamp := nextViewStamp() // before the run that reads the data the answer brings, under the page's lock
+	reqRouter.reads = map[string]bool{}
 	if res := t.execTree(vm, leaf, handler, ctxObj); res.K == value.Invalid || response.Kind() != "render" {
 		if res.K == value.Invalid {
 			t.recordRuntimeFailure(reqRouter, leaf.bytecode, "view", res)
@@ -336,6 +340,7 @@ func (t *Tenant) serveViewCall(vm *runtime.VM, ctxObj *Context, reqRouter *Route
 	after := viewSnapshot(response.Data())
 	patch, lists := viewPatch(before, after, t.viewListKeys(node))
 	answer := map[string]any{"seq": call.seq, "stamp": stamp}
+	t.answerTickets(answer, reqRouter, leaf, call.marks)
 	if call.revs != nil {
 		if revs := staleRevs(call.revs, before, after, isVar, patch, lists); len(revs) > 0 {
 			answer["revs"] = revs
@@ -438,8 +443,9 @@ func cookiesAsSentNext(req *http.Request, set []*http.Cookie) {
 
 // serveViewRefresh answers a page that asks for what changed since its revisions: each name of its data
 // (a var's aside) whose revision is not the page's, whole, with its new revision; nothing when it holds the data
-// as it is. Its stamp was taken before the view's function ran, under the page's lock (router_serve.go).
-func serveViewRefresh(vm *runtime.VM, reqRouter *Router) {
+// as it is. Its stamp was taken before the view's function ran, under the page's lock (router_serve.go); its
+// tickets are for what that run read (view_changes.go).
+func (t *Tenant) serveViewRefresh(vm *runtime.VM, reqRouter *Router, leaf *FolderRouter) {
 	call := reqRouter.call
 	data := reqRouter.response.Data()
 	now := viewSnapshot(data)
@@ -470,6 +476,7 @@ func serveViewRefresh(vm *runtime.VM, reqRouter *Router) {
 		}
 	}
 	answer := map[string]any{"seq": call.seq, "stamp": reqRouter.viewStamp}
+	t.answerTickets(answer, reqRouter, leaf, call.marks)
 	if len(revs) > 0 {
 		answer["patch"], answer["revs"] = patch, revs
 	}

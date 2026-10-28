@@ -50,6 +50,8 @@ type run struct {
 	revs map[string]string
 	// stamp is the moment the page's data was read, written with them (Request.Stamp)
 	stamp int64
+	// tickets are its channel's, written with them (Request.Tickets)
+	tickets []string
 }
 
 type crumb struct {
@@ -459,7 +461,7 @@ func (o *elemOp) renderOne(r *run, scope map[string]any) {
 		r.b.WriteString(newTabNote(r.language))
 	}
 	if o.pageState != nil {
-		o.pageState.writeState(&r.b, scope, r.revs, r.stamp)
+		o.pageState.writeState(&r.b, scope, r.revs, r.stamp, r.tickets)
 	}
 	if o.components != nil {
 		(*o.components).write(&r.b)

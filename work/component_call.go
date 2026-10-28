@@ -395,6 +395,7 @@ func (t *Tenant) serveComponentCall(vm *runtime.VM, ctxObj *Context, reqRouter *
 		return
 	}
 	stamp := nextViewStamp() // before the run that reads the page's data, under the page's lock (view_call.go)
+	reqRouter.reads = map[string]bool{}
 	if res := t.execTree(vm, leaf, handler, ctxObj); res.K == value.Invalid || response.Kind() != "render" {
 		if res.K == value.Invalid {
 			t.recordRuntimeFailure(reqRouter, leaf.bytecode, "view", res)
@@ -409,6 +410,7 @@ func (t *Tenant) serveComponentCall(vm *runtime.VM, ctxObj *Context, reqRouter *
 	// page held at another revision than the run before the job; a page the server draws whole holds none
 	if page := t.viewPage(node); page != nil && page.Live() {
 		answer["stamp"] = stamp // a tab takes no data read before the data it holds (call.js)
+		t.answerTickets(answer, reqRouter, leaf, call.marks)
 		now := viewSnapshot(after)
 		if viewDataChanged(before, now, pageVars) {
 			t.tellViewChanged(leaf, stamp) // the tabs listening to the page ask for what changed (view_listen.go)

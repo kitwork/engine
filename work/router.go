@@ -60,6 +60,8 @@ type Router struct {
 	// viewStamp is the moment the data of a page of router.view is read, taken before its function runs
 	// (view_call.go, nextViewStamp): written in the page's data block, and the stamp of a refresh's answer
 	viewStamp int64
+	// reads are the keys of storage the run of a page of router.view read, nil outside one (view_changes.go)
+	reads map[string]bool
 	// callChain and callGuards are the folders and the router.view guards a job's call passed, for the run
 	// after the job to pass again (view_call.go, guardsAgain)
 	callChain  []*RouteNode

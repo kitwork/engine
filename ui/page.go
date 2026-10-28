@@ -54,6 +54,9 @@ type Request struct {
 	// Stamp is the moment that data was read (work/view_call.go), in its data block with the revisions: the
 	// page takes no data read before it
 	Stamp int64
+	// Tickets are what the page's channel holds to be told when its data changes (work/view_changes.go), in
+	// its data block
+	Tickets []string
 	// Warn hears, while developing, of a value from data that made no class (a colour that is no token
 	// of the palette): file:line:col of the attribute, once per page. nil says nothing.
 	Warn func(message string)
@@ -90,7 +93,7 @@ func (p *Page) renderWith(req Request, instances map[string]Instance) (string, [
 			scope[a.alias] = a.start(scope)
 		}
 	}
-	r := &run{path: req.Path, origin: req.Origin, page: p, language: req.Language, warn: req.Warn, instances: instances, revs: req.Revs, stamp: req.Stamp,
+	r := &run{path: req.Path, origin: req.Origin, page: p, language: req.Language, warn: req.Warn, instances: instances, revs: req.Revs, stamp: req.Stamp, tickets: req.Tickets,
 		component: req.Component}
 	p.root.render(r, scope)
 	extra := make([]string, 0, len(r.extra))

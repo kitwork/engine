@@ -178,6 +178,10 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 	// embedded FS). It is answered here, before the folder tree, so nothing under it is ever a
 	// tenant's file; the names used before (/kit/…, /jitfonts/…) still answer. The one-response
 	// /kit.js went on 03/10 — no page asked for it any more, and it carried none of the directive files.
+	// a tab's channel of changes (view_changes.go), before the engine's files under the same /_kitwork/
+	if t.serveChangesIf(w, r, requestScope.Context().Done()) {
+		return
+	}
 	if t.serveEngineIf(w, r) {
 		return
 	}

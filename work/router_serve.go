@@ -163,8 +163,6 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 	if ui && r.Method == http.MethodPost {
 		callName, calling, refreshing = takeViewCall(r)
 	}
-	// a tab listening to a page of router.view asks it in the URL too (kitwork-listen, view_listen.go)
-	listening := ui && r.Method == http.MethodGet && takeViewListen(r)
 
 	// Folder-level rate limits (router.limit; router.ratelimit of a template), outside-in: ONE bucket per
 	// client per rule for the folder's whole subtree — a root rule is a site-wide ceiling, a branch's adds
@@ -291,13 +289,6 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 		}
 	}
 
-	// A tab of router.view's page listening for its changes (view_listen.go): past the guards, the stream
-	// holds; the view's function does not run.
-	if listening && method.view {
-		t.serveViewListen(w, reqRouter, leaf)
-		return
-	}
-
 	// Response cache (.cache RAM / .persist disk), on the route only (20/10/2026: .cache() on an answer
 	// is gone). Only a GET (and its HEAD) reads or writes it. Invalid or disallowed projected query
 	// values execute normally but never read or write a cache entry.
@@ -340,6 +331,7 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 			reqRouter.method, reqRouter.handling = method, true
 			if method.view {
 				reqRouter.viewStamp = nextViewStamp() // before the run that reads the page's data (view_call.go)
+				reqRouter.reads = map[string]bool{}   // the keys it reads, for its tickets (view_changes.go)
 			}
 			res := t.execTree(vm, leaf, method.handle, ctxObj)
 			reqRouter.handling = false

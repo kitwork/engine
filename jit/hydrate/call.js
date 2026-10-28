@@ -161,7 +161,8 @@
     if (!el) return;
     var data;
     try { data = JSON.parse(el.textContent || "{}"); } catch (e) { return; }
-    page = { jobs: data.jobs || [], vars: data.vars || [], program: data.program || "" };
+    page = { jobs: data.jobs || [], vars: data.vars || [], program: data.program || "", tickets: data.tickets || [] };
+    ticketsAt = Date.now();
     revs = data.revs || {};
     stamp = data.stamp || 0;
     var state = {};
@@ -200,6 +201,8 @@
     var vars = {};
     if (page) page.vars.forEach(function (k) { vars[k] = get(k); });
     var body = call.refresh ? { seq: call.seq, revs: revs } : { args: call.args, vars: vars, seq: call.seq, revs: revs };
+    // the keys its tickets are for, while they are new: the answer brings tickets only when they are not those
+    if (tickets().length && Date.now() - ticketsAt < 5 * 60 * 1000) body.marks = marksOf(tickets());
     if (call.at) {
       // the instance's vars, read as the call leaves; its inputs never go: the server reads them where it stands
       var own = {}, instance = instanceOf(call.host) || {};
@@ -271,6 +274,11 @@
       held = {};
     } else if (answer.stamp) {
       stamp = answer.stamp;
+      // the tickets of what the run of this answer read: the channel holds them in place of the page's
+      if (answer.tickets && page) {
+        page.tickets = answer.tickets;
+        ticketsAt = Date.now();
+      }
     }
     // a name this page held at another revision than the job ran on comes whole; every name that changed
     // brings its new revision
@@ -285,6 +293,7 @@
     if (!call.refresh) mark(call, false, null);
     tell(held);
     paint();
+    hold();
   }
 
   // ---- the page kept the same across the tabs of the browser and the moments it is not seen ----
@@ -343,28 +352,63 @@
   });
   window.addEventListener("focus", refresh);
 
-  // ---- the page told when its data changes, while it is seen ----
+  // ---- the tab told when the data it shows changes, while it is seen ----
 
-  // a tab seen listens to its page (GET ?kitwork-listen=1, work/view_listen.go), a stream that carries only
-  // the stamp of the data a job of the page left; a stamp newer than the data the tab holds asks for what
-  // changed, through the queue of its calls, with its cookies and past the guards. A hidden tab does not
-  // listen, it asks when seen again: a browser holds few connections to one host.
-  var listener = null;
+  // a tab seen holds one channel, GET /_kitwork/changes (work/view_changes.go), kept across the pages it moves
+  // to: a stream that carries only the stamp of a change. The channel holds the tickets of the page shown now,
+  // one for each key of data its run read, handed to it by POST; a stamp newer than the data the tab holds
+  // asks for what changed, through the queue of its calls, with its cookies and past the guards. Tickets run
+  // out: told to renew, the tab asks again, and the answer brings new ones. A hidden tab closes its channel and
+  // asks when seen again: a browser holds few connections to one host.
+  var changes = null, connection = "", holding = "", ticketsAt = 0;
+  function tickets() { return (page && page.tickets) || []; }
+  function marksOf(list) { return list.map(function (t) { return t.split(".")[0]; }).sort().join(" "); }
   function want(at) {
-    if (!page || !(at > stamp)) return;
+    if (!tickets().length || !(at > stamp)) return;
     if (at > told) told = at;
     if (queue.some(function (c) { return c.refresh; })) return; // the refresh waiting asks for it
     queue.push({ refresh: true, told: true, name: "", args: [], row: "", el: null, epoch: epoch });
     pump();
   }
   function listen() {
-    if (listener || !page || !stamp || typeof EventSource !== "function" || document.visibilityState === "hidden") return;
-    listener = new EventSource(location.pathname + (location.search ? location.search + "&" : "?") + "kitwork-listen=1");
-    listener.onmessage = function (e) { want(Number(e.data)); };
+    if (changes || !tickets().length || typeof EventSource !== "function" || document.visibilityState === "hidden") return;
+    var source = changes = new EventSource("/_kitwork/changes");
+    source.addEventListener("connection", function (e) {
+      connection = e.data;
+      holding = "";
+      hold();
+    });
+    source.addEventListener("renew", function () { refresh(); });
+    source.onmessage = function (e) { want(Number(e.data)); };
   }
   function unlisten() {
-    if (listener) listener.close();
-    listener = null;
+    if (changes) changes.close();
+    changes = null;
+    connection = holding = "";
+  }
+  // hands the channel the tickets of the page shown now, when they are not what it holds: the answer is the last
+  // change told of any of them, maybe one the page has not seen
+  function hold() {
+    var now = tickets().join(" ");
+    if (!connection || now === holding) return;
+    holding = now;
+    var at = connection;
+    fetch("/_kitwork/changes?connection=" + encodeURIComponent(at), {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify({ tickets: tickets() })
+    }).then(function (response) {
+      if (response.status === 404 && at === connection) {
+        // the channel was closed under the tab (the site was reloaded): it opens another
+        unlisten();
+        listen();
+        return null;
+      }
+      return response.ok ? response.json() : null;
+    }).then(function (answer) {
+      if (answer && answer.last) want(answer.last);
+    }, function () { /* the channel tells again on the next change */ });
   }
 
   // a keyed list's change by row: the rows removed, the rows set (changed in place, or new at the end), and
@@ -723,7 +767,6 @@
   // Drive leaves the page: its calls are dropped; the page it brings is seeded from its own data
   document.addEventListener("kitwork:before-swap", function () {
     epoch++;
-    unlisten();
     told = 0;
     queue = [];
     track = {};
@@ -735,7 +778,10 @@
   document.addEventListener("kitwork:load", function () {
     seed();
     paint();
+    // the channel stays: it holds the new page's tickets, or closes for a page that has none
+    if (!tickets().length) unlisten();
     listen();
+    hold();
   });
 
   seedComponents();

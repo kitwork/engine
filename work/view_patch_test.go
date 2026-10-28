@@ -75,8 +75,10 @@ func TestJobAnswersTheDataItChanged(t *testing.T) {
 		callAnswer(t, tn, "add", `{"args":[],"vars":{"title":"`+title+`"},"seq":`+string(rune('1'+i))+`}`)
 	}
 
-	// tick one box: the row that changed and the count, nothing else, well under 200 bytes
-	answer, body := callAnswer(t, tn, "toggle", `{"args":[2,true],"vars":{"title":""},"seq":4}`)
+	// tick one box: the row that changed and the count, nothing else, well under 200 bytes; the page holds
+	// tickets for the keys it reads, made lately, so none come again (view_changes.go)
+	tickets := pageTickets(t, serveGet(tn, "/todo", nil).Body.String())
+	answer, body := callAnswer(t, tn, "toggle", `{"args":[2,true],"vars":{"title":""},"seq":4,"marks":"`+ticketMarks(tickets)+`"}`)
 	if len(body) >= 200 {
 		t.Errorf("a ticked box answered %d bytes, want under 200: %s", len(body), body)
 	}

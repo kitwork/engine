@@ -243,11 +243,17 @@ func TestProgramSendsAndKeepsRevisions(t *testing.T) {
 // and takes what comes whole; tabs of one browser tell each other the data an answer brought.
 const keptAcrossTabsPage = `
 global.__sent = [];
+global.__held = [];
 global.fetch = function (url, options) {
   var body = JSON.parse(options.body);
+  if (url.indexOf("/_kitwork/changes") === 0) {
+    global.__held.push({ url: url, tickets: body.tickets });
+    var last = global.__last || 0;
+    return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve({ last: last }); } });
+  }
   global.__sent.push({ url: url, headers: options.headers, body: body });
   var answer = new URL(url, "http://x").searchParams.has("kitwork-refresh")
-    ? { seq: body.seq, patch: { left: 1, todos: [{ id: 1, title: "Một", done: false }, { id: 2, title: "Hai", done: true }] }, revs: { todos: "r2", left: "l2" }, stamp: 300 }
+    ? { seq: body.seq, patch: { left: 1, todos: [{ id: 1, title: "Một", done: false }, { id: 2, title: "Hai", done: true }] }, revs: { todos: "r2", left: "l2" }, stamp: 300, tickets: ["t1", "t3"] }
     : { seq: body.seq, patch: { left: 0, title: "" }, lists: { todos: { key: "id", set: [{ id: 1, title: "Việc số 1", done: true }] } }, revs: { todos: "r1", left: "l1" }, stamp: 200 };
   return Promise.resolve({ redirected: false, ok: true, status: 200, headers: { get: function () { return "application/json"; } }, json: function () { return Promise.resolve(answer); } });
 };
@@ -395,76 +401,102 @@ func TestCallsNamingTheJobInAHeaderAreCaught(t *testing.T) {
 	}
 }
 
-// A tab seen listens to its page (28/10/2026, work/view_listen.go): a stream that carries only stamps. A stamp
-// older than the data the tab holds asks nothing; a newer one asks once for what changed; one told while that
-// ask is on its way asks once more after it; a hidden tab stops listening and listens again when seen. The
-// page was drawn at 100; the server answers a refresh with data read at 300.
+// A tab seen holds one channel of changes (28/10/2026, work/view_changes.go): it opens it as the page loads,
+// hands it the page's tickets once it has its name, asks nothing for a stamp older than the data it holds,
+// asks once for a newer one and once more for one told meanwhile, hands it the tickets an answer brings, asks
+// again when told to renew, closes it when hidden and opens another when seen, and keeps it across a page
+// Drive brings, handing it that page's tickets. The page was drawn at 100 with tickets t1 and t2; the server
+// answers a refresh with data read at 300 and tickets t1 and t3.
 const listenerPrefix = `
 global.__sources = [];
-global.EventSource = function (url) { this.url = url; this.closed = false; global.__sources.push(this); };
+global.EventSource = function (url) { this.url = url; this.closed = false; this.on = {}; global.__sources.push(this); };
+global.EventSource.prototype.addEventListener = function (type, fn) { this.on[type] = fn; };
 global.EventSource.prototype.close = function () { this.closed = true; };
+global.EventSource.prototype.emit = function (type, data) {
+  var fn = type === "message" ? this.onmessage : this.on[type];
+  if (fn) fn({ data: data });
+};
 `
 
 const listenAssertions = `
 (async function () {
   var asked = function () { return global.__sent.filter(function (s) { return s.url.indexOf("kitwork-refresh=1") >= 0; }).length; };
   var source = global.__sources[0];
-  if (!source || source.url !== "/?kitwork-listen=1" || source.closed) throw new Error("a tab seen should listen to its page, opened " + JSON.stringify(global.__sources.map(function (s) { return s.url; })));
-  source.onmessage({ data: "50" });
+  if (global.__sources.length !== 1 || source.url !== "/_kitwork/changes" || source.closed) throw new Error("a tab seen should hold one channel of changes, opened " + JSON.stringify(global.__sources.map(function (s) { return s.url; })));
+  source.emit("connection", "c1");
+  await tick(); await tick();
+  var held = global.__held[0];
+  if (!held || held.url !== "/_kitwork/changes?connection=c1" || JSON.stringify(held.tickets) !== JSON.stringify(["t1", "t2"])) throw new Error("the tab should hand the channel its tickets, handed " + JSON.stringify(global.__held));
+  source.emit("message", "50");
   await tick(); await tick();
   if (asked() !== 0) throw new Error("a stamp older than the data the tab holds should ask nothing, asked " + asked());
-  source.onmessage({ data: "400" });
-  source.onmessage({ data: "500" });
+  source.emit("message", "400");
+  source.emit("message", "500");
   await tick(); await tick(); await tick(); await tick();
   if (asked() !== 2) throw new Error("a newer stamp should ask once, and one told while it is on its way once more after it: asked " + asked());
-  var view = kitwork.page.view();
-  if (rows().length !== 2 || view.state.left !== 1) throw new Error("what changed should be taken: " + rows().length + " rows, left " + view.state.left);
-  source.onmessage({ data: "250" });
+  var last = global.__held[global.__held.length - 1];
+  if (JSON.stringify(last.tickets) !== JSON.stringify(["t1", "t3"])) throw new Error("the tickets an answer brings should be handed to the channel, handed " + JSON.stringify(last.tickets));
+  source.emit("message", "250");
   await tick(); await tick();
   if (asked() !== 2) throw new Error("a stamp older than the data taken should ask nothing, asked " + asked());
+  source.emit("renew", "");
+  await tick(); await tick(); await tick();
+  if (asked() !== 3) throw new Error("told to renew, the tab should ask again for its page, asked " + asked());
   document.visibilityState = "hidden";
   document.dispatchEvent({ type: "visibilitychange" });
-  if (!source.closed) throw new Error("a hidden tab should stop listening");
+  if (!source.closed) throw new Error("a hidden tab should close its channel");
   document.visibilityState = "visible";
   document.dispatchEvent({ type: "visibilitychange" });
   var again = global.__sources[global.__sources.length - 1];
-  if (global.__sources.length !== 2 || again.closed) throw new Error("a tab seen again should listen again, opened " + global.__sources.length);
-  console.log("a tab listens while seen and asks once for each change it does not hold");
+  if (global.__sources.length !== 2 || again.closed) throw new Error("a tab seen again should open another channel, opened " + global.__sources.length);
+  again.emit("connection", "c2");
+  await tick(); await tick();
+  if (global.__held[global.__held.length - 1].url !== "/_kitwork/changes?connection=c2") throw new Error("the tab should hand its tickets to the new channel");
+  // Drive brings another page: the channel stays and holds that page's tickets
+  document.dispatchEvent({ type: "kitwork:before-swap" });
+  block.textContent = JSON.stringify({ state: { title: "", todos: [], left: 0 }, jobs: ["add", "toggle", "remove"], vars: ["title"], program: "p1", revs: { todos: "r9", left: "l9" }, stamp: 900, tickets: ["t9"] });
+  document.dispatchEvent({ type: "kitwork:load" });
+  await tick(); await tick();
+  if (global.__sources.length !== 2 || again.closed) throw new Error("the tab should keep its channel across the pages it moves to, opened " + global.__sources.length);
+  if (JSON.stringify(global.__held[global.__held.length - 1].tickets) !== JSON.stringify(["t9"])) throw new Error("the channel should hold the new page's tickets, handed " + JSON.stringify(global.__held[global.__held.length - 1]));
+  console.log("a tab holds one channel while seen, across its pages, and asks once for each change it does not hold");
 })().catch(function (e) { console.error(e && e.stack || e); process.exit(1); });
 `
 
 func listenScript(callJS string) string {
-	page := strings.Replace(programPage, `program: "p1" });`, `program: "p1", revs: { todos: "r0", left: "l0" }, stamp: 100 });`, 1)
+	page := strings.Replace(programPage, `program: "p1" });`, `program: "p1", revs: { todos: "r0", left: "l0" }, stamp: 100, tickets: ["t1", "t2"] });`, 1)
 	return strings.Replace(page, "__CALL_JS__", keptAcrossTabsPage+listenerPrefix+callJS, 1) + listenAssertions
 }
 
-func TestTabsListenToTheirPageWhileSeen(t *testing.T) {
+func TestTabsHoldOneChannelWhileSeen(t *testing.T) {
 	runNodeDOMScript(t, "listen.test.js", listenScript(callJS))
 }
 
-// The controls: a tab that never listens; one that asks for any stamp told; one that drops a stamp told while
-// its ask is on its way, as a refresh of a tab seen again does.
+// The controls: a tab that never opens its channel; one that never hands it its tickets; one that asks for any
+// stamp told; one that drops a stamp told while its ask is on its way; one that opens a channel for each page.
 func TestTabsThatListenWrongAreCaught(t *testing.T) {
 	for _, c := range []struct {
 		name  string
 		swaps [][2]string
 		want  string
 	}{
-		{"never listens", [][2]string{{"if (listener || !page || !stamp", "if (true || listener || !page || !stamp"}}, "should listen to its page"},
+		{"never listens", [][2]string{{"if (changes || !tickets().length", "if (true || changes || !tickets().length"}}, "should hold one channel"},
+		{"hands nothing", [][2]string{{"if (!connection || now === holding) return;", "return;"}}, "hand the channel its tickets"},
 		{"asks for any stamp", [][2]string{
-			{"if (!page || !(at > stamp)) return;", "if (!page) return;"},
+			{"if (!tickets().length || !(at > stamp)) return;", "if (!tickets().length) return;"},
 			{"if (call.told && told <= stamp) { told = 0; flying = null; pump(); return; }", ""},
 		}, "should ask nothing"},
 		{"drops what is told meanwhile", [][2]string{
 			{"if (queue.some(function (c) { return c.refresh; })) return; // the refresh waiting asks for it",
 				"if ((flying && flying.refresh) || queue.some(function (c) { return c.refresh; })) return;"},
 		}, "once more after it"},
+		{"a channel for each page", [][2]string{{"    if (!tickets().length) unlisten();\n", "    unlisten();\n"}}, "keep its channel across the pages"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			js := callJS
 			for _, swap := range c.swaps {
 				if !strings.Contains(js, swap[0]) {
-					t.Fatal("the listener of call.js moved: update this control")
+					t.Fatal("the channel of call.js moved: update this control")
 				}
 				js = strings.Replace(js, swap[0], swap[1], 1)
 			}

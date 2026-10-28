@@ -140,7 +140,7 @@ func (p *Page) Live() bool {
 
 // writeState writes the data of the page's bind the kernel repaints from, the jobs it calls and which
 // names are vars. A value JSON cannot carry is left out, as the kernel would read it: nothing.
-func (l *livePage) writeState(b *strings.Builder, scope map[string]any, revs map[string]string, stamp int64) {
+func (l *livePage) writeState(b *strings.Builder, scope map[string]any, revs map[string]string, stamp int64, tickets []string) {
 	state := make(map[string]any, len(l.names))
 	for _, name := range l.names {
 		v, ok := scope[name]
@@ -170,6 +170,9 @@ func (l *livePage) writeState(b *strings.Builder, scope map[string]any, revs map
 		block["revs"] = held
 		if stamp > 0 {
 			block["stamp"] = stamp // the moment it was read: the page takes no data read before (work/view_call.go)
+		}
+		if len(tickets) > 0 {
+			block["tickets"] = tickets // what its channel holds to be told of changes (work/view_changes.go)
 		}
 	}
 	data, err := json.Marshal(block)
