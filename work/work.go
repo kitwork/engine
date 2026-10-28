@@ -77,7 +77,7 @@ func (w *KitWork) Safe() value.Value { return value.NewSafeFunction() }
 // Capability → file map:
 //
 //	router.go    Router()        log.go       Log()         db.go        Database()
-//	http.go      HTTP()          jwt.go       JWT()         render.go    Render()
+//	http.go      HTTP()          render.go    Render()
 //	file.go      File()
 //	collection.go Collection()   (directory-backed Markdown content)
 //	browser.go   Browser()       chromedp.go  Chromedp()/Screenshot()   routine.go  Routine()
