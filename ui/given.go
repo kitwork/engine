@@ -46,6 +46,11 @@ type routeView struct {
 	// get says the file declares router.get; views is how many .view(…) it calls with an object or a value
 	get   bool
 	views int
+	// view says the file declares router.view (28/10/2026); jobs are the names of its bind that are functions,
+	// called through the bridge, and vars the vars at the top of its function (view_bridge.go)
+	view bool
+	jobs map[string]bool
+	vars map[string]bool
 }
 
 // pageGiven is what one page is given: the route's view for content.ui, nothing for notfound.ui, message for
@@ -132,8 +137,11 @@ func (s *Site) viewNames(routeDir string) routeView {
 				imported[module.Default.Value] = true
 			}
 		}
-		if routerLineWord(statement) == "get" {
+		if word := routerLineWord(statement); word == "get" || word == "view" {
 			view.get = true
+			if word == "view" {
+				view.view = true
+			}
 		}
 	}
 	// kitwork are the names an import of Kitwork binds; engine the parameters of the file's functions (the
@@ -304,7 +312,7 @@ func (s *Site) viewNames(routeDir string) routeView {
 			if len(n.Arguments) > 0 && fromAnotherFile(n.Function) || handsOn(n.Function, n.Arguments) {
 				known = false // makePage()(context), handle(context), router.get(makePage())
 			}
-			if member := viewMember(n.Function); member != nil {
+			if member := viewMember(n.Function); member != nil && !isIdentifier(member.Object, "router") {
 				called[member] = true
 				read(n.Arguments)
 			}
@@ -312,11 +320,13 @@ func (s *Site) viewNames(routeDir string) routeView {
 			if len(n.Arguments) > 0 && fromAnotherFile(n.Object) || handsOn(n.Object, n.Arguments) {
 				known = false // helpers.page(context), router.get(handlers.page)
 			}
-			if n.Method != nil && n.Method.Value == "view" {
+			// .view({ … }) answers a router.get, .bind({ … }) a router.view (28/10/2026); router.view(fn) is
+			// the door itself, not an answer
+			if n.Method != nil && (n.Method.Value == "view" || n.Method.Value == "bind") && !isIdentifier(n.Object, "router") {
 				read(n.Arguments)
 			}
 		case *logic.MemberExpression:
-			if n.Property != nil && n.Property.Value == "view" && !called[n] {
+			if n.Property != nil && n.Property.Value == "view" && !called[n] && !isIdentifier(n.Object, "router") {
 				known = false
 			}
 		case *logic.IndexExpression:
@@ -331,6 +341,9 @@ func (s *Site) viewNames(routeDir string) routeView {
 	})
 	if known {
 		view.names = names
+	}
+	if view.view {
+		view.jobs, view.vars = viewBridgeNames(program.Statements)
 	}
 	return view
 }

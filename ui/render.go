@@ -125,6 +125,7 @@ type dynAttr struct {
 	name    string
 	in      *interpolation
 	boolean bool
+	json    bool // written as JSON: the arguments of a job of router.view (view_bridge.go)
 	image   bool // an image's src: a value from data that is not an image address is not written
 }
 
@@ -355,6 +356,12 @@ func (o *elemOp) renderOne(r *run, scope map[string]any) {
 	}
 	for _, a := range o.dynAttrs {
 		v := a.in.value(scope)
+		if a.json {
+			if text, err := json.Marshal(v); err == nil {
+				writeAttr(&r.b, a.name, string(text))
+			}
+			continue
+		}
 		if a.boolean {
 			if truthy(v) {
 				r.b.WriteByte(' ')

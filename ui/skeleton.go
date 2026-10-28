@@ -80,6 +80,12 @@ func writeSkeleton(b *strings.Builder, o op) {
 			writeAttr(b, "class", strings.Join(classes, " "))
 		}
 		b.WriteString(o.staticAttrs)
+		for _, d := range o.dynAttrs {
+			// a job of router.view's page: the head links the bridge for it (view_bridge.go, jit/js callsJobs)
+			if strings.HasPrefix(d.name, "data-kitwork-job-") {
+				writeAttr(b, d.name, "")
+			}
+		}
 		b.WriteByte('>')
 		if o.void {
 			return

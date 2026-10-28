@@ -2359,6 +2359,7 @@ func (c *compiler) attrValue(n *Node, a *Attr, htmlName string, boolean bool, o 
 		return nil
 	}
 	o.dynAttrs = append(o.dynAttrs, dynAttr{name: htmlName, in: in, boolean: boolean})
+	c.viewVarField(htmlName, a.Value, w)
 	return nil
 }
 

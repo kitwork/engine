@@ -756,7 +756,14 @@ func (c *compiler) runtimeAttributes(n *Node, p *attrPlan, o *elemOp, scope *fra
 		return pairs, err
 	}
 	var err error
-	if pairs.events, err = scope.wireEvents(n, p.events); err != nil {
+	events := p.events
+	if scope.live() == nil {
+		// a job of router.view's page, called through the bridge (view_bridge.go)
+		if events, err = c.viewJobEvents(n, events, o); err != nil {
+			return pairs, err
+		}
+	}
+	if pairs.events, err = scope.wireEvents(n, events); err != nil {
 		return pairs, err
 	}
 	if pairs.binds, err = scope.bindPairs(n, o); err != nil {
