@@ -157,6 +157,22 @@ func (l *livePage) writeState(b *strings.Builder, scope map[string]any) {
 	b.WriteString(`</script>`)
 }
 
+// writeNames writes the page's data block with every name and no value: what the skeleton carries, for the
+// head to link the bridge and for the check of the names the page reads to know its page scope.
+func (l *livePage) writeNames(b *strings.Builder) {
+	state := make(map[string]any, len(l.names))
+	for _, name := range l.names {
+		state[name] = nil
+	}
+	data, err := json.Marshal(map[string]any{"state": state, "jobs": emptyList(l.jobs), "vars": emptyList(l.vars)})
+	if err != nil {
+		return
+	}
+	b.WriteString(`<script type="application/json" data-kitwork-page>`)
+	b.Write(data)
+	b.WriteString(`</script>`)
+}
+
 func emptyList(list []string) []string {
 	if list == nil {
 		return []string{}

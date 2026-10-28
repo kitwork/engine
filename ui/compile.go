@@ -917,7 +917,7 @@ func (c *compiler) region(n *Node, cx ctx) (op, error) {
 	if !ok || o.fragment {
 		return nil, errAt(root, "trang này chạy ở trình duyệt (router.view có việc hay var): gốc <%s> của nó phải là một phần tử", root.Tag)
 	}
-	o.pageState = true
+	o.pageState = c.out.live
 	return o, nil
 }
 

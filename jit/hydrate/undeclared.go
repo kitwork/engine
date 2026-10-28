@@ -1,6 +1,7 @@
 package hydrate
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -188,7 +189,7 @@ func scanUndeclaredNames(html string, components ComponentNames) (scan undeclare
 	scan.aliases = map[string]*boundary{}
 	// The page scope is a boundary too — the outermost one. It is knowable from the markup unless
 	// the page writes it from a script, which nothing in the tree would show.
-	page := &boundary{tag: "page", depth: -1, declared: map[string]bool{}, opaque: pageScopeIsWritten(html)}
+	page := &boundary{tag: "page", depth: -1, declared: pageDataNames(html), opaque: pageScopeIsWritten(html)}
 	stack := []*boundary{page}
 	depth := 0
 	index := 0
@@ -292,6 +293,37 @@ func scanUndeclaredNames(html string, components ComponentNames) (scan undeclare
 // the stack, so there is always one.
 func innermost(stack []*boundary) *boundary {
 	return stack[len(stack)-1]
+}
+
+// pageDataNames are the names a page that runs in the kernel declares in its page scope (28/10/2026,
+// ui/page_live.go): the data and the jobs of its <script type="application/json" data-kitwork-page>, which
+// call.js puts there. A page with none declares nothing yet.
+func pageDataNames(html string) map[string]bool {
+	names := map[string]bool{}
+	const open = "data-kitwork-page>"
+	start := strings.Index(html, open)
+	if start < 0 {
+		return names
+	}
+	body := html[start+len(open):]
+	end := strings.Index(body, "</script>")
+	if end < 0 {
+		return names
+	}
+	var data struct {
+		State map[string]json.RawMessage `json:"state"`
+		Jobs  []string                   `json:"jobs"`
+	}
+	if json.Unmarshal([]byte(body[:end]), &data) != nil {
+		return names
+	}
+	for name := range data.State {
+		names[name] = true
+	}
+	for _, name := range data.Jobs {
+		names[name] = true
+	}
+	return names
 }
 
 // pageScopeIsWritten reports whether the page pokes its own page scope from a script, which makes

@@ -134,3 +134,23 @@ func runNodeDOMWith(t *testing.T, runtime, assertions string) (string, error) {
 	out, err := exec.Command(node, path).CombinedOutput()
 	return string(out), err
 }
+
+// A page that runs in the kernel declares its page scope in its data block (ui/page_live.go writes it in the
+// skeleton with every name): what it reads of its bind is no undeclared name; a name it does not have still is.
+func TestPageDataDeclaresThePageScope(t *testing.T) {
+	doc := `<!doctype html><html><head></head><body><main>` +
+		`<p data-kitwork-bind="show: todos.length === 0; disabled: add.pending">x</p>` +
+		`<li data-kitwork-for="todo of todos; key: todo.id"><b data-kitwork-bind="text: todo.title"></b></li>` +
+		`<i data-kitwork-bind="text: lefft"></i>` +
+		`<script type="application/json" data-kitwork-page>{"jobs":["add"],"state":{"left":null,"todos":null},"vars":[]}</script>` +
+		`</main></body></html>`
+	got := strings.Join(undeclaredWarnings(doc), "\n")
+	for _, name := range []string{`"todos"`, `"add"`, `"todo"`, `"left"`} {
+		if strings.Contains(got, "reads "+name) {
+			t.Errorf("%s is declared by the page's data block:\n%s", name, got)
+		}
+	}
+	if !strings.Contains(got, `reads "lefft"`) {
+		t.Errorf("a name the page does not have should still be told:\n%s", got)
+	}
+}

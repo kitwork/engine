@@ -81,12 +81,14 @@ func writeSkeleton(b *strings.Builder, o op) {
 		}
 		b.WriteString(o.staticAttrs)
 		if o.liveFor {
-			b.WriteString(` data-kitwork-for=""`) // a list the kernel adopts: the head links the kernel
+			// a list the kernel adopts, once, as it reads it: its item is declared inside (jit/hydrate Check)
+			writeAttr(b, "data-kitwork-for", forText(o.forEach))
 		}
 		b.WriteByte('>')
-		if o.pageState {
-			// a page that runs in the kernel: the head links the bridge for it (page_live.go, jit/js PageAssets)
-			b.WriteString(`<script type="application/json" data-kitwork-page></script>`)
+		if o.pageState != nil {
+			// a page that runs in the kernel: the head links the bridge for it (page_live.go, jit/js PageAssets),
+			// and the names of its page scope are declared for the check of what the page reads
+			o.pageState.writeNames(b)
 		}
 		if o.void {
 			return

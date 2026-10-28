@@ -204,9 +204,9 @@ type elemOp struct {
 	// group of tabs (tabs.go)
 	after string
 	// liveFor: the for of a page that runs in the kernel, drawn as the kernel adopts it (renderLive);
-	// pageState: the root of that page's content, which ends with the data the kernel repaints from
+	// pageState: on the root of that page's content, which ends with the data the kernel repaints from
 	liveFor   bool
-	pageState bool
+	pageState *livePage
 }
 
 func (o *elemOp) render(r *run, scope map[string]any) {
@@ -432,8 +432,8 @@ func (o *elemOp) renderOne(r *run, scope map[string]any) {
 	if o.newTab && href != "" {
 		r.b.WriteString(newTabNote(r.language))
 	}
-	if o.pageState && r.page != nil && r.page.live != nil {
-		r.page.live.writeState(&r.b, scope)
+	if o.pageState != nil {
+		o.pageState.writeState(&r.b, scope)
 	}
 	r.b.WriteString("</")
 	r.b.WriteString(o.tag)
