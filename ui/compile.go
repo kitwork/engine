@@ -543,8 +543,9 @@ func (c *compiler) element(n *Node, cx ctx, site *callSite) (op, error) {
 		if each, err := parseFor(a.Value, n, a); err == nil {
 			around := cx.scope
 			cx.scope = rowFrame(each, cx.scope)
-			if c.page != nil && !around.inComponent() {
-				// a list of a page that runs in the kernel: its rows are the kernel's too (page_live.go)
+			if c.page != nil && !around.readsComponent(each.list) {
+				// a list of the data of a page that runs in the kernel, inside a component or not: its rows are
+				// the kernel's too (page_live.go); a list of a component's own state is not, yet
 				if live, _ := around.onClient(each.list, n, a); live {
 					cx.scope.client = true
 					c.noteLiveList(each)

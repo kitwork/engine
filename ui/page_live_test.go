@@ -164,3 +164,39 @@ router.view((context) => context.bind({ title: "", todos: [], left: 0, add: 0, t
 		}
 	}
 }
+
+// A list and an if of the page's data inside a component the kernel runs (a dropdown) run in the kernel like
+// the page's own (they were a compile error there until 28/10/2026, where a printed page draws them); a list
+// of the component's own state is still not live.
+func TestPageListInsideAComponentRunsInTheKernel(t *testing.T) {
+	compile := func(content string) (*Page, error) {
+		s := givenSite(map[string]string{"/site/todo/router.work": liveTodoRoute, "/site/todo/content.ui": content})
+		return s.Compile(filepath.Join(s.Root, "todo"))
+	}
+	page, err := compile(`<content><dropdown><button click="toggle()">{{ left }} việc</button><popover>` +
+		`<text if="todos.length === 0">Trống</text>` +
+		`<list><item for="todo of todos; key: todo.id"><text>{{ todo.title }}</text><button click="remove(todo.id)">x</button></item></list>` +
+		`</popover></dropdown><form submit="add()"><input value="{{ title }}" /></form></content>`)
+	if err != nil {
+		t.Fatalf("a list of the page's data inside a dropdown should compile on a page that runs in the kernel: %v", err)
+	}
+	if keys := page.ListKeys(); keys["todos"] != "id" {
+		t.Errorf("the list inside the dropdown is drawn by todo.id: keys = %v", keys)
+	}
+	html := page.Render(Request{Path: "/todo", Scope: liveTodoScope()})
+	for _, want := range []string{
+		`data-kitwork-component="dropdown"`, `<!--kit-for:start id=s1-->`, `data-kitwork-template`,
+		`data-kitwork-item="s1" data-kitwork-key="45"`, `data-kitwork-item="s1" data-kitwork-key="46"`,
+		`show: todos.length === 0`, `click: remove(todo.id)`, `text: todo.title`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("the page should hold %q:\n%s", want, html)
+		}
+	}
+	if _, err := compile(`<content><dropdown><button click="toggle()">x</button><popover><list>` +
+		`<item for="o of open; key: o"><text>{{ o }}</text></item></list></popover></dropdown>` +
+		`<form submit="add()"><input value="{{ title }}" /></form><text>{{ left }} {{ todos.length }}</text><button click="remove(1)">x</button></content>`); err == nil ||
+		!strings.Contains(err.Error(), "for theo trạng thái của component") {
+		t.Errorf("a list of the dropdown's own state should still be an error, got %v", err)
+	}
+}

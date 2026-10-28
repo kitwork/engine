@@ -154,3 +154,34 @@ func TestPageDataDeclaresThePageScope(t *testing.T) {
 		t.Errorf("a name the page does not have should still be told:\n%s", got)
 	}
 }
+
+// A list the server drew inside a component host is adopted the same way: its rows read the page's data
+// through the component's scope, and the component's own names beside it.
+func TestDrawnListInsideAComponentHost(t *testing.T) {
+	runNodeDOMScript(t, "drawn_in_component.test.js", `
+var kit = window.kit;
+kit.component("box", { open: true });
+var host = el("div", { "data-kitwork-component": "box" });
+var ul = el("ul");
+var start = document.createComment("kit-for:start id=s1");
+var template = el("li", { "data-kitwork-for": "todo of todos; key: todo.id", "data-kitwork-template": "", "hidden": "" });
+template.appendChild(el("span", { "data-kitwork-bind": "text: todo.title + (open ? ' *' : '')" }));
+var row = el("li", { "data-kitwork-item": "s1", "data-kitwork-key": "1" });
+var span = el("span", { "data-kitwork-bind": "text: todo.title + (open ? ' *' : '')" });
+span.textContent = "Mua sữa *";
+row.appendChild(span);
+ul.appendChild(start); ul.appendChild(template); ul.appendChild(row); ul.appendChild(document.createComment("kit-for:end"));
+host.appendChild(ul);
+document.body.appendChild(host);
+kit.scope.$.todos = [{ id: 1, title: "Mua sữa" }];
+kit.render();
+var rows = ul.querySelectorAll("[data-kitwork-item]");
+if (rows.length !== 1 || rows[0] !== row) throw new Error("the drawn row inside the component should be adopted, got " + rows.length);
+kit.scope.$.todos = [{ id: 1, title: "Mua sữa" }, { id: 2, title: "Gửi thư" }];
+kit.render();
+rows = ul.querySelectorAll("[data-kitwork-item]");
+if (rows.length !== 2 || rows[0] !== row) throw new Error("a new row should join the adopted one, got " + rows.length);
+if (rows[1].childNodes[0].textContent !== "Gửi thư *") throw new Error("the new row should read the page's data and the component's open: " + rows[1].childNodes[0].textContent);
+console.log("a drawn list inside a component host is adopted and reads both scopes");
+`)
+}

@@ -195,6 +195,17 @@ func (f *frame) onClient(e *expr, n *Node, a *Attr) (bool, error) {
 	return true, nil
 }
 
+// readsComponent reports whether an expression reads a name a component around declares: the component's
+// own state, as against the page's data or a row's item.
+func (f *frame) readsComponent(e *expr) bool {
+	for _, name := range usedNames(e.ir) {
+		if d := f.declaring(name); d != nil && d.component != nil {
+			return true
+		}
+	}
+	return false
+}
+
 // ofServerComponent reports whether every name an expression reads that a frame declares belongs to
 // a component whose logic has not reached the browser yet (a site component, step 4): its event is
 // that component's, not the page's, and waits for it.
@@ -541,9 +552,10 @@ func pipelineProblem(event string, modifiers []string) string {
 // kernel hides with the hidden attribute, the way the server's first paint does (render.go).
 func (s *frame) bindPairs(n *Node, o *elemOp) ([]string, error) {
 	var pairs []string
-	if o.ifExpr != nil && !s.inComponent() {
-		// an if of a page that runs in the kernel follows its data the way a show does: the server draws
-		// the element hidden when false and the kernel shows it when true (page_live.go)
+	if o.ifExpr != nil && !s.readsComponent(o.ifExpr) {
+		// an if of the data of a page that runs in the kernel, inside a component or not, follows that data
+		// the way a show does: the server draws the element hidden when false and the kernel shows it when
+		// true (page_live.go); an if of a component's own state is still the error below
 		if client, err := s.onClient(o.ifExpr, n, nil); err != nil {
 			return nil, err
 		} else if client {
@@ -591,7 +603,9 @@ func (s *frame) bindPairs(n *Node, o *elemOp) ([]string, error) {
 		if client, err := s.onClient(o.forEach.list, n, nil); err != nil {
 			return nil, err
 		} else if client {
-			if s.inComponent() || o.fragment {
+			// s is the frame of the rows: live only for a list of the data of a page that runs in the kernel
+			// (compile.go, element)
+			if !s.client || o.fragment {
 				return nil, errAt(n, "%s for theo trạng thái của component chưa chạy ở trình duyệt", s.within())
 			}
 			o.liveFor = true // a list of a page that runs in the kernel (page_live.go)
