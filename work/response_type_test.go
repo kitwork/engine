@@ -55,17 +55,17 @@ func TestUISiteTypeIsAnEdit(t *testing.T) {
 		"csv":       `response.type("text/csv").text("a,b")`,
 		"svg":       `response.type("image/svg+xml; charset=utf-8").text("<svg/>")`,
 		"plain":     `response.text("a,b")`,
-		"png":       `response.type("image/png").file(file.open("kitwork.png").bytes())`,
-		"bytes":     `response.file(file.open("kitwork.png").bytes())`,
+		"png":       `response.type("image/png").file(qrcode.data("kitwork").png())`,
+		"bytes":     `response.file(qrcode.data("kitwork").png())`,
 		"onjson":    `response.type("text/csv").json({ a: 1 })`,
 		"after":     `response.text("a,b").type("text/csv")`,
 		"context":   `context.type("text/csv").text("a,b")`,
 		"article":   `context.meta({ type: "article" }).title("Bài").view({ note: 1 })`,
 		"choiceold": `response.text("a,b", { type: "text/csv" })`,
 	}
-	files := map[string]string{"router.work": `import * as router from "kitwork/router";`, ".database/files/kitwork.png": "\x89PNG\r\n\x1a\n"}
+	files := map[string]string{"router.work": `import * as router from "kitwork/router";`}
 	for name, answer := range routes {
-		files[name+"/router.work"] = "import * as router from \"kitwork/router\";\nimport * as file from \"kitwork/file\";\n" +
+		files[name+"/router.work"] = "import * as router from \"kitwork/router\";\nimport { qrcode } from \"kitwork\";\n" +
 			"router.get((context) => { const response = context.response; return " + answer + "; });\n"
 	}
 	tn := NewTenant(writeSite(t, files), "localhost")

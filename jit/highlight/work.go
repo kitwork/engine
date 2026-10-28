@@ -44,6 +44,6 @@ var dialectWork = javascriptDialectLists{
 	hostNames: []string{
 		"app", "cache", "collection", "component", "console", "cron", "ctx", "database", "environment", "file",
 		"http", "jwt", "kitwork", "log", "napas", "palette", "path", "pigment",
-		"queue", "router", "shortbase", "sqlite", "sync", "timer",
+		"qrcode", "queue", "router", "shortbase", "sqlite", "sync", "timer",
 	},
 }.dialect()

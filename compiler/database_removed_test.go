@@ -17,7 +17,6 @@ func TestDatabaseOldSpellingsAreCompileErrors(t *testing.T) {
 		{"import { kitdb } from \"kitwork/database\";\n", "import { kitdb", `import { kitdb } from "kitwork/database" đã bỏ: database của app khai export const db = connection().schema({ bảng })`},
 		{"import { kitdb } from \"kitwork/database\";\n", "import { kitdb", "app.database(path, { port }) của host"},
 		{"import { safe, sqlite } from \"kitwork\";\n", "import { safe", `import { sqlite } from "kitwork" đã bỏ: SQLite là connection("tên")`},
-		{"import { qrcode } from \"kitwork\";\n", "import { qrcode", `import { qrcode } from "kitwork" đã bỏ: không có spec nên engine gỡ ngày 28/10/2026`},
 		{"import { webhook } from \"kitwork\";\n", "import { webhook", `import { webhook } from "kitwork" đã bỏ: không có spec nên engine gỡ ngày 28/10/2026`},
 		{"import { insights } from \"kitwork\";\n", "import { insights", `import { insights } from "kitwork" đã bỏ: không có spec nên engine gỡ ngày 28/10/2026`},
 		{"import { playground } from \"kitwork\";\n", "import { playground", `import { playground } from "kitwork" đã bỏ: không có spec nên engine gỡ ngày 28/10/2026`},

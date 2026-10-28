@@ -12,13 +12,12 @@ import (
 // context.type("image/png").file(bytes) for bytes the handler made; response.image(bytes) is gone.
 func TestAnswerMediaTypeIsTheTypeEdit(t *testing.T) {
 	tmp := writeSite(t, map[string]string{
-		"filesystem.kitwork":          "",
-		"router.kitwork.js":           `import * as router from "kitwork/router";`,
-		".database/files/kitwork.png": "\x89PNG\r\n\x1a\n",
-		"qr/router.kitwork.js": "import * as router from \"kitwork/router\";\nimport * as file from \"kitwork/file\";\n" +
-			"router.get(({ response }) => response.header(\"X-Qr\", \"1\").type(\"image/png\").file(file.open(\"kitwork.png\").bytes()));\n",
-		"shortcut/router.kitwork.js": "import * as router from \"kitwork/router\";\nimport * as file from \"kitwork/file\";\n" +
-			"router.get((context) => context.type(\"image/png\").file(file.open(\"kitwork.png\").bytes()));\n",
+		"filesystem.kitwork": "",
+		"router.kitwork.js":  `import * as router from "kitwork/router";`,
+		"qr/router.kitwork.js": "import * as router from \"kitwork/router\";\nimport { qrcode } from \"kitwork\";\n" +
+			"router.get(({ response }) => response.header(\"X-Qr\", \"1\").type(\"image/png\").file(qrcode.data(\"kitwork\").png()));\n",
+		"shortcut/router.kitwork.js": "import * as router from \"kitwork/router\";\nimport { qrcode } from \"kitwork\";\n" +
+			"router.get((context) => context.type(\"image/png\").file(qrcode.data(\"kitwork\").png()));\n",
 		"csv/router.kitwork.js": "import * as router from \"kitwork/router\";\n" +
 			"router.get(({ response }) => response.status(201).type(\"text/csv; charset=utf-8\").text(\"a,b\"));\n",
 		"send/router.kitwork.js": "import * as router from \"kitwork/router\";\n" +
