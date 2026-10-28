@@ -1,17 +1,15 @@
 // Kitwork native bridge adapter.
 //
-// Native shells may either seed `window.kit.bridge` with a complete adapter exposing
+// Native shells may either seed `window.kitwork.bridge` with a complete adapter exposing
 // call(action, params), or expose a WebView postMessage handle. Plain web pages keep bridge=null
 // and use the browser fallbacks implemented by the capability modules.
 (function (window) {
   "use strict";
 
-  var kit = window.kit || window.kitwork || {};
-  window.kit = kit;
-  window.kitwork = kit;
-  if (kit.Bridge) return;
+  var kitwork = (window.kitwork = window.kitwork || {});
+  if (kitwork.Bridge) return;
 
-  // The bridge loads BEFORE the kernel (the kernel reads kit.platform as it initialises), so it
+  // The bridge loads BEFORE the kernel (the kernel reads kitwork.platform as it initialises), so it
   // cannot borrow the kernel's copy — it carries its own and publishes it. The kernel defines the
   // same shape only when the bridge is absent, which is how a web-only page still gets it.
   function KitworkError(message, code, moduleName, actionName, details) {
@@ -30,8 +28,7 @@
     }
     var handlers = window.webkit && window.webkit.messageHandlers;
     if (handlers) {
-      var handler = handlers.kit;
-      if (!handler || typeof handler.postMessage !== "function") handler = handlers.kitwork;
+      var handler = handlers.kitwork; // the WebKit shell's handler is kitwork, as the root is (28/10/2026)
       if (handler && typeof handler.postMessage === "function") return handler;
     }
     return null;
@@ -197,7 +194,7 @@
   // document[Symbol.for("kitwork:native:host:v1")], with call(action, params). Its answers come back
   // through the shell's own script, never as a message event — so a Bridge built on the raw WebView
   // handle sends requests the shell does carry out, but never hears a reply: on desktop
-  // kit.window.isMaximized() waited out its timeout (02/10). When that adapter is there, it IS the
+  // kitwork.window.isMaximized() waited out its timeout (02/10). When that adapter is there, it IS the
   // bridge. The slot is read, not deleted: the shell's own window scripts read it too.
   function seededHost() {
     try {
@@ -206,16 +203,16 @@
     } catch (_) { return null; }
   }
 
-  var seeded = kit.bridge;
+  var seeded = kitwork.bridge;
   var bridge = seeded && typeof seeded.call === "function" ? seeded : seededHost();
   if (!bridge) {
     var handle = seeded && typeof seeded.postMessage === "function" ? seeded : nativeHandle();
     if (handle) bridge = new Bridge(handle, { platform: handle.platform });
   }
 
-  kit.KitworkError = KitworkError;
-  kit.Bridge = Bridge;
-  kit.bridge = bridge;
+  kitwork.KitworkError = KitworkError;
+  kitwork.Bridge = Bridge;
+  kitwork.bridge = bridge;
   // The shell normally seeds the bridge at document-start, but these accessors also keep metadata
   // coherent if a test harness or host attaches/replaces the adapter later.
 })(window);

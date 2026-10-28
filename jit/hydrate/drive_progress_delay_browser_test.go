@@ -48,7 +48,7 @@ func TestBrowserDriveProgressDelay(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := watchProgressAfter(t, browser, c.host, c.answer); got != c.showsUp {
-				t.Fatalf("kit.progress seen=%s, want %s", got, c.showsUp)
+				t.Fatalf("kitwork.progress seen=%s, want %s", got, c.showsUp)
 			}
 		})
 	}
@@ -89,7 +89,7 @@ func watchProgressAfter(t *testing.T, browser, host string, answer int) string {
 				     setTimeout(function () { link.click(); }, 60);
 				   }
 				   (function watch() {
-				     if (window.kit.progress && window.kit.progress.active) seen = true;
+				     if (window.kitwork.progress && window.kitwork.progress.active) seen = true;
 				     if (++ticks < 90) { setTimeout(watch, 10); return; }
 				     document.documentElement.setAttribute("data-progress-seen", String(seen));
 				   })();

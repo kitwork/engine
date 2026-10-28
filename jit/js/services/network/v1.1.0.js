@@ -1,4 +1,4 @@
-;(function (global, kit) {
+;(function (global, kitwork) {
 "use strict";
 
 // KitJS service: network@1.1.0
@@ -398,6 +398,6 @@ namespace.subscribe = subscribe;
 namespace.status = status;
 namespace.request = request;
 
-kit.service("network", namespace);
+kitwork.service("network", namespace);
 installUploadBoundary();
-})(globalThis, kit);
+})(globalThis, kitwork);

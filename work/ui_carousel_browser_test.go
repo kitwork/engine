@@ -247,7 +247,7 @@ const carouselProbe = `(function () {
   };
   var orders = function (p) { return p.slides.map(function (s, i) { return s.style.order ? i + ":" + s.style.order : ""; }).filter(Boolean).join(","); };
   var read = function (alias) {
-    var p = parts(alias), scope = kit.scopeFor(p.host), screen = seen(p);
+    var p = parts(alias), scope = kitwork.scopeFor(p.host), screen = seen(p);
     var counter = document.getElementById(alias + "-counter");
     return { current: scope.current, count: scope.count, playing: !!scope.playing, left: Math.round(p.track.scrollLeft),
       width: p.track.clientWidth, slide: Math.round(p.slides[0].getBoundingClientRect().width),
@@ -307,7 +307,7 @@ const carouselProbe = `(function () {
     },
     moves: function (alias, within) {
       return new Promise(function (done) {
-        var scope = kit.scopeFor(host(alias)), from = scope.current, started = performance.now();
+        var scope = kitwork.scopeFor(host(alias)), from = scope.current, started = performance.now();
         (function frame() {
           requestAnimationFrame(function () {
             var t = performance.now() - started;
@@ -1034,8 +1034,8 @@ setTimeout(function () { `+dot(2)+` }, 240);`,
 		check(t, "/play at the last", d.evaluate(`(function () {
   var p = window.__carousel.parts("play");
   return new Promise(function (done) {
-    p.track.addEventListener("scrollend", function () { done(String(kit.scopeFor(p.host).current)); }, { once: true });
-    kit.scopeFor(p.host).go(2);
+    p.track.addEventListener("scrollend", function () { done(String(kitwork.scopeFor(p.host).current)); }, { once: true });
+    kitwork.scopeFor(p.host).go(2);
   });
 })()`), "2")
 		// read until the round is over: it comes two seconds after go(2), half a second of which is gone
@@ -1059,7 +1059,7 @@ setTimeout(function () { `+dot(2)+` }, 240);`,
 		d := open(t, "/play", "no-preference")
 		check(t, "at the start", carouselSays(carouselState(t, d, "play"))+" | "+d.evaluate(`document.getElementById("play-toggle").textContent`),
 			"current 0 of 3, playing true | slides 100 | dots  | counter 1 / 3 | live off | Dừng")
-		check(t, "moves on by itself", carouselWaits(t, d, "play", 3000, `kit.scopeFor(window.__carousel.parts("play").host).go(0)`), "moves to 1 after ~2s, playing true")
+		check(t, "moves on by itself", carouselWaits(t, d, "play", 3000, `kitwork.scopeFor(window.__carousel.parts("play").host).go(0)`), "moves to 1 after ~2s, playing true")
 		d.evaluate(`window.__carousel.wait(900)`) // the move lands
 
 		carouselPointer(t, d, `[data-kitwork-component="carousel: $play"] .carousel-track`, 0, 0)
@@ -1214,7 +1214,7 @@ setTimeout(function () { `+dot(2)+` }, 240);`,
 		// aria-current (- for none), words and whether it shows
 		held := func() string {
 			return d.evaluate(`(function () {
-  var p = window.__carousel.parts("none"), scope = kit.scopeFor(p.host);
+  var p = window.__carousel.parts("none"), scope = kitwork.scopeFor(p.host);
   var say = function (el, name) { var v = el.getAttribute(name); return v === null ? "-" : v; };
   return "count " + scope.count + ", current " + scope.current + " | " + p.slides.map(function (el) {
     return el.tagName.toLowerCase() + " role " + say(el, "role") + ", roledescription " + say(el, "aria-roledescription") + ", name " + say(el, "aria-label") +

@@ -14,7 +14,7 @@ import "testing"
 // in blocks_dom_test.go, shared with the data-kitwork-if test.
 func TestKitForRendersAndReconcilesByKey(t *testing.T) {
 	const assertions = `
-var kit = window.kit;
+var kitwork = window.kitwork;
 
 // Build the cart list: <section component=cart> <ul> <li for=... key=item.id> <span text=item.name> <b text=item.price> </li> </ul> </section>
 var section = el("section", { "data-kitwork-component": "cart" });
@@ -29,12 +29,12 @@ document.body.appendChild(section);
 
 // A REAL-JS component — methods are plain functions (filter/push), no IR.
 var nextId = 3;
-kit.component("cart", {
+kitwork.component("cart", {
   items: [ { id: 1, name: "Ban phim", price: 250 }, { id: 2, name: "Chuot", price: 120 } ],
   add: function () { this.items.push({ id: nextId++, name: "Moi", price: 0 }); },
   remove: function (id) { this.items = this.items.filter(function (x) { return x.id !== id; }); }
 });
-kit.render();
+kitwork.render();
 
 function rows() { return document.querySelectorAll("[data-kitwork-item]"); }
 function rowByKey(k) { var rs = rows(); for (var i = 0; i < rs.length; i++) if (rs[i].getAttribute("data-kitwork-key") === k) return rs[i]; return null; }
@@ -44,9 +44,9 @@ var r = rows();
 if (r.length !== 2) throw new Error("initial: expected 2 rows, got " + r.length);
 // The wire shape of ideaship-final §7: a start marker naming the list, rows carrying that id, an end marker.
 var start = ul.childNodes[0], end = ul.childNodes[ul.childNodes.length - 1];
-if (start.nodeType !== 8 || !/^kit-for:start id=\S+$/.test(start._text)) throw new Error("the list should begin with <!--kit-for:start id=…-->, got " + start._text);
-if (end.nodeType !== 8 || end._text !== "kit-for:end") throw new Error("the list should end with <!--kit-for:end-->, got " + end._text);
-var listId = start._text.slice("kit-for:start id=".length);
+if (start.nodeType !== 8 || !/^kitwork-for:start id=\S+$/.test(start._text)) throw new Error("the list should begin with <!--kitwork-for:start id=…-->, got " + start._text);
+if (end.nodeType !== 8 || end._text !== "kitwork-for:end") throw new Error("the list should end with <!--kitwork-for:end-->, got " + end._text);
+var listId = start._text.slice("kitwork-for:start id=".length);
 if (r[0].getAttribute("data-kitwork-item") !== listId) throw new Error("each row should carry the list id in data-kitwork-item, got " + r[0].getAttribute("data-kitwork-item"));
 // The row overlay: index, count, first/last, even/odd — beside the authored item/index names.
 function overlayOf(row) { return row.querySelectorAll("[data-kitwork-bind]")[2].textContent; }
@@ -59,16 +59,16 @@ if (nameOf(rowByKey("2")) !== "Chuot") throw new Error("initial: row 2 name = " 
 var row2 = rowByKey("2");
 
 // ADD → 3 rows; row 2 is the SAME node object (not rebuilt).
-kit.scopeFor(section).add();
-kit.render();
+kitwork.scopeFor(section).add();
+kitwork.render();
 if (rows().length !== 3) throw new Error("after add: expected 3 rows, got " + rows().length);
 if (rowByKey("2") !== row2) throw new Error("after add: row 2 was rebuilt — keyed identity lost");
 if (nameOf(rowByKey("3")) !== "Moi") throw new Error("after add: new row name = " + nameOf(rowByKey("3")));
 if (overlayOf(rowByKey("2")) !== "1/3 odd") throw new Error("after add: the middle row's overlay should follow the longer list, got " + JSON.stringify(overlayOf(rowByKey("2"))));
 
 // REMOVE key 1 → 2 rows; key 1 gone; row 2 STILL the same node.
-kit.scopeFor(section).remove(1);
-kit.render();
+kitwork.scopeFor(section).remove(1);
+kitwork.render();
 var after = rows();
 if (after.length !== 2) throw new Error("after remove: expected 2 rows, got " + after.length);
 if (rowByKey("1") !== null) throw new Error("after remove: row 1 still present");

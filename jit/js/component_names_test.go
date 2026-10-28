@@ -16,23 +16,23 @@ func TestComponentNamesAreReadOffTheSource(t *testing.T) {
 		want         []string // nil with ok=false
 		missing      []string
 	}{
-		{"an inline blueprint", `kit.component("a", { open: false, items: [], toggle: function () { this.open = !this.open; } });`,
+		{"an inline blueprint", `kitwork.component("a", { open: false, items: [], toggle: function () { this.open = !this.open; } });`,
 			[]string{"items", "open", "toggle"}, nil},
 		{"a blueprint held in a variable", `var aDef = { count: 0, add() { this.count++; } };
-window.kit.component("a", aDef); window.kit.component("a@v1.0.0", aDef);`,
+window.kitwork.component("a", aDef); window.kitwork.component("a@v1.0.0", aDef);`,
 			[]string{"add", "count"}, nil},
-		{"getters, async methods and quoted keys", `kit.component("a", { get total() { return 1; }, async load() {}, "label": "x" });`,
+		{"getters, async methods and quoted keys", `kitwork.component("a", { get total() { return 1; }, async load() {}, "label": "x" });`,
 			[]string{"label", "load", "total"}, nil},
-		{"values that hold brackets, strings, regexes and comments", `kit.component("a", {
+		{"values that hold brackets, strings, regexes and comments", `kitwork.component("a", {
   // a comment with { and ,
   pattern: /[}]+/g, // read as a division, its "}" would close the blueprint early
   text: "}, not: a key",
   nested: { inner: 1, deeper: [1, { x: 2 }] },
   run: function (x) { return x / 2 > 1 ? "a" : "b"; }
 });`, []string{"nested", "pattern", "run", "text"}, []string{"inner", "deeper", "x", "not"}},
-		{"a key the code assigns later", `kit.component("a", { init: function () { this.hideTimer = 0; } });`,
+		{"a key the code assigns later", `kitwork.component("a", { init: function () { this.hideTimer = 0; } });`,
 			[]string{"hideTimer", "init"}, nil},
-		{"a Symbol slot is not a name", `var SLOT = Symbol("a"); kit.component("a", { init: function (context) { this[SLOT] = context; } });`,
+		{"a Symbol slot is not a name", `var SLOT = Symbol("a"); kitwork.component("a", { init: function (context) { this[SLOT] = context; } });`,
 			[]string{"init"}, nil},
 	}
 	for _, c := range cases {
@@ -57,12 +57,12 @@ window.kit.component("a", aDef); window.kit.component("a@v1.0.0", aDef);`,
 	// Unknowable: the check must then stay silent about the whole component.
 	for name, source := range map[string]string{
 		"no registration":         `var x = { a: 1 };`,
-		"a spread key":            `kit.component("a", { ...base, b: 1 });`,
-		"a computed key":          `kit.component("a", { [name]: 1 });`,
-		"a key written by name":   `kit.component("a", { init: function () { var k = "x"; this[k] = 1; } });`,
-		"Object.assign onto this": `kit.component("a", { init: function () { Object.assign(this, defaults); } });`,
-		"a blueprint from a call": `kit.component("a", build());`,
-		"an unclosed string":      `kit.component("a", { a: "open });`,
+		"a spread key":            `kitwork.component("a", { ...base, b: 1 });`,
+		"a computed key":          `kitwork.component("a", { [name]: 1 });`,
+		"a key written by name":   `kitwork.component("a", { init: function () { var k = "x"; this[k] = 1; } });`,
+		"Object.assign onto this": `kitwork.component("a", { init: function () { Object.assign(this, defaults); } });`,
+		"a blueprint from a call": `kitwork.component("a", build());`,
+		"an unclosed string":      `kitwork.component("a", { a: "open });`,
 	} {
 		if names, ok := scanDeclaredNames(source); ok {
 			t.Errorf("%s: should be unknowable, read %v", name, names)
@@ -99,7 +99,7 @@ func TestACallToAMissingMethodIsReportedAtRender(t *testing.T) {
 	}
 	check := func(html string) string {
 		return capturedCheck(t, html, namesWith(map[string]string{
-			"workbench": `kit.component("workbench", { init: function () { var k = "x"; this[k] = 1; } });`,
+			"workbench": `kitwork.component("workbench", { init: function () { var k = "x"; this[k] = 1; } });`,
 		}))
 	}
 
@@ -128,7 +128,7 @@ func TestACallThroughAnAliasIsCheckedAgainstItsHost(t *testing.T) {
 	}
 	check := func(html string) string {
 		return capturedCheck(t, html, namesWith(map[string]string{
-			"workbench": `kit.component("workbench", { init: function () { var k = "x"; this[k] = 1; } });`,
+			"workbench": `kitwork.component("workbench", { init: function () { var k = "x"; this[k] = 1; } });`,
 		}))
 	}
 

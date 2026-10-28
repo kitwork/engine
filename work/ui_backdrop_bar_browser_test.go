@@ -27,7 +27,7 @@ router.reload(false);
 // (the first <meta name="theme-color"> whose media holds, as a browser picks it) follows the mode the
 // page shows, not only the device's (decision D4: the bar matches the page). On a light device:
 //   - at first the page and the bar are light, cirrus's light corner, #849cdd — the device decides;
-//   - the visitor turns dark with the page's toggle (kit.appearance): the bar turns #202f5e with it;
+//   - the visitor turns dark with the page's toggle (kitwork.appearance): the bar turns #202f5e with it;
 //   - a move by Drive to /b, the same view.ui, keeps the page and the bar dark (no reload);
 //   - a reload keeps both dark from the first paint: the pre-paint reads the stored choice and sets the
 //     bar as it sets the page.
@@ -67,9 +67,9 @@ func TestBrowserPageBackdropBarFollowsTheMode(t *testing.T) {
 	    " html=" + getComputedStyle(document.documentElement).backgroundColor + " focus=" + getComputedStyle(document.documentElement).getPropertyValue("--kitwork-focus").trim() +
 	    " marked=" + (window.__marker === 1) + " of 1");
 	}); }); })`
-	// ready waits for the kernel to have bound the toggle (kit.appearance is the toggle's service)
+	// ready waits for the kernel to have bound the toggle (kitwork.appearance is the toggle's service)
 	const ready = `new Promise(function (done) { var tries = 0; (function wait() {
-	  if (window.kit && window.kit.appearance || tries++ > 100) { window.__marker = 1; done(String(!!(window.kit && window.kit.appearance))); return; }
+	  if (window.kitwork && window.kitwork.appearance || tries++ > 100) { window.__marker = 1; done(String(!!(window.kitwork && window.kitwork.appearance))); return; }
 	  setTimeout(wait, 50); })(); })`
 	d := openDevtools(t, browser, server.URL+"/", 800, 600, "")
 	steps := []struct{ what, got, want string }{}

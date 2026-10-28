@@ -9,13 +9,13 @@ import "testing"
 // September drew September's title over a grid with no days in it.
 func TestNestedForFillsANewRowInTheSamePass(t *testing.T) {
 	runNodeDOMScript(t, "nested_for.test.js", `
-var kit = window.kit;
+var kitwork = window.kitwork;
 var box = el("div", { "data-kitwork-scope": "weeks: [[1, 2], [3, 4]]" });
 var row = el("p", { "data-kitwork-for": "week of weeks; key: week[0]" });
 row.appendChild(el("b", { "data-kitwork-for": "day of week; key: day", "data-kitwork-bind": "text: day" }));
 box.appendChild(row);
 document.body.appendChild(box);
-kit.render(); kit.render(); // the first page may take two passes; that is not the case under test
+kitwork.render(); kitwork.render(); // the first page may take two passes; that is not the case under test
 
 function days() {
   var out = [];
@@ -25,8 +25,8 @@ function days() {
 if (days() !== "1,2,3,4") throw new Error("precondition: the first weeks render, got " + days());
 
 // New weeks — rows that did not exist before — and ONE pass.
-kit.scopeFor(box).weeks = [[3, 4], [5, 6], [7, 8]];
-kit.render();
+kitwork.scopeFor(box).weeks = [[3, 4], [5, 6], [7, 8]];
+kitwork.render();
 if (days() !== "3,4,5,6,7,8") throw new Error("a new row's inner list must fill in the same pass, got " + days());
 console.log("a nested list fills a new row in the same pass");
 `)

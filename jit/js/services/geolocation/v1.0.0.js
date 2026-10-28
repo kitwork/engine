@@ -1,4 +1,4 @@
-;(function (global, kit) {
+;(function (global, kitwork) {
 "use strict";
 
 // KitJS staged service: geolocation@1.0.0
@@ -34,7 +34,7 @@ var promiseReject = call.bind(PromiseType.reject, PromiseType);
 var promiseResolve = call.bind(PromiseType.resolve, PromiseType);
 var assembly = global.document && global.document[Symbol.for("kitjs:assembly")];
 var nativeHost = assembly && assembly.nativeHost;
-var capabilities = kit.capabilities;
+var capabilities = kitwork.capabilities;
 var supportsCapability = capabilities && capabilities.supports;
 var activeScan = null;
 var BEGIN_TIMEOUT_MS = 15000;
@@ -492,9 +492,9 @@ function permission() {
   });
 }
 
-kit.service("geolocation", {
+kitwork.service("geolocation", {
   available: available,
   permission: permission,
   getCurrentPosition: scan
 });
-})(globalThis, kit);
+})(globalThis, kitwork);

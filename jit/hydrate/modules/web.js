@@ -1,18 +1,18 @@
-// Browser-backed platform services exposed through the canonical `kit.*` namespaces.
+// Browser-backed platform services exposed through the canonical `kitwork.*` namespaces.
 (function (window, document) {
   "use strict";
 
-  var kit = window.kit || window.kitwork;
-  if (!kit || !kit.module || !kit.service || kit.has("web")) return;
+  var kitwork = window.kitwork;
+  if (!kitwork || !kitwork.module || !kitwork.service || kitwork.has("web")) return;
 
   // The web kernel carries no native module (KernelFile(false)): the bridge is looked up when a
   // service runs, so a page in a browser takes the browser path instead of throwing on undefined.
   var native = {
     get available() {
-      var bridge = kit.module("native");
+      var bridge = kitwork.module("native");
       return !!(bridge && bridge.available);
     },
-    call: function (name, args) { return kit.module("native").call(name, args); }
+    call: function (name, args) { return kitwork.module("native").call(name, args); }
   };
   var navigator = window.navigator || {};
   var hasOwn = Object.prototype.hasOwnProperty;
@@ -81,7 +81,7 @@
   });
 
   function unsupported(moduleName, actionName) {
-    return kit.KitworkError(
+    return kitwork.KitworkError(
       moduleName + "." + actionName + " is unsupported",
       "UNSUPPORTED",
       moduleName,
@@ -161,7 +161,7 @@
     }
   };
 
-  // (kit.dialog — alert, confirm and prompt from logic — went on 26/10/2026: asking before acting is
+  // (kitwork.dialog — alert, confirm and prompt from logic — went on 26/10/2026: asking before acting is
   // $dialog.open({ …, confirm }), a dialog the page draws; docs/components/dialog.md.)
 
   var share = {
@@ -263,14 +263,14 @@
     }
   };
 
-  // kit.appearance — light or dark. Three modes, the same three the server's pre-paint knows:
+  // kitwork.appearance — light or dark. Three modes, the same three the server's pre-paint knows:
   // "light", "dark", and "system" — meaning "follow prefers-color-scheme".
   //   mode       "light" | "dark" | "system": what was chosen; with no choice stored, the mode the
   //              site shows before the visitor chooses (router.appearance, below); then "system"
   //   dark       true while the page shows dark (system resolved) — what an icon follows
   //   resolved   "light" | "dark", the same fact as a word
   //   toggle()   flip what is shown;  set(mode);  system() — hand the choice back to the OS
-  // The light/dark service was kit.theme until 11/10/2026; that name, kept for template pages and the
+  // The light/dark service was kitwork.theme until 11/10/2026; that name, kept for template pages and the
   // theme component, went with them on 26/10/2026.
   //
   // The choice is stored under "appearance". It was stored under "theme" before, so a choice found
@@ -365,7 +365,7 @@
   function setTheme(mode) {
     mode = String(mode || "").toLowerCase();
     if (mode !== "light" && mode !== "dark" && mode !== "system") {
-      throw kit.KitworkError(
+      throw kitwork.KitworkError(
         "Appearance mode must be light, dark or system",
         "INVALID_ARGUMENT",
         "appearance",
@@ -422,7 +422,7 @@
     }
   };
 
-  // kit.progress — how far the work in flight has got: a page change (Drive reports it), an upload,
+  // kitwork.progress — how far the work in flight has got: a page change (Drive reports it), an upload,
   // a form being sent. One place for every source, so a page never shows two bars that disagree.
   // JavaScript only: markup reads it through the progressbar component, whose getters read it here.
   //   start()       work of unknown length — creeps toward 90%, never claiming to be done
@@ -436,7 +436,7 @@
     progressQueued = true;
     (typeof queueMicrotask === "function" ? queueMicrotask : function (f) { setTimeout(f, 0); })(function () {
       progressQueued = false;
-      if (kit.runtime && kit.runtime.booted) kit.render();
+      if (kitwork.runtime && kitwork.runtime.booted) kitwork.render();
     });
   }
   function progressStop() {
@@ -471,9 +471,9 @@
     value: { get: function () { return progressValue; }, enumerable: true },
     active: { get: function () { return progressActive; }, enumerable: true }
   });
-  kit.service("progress", progress);
+  kitwork.service("progress", progress);
 
-  // kit.reader — what a screen reader says aloud: the new page's title after a move without a reload
+  // kitwork.reader — what a screen reader says aloud: the new page's title after a move without a reload
   // (Drive says it), or a sentence a page wants heard. JavaScript only: markup hears it through the
   // reader component, an invisible live region whose text is this service's.
   //   say(text)   say a sentence. The text is emptied first and set a moment later: a live region
@@ -491,17 +491,17 @@
     }
   };
   Object.defineProperty(reader, "text", { get: function () { return readerText; }, enumerable: true });
-  kit.service("reader", reader);
+  kitwork.service("reader", reader);
 
-  kit.service("capabilities", capabilities);
-  kit.service("share", share);
-  kit.service("clipboard", clipboard);
-  kit.service("camera", camera);
-  kit.service("appearance", appearance);
-  kit.service("navigation", navigation);
+  kitwork.service("capabilities", capabilities);
+  kitwork.service("share", share);
+  kitwork.service("clipboard", clipboard);
+  kitwork.service("camera", camera);
+  kitwork.service("appearance", appearance);
+  kitwork.service("navigation", navigation);
 
   function compatibility(name, value) {
-    Object.defineProperty(kit, name, {
+    Object.defineProperty(kitwork, name, {
       value: value,
       configurable: true,
       writable: true,
@@ -512,7 +512,7 @@
   compatibility("runtimeInfo", function () {
     return native.available ?
       native.call("runtime.info") :
-      Promise.resolve(kit.runtime.info());
+      Promise.resolve(kitwork.runtime.info());
   });
   compatibility("supports", function (id) {
     return capabilities.supports(id);
@@ -527,7 +527,7 @@
     return navigation.reload();
   });
 
-  kit.module("web", {
+  kitwork.module("web", {
     supports: browserSupports,
     captureCamera: captureCamera,
     showAppearance: showAppearance

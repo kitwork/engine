@@ -35,7 +35,7 @@ var enginePageScripts = []string{"kernel", "drive", "directives/intersect", "com
 // it would give a page that called the service.
 func serviceFile(t *testing.T) string {
 	t.Helper()
-	for _, asset := range jitjs.PageAssets(`<button data-kitwork-event="click: kit.studioState.clearHistory()">x</button>`, jitjs.Options{}) {
+	for _, asset := range jitjs.PageAssets(`<button data-kitwork-event="click: kitwork.studioState.clearHistory()">x</button>`, jitjs.Options{}) {
 		if strings.HasPrefix(asset.Path, "/_kitwork/services/studioState.") {
 			return asset.Path
 		}
@@ -155,7 +155,7 @@ func TestEngineFilesLiveUnderOnePrefixByRole(t *testing.T) {
 	// the /kit/ prefix is no longer the engine's (26/10/2026): it is a path of the site's like any
 	// other, and the site has none, so it is a 404, never the file
 	for _, path := range []string{"/kit/" + strings.TrimPrefix(tabs, "/_kitwork/"), "/kit/kernel." + stale + ".js"} {
-		if response := serveEngine(tenant, http.MethodGet, path); response.Code != http.StatusNotFound || strings.Contains(response.Body.String(), "kit.component") {
+		if response := serveEngine(tenant, http.MethodGet, path); response.Code != http.StatusNotFound || strings.Contains(response.Body.String(), "kitwork.component") {
 			t.Errorf("%s: status %d — want a 404, not today's file", path, response.Code)
 		}
 	}

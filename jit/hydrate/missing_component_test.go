@@ -3,12 +3,12 @@ package hydrate
 import "testing"
 
 // A host naming a component nobody registered used to wait for a CDN fetch that never came: the
-// loader was opt-in through kit.cdnComponents, no site ever set it, and the host simply sat there
+// loader was opt-in through kitwork.cdnComponents, no site ever set it, and the host simply sat there
 // looking correct. The engine ships exactly the components a page names, so an unknown name is a
 // typo or a missing _components/<name>.js — and the page should say which, once.
 func TestUnknownComponentIsNamedOnce(t *testing.T) {
 	const assertions = `
-var kit = window.kit;
+var kitwork = window.kitwork;
 var errors = [];
 var realError = console.error;
 console.error = function () { errors.push(Array.prototype.join.call(arguments, " ")); };
@@ -16,9 +16,9 @@ console.error = function () { errors.push(Array.prototype.join.call(arguments, "
 var host = el("div", { "data-kitwork-component": "definitely-not-registered" });
 host.appendChild(el("b", { "data-kitwork-bind": "text: 'x'" }));
 document.body.appendChild(host);
-kit.render();
-kit.render();
-kit.render();
+kitwork.render();
+kitwork.render();
+kitwork.render();
 
 console.error = realError;
 var joined = errors.join(" | ");
@@ -33,12 +33,12 @@ if (named.length !== 1) {
 // Control: a registered component mounts, and says nothing.
 errors = [];
 console.error = function () { errors.push(Array.prototype.join.call(arguments, " ")); };
-kit.component("actually-registered", { label: "here" });
+kitwork.component("actually-registered", { label: "here" });
 var ok = el("div", { "data-kitwork-component": "actually-registered" });
 var text = el("b", { "data-kitwork-bind": "text: label" });
 ok.appendChild(text);
 document.body.appendChild(ok);
-kit.render();
+kitwork.render();
 console.error = realError;
 if (text.textContent !== "here") throw new Error("a registered component must still mount: " + text.textContent);
 if (errors.length !== 0) throw new Error("a registered component must be silent, got: " + errors.join(" | "));

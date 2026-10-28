@@ -28,7 +28,7 @@ func readerComponentFile(t *testing.T) []byte {
 var spokenAttribute = regexp.MustCompile(`data-spoken="([^"]*)"`)
 
 // A move without a reload does not tell a screen reader that the page changed. Drive keeps no live
-// region of its own (11/10/2026): it says the new title through kit.reader, and the reader component —
+// region of its own (11/10/2026): it says the new title through kitwork.reader, and the reader component —
 // the invisible live region the engine puts on every page that moves this way — speaks it. The walk
 // is / → /b → /c → /, where /b and /c share a title: each arrival is said, the second of two equal
 // titles too (the text is emptied first, so the live region sees a change). Drive must not make a
@@ -59,7 +59,7 @@ func TestBrowserDriveSaysTheNewTitleThroughTheReader(t *testing.T) {
 			    }).observe(host(), { subtree: true, childList: true, characterData: true });
 			    // the page repaints all the time (a progress bar ticking does): the same words must not be
 			    // written again, or the live region would read them out again
-			    setInterval(function () { if (window.kit && window.kit.render) window.kit.render(); }, 40);
+			    setInterval(function () { if (window.kitwork && window.kitwork.render) window.kitwork.render(); }, 40);
 			    function go() { if (moves++ < 3) setTimeout(function () { document.getElementById("next").click(); }, 60); }
 			    window.addEventListener("load", go);
 			    document.addEventListener("kitwork:load", function () { setTimeout(go, 200); });

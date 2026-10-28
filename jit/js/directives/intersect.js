@@ -20,8 +20,8 @@
   // A browser without IntersectionObserver answers "on screen" once: content that waits to be seen
   // must never wait forever. (The hand-written data-kit-intersect[:modifier…] of template pages went
   // on 26/10/2026.)
-  var kit = window.kit;
-  if (!kit || kit.intersect) return;
+  var kitwork = window.kitwork;
+  if (!kitwork || kitwork.intersect) return;
   var watching = new WeakMap(); // element → { pair name: observer }
 
   function modifiersOf(name) {
@@ -77,7 +77,7 @@
       var names = [];
       // (a value the kernel cannot read is reported there; here it watches nothing)
       try {
-        kit.internal.grouped.pairs(element.getAttribute("data-kitwork-event") || "").forEach(function (pair) {
+        kitwork.internal.grouped.pairs(element.getAttribute("data-kitwork-event") || "").forEach(function (pair) {
           if (/^intersect-(enter|leave)(\.|$)/.test(pair[0])) names.push(pair[0]);
         });
       } catch (error) { }
@@ -86,7 +86,7 @@
       if (!current) {
         current = {};
         watching.set(element, current);
-        kit.onCleanup(element, function () {
+        kitwork.onCleanup(element, function () {
           for (var name in current) if (current[name]) current[name].disconnect();
           watching.delete(element);
         });
@@ -109,7 +109,7 @@
   // Nodes only, not attributes: a binding writes attributes on every paint, and a rescan per paint
   // would be the whole page each time. A morph that rewrites an element's attributes ends in
   // kitwork:load, which rescans too.
-  kit.onStart(function () {
+  kitwork.onStart(function () {
     var pending = false;
     var later = function () {
       if (pending) return;
@@ -120,5 +120,5 @@
     new MutationObserver(later).observe(document.documentElement, { childList: true, subtree: true });
     document.addEventListener("kitwork:load", later);
   });
-  kit.intersect = { scan: scan };
+  kitwork.intersect = { scan: scan };
 })(window, document);

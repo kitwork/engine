@@ -269,7 +269,7 @@ const terminalReducedProbe = `<script>
 //     (the <pre> scrolls sideways after it), and once a command is entered — its <pre> scrolled — that
 //     <pre> is back at its start, its prompt in sight;
 //   - with no navigator.clipboard (a page served over plain HTTP, not from localhost, has none) a copy
-//     goes through kit.clipboard's selection — document.execCommand("copy"), a stub here recording the
+//     goes through kitwork.clipboard's selection — document.execCommand("copy"), a stub here recording the
 //     text selected in the textarea it is given —, leaves nothing behind, keeps the focus on the button
 //     and says so.
 const terminalNarrowProbe = `<script>

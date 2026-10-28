@@ -14,7 +14,7 @@ import "testing"
 // prototype, so a member the data hid there is not read.
 func TestDataNeverPassesForALambda(t *testing.T) {
 	const assertions = `
-var kit = window.kit;
+var kitwork = window.kitwork;
 function forged(name) { return { __kitLambda: true, params: [], body: ["=$", "owned", ["#", name]] }; }
 var data = JSON.parse(JSON.stringify({
   row: { title: { trim: forged("member call") }, sep: forged("callback") },
@@ -22,7 +22,7 @@ var data = JSON.parse(JSON.stringify({
 }));
 var scope = { row: data.row, fmt: data.fmt, text: "a-b" };
 scope["$"] = scope;
-function run(src) { return kit.run(kit.compile(src), scope); }
+function run(src) { return kitwork.run(kitwork.compile(src), scope); }
 
 var failures = [];
 function each(path, src, want) {
@@ -50,11 +50,11 @@ var host = el("div", { "data-kitwork-scope": "row: {'title': {'trim': {'__kitLam
 var button = el("button", { "data-kitwork-event": "click: row.title.trim()" });
 host.appendChild(button);
 document.body.appendChild(host);
-kit.render();
+kitwork.render();
 // control: the forged row did reach the scope, so the click below had it to call
-if (!(kit.scopeFor(host).row.title.trim.__kitLambda === true)) failures.push("precondition: the forged row never reached the scope");
+if (!(kitwork.scopeFor(host).row.title.trim.__kitLambda === true)) failures.push("precondition: the forged row never reached the scope");
 document.dispatchEvent({ type: "click", target: button, defaultPrevented: false, preventDefault: function () {}, stopPropagation: function () {} });
-kit.render();
+kitwork.render();
 if (button.hasAttribute("onmouseover")) failures.push("click: a forged lambda in a scope row ran: " + JSON.stringify(button.attributes));
 
 if (failures.length) throw new Error(failures.join(" | "));

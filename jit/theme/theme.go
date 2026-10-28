@@ -1,5 +1,5 @@
 // Package theme is the JIT appearance pre-paint: the first-paint half of the
-// appearance service (kit.appearance) and its versioned theme adapter.
+// appearance service (kitwork.appearance) and its versioned theme adapter.
 //
 // A tiny synchronous script must run in <head> before first paint to apply the light/dark mode, or
 // the deferred browser runtime can reveal the wrong palette briefly. Render injects that script when
@@ -11,13 +11,13 @@
 //
 //	<script data-kitwork-generated="appearance"></script>
 //
-// The marker was data-kitwork-generated="theme" until the light/dark service became kit.appearance
+// The marker was data-kitwork-generated="theme" until the light/dark service became kitwork.appearance
 // (11/10/2026), and data-kitwork-jit="theme" before 10/10/2026. A template or a cached page may carry
 // either, so all three pin the slot and are rewritten to today's name.
 //
 // When the marker is present it is filled in place (author wins); otherwise the script is injected
 // at the very TOP of <head> -- the earliest point, before any stylesheet. Either way it decides the
-// mode by the rule kit.appearance (alias kit.theme) follows, so pre-paint and runtime stay in sync:
+// mode by the rule kitwork.appearance (alias kitwork.theme) follows, so pre-paint and runtime stay in sync:
 // the visitor's choice in localStorage "appearance", or in the older "theme" key when "appearance"
 // holds no choice (a choice saved before the rename survives it); with no choice stored, the mode
 // the site shows before the visitor chooses — router.appearance(), written on the page as
@@ -35,7 +35,7 @@ import (
 )
 
 // prepaint runs before paint and decides the mode in three steps — the rule the kernel's
-// kit.appearance follows too (jit/hydrate/modules/web.js), so the first paint and the runtime never
+// kitwork.appearance follows too (jit/hydrate/modules/web.js), so the first paint and the runtime never
 // disagree:
 //
 //  1. the visitor's choice: localStorage "appearance", or the older "theme" key only when
@@ -55,7 +55,7 @@ import (
 // mode without a class per mode. A Kitwork UI page with a backdrop writes its <meta name="theme-color">
 // before the pre-paint, each carrying the colour of both modes (data-kitwork-light, data-kitwork-dark):
 // the mode shown sets its content and drops its media, so the browser's bar follows a visitor's choice
-// of the other mode than the device's, as kit.appearance does again when the choice changes.
+// of the other mode than the device's, as kitwork.appearance does again when the choice changes.
 const prepaintBody = `(function(){var r=document.documentElement,c=r.classList,m="";` +
 	`function v(t){t=t&&t.toLowerCase();return t==="light"||t==="dark"||t==="system"?t:""}` +
 	`try{var s=localStorage;m=v(s.getItem("appearance"))||v(s.getItem("theme"))}catch(e){}` +
@@ -70,7 +70,7 @@ const prepaintMarker = `data-kitwork-generated="appearance"`
 const prepaint = `<script ` + prepaintMarker + `>` + prepaintBody + `</script>`
 
 // prepaintMarkers is every spelling a rendered page may carry the engine's pre-paint under: today's,
-// the one before the light/dark service became kit.appearance (11/10/2026), and the one before the
+// the one before the light/dark service became kitwork.appearance (11/10/2026), and the one before the
 // data-kitwork-jit → data-kitwork-generated rename (10/10/2026).
 var prepaintMarkers = []string{prepaintMarker, `data-kitwork-generated="theme"`, `data-kitwork-jit="theme"`}
 
@@ -81,7 +81,7 @@ var prepaintMarkers = []string{prepaintMarker, `data-kitwork-generated="theme"`,
 var (
 	markerRe    = regexp.MustCompile(`(?is)(?:<script[^>]*\bdata-kit(?:work)?-(?:generated|jit)\s*=\s*(?:"(?:appearance|theme)"|'(?:appearance|theme)')[^>]*>|<script[^>]*\bdata-kit(?:work)?-(?:generated|jit)\s*=\s*(?:appearance|theme)(?:\s+[^>]*)?/?>).*?</script>`)
 	componentRe = regexp.MustCompile(`(?is)\bdata-kit(?:work)?-component\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>]+))`)
-	apiRe       = regexp.MustCompile(`(?i)(?:\bkit|\$app)\s*\.\s*(?:appearance|theme)\b|\btoggleTheme\b`)
+	apiRe       = regexp.MustCompile(`(?i)(?:\bkit(?:work)?|\$app)\s*\.\s*(?:appearance|theme)\b|\btoggleTheme\b`)
 	headOpenRe  = regexp.MustCompile(`(?is)<head(?:\s[^>]*)?>`)
 )
 

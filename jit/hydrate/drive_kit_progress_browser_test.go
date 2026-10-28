@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// A page change is work in flight like any other: Drive reports it to kit.progress, and the progressbar
+// A page change is work in flight like any other: Drive reports it to kitwork.progress, and the progressbar
 // COMPONENT shows it. Drive draws no bar of its own (10/10/2026): not on a page with a progressbar host,
 // and not on a page without one either (the engine gives every page of a Drive site a host; a page
 // that somehow has none shows no bar rather than a second, different one). Real Chrome, a navigation
@@ -36,7 +36,7 @@ func TestBrowserDriveReportsToKitProgress(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			driveBar, kitProgress := watchNavigationProgress(t, browser, c.host)
 			if driveBar != c.driveBar || kitProgress != c.kitProgress {
-				t.Fatalf("Drive's bar seen=%s (want %s), kit.progress active seen=%s (want %s)", driveBar, c.driveBar, kitProgress, c.kitProgress)
+				t.Fatalf("Drive's bar seen=%s (want %s), kitwork.progress active seen=%s (want %s)", driveBar, c.driveBar, kitProgress, c.kitProgress)
 			}
 		})
 	}
@@ -69,7 +69,7 @@ func watchNavigationProgress(t *testing.T, browser, host string) (driveBar, kitP
 				   (function watch() {
 				     var bar = document.querySelector('[data-kitwork-ui],[data-kitwork-generated="progress"]'); // a bar Drive made, under either name
 				     if (bar && bar.style.opacity === "1") driveBar = true;
-				     if (window.kit.progress && window.kit.progress.active) kitProgress = true;
+				     if (window.kitwork.progress && window.kitwork.progress.active) kitProgress = true;
 				     if (++ticks < 60) { setTimeout(watch, 20); return; }
 				     document.documentElement.setAttribute("data-drive-bar", String(driveBar));
 				     document.documentElement.setAttribute("data-kit-progress-seen", String(kitProgress));

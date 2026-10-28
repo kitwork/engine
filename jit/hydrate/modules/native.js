@@ -2,11 +2,11 @@
 (function (window) {
   "use strict";
 
-  var kitwork = window.kitwork, kit = kitwork;
-  if (!kitwork || !kit.module || !kit.service || kit.has("native")) return;
+  var kitwork = window.kitwork;
+  if (!kitwork || !kitwork.module || !kitwork.service || kitwork.has("native")) return;
 
   function currentBridge() {
-    var bridge = kit.bridge;
+    var bridge = kitwork.bridge;
     return bridge && typeof bridge.call === "function" ? bridge : null;
   }
 
@@ -20,7 +20,7 @@
       }
     }
     var parts = String(action || "").split(".");
-    return Promise.reject(kit.KitworkError(
+    return Promise.reject(kitwork.KitworkError(
       "Capability " + action + " requires a native bridge",
       "UNSUPPORTED",
       parts[0] || "system",
@@ -33,12 +33,12 @@
     exit: function () { return call("host.exit"); },
     restart: function () { return call("host.restart"); }
   };
-  kit.service("host", host);
+  kitwork.service("host", host);
   // Compatibility for trusted JavaScript written before host/application responsibilities were
-  // separated. New code uses kit.host; this alias is not granted to authored expressions and has
+  // separated. New code uses kitwork.host; this alias is not granted to authored expressions and has
   // no relationship to the ordinary `$app` component alias.
-  Object.defineProperty(kit, "app", {
-    get: function () { return kit.service("host"); },
+  Object.defineProperty(kitwork, "app", {
+    get: function () { return kitwork.service("host"); },
     configurable: true,
     enumerable: false
   });
@@ -52,7 +52,7 @@
       });
     }
   };
-  kit.service("permissions", permissions);
+  kitwork.service("permissions", permissions);
 
   var secureStorage = {
     get: function (key, options) {
@@ -65,7 +65,7 @@
       return call("secureStorage.remove", { key: key });
     }
   };
-  kit.service("secureStorage", secureStorage);
+  kitwork.service("secureStorage", secureStorage);
 
   var cache = {
     get: function (key) { return call("cache.get", { key: key }); },
@@ -73,12 +73,12 @@
       return call("cache.set", Object.assign({ key: key, value: value }, options));
     }
   };
-  kit.service("cache", cache);
+  kitwork.service("cache", cache);
 
   var database = {
     open: function (name) { return call("database.open", { name: name }); }
   };
-  kit.service("database", database);
+  kitwork.service("database", database);
 
   var files = {
     read: function (path) { return call("files.read", { path: path }); },
@@ -87,31 +87,31 @@
     },
     exists: function (path) { return call("files.exists", { path: path }); }
   };
-  kit.service("files", files);
+  kitwork.service("files", files);
 
   var media = {
     resize: function (path, options) {
       return call("media.resize", Object.assign({ path: path }, options));
     }
   };
-  kit.service("media", media);
+  kitwork.service("media", media);
 
   var audio = {
     record: function (options) { return call("audio.record", options); },
     play: function (source) { return call("audio.play", { src: source }); }
   };
-  kit.service("audio", audio);
+  kitwork.service("audio", audio);
 
   var screen = {
     capture: function () { return call("screen.capture"); },
     keepAwake: function () { return call("screen.keepAwake"); }
   };
-  kit.service("screen", screen);
+  kitwork.service("screen", screen);
 
   var location = {
     current: function () { return call("location.current"); }
   };
-  kit.service("location", location);
+  kitwork.service("location", location);
 
   var device = {
     info: function () { return call("device.info"); },
@@ -119,24 +119,24 @@
       return call("device.vibrate", { pattern: pattern });
     }
   };
-  kit.service("device", device);
+  kitwork.service("device", device);
 
   var network = {
     status: function () { return call("network.status"); }
   };
-  kit.service("network", network);
+  kitwork.service("network", network);
 
   var ai = {
     chat: function (options) { return call("ai.chat", options); },
     transcribe: function (path) { return call("ai.transcribe", { path: path }); }
   };
-  kit.service("ai", ai);
+  kitwork.service("ai", ai);
 
   var auth = {
     login: function (credentials) { return call("auth.login", credentials); },
     logout: function () { return call("auth.logout"); }
   };
-  kit.service("auth", auth);
+  kitwork.service("auth", auth);
 
   var session = {
     get: function (key) { return call("session.get", { key: key }); },
@@ -145,7 +145,7 @@
     },
     clear: function () { return call("session.clear"); }
   };
-  kit.service("session", session);
+  kitwork.service("session", session);
 
   var logs = {
     info: function (message) { return call("logs.info", { message: message }); },
@@ -153,12 +153,12 @@
       return call("logs.error", { message: message, error: String(error) });
     }
   };
-  kit.service("logs", logs);
+  kitwork.service("logs", logs);
 
   var shell = {
     open: function (url) { return call("shell.open", { url: url }); }
   };
-  kit.service("shell", shell);
+  kitwork.service("shell", shell);
 
   function windowCall(action) {
     return currentBridge() ? call("window." + action) : Promise.resolve(false);
@@ -174,23 +174,23 @@
     // can choose between maximise and restore, or label its own button.
     isMaximized: function () { return windowCall("isMaximized"); }
   };
-  kit.service("window", windowService);
+  kitwork.service("window", windowService);
 
-  Object.defineProperties(kit, {
+  Object.defineProperties(kitwork, {
     minimize: {
-      value: function () { return kit.service("window").minimize(); },
+      value: function () { return kitwork.service("window").minimize(); },
       configurable: true,
       enumerable: false,
       writable: true
     },
     maximize: {
-      value: function () { return kit.service("window").maximize(); },
+      value: function () { return kitwork.service("window").maximize(); },
       configurable: true,
       enumerable: false,
       writable: true
     },
     closeWindow: {
-      value: function () { return kit.service("window").close(); },
+      value: function () { return kitwork.service("window").close(); },
       configurable: true,
       enumerable: false,
       writable: true
@@ -204,9 +204,9 @@
       enumerable: true
     }
   });
-  kit.module("native", native);
-  if (kit.cleanup) {
-    kit.cleanup(function () {
+  kitwork.module("native", native);
+  if (kitwork.cleanup) {
+    kitwork.cleanup(function () {
       var bridge = currentBridge();
       if (bridge && typeof bridge.destroy === "function") bridge.destroy();
     });

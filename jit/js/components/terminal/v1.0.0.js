@@ -18,7 +18,7 @@
  *     <span class="reader" role="status"></span>
  *   </div>
  *
- *   copy()   put the commands on the clipboard (kit.clipboard: the system pasteboard in a desktop or
+ *   copy()   put the commands on the clipboard (kitwork.clipboard: the system pasteboard in a desktop or
  *            mobile shell), one a line, in page order: the text of each <code> the host owns and shows
  *            (shown: one a show hides is neither copied nor typed) — never a prompt (outside the
  *            <code>), a <text>, nor the code of a nested component. It says what
@@ -95,7 +95,7 @@ var terminalDef = {
 
   copy: function () {
     var self = this;
-    var context = window.kit.context(this);
+    var context = window.kitwork.context(this);
     var own = ownOf(this);
     if (own.typist) finish(own.typist);
     var codes = shown(context);
@@ -106,7 +106,7 @@ var terminalDef = {
     var before = document.activeElement;
     var written;
     try {
-      written = Promise.resolve(window.kit.clipboard.writeText(text));
+      written = Promise.resolve(window.kitwork.clipboard.writeText(text));
     } catch (problem) {
       written = Promise.reject(problem);
     }
@@ -439,4 +439,4 @@ function finish(typist) {
   rewind(typist);
 }
 
-window.kit.component("terminal", terminalDef);
+window.kitwork.component("terminal", terminalDef);

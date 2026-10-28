@@ -22,7 +22,7 @@
  *              then what the name it persists under keeps, once the store answers
  *   persist    the name the choice is kept under, "" for none. Every tabs of the page with the same
  *              name follows a choice made in any of them (when it has a tab of that name), and the
- *              choice goes to kit.storage under "tabs:<name>" — in a browser localStorage
+ *              choice goes to kitwork.storage under "tabs:<name>" — in a browser localStorage
  *              "kitwork:tabs:<name>", in a desktop or mobile app the native store over the bridge
  *              (which no shell keeps yet: storage.* answers UNSUPPORTED there, so nothing is kept —
  *              docs/components/tabs.md). It is read as the instance starts: a store that answers late
@@ -41,12 +41,12 @@
  * component's job. It never writes an attribute: role, aria-* and tabindex are markup and bindings.
  *
  * In a browser, the engine's pre-paint (ui/tabs.go) has shown the tab kept before the first frame,
- * reading the same localStorage entry kit.storage writes; the restore here makes the same choice, in
+ * reading the same localStorage entry kitwork.storage writes; the restore here makes the same choice, in
  * the same task as the kernel starts, so nothing moves again. It is what shows the tab kept on a page
  * Drive brings, and in an app, where no first frame can wait for the bridge.
  */
 var TABS = Symbol("kit:tabs");
-// the key a choice is kept under in kit.storage, and the prefix kit.storage writes before it in a
+// the key a choice is kept under in kitwork.storage, and the prefix kitwork.storage writes before it in a
 // browser's localStorage (what a storage event names)
 var KEPT = "tabs:";
 var WEB = "kitwork:";
@@ -77,8 +77,8 @@ function persistOf(scope) {
 
 // store is the kernel's storage service, or null on a page without one
 function store() {
-  var kit = window.kit;
-  var storage = kit && kit.storage;
+  var kitwork = window.kitwork;
+  var storage = kitwork && kitwork.storage;
   return storage && typeof storage.get === "function" && typeof storage.set === "function" ? storage : null;
 }
 
@@ -207,4 +207,4 @@ function focusTab(scope, element) {
   try { element.focus({ preventScroll: true }); } catch (error) { element.focus(); }
 }
 
-window.kit.component("tabs", tabsDef);
+window.kitwork.component("tabs", tabsDef);

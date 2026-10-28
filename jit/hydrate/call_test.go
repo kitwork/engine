@@ -16,7 +16,7 @@ import (
 // kernel, with the fake server and the wire.
 const callPage = drawnList + `
 var page = el("script", { "type": "application/json", "data-kitwork-page": "" });
-page.textContent = JSON.stringify({ state: { title: "", left: 1, todos: kit.scope.$.todos }, jobs: ["toggle", "remove"], vars: ["title"] });
+page.textContent = JSON.stringify({ state: { title: "", left: 1, todos: kitwork.scope.$.todos }, jobs: ["toggle", "remove"], vars: ["title"] });
 document.body.appendChild(page);
 first.childNodes[0].setAttribute("data-kitwork-event", "change: toggle(todo.id, !todo.done)");
 first.childNodes[0].setAttribute("data-kitwork-bind", "checked: todo.done; disabled: toggle.pending");
@@ -65,14 +65,14 @@ function change(row) {
 // server's last answer.
 const orderAssertions = `
 (async function () {
-  kit.render();
+  kitwork.render();
   change(first);   // tick "Mua sữa": not done → done
   change(second);  // untick "Gửi thư": done → not done
   if (sent.length !== 1) throw new Error("a second call left while the first was out: " + sent.length + " out");
   await deliver();
   if (sent.length !== 2) throw new Error("expected both calls sent, got " + sent.length);
   if (sent[1].body.seq !== sent[0].body.seq + 1) throw new Error("calls should be numbered in order: " + JSON.stringify(sent.map(function (s) { return s.body.seq; })));
-  var s = kit.scope.$;
+  var s = kitwork.scope.$;
   if (s.left !== 1) throw new Error("left should be the server's last answer (1), got " + s.left + ": an older answer landed on a newer page");
   var byId = {}; s.todos.forEach(function (t) { byId[t.id] = t.done; });
   if (byId[1] !== true || byId[2] !== false) throw new Error("rows should be the server's: " + JSON.stringify(s.todos));
@@ -111,10 +111,10 @@ func TestCallsAtOnceLetAnOldAnswerWin(t *testing.T) {
 func TestCallPendingErrorAndSeed(t *testing.T) {
 	runNodeDOMScript(t, "call_pending.test.js", callScript(callJS, `
 (async function () {
-  kit.render();
-  if (kit.scope.$.left !== 1 || kit.scope.$.title !== "" || typeof kit.scope.$.toggle !== "function") throw new Error("the page's data and jobs should be in its scope");
+  kitwork.render();
+  if (kitwork.scope.$.left !== 1 || kitwork.scope.$.title !== "" || typeof kitwork.scope.$.toggle !== "function") throw new Error("the page's data and jobs should be in its scope");
   change(first);
-  kit.render();
+  kitwork.render();
   if (box(first).disabled !== true) throw new Error("the row whose call is out should be pending");
   if (box(second).disabled === true) throw new Error("another row should not be pending");
   if (box(first).checked !== true) throw new Error("the box the person ticked should stay ticked while its call is out");
@@ -123,14 +123,14 @@ func TestCallPendingErrorAndSeed(t *testing.T) {
 
   refuse = true;
   change(second); // untick: the server refuses
-  kit.render();
+  kitwork.render();
   if (box(second).checked !== false) throw new Error("the box should show what the person did while the call is out");
   await deliver();
   if (box(second).checked !== true) throw new Error("a call that failed should put the box back to the data (done)");
   if (notice.textContent !== "đơn đã khoá") throw new Error("the error should reach toggle.error: " + JSON.stringify(notice.textContent));
   refuse = false;
   change(second);
-  kit.render();
+  kitwork.render();
   if (notice.textContent !== "") throw new Error("a new call of the job should clear its error, got " + JSON.stringify(notice.textContent));
   await deliver();
   console.log("pending per row, a failed call goes back, the error shows and clears");
@@ -142,14 +142,14 @@ func TestCallPendingErrorAndSeed(t *testing.T) {
 func TestCallAppliesAListByRow(t *testing.T) {
 	runNodeDOMScript(t, "call_list.test.js", callScript(callJS, `
 (async function () {
-  kit.render();
+  kitwork.render();
   global.fetch = function () {
     return Promise.resolve({ redirected: false, ok: true, status: 200, headers: { get: function () { return "application/json"; } },
       json: function () { return Promise.resolve({ seq: 1, lists: { todos: { key: "id", remove: [1], set: [{ id: 3, title: "Gọi mẹ", done: false }], order: [3, 2] } } }); } });
   };
-  kit.scope.$.toggle(1, true);
+  kitwork.scope.$.toggle(1, true);
   await tick(); await tick(); await tick();
-  var ids = kit.scope.$.todos.map(function (t) { return t.id; }).join(",");
+  var ids = kitwork.scope.$.todos.map(function (t) { return t.id; }).join(",");
   if (ids !== "3,2") throw new Error("after remove 1, set 3 and order 3,2 the list should be 3,2, got " + ids);
   if (rows().length !== 2 || rows()[1] !== second) throw new Error("the kept row should stay the same node");
   console.log("a list's change applies by row");

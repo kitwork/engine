@@ -8,7 +8,7 @@ import (
 // The grouped splitter has two copies, pairs.go on the server and kernel.js in the browser, and
 // grouped_corpus.json is the contract both are held to: every case's "want", or an error where the
 // case says "error": true. The Go half runs in pairs_test.go; this is the browser half, run through
-// the kernel's own reader (kit.internal.grouped) in node. A value that verifies on the server and
+// the kernel's own reader (kitwork.internal.grouped) in node. A value that verifies on the server and
 // reads differently in the browser would be a directive that checks out and does nothing, so the two
 // must give the same answer, case for case.
 //
@@ -29,8 +29,8 @@ CORPUS.push(
   { kind: "pairs", name: "modifier-argument-closed-first", src: "click.debounce)300(: x", error: true },
   { kind: "for", name: "key-given-twice", src: "x of xs; key: x.id; key: x.name", error: true }
 );
-var grouped = window.kit.internal && window.kit.internal.grouped;
-if (!grouped) throw new Error("kit.internal.grouped is missing: the kernel exposes no grouped reader");
+var grouped = window.kitwork.internal && window.kitwork.internal.grouped;
+if (!grouped) throw new Error("kitwork.internal.grouped is missing: the kernel exposes no grouped reader");
 var read = { pairs: grouped.pairs, component: grouped.component, "for": grouped.loop };
 function canon(v) {
   if (Array.isArray(v)) return "[" + v.map(canon).join(",") + "]";

@@ -32,7 +32,7 @@ router.language("vi");
 }
 
 // tabsAppHead runs first in <head>, before the kernel: it is the shell. It seeds the native bridge a
-// desktop or mobile shell gives the page (kit.bridge, call(action, params) answering a promise), here
+// desktop or mobile shell gives the page (kitwork.bridge, call(action, params) answering a promise), here
 // carried to the test (/native), which answers as a shell would: ?store=native, a store of its own that
 // answers storage.get late (an asynchronous bridge); ?store=none, UNSUPPORTED for every call, as the
 // shells answer storage.* today (native/capability). It collects every error, and which file each frame
@@ -47,7 +47,7 @@ const tabsAppHead = `<script>
   var store = new URLSearchParams(location.search).get("store");
   var calls = window.__calls = [];
   window.__pending = 0; // calls the shell has not answered yet: a page left before then loses them
-  window.kit = { bridge: { platform: "windows", call: function (action, params) {
+  window.kitwork = { bridge: { platform: "windows", call: function (action, params) {
     if (String(action).indexOf("storage.") === 0) calls.push(action + " " + (params && params.key) + (params && params.value !== undefined ? "=" + params.value : ""));
     window.__pending++;
     var settled = function () { window.__pending--; };
@@ -154,7 +154,7 @@ const tabsAppProbe = `<script>
 </script>`
 
 // TestBrowserTabsPersistInAnApp proves where a tabs keeps its choice in a desktop or mobile app: through
-// kit.storage, which there is the native bridge, asynchronous. The page is served as to an app (the
+// kitwork.storage, which there is the native bridge, asynchronous. The page is served as to an app (the
 // kernel with the bridge, jitjs.Native) and the test is the shell (tabsAppHead). With a native store:
 // the choice goes over the bridge and nowhere else, and on the next visit the kernel shows it once the
 // store answers — after the first frames, which show the server's tab (the gap docs/components/tabs.md

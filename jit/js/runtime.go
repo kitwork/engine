@@ -3,12 +3,12 @@
 // writes for <tabs as="$files">) gets the kernel plus ONLY the components it names. No framework, no
 // full-library payload — the jitcss model applied to JS.
 //
-// Each component is a file in ./components/<name>/<version>.js registering a `kit.component`
+// Each component is a file in ./components/<name>/<version>.js registering a `kitwork.component`
 // blueprint under its bare name — never a versioned one (11/10/2026): the latest version ships. The
 // catalogue is what Kitwork UI's tags deliver; the components only template pages used, their older
 // versions and a site's own _components/<name>.js went with template pages' client on 26/10/2026.
 //
-// THE CORE IS the kernel behind the canonical window.kit root (window.kitwork remains a
+// THE CORE IS the kernel behind the canonical window.kitwork root (window.kitwork remains a
 // compatibility alias) and one delegated event system. Deliver (delivery.go) gives a page the
 // kernel and its components as one file per part; there is no composed runtime any more.
 package js

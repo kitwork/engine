@@ -1,4 +1,4 @@
-;(function (global, kit) {
+;(function (global, kitwork) {
 "use strict";
 
 // KitJS staged service: qr@1.0.0
@@ -34,7 +34,7 @@ var promiseReject = call.bind(PromiseType.reject, PromiseType);
 var promiseResolve = call.bind(PromiseType.resolve, PromiseType);
 var assembly = global.document && global.document[Symbol.for("kitjs:assembly")];
 var nativeHost = assembly && assembly.nativeHost;
-var capabilities = kit.capabilities;
+var capabilities = kitwork.capabilities;
 var supportsCapability = capabilities && capabilities.supports;
 var activeScan = null;
 
@@ -418,8 +418,8 @@ function scan(input) {
   return result;
 }
 
-kit.service("qr", {
+kitwork.service("qr", {
   available: available,
   scan: scan
 });
-})(globalThis, kit);
+})(globalThis, kitwork);

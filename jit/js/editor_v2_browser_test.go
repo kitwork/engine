@@ -92,7 +92,7 @@ func editorWireV2(value, scope, extra string) string {
 // editorV2Script is the hands the v2 proofs add: the dropdown opened from its own button, whether it
 // is open, the disabled state of a button.
 const editorV2Script = `
-function dropdownOpen() { return !$("more-popover").hidden && window.kit.scopeFor($("more")).open === true; }
+function dropdownOpen() { return !$("more-popover").hidden && window.kitwork.scopeFor($("more")).open === true; }
 function openMore() { $("more-button").click(); }
 function off(id) { return $(id).getAttribute("aria-disabled") === "true"; }
 `
@@ -356,7 +356,7 @@ func TestBrowserEditorValueIsRichtextsOwnV2(t *testing.T) {
 	start := richtext.Clean("<h4 class=\"align-center\">Đầu đề bốn</h4><p>Một <strong>đậm</strong> và <a href=\"https://kitwork.io/a\">liên hệ</a> nữa.</p>" +
 		"<pre><code>func main() {\n  x := 1\n}</code></pre><hr><blockquote><p class=\"align-right\">trích dẫn</p></blockquote><ul><li>mục một</li><li>mục hai</li></ul><p>kết bài</p>")
 	out := runBrowserDump(t, "editor value v2", editorWireV2(strings.ReplaceAll(start.HTML, ">\n<", "><"), startScope(false, start.Words, start.Characters), "")+`<pre id="corpus"></pre><pre id="newer"></pre>`+editorProof(editorV2Script+`
-  var states = [], body = window.kit.scope.$body;
+  var states = [], body = window.kitwork.scope.$body;
   function record(label) {
     states.push({ label: label, html: area.innerHTML, value: field.value, words: body.words, characters: body.characters, empty: body.empty });
   }

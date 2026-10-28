@@ -1,4 +1,4 @@
-;(function (global, kit) {
+;(function (global, kitwork) {
 "use strict";
 
 // KitJS staged service: media@1.1.0
@@ -18,7 +18,7 @@ var promiseResolve = call.bind(PromiseType.resolve, PromiseType);
 var stringSlice = call.bind(String.prototype.slice);
 var assembly = global.document && global.document[Symbol.for("kitjs:assembly")];
 var graph = assembly && assembly.graph;
-var files = kit.files;
+var files = kitwork.files;
 var pickFile = files && files.pick;
 var releaseFile = files && files.release;
 
@@ -139,7 +139,7 @@ function pickImage(input) {
   });
 }
 
-kit.service("media", {
+kitwork.service("media", {
   pickImage: pickImage
 });
-})(globalThis, kit);
+})(globalThis, kitwork);

@@ -59,7 +59,7 @@ func TestUndeclaredNames(t *testing.T) {
 		},
 		{
 			name: "a page that writes its own page scope from a script",
-			html: `<body><span data-kitwork-bind="show: ready">…</span><script>kit.set("ready", true)</script></body>`,
+			html: `<body><span data-kitwork-bind="show: ready">…</span><script>kitwork.set("ready", true)</script></body>`,
 		},
 		{
 			name: "control: the same page without that script",

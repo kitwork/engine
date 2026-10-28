@@ -325,7 +325,7 @@ func TestBrowserExampleTabsWindowShots(t *testing.T) {
 				d.call("Input.dispatchKeyEvent", map[string]any{"type": kind, "key": "ArrowRight", "code": "ArrowRight", "windowsVirtualKeyCode": 39})
 			}
 		case "script":
-			d.evaluate(`kit.scopeFor(document.getElementById("tabs")).$files.select("page")`)
+			d.evaluate(`kitwork.scopeFor(document.getElementById("tabs")).$files.select("page")`)
 		}
 		if got := d.evaluate(exampleSeen); got != early.want {
 			t.Errorf("a switch by %s before typing's clock ran: %s\n want %s", early.by, got, early.want)
@@ -376,9 +376,9 @@ func TestBrowserExampleTabsWindowShots(t *testing.T) {
 
 // The kitwork example's /docs/getting-started gives the one step whose commands differ between shells —
 // setting ALLOW_LOCAL and PORT for the session — in two tabs, bash and PowerShell, with persist="true":
-// the choice is kept under the set of their names (bash+powershell), through kit.storage, so the
+// the choice is kept under the set of their names (bash+powershell), through kitwork.storage, so the
 // reader's shell is shown on every page with the same tabs, on every visit. In a real browser: nothing
-// kept, bash is shown; PowerShell clicked, it is shown and kit.storage keeps "powershell" under
+// kept, bash is shown; PowerShell clicked, it is shown and kitwork.storage keeps "powershell" under
 // tabs:bash+powershell (in localStorage, kitwork:tabs:bash+powershell); reloaded, PowerShell is shown,
 // chosen and the tab in the tab order. The step card is pictured each time (shell-before.png,
 // shell-powershell.png, shell-reloaded.png in KITWORK_TABS_SHOTS), and the pictures differ where the

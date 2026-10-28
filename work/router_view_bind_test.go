@@ -129,7 +129,7 @@ func TestRouterViewPageWiresItsJobs(t *testing.T) {
 		t.Fatalf("/todo: %d\n%.1500s", r.Code, body)
 	}
 	for _, part := range []string{
-		`data-k="`, `data-k-for="0"`, `<!--kit-for:start id=s1-->`, `data-kitwork-item="s1" data-kitwork-key="7"`,
+		`data-kitwork-mark="`, `data-kitwork-template="0"`, `<!--kitwork-for:start id=s1-->`, `data-kitwork-item="s1" data-kitwork-key="7"`,
 		`<script type="application/json" data-kitwork-page>`, `"program":"`, `/_kitwork/kernel.`, `/_kitwork/call.`,
 	} {
 		if !strings.Contains(body, part) {

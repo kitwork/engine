@@ -100,7 +100,7 @@ func TestBrowserCarouselSlowFramesPlays(t *testing.T) {
 	}
 	// the slides current goes through, read every 250ms for 20 seconds (a move takes five frames of 1.1s)
 	got := d.evaluate(`(function () {
-  var scope = kit.scopeFor(window.__carousel.parts("play").host), seen = [String(scope.current)], started = performance.now();
+  var scope = kitwork.scopeFor(window.__carousel.parts("play").host), seen = [String(scope.current)], started = performance.now();
   return new Promise(function (done) {
     var read = setInterval(function () {
       var now = String(scope.current);
@@ -139,7 +139,7 @@ func TestBrowserCarouselSlowFramesStaysItsDuration(t *testing.T) {
 	}
 	// when the track came to rest at the second slide's place, and when current moved on from it
 	raw := d.evaluate(`(function () {
-  var p = window.__carousel.parts("play"), scope = kit.scopeFor(p.host), started = performance.now(), arrived = 0, last = scope.current;
+  var p = window.__carousel.parts("play"), scope = kitwork.scopeFor(p.host), started = performance.now(), arrived = 0, last = scope.current;
   var place = function () { return p.slides[1].offsetLeft - p.slides[0].offsetLeft; };
   p.track.addEventListener("scrollend", function () {
     if (!arrived && Math.abs(p.track.scrollLeft - place()) < 1) arrived = performance.now() - started;

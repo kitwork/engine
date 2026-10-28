@@ -1,4 +1,4 @@
-;(function (global, kit) {
+;(function (global, kitwork) {
 "use strict";
 
 // KitJS staged service: notifications@1.2.0
@@ -404,7 +404,7 @@ function cancel(tag) {
   });
 }
 
-kit.service("notifications", {
+kitwork.service("notifications", {
   schedule: schedule,
   pending: pending,
   cancel: cancel,
@@ -412,4 +412,4 @@ kit.service("notifications", {
   requestPermission: requestPermission,
   show: show
 });
-})(globalThis, kit);
+})(globalThis, kitwork);

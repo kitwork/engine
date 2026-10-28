@@ -233,7 +233,7 @@ func (o *elemOp) renderLive(r *run, scope map[string]any) {
 			restore(scope, index, oldIndex, hadIndex)
 		}
 	}()
-	r.b.WriteString("<!--kit-for:start id=" + id + "-->")
+	r.b.WriteString("<!--kitwork-for:start id=" + id + "-->")
 	scope[item] = nil
 	if index != "" {
 		scope[index] = float64(0)
@@ -242,7 +242,7 @@ func (o *elemOp) renderLive(r *run, scope map[string]any) {
 	r.mark = ` data-kitwork-for="` + html.EscapeString(forText(o.forEach)) + `" data-kitwork-template`
 	if o.liveList != nil {
 		// a page with a program: the template is the program's list, which the kernel leaves alone
-		r.mark = ` data-k-for="` + strconv.Itoa(o.liveList.index) + `" data-kitwork-template`
+		r.mark = ` data-kitwork-template="` + strconv.Itoa(o.liveList.index) + `"`
 	}
 	r.markHidden = true
 	o.renderOne(r, scope)
@@ -260,5 +260,5 @@ func (o *elemOp) renderLive(r *run, scope map[string]any) {
 		o.renderOne(r, scope)
 	}
 	r.mark, r.markHidden = "", false
-	r.b.WriteString("<!--kit-for:end-->")
+	r.b.WriteString("<!--kitwork-for:end-->")
 }

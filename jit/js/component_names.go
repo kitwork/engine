@@ -16,14 +16,14 @@ import (
 // The kernel seeds a component's scope with its blueprint's own keys (state, methods, getters) and
 // adds a key whenever the component's code assigns one (`this.hideTimer = …` writes to the nearest
 // scope that does not have it, which is the component's). So the names are: the keys of the object
-// literal passed to kit.component, plus every property the source assigns. The second set is wider
+// literal passed to kitwork.component, plus every property the source assigns. The second set is wider
 // than the truth — `el.hidden = …` adds "hidden" — which is the safe direction: it can only silence a
 // report, never invent one.
 //
 // Like the pass it feeds, it must never cry wolf. Anything it cannot read for certain answers
 // "unknowable", and the page's check treats the component as it always did, as opaque:
 //
-//   - no kit.component call, or one whose blueprint is neither an object literal nor a variable
+//   - no kitwork.component call, or one whose blueprint is neither an object literal nor a variable
 //     holding one in the same file;
 //   - a key the reader cannot name: `...spread`, `[computed]`;
 //   - a key assigned by computation: `this[name] = …`, Object.assign(this, …), defineProperty — but
@@ -73,7 +73,7 @@ func declaredNamesOf(source string) ([]string, bool) {
 }
 
 var (
-	registrationRe     = regexp.MustCompile(`\bkit\.component\(\s*(?:"[^"]*"|'[^']*')\s*,\s*`)
+	registrationRe     = regexp.MustCompile(`\bkitwork\.component\(\s*(?:"[^"]*"|'[^']*')\s*,\s*`)
 	assignedPropertyRe = regexp.MustCompile(`\.\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*(?:=[^=>]|\+=|-=|\*=|/=|\|\|=|&&=|\?\?=|\+\+|--)`)
 	computedWriteRe    = regexp.MustCompile(`\b(?:this|self|scope)\s*\[([^\]]*)\]\s*=[^=]`)
 	assignObjectRe     = regexp.MustCompile(`Object\.(?:assign|defineProperty|defineProperties)\(\s*(?:this|self|scope)\b`)

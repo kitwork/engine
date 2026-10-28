@@ -21,26 +21,26 @@ func verifyOf(t *testing.T, html string) string {
 // silence, so every one is named at render, with the component that is that service's view.
 func TestVerifyNamesAnyKitInMarkup(t *testing.T) {
 	for source, view := range map[string]string{
-		`<button data-kitwork-event="click: kit.theme.toggle()">x</button>`:                "the theme component",
-		`<b data-kitwork-bind="text: kit.theme.resolved"></b>`:                             "the theme component",
-		`<b data-kitwork-bind="text: kit?.theme?.resolved"></b>`:                           "the theme component",
-		`<button data-kitwork-event="click: kit.window.close()">x</button>`:                "the titlebar component",
-		`<button data-kitwork-event="click: kit.clipboard.copy('x')">x</button>`:           "the clipboard component",
-		`<button data-kitwork-event="click: kit.permissions.request('camera')">x</button>`: "calls kit.permissions",
+		`<button data-kitwork-event="click: kitwork.theme.toggle()">x</button>`:                "the theme component",
+		`<b data-kitwork-bind="text: kitwork.theme.resolved"></b>`:                             "the theme component",
+		`<b data-kitwork-bind="text: kitwork?.theme?.resolved"></b>`:                           "the theme component",
+		`<button data-kitwork-event="click: kitwork.window.close()">x</button>`:                "the titlebar component",
+		`<button data-kitwork-event="click: kitwork.clipboard.copy('x')">x</button>`:           "the clipboard component",
+		`<button data-kitwork-event="click: kitwork.permissions.request('camera')">x</button>`: "calls kitwork.permissions",
 	} {
 		report := verifyOf(t, source)
-		if !strings.Contains(report, "markup does not call kit") || !strings.Contains(report, view) {
+		if !strings.Contains(report, "markup does not call kitwork") || !strings.Contains(report, view) {
 			t.Errorf("%s: want a report naming %q, got:\n%s", source, view, report)
 		}
 	}
 	// CONTROL: what only looks like kit stays silent.
 	for _, fine := range []string{
-		`<b data-kitwork-bind="text: 'kit.theme is a service'"></b>`,
+		`<b data-kitwork-bind="text: 'kitwork.theme is a service'"></b>`,
 		`<b data-kitwork-bind="text: item.kit.name"></b>`,
 		`<button data-kitwork-component="theme" data-kitwork-event="click: toggle()">x</button>`,
 	} {
-		if report := verifyOf(t, fine); strings.Contains(report, "markup does not call kit") {
-			t.Errorf("%s was reported as a kit call:\n%s", fine, report)
+		if report := verifyOf(t, fine); strings.Contains(report, "markup does not call kitwork") {
+			t.Errorf("%s was reported as a kitwork call:\n%s", fine, report)
 		}
 	}
 }
@@ -95,13 +95,13 @@ func TestVerifyDoesNotGuessAboutAFragment(t *testing.T) {
 // and it must not be reported as the page's own markup.
 func TestVerifyDoesNotJudgeAPrintedExample(t *testing.T) {
 	example := `<html><body><pre><code>&lt;button data-kitwork-event="click: count++"&gt;+&lt;/button&gt;
-&lt;b data-kitwork-bind="text: kit.theme.systen"&gt;&lt;/b&gt;</code></pre></body></html>`
+&lt;b data-kitwork-bind="text: kitwork.theme.systen"&gt;&lt;/b&gt;</code></pre></body></html>`
 	if report := verifyOf(t, example); report != "" {
 		t.Errorf("a printed example was judged as live markup:\n%s", report)
 	}
 
 	// CONTROL: a directive ON the <pre> itself is live, and a mistake in it must still be named.
-	live := `<html><body><pre data-kitwork-bind="text: kit.theme.systen"></pre></body></html>`
+	live := `<html><body><pre data-kitwork-bind="text: kitwork.theme.systen"></pre></body></html>`
 	if report := verifyOf(t, live); !strings.Contains(report, "systen") {
 		t.Errorf("a live directive on a <pre> element was skipped along with its content:\n%s", report)
 	}

@@ -20,8 +20,8 @@ window.document[Symbol.for("kitwork:native:host:v1")] = host;
 `,
 		`
 (async function () {
-  if (window.kit.bridge !== host) throw new Error("the shell's seeded host was not adopted");
-  var answer = await window.kit.bridge.call("window.isMaximized", {});
+  if (window.kitwork.bridge !== host) throw new Error("the shell's seeded host was not adopted");
+  var answer = await window.kitwork.bridge.call("window.isMaximized", {});
   if (answer.via !== "seed" || answer.action !== "window.isMaximized") throw new Error("the call did not go through the seed");
   if (posted.length !== 0) throw new Error("a request went to the raw WebView handle");
   if (window.document[Symbol.for("kitwork:native:host:v1")] !== host) throw new Error("the slot must stay for the shell's own scripts");
@@ -34,6 +34,6 @@ global.window = { chrome: { webview: webview }, document: {} };
 window.document[Symbol.for("kitwork:native:host:v1")] = { version: "9.9.9", call: function () {} };
 `,
 		`
-if (!window.kit.bridge || window.kit.bridge.handle !== webview) throw new Error("CONTROL: an unknown contract version must not be adopted");
+if (!window.kitwork.bridge || window.kitwork.bridge.handle !== webview) throw new Error("CONTROL: an unknown contract version must not be adopted");
 `)
 }

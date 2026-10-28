@@ -44,7 +44,7 @@ func pageJavaScript(t *testing.T, tenant *Tenant) string {
 const sizePage = `<content><dropdown><button click="open = !open">menu</button></dropdown></content>`
 
 // A site that loads every page whole has no use for the navigator or the DOM morph it drives —
-// nothing else in the runtime calls kit.morph. Shipping them anyway is the same waste as shipping a
+// nothing else in the runtime calls kitwork.morph. Shipping them anyway is the same waste as shipping a
 // component nobody named, and it is the largest single piece of the runtime.
 func TestDriveIsNotShippedToSitesThatDidNotAskForIt(t *testing.T) {
 	serve := func(t *testing.T, router string) string {
@@ -64,8 +64,8 @@ func TestDriveIsNotShippedToSitesThatDidNotAskForIt(t *testing.T) {
 	with := serve(t, `router.reload(false);`)
 
 	// Marker strings from the CODE, not from comments: the production asset is minified, so a comment
-	// would prove nothing. X-Kitwork-Hydrate is the header Drive fetches with; kit.morph is what it
-	// drives, and kit.internal.clientOwned is the set only the two of them keep (the kernel spells
+	// would prove nothing. X-Kitwork-Hydrate is the header Drive fetches with; kitwork.morph is what it
+	// drives, and kitwork.internal.clientOwned is the set only the two of them keep (the kernel spells
 	// TEXTAREA too since it reads data-kitwork-bind's two-way value:, so that word is no marker).
 	for _, mark := range []string{"X-Kitwork-Hydrate", "clientOwned"} {
 		if strings.Contains(without, mark) {

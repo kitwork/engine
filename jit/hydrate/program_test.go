@@ -5,13 +5,13 @@ import (
 	"testing"
 )
 
-// A page with a program (ui/page_program.go, 28/10/2026): its elements carry data-k marks, its program says
+// A page with a program (ui/page_program.go, 28/10/2026): its elements carry data-kitwork-mark marks, its program says
 // what each mark writes and which names it reads, and call.js runs again only what reads a name that
 // changed. The todo page with 1.000 rows, as the server draws it, on the DOM shim; view.runs counts the
 // values the program computes.
 const programPage = `
-var kit = window.kit;
-var P = kit.compile;
+var kitwork = window.kitwork;
+var P = kitwork.compile;
 var program = {
   g: [
     { l: -1, b: [{ n: "value", x: P("title"), r: ["title"] }] },
@@ -27,37 +27,37 @@ var program = {
   ],
   l: [{ i: "todo", a: P("todos"), k: P("todo.id"), r: ["todos"] }]
 };
-kit.pages = { p1: program };
+kitwork.pages = { p1: program };
 
 var N = 1000, todos = [];
 for (var i = 1; i <= N; i++) todos.push({ id: i, title: "Việc số " + i, done: false });
 var main = el("main");
-var form = el("form", { "data-k": "2" });
-var input = el("input", { "data-k": "0" });
-var add = el("button", { "data-k": "1", "type": "submit" });
+var form = el("form", { "data-kitwork-mark": "2" });
+var input = el("input", { "data-kitwork-mark": "0" });
+var add = el("button", { "data-kitwork-mark": "1", "type": "submit" });
 form.appendChild(input); form.appendChild(add);
 main.appendChild(form);
-var notice = el("p", { "data-k": "3", "hidden": "" });
+var notice = el("p", { "data-kitwork-mark": "3", "hidden": "" });
 main.appendChild(notice);
-var empty = el("p", { "data-k": "4", "hidden": "" });
+var empty = el("p", { "data-kitwork-mark": "4", "hidden": "" });
 main.appendChild(empty);
 var ul = el("ul");
-ul.appendChild(document.createComment("kit-for:start id=s1"));
+ul.appendChild(document.createComment("kitwork-for:start id=s1"));
 function row(attrs, todo) {
   var li = el("li", attrs);
-  var box = el("input", { "type": "checkbox", "data-k": "5" });
+  var box = el("input", { "type": "checkbox", "data-kitwork-mark": "5" });
   box.checked = !!(todo && todo.done);
-  var text = el("p", { "data-k": "6" });
+  var text = el("p", { "data-kitwork-mark": "6" });
   text.textContent = todo ? todo.title : "";
-  var remove = el("button", { "data-k": "7" });
+  var remove = el("button", { "data-kitwork-mark": "7" });
   li.appendChild(box); li.appendChild(text); li.appendChild(remove);
   return li;
 }
-ul.appendChild(row({ "data-k-for": "0", "data-kitwork-template": "", "hidden": "" }, null));
+ul.appendChild(row({ "data-kitwork-template": "0", "hidden": "" }, null));
 todos.forEach(function (todo) { ul.appendChild(row({ "data-kitwork-item": "s1", "data-kitwork-key": String(todo.id) }, todo)); });
-ul.appendChild(document.createComment("kit-for:end"));
+ul.appendChild(document.createComment("kitwork-for:end"));
 main.appendChild(ul);
-var left = el("p", { "data-k": "8" });
+var left = el("p", { "data-kitwork-mark": "8" });
 left.textContent = "Còn " + N + " việc chưa xong.";
 main.appendChild(left);
 var block = el("script", { "type": "application/json", "data-kitwork-page": "" });
@@ -105,7 +105,7 @@ func programScript(callJS, assertions string) string {
 // typing: one keystroke computes what reads title, the field itself; nothing of the thousand rows
 const typingAssertions = `
 (async function () {
-  var view = kit.page.view();
+  var view = kitwork.page.view();
   if (!view) throw new Error("the page should run on its program");
   if (rows().length !== N) throw new Error("the drawn rows should be adopted, got " + rows().length);
   var before = view.runs;
@@ -142,7 +142,7 @@ func TestProgramTypingWithoutTheNameFilterRunsEverything(t *testing.T) {
 // that row and what reads the count, nothing of the other rows
 const tickAssertions = `
 (async function () {
-  var view = kit.page.view();
+  var view = kitwork.page.view();
   var first = rows()[0], second = rows()[1];
   var before = view.runs;
   first.childNodes[0].checked = true;          // the browser ticks the box
@@ -225,7 +225,7 @@ func TestProgramSendsAndKeepsRevisions(t *testing.T) {
       : { seq: body.seq, revs: {} };
     return Promise.resolve({ redirected: false, ok: true, status: 200, headers: { get: function () { return "application/json"; } }, json: function () { return Promise.resolve(answer); } });
   };
-  var view = kit.page.view();
+  var view = kitwork.page.view();
   view.state.toggle(1, true);
   await tick(); await tick(); await tick();
   view.state.toggle(1, false);
@@ -260,7 +260,7 @@ func keptAcrossTabsScript(callJS, assertions string) string {
 
 const seenAgainAssertions = `
 (async function () {
-  var view = kit.page.view();
+  var view = kitwork.page.view();
   document.visibilityState = "visible";
   document.dispatchEvent({ type: "visibilitychange" });
   await tick(); await tick(); await tick();
@@ -290,7 +290,7 @@ func TestTabSeenAgainWithoutTheListenerAsksNothing(t *testing.T) {
 
 const tellOtherTabsAssertions = `
 (async function () {
-  var view = kit.page.view();
+  var view = kitwork.page.view();
   var channel = global.__channels.filter(function (c) { return c.name === "kitwork:page"; })[0];
   if (!channel) throw new Error("call.js should open the channel kitwork:page");
   view.state.toggle(1, true);
@@ -318,7 +318,7 @@ func TestTabsOfOneBrowserTellEachOther(t *testing.T) {
 // at 240; its own call answers after that.
 const olderDataAssertions = `
 (async function () {
-  var view = kit.page.view();
+  var view = kitwork.page.view();
   var channel = global.__channels.filter(function (c) { return c.name === "kitwork:page"; })[0];
   channel.onmessage({ data: { page: "/", stamp: 250, values: { left: 7, todos: [{ id: 9, title: "Từ tab khác", done: false }] }, revs: { left: "l9", todos: "r9" } } });
   if (rows().length !== 1 || view.state.left !== 7) throw new Error("data read after the tab's should be taken: " + rows().length + " rows, left " + view.state.left);
@@ -361,7 +361,7 @@ func TestTabsThatIgnoreTheStampGoBack(t *testing.T) {
 // headers (the desktop's none, Android's Content-Type and Accept only). The page's own query stays.
 const namedInTheURLAssertions = `
 (async function () {
-  var view = kit.page.view();
+  var view = kitwork.page.view();
   view.state.toggle(1, true);
   await tick(); await tick();
   var sent = global.__sent[global.__sent.length - 1];
@@ -417,7 +417,7 @@ const listenAssertions = `
   source.onmessage({ data: "500" });
   await tick(); await tick(); await tick(); await tick();
   if (asked() !== 2) throw new Error("a newer stamp should ask once, and one told while it is on its way once more after it: asked " + asked());
-  var view = kit.page.view();
+  var view = kitwork.page.view();
   if (rows().length !== 2 || view.state.left !== 1) throw new Error("what changed should be taken: " + rows().length + " rows, left " + view.state.left);
   source.onmessage({ data: "250" });
   await tick(); await tick();

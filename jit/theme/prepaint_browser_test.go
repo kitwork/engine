@@ -18,7 +18,7 @@ import (
 // in place, after one script that sets up what the visitor has stored. Two first paints are proven on
 // a real load:
 //
-//   - a visitor who chose dark before the light/dark service became kit.appearance (only the OLD
+//   - a visitor who chose dark before the light/dark service became kitwork.appearance (only the OLD
 //     "theme" key holds it) on a site with no default: the first paint is dark;
 //   - a site whose default is dark (router.appearance("dark") → <html data-kitwork-appearance="dark">)
 //     and a visitor who stored nothing: the first paint is dark, whatever the OS prefers.

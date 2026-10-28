@@ -91,7 +91,7 @@ const networkProbe = `(function () {
   window.__network = {
     host: host,
     notice: function () {
-      var card = document.getElementById("notice"), network = kit.scope.$network;
+      var card = document.getElementById("notice"), network = kitwork.scope.$network;
       var icon = Array.prototype.filter.call(card.querySelectorAll(":scope > i"), shown).map(function (i) { return (i.className.match(/icon-([a-z0-9-]+)/) || [])[1]; }).join("+");
       return (shown(card) ? "shown " + icon + " " + document.getElementById("words").textContent : "closed") +
         " connected=" + network.connected + " open=" + network.open;
@@ -106,7 +106,7 @@ const networkProbe = `(function () {
       var rows = Array.prototype.filter.call(toast.children, function (c) { return c.hasAttribute("data-kitwork-key") && !c.hasAttribute("data-leaving"); });
       return rows.map(function (row) { var p = row.querySelectorAll("p"); return p[1].textContent + (shown(p[2]) ? p[2].textContent : ""); }).join(" ; ") || "no notice";
     },
-    clear: function () { kit.scope.$toast.clear(); return new Promise(function (done) { start(done, 250); }); },
+    clear: function () { kitwork.scope.$toast.clear(); return new Promise(function (done) { start(done, 250); }); },
     next: function (name) {
       return new Promise(function (done) {
         var timer = start(function () { done("never"); }, 5000);
@@ -399,7 +399,7 @@ const networkTimesHeard = `(function () {
   document.addEventListener("kitwork:offline", function () { at("drive offline"); });
   var last = "";
   setInterval(function () {
-    var network = window.kit && kit.scope && kit.scope.$network;
+    var network = window.kitwork && kitwork.scope && kitwork.scope.$network;
     if (!network) return;
     var now = (network.connected ? "connected" : "disconnected") + "+" + (network.open ? "open" : "closed");
     if (now !== last) { if (last) at(now); last = now; }
@@ -425,7 +425,7 @@ const networkTimesRead = `var times = function () { var list = window.__times; w
     (window.__measured = window.__measured || []).push(words + ": " + Math.round(ms) + "ms");
     return ms >= low && ms <= high ? words : Math.round(ms) + "ms";
   };
-  var held = function () { var network = kit.scope.$network; return network.delay + " " + network.duration; };
+  var held = function () { var network = kitwork.scope.$network; return network.delay + " " + network.duration; };
 `
 
 // networkHostTimes finds the times a page's network host carries to its instance (data-kitwork-scope),
@@ -546,7 +546,7 @@ func TestBrowserNetworkTimes(t *testing.T) {
   var said = await until("said online");
   await N.frames();
   var shown = N.notice();
-  for (var tries = 0; tries < 120 && kit.scope.$network.open; tries++) await N.wait(50);
+  for (var tries = 0; tries < 120 && kitwork.scope.$network.open; tries++) await N.wait(50);
   await N.frames();
   var list = times();
   return [said, shown, names(list), within(first(list, "said online"), first(list, "connected+closed"), 1950, 2600, "closed after the duration"), N.notice(), N.toast()].join(" | ");`),
@@ -672,7 +672,7 @@ const networkWithoutNavigation = `Object.defineProperty(window, "navigation", { 
 // (history.state.i); where() adds history.length and the Navigation API's index ("none" without it);
 // place() is "at #cuoi" when that place stands at the top of the screen, else how far the page is
 // scrolled; drive() is what Drive said since the last read (offline, load) and moves() the ways it
-// moved the content; bar() is whether the bar of a move shows (kit.progress, which the progressbar draws).
+// moved the content; bar() is whether the bar of a move shows (kitwork.progress, which the progressbar draws).
 const networkHistoryRead = `var address = function () {
     return [location.pathname + location.hash, document.getElementById("here").textContent,
       document.documentElement.classList.contains("kitwork-loading") ? "loading" : "settled", "i=" + (history.state && history.state.i)].join(" ");
@@ -684,7 +684,7 @@ const networkHistoryRead = `var address = function () {
   };
   var drive = function () { var list = window.__drive.join(" "); window.__drive = []; return list || "nothing"; };
   var moves = function () { var list = window.__moves.join(","); window.__moves = []; return list || "none"; };
-  var bar = function () { return kit.progress.active ? "bar shown" : "bar idle"; };
+  var bar = function () { return kitwork.progress.active ? "bar shown" : "bar idle"; };
 `
 
 // TestBrowserNetworkHistory proves Drive's moves through history when the network is gone, and its

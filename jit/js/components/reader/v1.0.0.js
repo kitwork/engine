@@ -6,19 +6,19 @@
  *        aria-live="polite" aria-atomic="true" style="position:absolute;width:1px;…"></div>
  *
  * A move without a reload does not tell a screen reader that the page changed, so Drive says the new
- * page's title through kit.reader after every move. A page can say a sentence of its own the same way,
+ * page's title through kitwork.reader after every move. A page can say a sentence of its own the same way,
  * through the alias: click="$cart.add(product, 1); $reader.say('Đã thêm vào giỏ')".
  *
- * Markup never calls kit: kit.reader holds the sentence, this component is how markup hears it. Its
+ * Markup never calls kit: kitwork.reader holds the sentence, this component is how markup hears it. Its
  * text is a getter that reads the service, so every reader on a page agrees.
  *
  *   text       the sentence being said ("" between two)
  *   say(text)  say a sentence; the same sentence twice is said twice
  */
 var readerDef = {
-  get text() { return window.kit.reader.text; },
+  get text() { return window.kitwork.reader.text; },
 
-  say: function (text) { window.kit.reader.say(text); }
+  say: function (text) { window.kitwork.reader.say(text); }
 };
 
-window.kit.component("reader", readerDef);
+window.kitwork.component("reader", readerDef);

@@ -30,12 +30,12 @@ func progressbarComponentFile(t *testing.T) []byte {
 }
 
 // A desktop window opened with app.desktop({ chrome: "html" }) draws its own title bar, marked
-// data-kit-drag="true". The bar between pages goes under it, where a browser's own progress sits,
+// data-kitwork-drag="true". The bar between pages goes under it, where a browser's own progress sits,
 // instead of across the window's controls. A drag region that does not touch the top edge is not a
 // title bar, and a page without one keeps the bar at the very top.
 //
 // The bar is the progressbar COMPONENT (Drive draws none of its own since 10/10/2026), so this is the
-// whole chain: Drive reports the move to kit.progress, the component shows, and its top getter puts
+// whole chain: Drive reports the move to kitwork.progress, the component shows, and its top getter puts
 // the host under the title bar. The host is the one the engine writes (ui.ProgressbarMarkup), the
 // component file is the catalogue's own. A real Chrome; the next page answers 500ms late, so the move
 // is slow enough for the bar to show, and the page records where the bar landed.
@@ -51,9 +51,9 @@ func TestBrowserDriveProgressSitsUnderTheTitleBar(t *testing.T) {
 	cases := []struct {
 		name, chrome, want string
 	}{
-		{"title bar", `<header data-kit-drag="true" style="position:fixed;top:0;left:0;right:0;height:40px"></header>`, "40"},
+		{"title bar", `<header data-kitwork-drag="true" style="position:fixed;top:0;left:0;right:0;height:40px"></header>`, "40"},
 		{"no title bar", ``, "0"},
-		{"drag region below the top", `<div data-kit-drag="true" style="position:fixed;top:300px;left:0;width:80px;height:40px"></div>`, "0"},
+		{"drag region below the top", `<div data-kitwork-drag="true" style="position:fixed;top:300px;left:0;width:80px;height:40px"></div>`, "0"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -95,7 +95,7 @@ func driveBarTop(t *testing.T, browser, chrome string) string {
 				   setTimeout(function () { document.getElementById("next").click(); }, 60);
 				   (function watch() {
 				     var host = document.querySelector('[data-kitwork-component="progressbar"]');
-				     if (host && !host.hidden && window.kit.progress.active) {
+				     if (host && !host.hidden && window.kitwork.progress.active) {
 				       document.documentElement.setAttribute("data-bar-top", String(Math.round(host.getBoundingClientRect().top)));
 				       return;
 				     }

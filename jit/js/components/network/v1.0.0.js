@@ -146,4 +146,4 @@ var networkDef = {
   }
 };
 
-window.kit.component("network", networkDef);
+window.kitwork.component("network", networkDef);

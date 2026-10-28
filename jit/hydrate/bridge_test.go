@@ -28,15 +28,17 @@ func TestBridgePlainWebStaysWeb(t *testing.T) {
 	runNodeSourceTest(t, bridgeJS,
 		`global.window = {};`,
 		`
-if (window.kit !== window.kitwork) throw new Error("runtime roots were not aliased");
+if (typeof window.kitwork !== "object" || "kit" in window) throw new Error("the bridge should make window.kitwork and no other root");
 if (window.kitwork.bridge !== null) throw new Error("plain web should have no bridge");
-// platform/isNative are derived from kit.bridge by the kernel, which this test does not load.
+// platform/isNative are derived from kitwork.bridge by the kernel, which this test does not load.
 if (window.kitwork.bridge !== null) throw new Error("plain web created a bridge");
 if (typeof window.kitwork.Bridge !== "function") throw new Error("Bridge constructor missing");
 `)
 }
 
-func TestBridgePrefersCanonicalKitAndPreservesSeededAdapter(t *testing.T) {
+// A shell that seeds window.kitwork with its adapter keeps both: the bridge adopts the root and the adapter, and
+// reads nothing off a root named kit (28/10/2026).
+func TestBridgeKeepsTheSeededRootAndItsAdapter(t *testing.T) {
 	runNodeSourceTest(t, bridgeJS,
 		`
 var seeded = {
@@ -45,19 +47,19 @@ var seeded = {
     return Promise.resolve({ action: action, params: params });
   }
 };
-var canonical = { bridge: seeded };
-var legacy = { bridge: { call: function () {} } };
-global.window = { kit: canonical, kitwork: legacy };
+var root = { bridge: seeded };
+var old = { bridge: { platform: "old", call: function () {} } };
+global.window = { kitwork: root, kit: old };
 `,
 		`
 (async function () {
-  if (window.kit !== canonical) throw new Error("canonical kit root was replaced");
-  if (window.kitwork !== canonical) throw new Error("legacy root was not aliased to kit");
-  if (window.kit.bridge !== seeded) throw new Error("seeded bridge adapter was replaced");
-  if (!window.kit.bridge) throw new Error("seeded bridge was not adopted");
-  if (window.kit.bridge.platform !== "seeded-native") throw new Error("seeded platform mismatch");
+  if (window.kitwork !== root) throw new Error("the seeded kitwork root was replaced");
+  if (window.kit !== old || window.kit.bridge.platform !== "old") throw new Error("a root named kit is not the bridge's to touch");
+  if (window.kitwork.bridge !== seeded) throw new Error("seeded bridge adapter was replaced");
+  if (!window.kitwork.bridge) throw new Error("seeded bridge was not adopted");
+  if (window.kitwork.bridge.platform !== "seeded-native") throw new Error("seeded platform mismatch");
 
-  var result = await window.kit.bridge.call("echo.write", { text: "hello" });
+  var result = await window.kitwork.bridge.call("echo.write", { text: "hello" });
   if (result.action !== "echo.write" || result.params.text !== "hello") {
     throw new Error("seeded bridge behavior changed");
   }
@@ -68,8 +70,9 @@ global.window = { kit: canonical, kitwork: legacy };
 `)
 }
 
+// A WebKit shell's handler is named kitwork; one named kit, as before 28/10/2026, is not a shell's any more.
 func TestBridgeDetectsWKWebViewHandlers(t *testing.T) {
-	for _, handlerName := range []string{"kit", "kitwork"} {
+	for _, handlerName := range []string{"kitwork"} {
 		t.Run(handlerName, func(t *testing.T) {
 			runNodeSourceTest(t, bridgeJS,
 				`
@@ -87,16 +90,16 @@ global.window = {
 };
 `,
 				`
-if (!window.kit.bridge) throw new Error("WKWebView handler was not detected");
-if (window.kit.bridge.platform !== "wkwebview") throw new Error("WKWebView platform mismatch");
-if (window.kit.bridge.handle !== handler) throw new Error("wrong WKWebView handler selected");
+if (!window.kitwork.bridge) throw new Error("WKWebView handler was not detected");
+if (window.kitwork.bridge.platform !== "wkwebview") throw new Error("WKWebView platform mismatch");
+if (window.kitwork.bridge.handle !== handler) throw new Error("wrong WKWebView handler selected");
 
-window.kit.bridge.call("device.info", {});
+window.kitwork.bridge.call("device.info", {});
 if (sent.length !== 1 || sent[0].module !== "device" || sent[0].action !== "info") {
   throw new Error("WKWebView request was not posted");
 }
-window.kit.bridge.receive({ id: sent[0].id, result: null });
-window.kit.bridge.destroy();
+window.kitwork.bridge.receive({ id: sent[0].id, result: null });
+window.kitwork.bridge.destroy();
 `)
 		})
 	}
@@ -265,4 +268,11 @@ if (removed === 0 || removed > added) throw new Error("global listener cleanup m
   process.exitCode = 1;
 });
 `)
+}
+
+// The control: a handler named kit is not taken for the shell's.
+func TestBridgeTakesNoHandlerNamedKit(t *testing.T) {
+	runNodeSourceTest(t, bridgeJS,
+		`global.window = { webkit: { messageHandlers: { kit: { postMessage: function () {} } } } };`,
+		`if (window.kitwork.bridge !== null) throw new Error("a handler named kit should not be taken for the shell's");`)
 }

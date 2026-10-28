@@ -59,8 +59,8 @@ func TestGroupedTwinsAgreeBeyondTheCorpus(t *testing.T) {
 	}
 	assertions := `
 var CASES = ` + string(list) + `;
-var grouped = window.kit.internal && window.kit.internal.grouped;
-if (!grouped) throw new Error("kit.internal.grouped is missing: the kernel exposes no grouped reader");
+var grouped = window.kitwork.internal && window.kitwork.internal.grouped;
+if (!grouped) throw new Error("kitwork.internal.grouped is missing: the kernel exposes no grouped reader");
 var read = { pairs: grouped.pairs, component: grouped.component, "for": grouped.loop };
 function canon(v) {
   if (Array.isArray(v)) return "[" + v.map(canon).join(",") + "]";

@@ -11,10 +11,10 @@ import "testing"
 // render pass is what makes the result repaint when they change.
 func TestComputedValuesInAScopeLiteral(t *testing.T) {
 	const assertions = `
-var kit = window.kit;
+var kitwork = window.kitwork;
 function click(target) {
   document.dispatchEvent({ type: "click", target: target, defaultPrevented: false, preventDefault: function () {}, stopPropagation: function () {} });
-  kit.render();
+  kitwork.render();
 }
 
 var host = el("div", { "data-kitwork-scope": "screen: 'workspace'; rows: [1, 2, 3]; " +
@@ -28,7 +28,7 @@ var one = el("em", { "data-kitwork-bind": "text: plural(1)" });
 var go = el("button", { "data-kitwork-event": "click: screen = 'library'" });
 host.appendChild(flag); host.appendChild(name); host.appendChild(count); host.appendChild(one); host.appendChild(go);
 document.body.appendChild(host);
-kit.render();
+kitwork.render();
 
 if (flag.textContent !== "yes") throw new Error("a computed did not read the scope: " + flag.textContent);
 if (name.textContent !== "Workspace") throw new Error("a computed could not call another: " + name.textContent);
@@ -51,7 +51,7 @@ console.log("computed values in a scope literal: read live, take arguments, comp
 // boundary that declares the same name shadows it for a computed defined further out.
 func TestComputedValueResolvesInTheCallingScope(t *testing.T) {
 	const assertions = `
-var kit = window.kit;
+var kitwork = window.kitwork;
 var outer = el("div", { "data-kitwork-scope": "screen: 'workspace'; isWorkspace: () => screen === 'workspace'" });
 var here = el("b", { "data-kitwork-bind": "text: isWorkspace() ? 'yes' : 'no'" });
 var inner = el("div", { "data-kitwork-scope": "screen: 'library'" });
@@ -59,7 +59,7 @@ var there = el("i", { "data-kitwork-bind": "text: isWorkspace() ? 'yes' : 'no'" 
 inner.appendChild(there);
 outer.appendChild(here); outer.appendChild(inner);
 document.body.appendChild(outer);
-kit.render();
+kitwork.render();
 
 if (here.textContent !== "yes") throw new Error("the computed failed in its own boundary: " + here.textContent);
 if (there.textContent !== "no") throw new Error("the computed should read the nearer screen, got: " + there.textContent);

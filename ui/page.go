@@ -30,7 +30,7 @@ type Request struct {
 	Transition string
 	// Appearance is router.appearance of this page's folder (the nearest that sets one): the light/dark
 	// mode the page shows before the visitor chooses. "light" and "dark" are written on <html> as
-	// data-kitwork-appearance, for the pre-paint and kit.appearance to fall back on while the visitor
+	// data-kitwork-appearance, for the pre-paint and kitwork.appearance to fall back on while the visitor
 	// has stored no choice; "" and "system" (follow the device) write nothing.
 	Appearance string
 	// Favicon is the URL of the page's icon (router.favicon of the nearest folder): <link rel="icon">.

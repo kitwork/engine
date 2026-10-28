@@ -5,7 +5,7 @@
 // it in the page's state, and each job there as a function the markup calls by name: remove(todo.id).
 //
 // Most such pages have a program (ui/page_program.go, /_kitwork/page.<hash>.js): each element whose values
-// follow the data carries one mark, data-k="n", and the program says what mark n writes, from which
+// follow the data carries one mark, data-kitwork-mark="n", and the program says what mark n writes, from which
 // expression and which names of the page it reads. A name that changes runs again only what reads it; a
 // list changes by row; a row whose item is the same object is left alone. A page with no program (one that
 // holds a component of Kitwork) is painted by the kernel from its data-kitwork-* attributes, as before.
@@ -31,8 +31,8 @@
 //   { "seq": 5, "components": { "c1": { "patch": { "items": [], "done": true } } } }
 (function () {
   "use strict";
-  var kit = window.kitwork || window.kit;
-  if (!kit || !kit.scope || window.__kitworkCall) return;
+  var kitwork = window.kitwork;
+  if (!kitwork || !kitwork.scope || window.__kitworkCall) return;
   window.__kitworkCall = true;
 
   var page = null;   // { jobs, vars } of the page drawn now, null on a page with none
@@ -47,15 +47,15 @@
   var stamp = 0;      // the moment the server read the data the page holds: no data read before it is taken
   var told = 0;       // the newest stamp the server told while the page listens, not asked about yet
 
-  function acting() { return current || (typeof kit.element === "function" ? kit.element() : null); }
-  function get(name) { return view ? view.state[name] : kit.scope.$[name]; }
+  function acting() { return current || (typeof kitwork.element === "function" ? kitwork.element() : null); }
+  function get(name) { return view ? view.state[name] : kitwork.scope.$[name]; }
   function put(name, value) {
     if (view) view.set(name, value);
-    else kit.scope.$[name] = value;
+    else kitwork.scope.$[name] = value;
   }
   function paint() {
     if (view) view.flush();
-    else if (typeof kit.render === "function") kit.render();
+    else if (typeof kitwork.render === "function") kitwork.render();
   }
 
   // the row of a list an element stands in, "" outside every row: the list's id and the row's key
@@ -106,7 +106,7 @@
 
   // the host of the component instance a scope belongs to, null outside every one
   function hostOf(self) {
-    try { return kit.context(self).host; } catch (e) { return null; }
+    try { return kitwork.context(self).host; } catch (e) { return null; }
   }
   // the place the component host around an element is called from, "" outside every one
   function atOf(el) {
@@ -114,7 +114,7 @@
     return host ? host.getAttribute("data-kitwork-at") : "";
   }
   function instanceOf(host) {
-    var st = host && typeof kit.state === "function" ? kit.state(host) : null;
+    var st = host && typeof kitwork.state === "function" ? kitwork.state(host) : null;
     return st && st.scope || null;
   }
 
@@ -149,7 +149,7 @@
       var c = data[component] || {}, def = {}, state = c.state || {};
       Object.keys(state).forEach(function (k) { def[k] = state[k]; });
       (c.jobs || []).forEach(function (name) { def[name] = componentJob(component, name, c.vars || []); });
-      kit.component(component, def);
+      kitwork.component(component, def);
     });
   }
 
@@ -167,19 +167,19 @@
     var state = {};
     Object.keys(data.state || {}).forEach(function (k) { state[k] = data.state[k]; });
     page.jobs.forEach(function (name) { state[name] = job(name); });
-    var program = page.program && kit.pages && kit.pages[page.program];
+    var program = page.program && kitwork.pages && kitwork.pages[page.program];
     if (program) {
       view = makeView(program, state, page.jobs);
       return;
     }
-    if (page.program) return; // its program has not arrived yet: kit.pageReady seeds again when it does
-    var s = kit.scope.$;
+    if (page.program) return; // its program has not arrived yet: kitwork.pageReady seeds again when it does
+    var s = kitwork.scope.$;
     Object.keys(state).forEach(function (k) { s[k] = state[k]; });
   }
   // the program running the page drawn now, for a test and the console
-  kit.page = { view: function () { return view; } };
+  kitwork.page = { view: function () { return view; } };
   // a page's program arrived after this file ran: the page drawn now may be its
-  kit.pageReady = function (id) {
+  kitwork.pageReady = function (id) {
     if (!view && page && page.program === id) {
       seed();
       paint();
@@ -255,7 +255,7 @@
       mark(call, false, { code: answer.error.code, message: answer.error.message || "" });
       var back = call.el && call.el.closest && call.el.closest("[data-kitwork-item]") || call.el;
       if (view) view.forget(back);
-      else if (typeof kit.forget === "function") kit.forget(back);
+      else if (typeof kitwork.forget === "function") kitwork.forget(back);
       if (window.console) console.error("kitwork: việc " + call.name + " không thành", answer.error);
       paint();
       return;
@@ -438,20 +438,19 @@
       (g.e || []).forEach(function (p) { events[p.n.split(".")[0]] = true; });
     });
 
-    document.querySelectorAll("[data-k]").forEach(function (el) {
-      var n = +el.getAttribute("data-k"), g = groups[n];
+    document.querySelectorAll("[data-kitwork-mark]").forEach(function (el) {
+      var n = +el.getAttribute("data-kitwork-mark"), g = groups[n];
       if (g && g.l < 0) pageEls[n] = el;
     });
 
     lists.forEach(function (spec, i) {
-      var template = document.querySelector('[data-k-for="' + i + '"]');
+      var template = document.querySelector('[data-kitwork-template="' + i + '"]');
       if (!template) return;
       var start = template.previousSibling, close = template.nextSibling;
-      while (close && !(close.nodeType === 8 && close.nodeValue === "kit-for:end")) close = close.nextSibling;
-      var opened = start && start.nodeType === 8 && /^kit-for:start id=(\S+)$/.exec(start.nodeValue);
+      while (close && !(close.nodeType === 8 && close.nodeValue === "kitwork-for:end")) close = close.nextSibling;
+      var opened = start && start.nodeType === 8 && /^kitwork-for:start id=(\S+)$/.exec(start.nodeValue);
       if (!opened || !close) return;
       template.parentNode.removeChild(template);
-      template.removeAttribute("data-k-for");
       template.removeAttribute("data-kitwork-template");
       template.removeAttribute("hidden");
       var list = { i: i, spec: spec, id: opened[1], start: start, end: close, template: template, rows: {}, order: [] };
@@ -488,15 +487,15 @@
       var s = {};
       s[list.spec.i] = item;
       if (list.spec.x) s[list.spec.x] = at;
-      var key = String(kit.run(list.spec.k, s));
+      var key = String(kitwork.run(list.spec.k, s));
       if (cached) keys.set(item, key);
       return key;
     }
     function marksOf(rowEl) {
       var marks = {};
-      if (rowEl.hasAttribute("data-k")) (marks[rowEl.getAttribute("data-k")] = []).push(rowEl);
-      rowEl.querySelectorAll("[data-k]").forEach(function (el) {
-        var n = el.getAttribute("data-k");
+      if (rowEl.hasAttribute("data-kitwork-mark")) (marks[rowEl.getAttribute("data-kitwork-mark")] = []).push(rowEl);
+      rowEl.querySelectorAll("[data-kitwork-mark]").forEach(function (el) {
+        var n = el.getAttribute("data-kitwork-mark");
         (marks[n] || (marks[n] = [])).push(el);
       });
       return marks;
@@ -535,16 +534,16 @@
         (g.b || []).forEach(function (p) {
           if (!reads(p, only)) return;
           v.runs++;
-          var value = kit.run(p.x, scope);
-          if (p.n === "text") kit.text(el, value);
+          var value = kitwork.run(p.x, scope);
+          if (p.n === "text") kitwork.text(el, value);
           else if (p.n === "show") el.hidden = !value;
           else if ((p.n === "value" || p.n === "checked") && twoWay(el, p)) model(el, p.n, value);
-          else kit.write(el, p.n, value);
+          else kitwork.write(el, p.n, value);
         });
         (g.c || []).forEach(function (p) {
           if (!reads(p, only)) return;
           v.runs++;
-          el.classList.toggle(p.n, !!kit.run(p.x, scope));
+          el.classList.toggle(p.n, !!kitwork.run(p.x, scope));
         });
       } catch (error) {
         if (window.console) console.error("kitwork:", error, el);
@@ -618,11 +617,11 @@
     };
     v.forget = function (el) {
       if (!el || el.nodeType !== 1) return;
-      if (typeof kit.forget === "function") kit.forget(el);
+      if (typeof kitwork.forget === "function") kitwork.forget(el);
       var all = [el];
-      el.querySelectorAll("[data-k]").forEach(function (x) { all.push(x); });
+      el.querySelectorAll("[data-kitwork-mark]").forEach(function (x) { all.push(x); });
       all.forEach(function (x) {
-        if (x.hasAttribute("data-k")) runGroup(+x.getAttribute("data-k"), x, scopeOf(x));
+        if (x.hasAttribute("data-kitwork-mark")) runGroup(+x.getAttribute("data-kitwork-mark"), x, scopeOf(x));
       });
     };
     v.flush = function () {
@@ -685,8 +684,8 @@
     });
     v.handle = function (type, e) {
       for (var el = e.target; el && el.nodeType === 1; el = el.parentElement) {
-        if (!el.hasAttribute("data-k")) continue;
-        var g = groups[+el.getAttribute("data-k")];
+        if (!el.hasAttribute("data-kitwork-mark")) continue;
+        var g = groups[+el.getAttribute("data-kitwork-mark")];
         if (!g || !g.e) continue;
         var stop = false;
         for (var i = 0; i < g.e.length; i++) {
@@ -695,7 +694,7 @@
           if (parts.indexOf("prevent") > 0 && e.preventDefault) e.preventDefault();
           if (parts.indexOf("stop") > 0) { stop = true; if (e.stopPropagation) e.stopPropagation(); }
           current = el;
-          try { kit.run(p.x, scopeOf(el)); }
+          try { kitwork.run(p.x, scopeOf(el)); }
           catch (error) { if (window.console) console.error("kitwork:", error, el); }
           finally { current = null; }
         }
@@ -706,8 +705,8 @@
     // a field that holds a var: what is typed is the var, and what reads it runs again
     v.input = function (e) {
       var el = e.target;
-      if (!el || !el.hasAttribute || !el.hasAttribute("data-k")) return;
-      var g = groups[+el.getAttribute("data-k")];
+      if (!el || !el.hasAttribute || !el.hasAttribute("data-kitwork-mark")) return;
+      var g = groups[+el.getAttribute("data-kitwork-mark")];
       (g && g.b || []).forEach(function (p) {
         if ((p.n === "value" || p.n === "checked") && twoWay(el, p)) {
           var value = p.n === "checked" ? !!el.checked : (el.type === "number" || el.type === "range") ? (parseFloat(el.value) || 0) : (el.value || "");

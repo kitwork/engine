@@ -15,9 +15,9 @@ import (
 
 // drawnList is the list a page of router.view arrives with: two rows drawn, a template hidden before them.
 const drawnList = `
-var kit = window.kit;
+var kitwork = window.kitwork;
 var ul = el("ul");
-var start = document.createComment("kit-for:start id=s1");
+var start = document.createComment("kitwork-for:start id=s1");
 var template = el("li", { "data-kitwork-for": "todo of todos; key: todo.id", "data-kitwork-template": "", "hidden": "" });
 template.appendChild(el("input", { "type": "checkbox", "data-kitwork-bind": "checked: todo.done" }));
 template.appendChild(el("span", { "data-kitwork-bind": "text: todo.title" }));
@@ -31,7 +31,7 @@ function drawn(id, title, done) {
   li.appendChild(span);
   return li;
 }
-var end = document.createComment("kit-for:end");
+var end = document.createComment("kitwork-for:end");
 ul.appendChild(start);
 ul.appendChild(template);
 var first = drawn(1, "Mua sữa", false), second = drawn(2, "Gửi thư", true);
@@ -39,8 +39,8 @@ ul.appendChild(first);
 ul.appendChild(second);
 ul.appendChild(end);
 document.body.appendChild(ul);
-kit.scope.$.todos = [{ id: 1, title: "Mua sữa", done: false }, { id: 2, title: "Gửi thư", done: true }];
-kit.render();
+kitwork.scope.$.todos = [{ id: 1, title: "Mua sữa", done: false }, { id: 2, title: "Gửi thư", done: true }];
+kitwork.render();
 function rows() { return ul.querySelectorAll("[data-kitwork-item]"); }
 function box(row) { return row.childNodes[0]; }  // the shim reads attribute selectors only
 function text(row) { return row.childNodes[1].textContent; }
@@ -55,8 +55,8 @@ var r = rows();
 if (r.length !== 2) throw new Error("expected the 2 drawn rows, got " + r.length);
 if (r[0] !== first || r[1] !== second) throw new Error("the rows the server drew should be adopted, not rebuilt");
 
-kit.scope.$.todos = kit.scope.$.todos.concat([{ id: 3, title: "Gọi mẹ", done: false }]);
-kit.render();
+kitwork.scope.$.todos = kitwork.scope.$.todos.concat([{ id: 3, title: "Gọi mẹ", done: false }]);
+kitwork.render();
 r = rows();
 if (r.length !== 3) throw new Error("after a new row: expected 3, got " + r.length);
 if (r[0] !== first || r[1] !== second) throw new Error("after a new row: the drawn rows were rebuilt");
@@ -65,8 +65,8 @@ if (made.getAttribute("data-kitwork-item") !== "s1" || made.getAttribute("data-k
 if (made.hasAttribute("hidden") || made.hasAttribute("data-kitwork-template")) throw new Error("a row made from the template should not be hidden");
 if (text(made) !== "Gọi mẹ") throw new Error("the new row's text = " + text(made));
 
-kit.scope.$.todos = kit.scope.$.todos.filter(function (todo) { return todo.id !== 1; });
-kit.render();
+kitwork.scope.$.todos = kitwork.scope.$.todos.filter(function (todo) { return todo.id !== 1; });
+kitwork.render();
 r = rows();
 if (r.length !== 2 || r[0] !== second || r[1] !== made) throw new Error("after removing row 1: the others should stay as they are");
 console.log("a drawn list is adopted by key, grows from its template and loses a row by key");
@@ -77,19 +77,19 @@ console.log("a drawn list is adopted by key, grows from its template and loses a
 const fieldStays = drawnList + `
 var tick = box(first);
 tick.checked = true;            // the person ticks it; the data still says not done
-kit.render();                   // the paint that shows the call pending
+kitwork.render();                   // the paint that shows the call pending
 if (tick.checked !== true) throw new Error("a paint whose data did not change unticked the box the person ticked");
-kit.forget(first);              // the call failed: the row goes back to its data
-kit.render();
-if (tick.checked !== false) throw new Error("after kit.forget the box should show the data again (not done)");
+kitwork.forget(first);              // the call failed: the row goes back to its data
+kitwork.render();
+if (tick.checked !== false) throw new Error("after kitwork.forget the box should show the data again (not done)");
 tick.checked = true;
-kit.scope.$.todos = [{ id: 1, title: "Mua sữa", done: true }, { id: 2, title: "Gửi thư", done: true }];
-kit.render();                   // the call answered: done
+kitwork.scope.$.todos = [{ id: 1, title: "Mua sữa", done: true }, { id: 2, title: "Gửi thư", done: true }];
+kitwork.render();                   // the call answered: done
 if (tick.checked !== true) throw new Error("the answer says done: the box should be ticked");
-kit.scope.$.todos = [{ id: 1, title: "Mua sữa", done: false }, { id: 2, title: "Gửi thư", done: true }];
-kit.render();                   // the data changes back: the field follows it
+kitwork.scope.$.todos = [{ id: 1, title: "Mua sữa", done: false }, { id: 2, title: "Gửi thư", done: true }];
+kitwork.render();                   // the data changes back: the field follows it
 if (tick.checked !== false) throw new Error("new data should still reach the field");
-console.log("a ticked box stays until its data changes; kit.forget puts it back");
+console.log("a ticked box stays until its data changes; kitwork.forget puts it back");
 `
 
 func TestFieldKeepsWhatThePersonDidUntilItsDataChanges(t *testing.T) {
@@ -112,13 +112,13 @@ func TestFieldStaysFailsWithoutTheMemo(t *testing.T) {
 func TestElementSaysWhereADirectiveRuns(t *testing.T) {
 	runNodeDOMScript(t, "acting.test.js", drawnList+`
 var seen = [];
-kit.scope.$.where = function () { var el = kit.element(); seen.push(el && el.tagName); return ""; };
+kitwork.scope.$.where = function () { var el = kitwork.element(); seen.push(el && el.tagName); return ""; };
 var probe = el("b", { "data-kitwork-bind": "text: where()" });
 document.body.appendChild(probe);
-kit.render();
-if (seen.indexOf("B") < 0) throw new Error("a binding should run with kit.element() its element, saw " + JSON.stringify(seen));
-if (kit.element() !== null) throw new Error("kit.element() should be null between directives");
-console.log("kit.element() is the element a directive runs on");
+kitwork.render();
+if (seen.indexOf("B") < 0) throw new Error("a binding should run with kitwork.element() its element, saw " + JSON.stringify(seen));
+if (kitwork.element() !== null) throw new Error("kitwork.element() should be null between directives");
+console.log("kitwork.element() is the element a directive runs on");
 `)
 }
 
@@ -159,26 +159,26 @@ func TestPageDataDeclaresThePageScope(t *testing.T) {
 // through the component's scope, and the component's own names beside it.
 func TestDrawnListInsideAComponentHost(t *testing.T) {
 	runNodeDOMScript(t, "drawn_in_component.test.js", `
-var kit = window.kit;
-kit.component("box", { open: true });
+var kitwork = window.kitwork;
+kitwork.component("box", { open: true });
 var host = el("div", { "data-kitwork-component": "box" });
 var ul = el("ul");
-var start = document.createComment("kit-for:start id=s1");
+var start = document.createComment("kitwork-for:start id=s1");
 var template = el("li", { "data-kitwork-for": "todo of todos; key: todo.id", "data-kitwork-template": "", "hidden": "" });
 template.appendChild(el("span", { "data-kitwork-bind": "text: todo.title + (open ? ' *' : '')" }));
 var row = el("li", { "data-kitwork-item": "s1", "data-kitwork-key": "1" });
 var span = el("span", { "data-kitwork-bind": "text: todo.title + (open ? ' *' : '')" });
 span.textContent = "Mua sữa *";
 row.appendChild(span);
-ul.appendChild(start); ul.appendChild(template); ul.appendChild(row); ul.appendChild(document.createComment("kit-for:end"));
+ul.appendChild(start); ul.appendChild(template); ul.appendChild(row); ul.appendChild(document.createComment("kitwork-for:end"));
 host.appendChild(ul);
 document.body.appendChild(host);
-kit.scope.$.todos = [{ id: 1, title: "Mua sữa" }];
-kit.render();
+kitwork.scope.$.todos = [{ id: 1, title: "Mua sữa" }];
+kitwork.render();
 var rows = ul.querySelectorAll("[data-kitwork-item]");
 if (rows.length !== 1 || rows[0] !== row) throw new Error("the drawn row inside the component should be adopted, got " + rows.length);
-kit.scope.$.todos = [{ id: 1, title: "Mua sữa" }, { id: 2, title: "Gửi thư" }];
-kit.render();
+kitwork.scope.$.todos = [{ id: 1, title: "Mua sữa" }, { id: 2, title: "Gửi thư" }];
+kitwork.render();
 rows = ul.querySelectorAll("[data-kitwork-item]");
 if (rows.length !== 2 || rows[0] !== row) throw new Error("a new row should join the adopted one, got " + rows.length);
 if (rows[1].childNodes[0].textContent !== "Gửi thư *") throw new Error("the new row should read the page's data and the component's open: " + rows[1].childNodes[0].textContent);

@@ -1,4 +1,4 @@
-;(function (global, kit) {
+;(function (global, kitwork) {
 "use strict";
 
 // KitJS staged service: studioDatabase@1.1.0
@@ -927,7 +927,7 @@ function close(reference) {
   return state.closing;
 }
 
-kit.service("studioDatabase", {
+kitwork.service("studioDatabase", {
   open: open,
   catalog: catalog,
   structure: structure,
@@ -936,4 +936,4 @@ kit.service("studioDatabase", {
   queryCount: queryCount,
   close: close
 });
-})(globalThis, kit);
+})(globalThis, kitwork);

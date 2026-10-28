@@ -38,7 +38,7 @@ import (
 //     chose nothing, starts on the tab that one starts on when it has it (powershell, bash after bash,
 //     powershell): the tabs that follow one choice agree from the first frame, before anything is kept.
 //   - persist (16/10/2026, the word of the tabs, written out; tabsWords) keeps the choice in the viewer's
-//     storage (kit.storage), under a name the engine hands the instance as persist: persist="true" is
+//     storage (kitwork.storage), under a name the engine hands the instance as persist: persist="true" is
 //     the SET of the tab names, sorted and joined by "+" (bash+powershell), so every tabs of the site
 //     with the same tabs follows one choice, on every page and every visit, with nothing to name;
 //     persist="shell" is that name, for sets that differ but should share. persist="false" or none:
@@ -48,7 +48,7 @@ import (
 //     of its name (tabsPrepaint), which shows the tab the viewer's browser kept before the first frame,
 //     as the appearance pre-paint does light or dark: the panels' hidden, the tabs' aria-selected and
 //     tabindex, and so a tab's look written with selected: (its CSS follows aria-selected). It reads
-//     what kit.storage writes in a browser; in a desktop or mobile app kit.storage is the native bridge,
+//     what kitwork.storage writes in a browser; in a desktop or mobile app kitwork.storage is the native bridge,
 //     which nothing at the first frame can read: the kernel restores once the store answers — and no
 //     shell keeps storage.* yet, so an app keeps nothing (docs/components/tabs.md, Còn mở).
 //     One constant body, one CSP hash (TabsPrepaintHash).
@@ -562,12 +562,12 @@ func (c *compiler) tabsPrepaints() {
 
 // tabsPrepaint is the body of the pre-paint of the tabs that persist under one name. It runs where the
 // parser meets it, before the first frame and before any of Kitwork's deferred scripts. It reads what
-// the kernel's tabs keeps through kit.storage in a browser — localStorage "kitwork:tabs:<name>", the
+// the kernel's tabs keeps through kitwork.storage in a browser — localStorage "kitwork:tabs:<name>", the
 // tab's name as JSON — and, on every tablist of the name that has a tab of that name, shows that tab's
 // panels, hides the others, and moves aria-selected and tabindex to it. A name kept that is no tab,
 // a value that is no name, storage that refuses, anything that throws: nothing changes, the page stays
 // as the server painted it. The kernel then starts each tabs from the same choice, so nothing moves
-// again. In a desktop or mobile app kit.storage is the native bridge, not localStorage: nothing is
+// again. In a desktop or mobile app kitwork.storage is the native bridge, not localStorage: nothing is
 // found here, and the kernel restores when the store answers. The name and the tabs' ids are read off
 // the script element itself, so the body is one constant (TabsPrepaintHash).
 const tabsPrepaint = `(function(s){try{var k=JSON.parse(localStorage.getItem("kitwork:tabs:"+s.getAttribute("data-kitwork-persist")));if(typeof k!="string"||!k)return;` +

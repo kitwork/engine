@@ -4,7 +4,7 @@ import "testing"
 
 // Three modes, and the client must know the same three the server's pre-paint reads from
 // localStorage (under "appearance" since 11/10/2026, "theme" before): light, dark, and system — the
-// default, meaning "follow the OS". The service is kit.appearance (kit.theme until 11/10/2026; that
+// default, meaning "follow the OS". The service is kitwork.appearance (kitwork.theme until 11/10/2026; that
 // name went on 26/10/2026).
 //
 // The kernel used to understand only two. A page could ask the server for system (by storing
@@ -12,7 +12,7 @@ import "testing"
 // appearance page whose third button had nothing to call.
 func TestAppearanceKnowsTheSameThreeModesAsThePrePaint(t *testing.T) {
 	const assertions = `
-var kit = window.kit;
+var kitwork = window.kitwork;
 
 // The block shim ships a localStorage that forgets everything, which would make every assertion
 // below pass for the wrong reason. Give it a real one.
@@ -33,14 +33,14 @@ window.localStorage = global.localStorage = {
 };
 
 // Nothing stored: the CHOICE is system, and resolved is whatever is painted.
-if (kit.appearance.mode !== "system") throw new Error("default choice should be system, got " + kit.appearance.mode);
-if (kit.appearance.resolved !== "light" && kit.appearance.resolved !== "dark") {
-  throw new Error("resolved must be a painted mode, got " + kit.appearance.resolved);
+if (kitwork.appearance.mode !== "system") throw new Error("default choice should be system, got " + kitwork.appearance.mode);
+if (kitwork.appearance.resolved !== "light" && kitwork.appearance.resolved !== "dark") {
+  throw new Error("resolved must be a painted mode, got " + kitwork.appearance.resolved);
 }
 
 // An explicit choice is remembered as itself.
-if (kit.appearance.set("dark") !== "dark" || kit.appearance.mode !== "dark" || kit.appearance.resolved !== "dark") {
-  throw new Error("set('dark') did not stick: " + kit.appearance.mode + "/" + kit.appearance.resolved);
+if (kitwork.appearance.set("dark") !== "dark" || kitwork.appearance.mode !== "dark" || kitwork.appearance.resolved !== "dark") {
+  throw new Error("set('dark') did not stick: " + kitwork.appearance.mode + "/" + kitwork.appearance.resolved);
 }
 if (localStorage.getItem("appearance") !== "dark") throw new Error("the choice should be stored as written, under \"appearance\"");
 if (document.documentElement.getAttribute("data-theme") !== "dark") {
@@ -48,17 +48,17 @@ if (document.documentElement.getAttribute("data-theme") !== "dark") {
 }
 
 // Handing it back: the stored value becomes the word the pre-paint reads on the next load.
-if (kit.appearance.system() !== "system" || kit.appearance.mode !== "system") {
-  throw new Error("system() did not hand the choice back: " + kit.appearance.mode);
+if (kitwork.appearance.system() !== "system" || kitwork.appearance.mode !== "system") {
+  throw new Error("system() did not hand the choice back: " + kitwork.appearance.mode);
 }
 if (localStorage.getItem("appearance") !== "system") throw new Error("stored value should be 'system', got " + localStorage.getItem("appearance"));
-if (kit.appearance.resolved !== "light" && kit.appearance.resolved !== "dark") {
+if (kitwork.appearance.resolved !== "light" && kitwork.appearance.resolved !== "dark") {
   throw new Error("resolved must still be a painted mode under system");
 }
 
 // A word that is not one of the three is refused rather than silently stored.
 var refused = false;
-try { kit.appearance.set("sepia"); } catch (e) { refused = true; }
+try { kitwork.appearance.set("sepia"); } catch (e) { refused = true; }
 if (!refused) throw new Error("an unknown mode must be refused");
 if (localStorage.getItem("appearance") !== "system") throw new Error("a refused set must not change what is stored");
 
@@ -69,12 +69,12 @@ console.log("appearance: light / dark / system, the same three the pre-paint rea
 
 // The service knowing three modes is only half of it: markup once reached the service through the
 // expression grant, a separate list, and a member missing from that list read as undefined. So the
-// third mode existed on the runtime while `data-kit-click="kit.theme.system()"` threw — which is
+// third mode existed on the runtime while `data-kit-click="kitwork.theme.system()"` threw — which is
 // the same page kitjs.org had, one layer down. Markup has no kit now (03/10), so what has to know all
 // three is the service's own surface, which trusted JavaScript and the appearance component call.
 func TestAppearanceServiceKnowsAllThreeModes(t *testing.T) {
 	const assertions = `
-var kit = window.kit;
+var kitwork = window.kitwork;
 var store = {};
 var classes = {};
 document.documentElement.classList = {
@@ -90,11 +90,11 @@ window.localStorage = global.localStorage = {
 };
 
 // JavaScript calls the service; markup reaches it through the appearance component (jit/js).
-if (kit.appearance.set('dark') !== "dark") throw new Error("the service cannot set dark");
-if (kit.appearance.set('light') !== "light") throw new Error("the service cannot set light");
-if (kit.appearance.system() !== "system") throw new Error("the service cannot hand the choice back to the system");
-if (kit.appearance.mode !== "system") throw new Error("the service cannot read the choice back");
-if (kit.appearance.toggle() !== "dark" && kit.appearance.mode !== "light") throw new Error("the service cannot toggle");
+if (kitwork.appearance.set('dark') !== "dark") throw new Error("the service cannot set dark");
+if (kitwork.appearance.set('light') !== "light") throw new Error("the service cannot set light");
+if (kitwork.appearance.system() !== "system") throw new Error("the service cannot hand the choice back to the system");
+if (kitwork.appearance.mode !== "system") throw new Error("the service cannot read the choice back");
+if (kitwork.appearance.toggle() !== "dark" && kitwork.appearance.mode !== "light") throw new Error("the service cannot toggle");
 
 console.log("the appearance service knows light, dark and system");
 `

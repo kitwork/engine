@@ -555,7 +555,7 @@ func TestFontIsARoleOfTheTheme(t *testing.T) {
 }
 
 // Document writes the route's appearance on <html> only when it fixes one (light, dark): the pre-paint
-// and kit.appearance fall back on it while the visitor has stored no choice. "system" (the default,
+// and kitwork.appearance fall back on it while the visitor has stored no choice. "system" (the default,
 // follow the device), nothing, and any other word write nothing.
 func TestDocumentWritesTheAppearanceOnlyForLightAndDark(t *testing.T) {
 	s := memorySite("", map[string]string{"/site/content.ui": `<content><text>x</text></content>`})

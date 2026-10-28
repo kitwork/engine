@@ -566,4 +566,4 @@ var countdownDef = {
   }
 };
 
-window.kit.component("countdown", countdownDef);
+window.kitwork.component("countdown", countdownDef);

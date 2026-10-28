@@ -112,7 +112,7 @@ const tabsHead = `<script>
   }
   var seen = [], count = 0;
   (function frame() {
-    if (window.kit && window.kit.component) { window.__frames = { seen: seen.join(" "), early: count > 0 }; return; }
+    if (window.kitwork && window.kitwork.component) { window.__frames = { seen: seen.join(" "), early: count > 0 }; return; }
     var router = document.getElementById("file-router"), page = document.getElementById("file-page");
     if (router && page) {
       var now = [router, page].filter(function (panel) { return !panel.hidden; }).map(function (panel) { return panel.id; }).join(",");
@@ -125,7 +125,7 @@ const tabsHead = `<script>
 </script>`
 
 // tabsGroups is what the probes read the tabs of tabsBrowserFiles with, in a document: the tab each
-// tabs shows (its panels not hidden), and the names its persist keeps, as kit.storage keeps them in
+// tabs shows (its panels not hidden), and the names its persist keeps, as kitwork.storage keeps them in
 // localStorage (kitwork:tabs:<name>, the name as JSON).
 const tabsGroups = `
   function pick(doc, ids) {
@@ -161,7 +161,7 @@ const tabsGroups = `
 //  1. Nothing kept: typing starts on the router file, the one shown; a click on view.ui while it types
 //     shows the page file at once (typing finished, no range left), flips aria-selected and tabindex,
 //     and $also follows (the same set, written the other way round) — not $other (the same tabs, no
-//     persist), not $partial (another set); kit.storage keeps "page" under page+router. The arrows, End
+//     persist), not $partial (another set); kitwork.storage keeps "page" under page+router. The arrows, End
 //     and Home move the choice and the focus along the tablist and wrap; Ctrl+Home is not the tablist's.
 //     copy() copies only the file shown, and says it copied code, not commands. Then the name an author
 //     chose: PowerShell in $console is followed by $shell (another set, the same name); cmd, a tab $shell
@@ -341,7 +341,7 @@ const tabsProbe = `<script>
 // shown and says it copied code; persist="true" keeps a choice under the set of the tab names, so every
 // tabs with that set follows it — in this window and in another — and no other; persist="shell" shares
 // a choice between different sets under the name an author chose; no persist keeps nothing; the
-// viewer's browser keeps it all through kit.storage, and a kept name that is no tab or storage that
+// viewer's browser keeps it all through kitwork.storage, and a kept name that is no tab or storage that
 // throws changes nothing.
 func TestBrowserTabsInATerminal(t *testing.T) {
 	if testing.Short() {

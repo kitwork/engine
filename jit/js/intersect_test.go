@@ -76,7 +76,7 @@ document.addEventListener("DOMContentLoaded", function () { (async function () {
     });
   }
   function byId(id) { return document.getElementById(id); }
-  var page = function () { return window.kit.scopeFor(byId("page")); };
+  var page = function () { return window.kitwork.scopeFor(byId("page")); };
   await wait(150);
 
   var reveal = byId("reveal");
@@ -119,7 +119,7 @@ document.addEventListener("DOMContentLoaded", function () { (async function () {
   late.id = "late";
   late.setAttribute("data-kitwork-event", "intersect-enter: added++");
   byId("slot").appendChild(late);
-  window.kit.render(); await wait(80);
+  window.kitwork.render(); await wait(80);
   report(late, true); await wait(30);
   assert(page().added === 1, "an element added after load is watched, got " + page().added);
 

@@ -11,7 +11,7 @@ import (
 // the place and carries that instance's vars; the answer's patch lands in that instance, and .pending and
 // .error are that instance's.
 const componentPage = `
-var kit = window.kit;
+var kitwork = window.kitwork;
 function cart(at) {
   var host = el("div", { "data-kitwork-component": "shop-cart", "data-kitwork-at": at });
   var count = el("p", { "data-kitwork-bind": "text: items.length" });
@@ -50,34 +50,34 @@ async function deliver() {
 function click(button) {
   document.dispatchEvent({ type: "click", target: button, defaultPrevented: false, preventDefault: function () {}, stopPropagation: function () {} });
 }
-function instance(c) { return kit.state(c.host).scope; }
+function instance(c) { return kitwork.state(c.host).scope; }
 ` + "\n__CALL_JS__\n"
 
 const componentAssertions = `
 (async function () {
-  kit.render();
+  kitwork.render();
   if (typeof instance(one).checkout !== "function" || instance(one).done !== false) throw new Error("each cart should start from what the page wrote, its jobs functions");
   instance(one).items = [{ id: 1, name: "cà phê" }];
-  kit.render();
+  kitwork.render();
   click(one.button);
-  kit.render();
+  kitwork.render();
   if (sent.length !== 1 || sent[0].job !== "shop-cart.checkout") throw new Error("the call should name the component and the job: " + JSON.stringify(sent));
   var body = sent[0].body;
   if (body.at !== "c1") throw new Error("the call should name the place of the instance clicked, got " + body.at);
   if (Object.keys(body.scope).sort().join(",") !== "done,items" || body.scope.items.length !== 1) throw new Error("the call should carry the instance's vars, nothing else: " + JSON.stringify(body.scope));
   if (one.button.disabled !== true || two.button.disabled === true) throw new Error("the cart whose call is out is pending, the other is not");
   await deliver();
-  kit.render();
+  kitwork.render();
   if (instance(one).done !== true || instance(one).items.length !== 0) throw new Error("the instance should show the answer: " + JSON.stringify(instance(one)));
   if (instance(two).done !== false) throw new Error("the other cart should not change");
-  if ("done" in kit.scope.$) throw new Error("the instance's data is not the page's");
+  if ("done" in kitwork.scope.$) throw new Error("the instance's data is not the page's");
   if (one.done.hidden !== false || two.done.hidden !== true) throw new Error("the instance's look should follow its data");
   if (one.button.disabled) throw new Error("after the answer the cart is not pending");
 
   refuse = true;
   click(two.button);
   await deliver();
-  kit.render();
+  kitwork.render();
   if (sent[1].body.at !== "c2") throw new Error("the second call should name c2, got " + sent[1].body.at);
   if (two.notice.textContent !== "hết hàng" || one.notice.textContent !== "") throw new Error("the error belongs to the cart that called: " + JSON.stringify([one.notice.textContent, two.notice.textContent]));
   console.log("a component's job is called on its instance and answers into it");

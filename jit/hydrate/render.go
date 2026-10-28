@@ -87,7 +87,7 @@ func UsesGrammar(html string) bool {
 //
 //	data-kit-*      what the kernel itself writes on a materialised row (data-kit-item,
 //	                data-kit-key), and the few hand-written attributes that are not expressions:
-//	                data-kit-element (a name for $element), data-kit-drag (a desktop window's title
+//	                data-kit-element (a name for $element), data-kitwork-drag (a desktop window's title
 //	                bar, directives/drag.js) and data-kit-reload (Drive leaves the link alone). The
 //	                hand-written expression grammar of template pages (data-kit-text,
 //	                data-kit-bind:x, data-kit-click:prevent, …) went with them: the kernel stopped
@@ -285,9 +285,9 @@ func checkIntersectModifiers(modifiers []string, sep, label string, allowed ...s
 }
 
 // presenceRe decides runtime INJECTION for the one hand-written attribute that needs it,
-// data-kit-drag (a desktop window's title bar). The template pages' data-kit-* expression grammar
+// data-kitwork-drag (a desktop window's title bar). The template pages' data-kit-* expression grammar
 // brought the runtime until 27/10/2026; the kernel had stopped reading it on 26/10/2026.
-var presenceRe = regexp.MustCompile(`data-kit-drag="`)
+var presenceRe = regexp.MustCompile(`data-kitwork-drag="`)
 
 // groupedPresenceRe is presenceRe for the engine's form: exactly the eight grouped directives, never
 // a transport marker — data-kitwork-generated sits on nearly every page, and matching the prefix would
@@ -307,7 +307,7 @@ var groupedPresenceRe = regexp.MustCompile(`(?:` + strings.Join(GroupedDirective
 
 // authoredPrefix is the hand-written attribute that brings the runtime (presenceRe) — the cheap door,
 // with the eight grouped names beside it (hasDirectivePrefix).
-const authoredPrefix = "data-kit-drag"
+const authoredPrefix = "data-kitwork-drag"
 
 // hasDirectivePrefix is the cheap door: a substring test per form, before any regex runs.
 func hasDirectivePrefix(html string) bool {

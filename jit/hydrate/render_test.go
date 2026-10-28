@@ -9,7 +9,7 @@ const marker = `<body data-kitwork-hydrate="v1.0.0">`
 
 // A page that writes the grammar is a Kitwork page: it is checked, and jit/js Deliver gives it its
 // JavaScript. The grammar is the eight grouped data-kitwork-* attributes the engine writes, and one
-// hand-written attribute, data-kit-drag (a desktop window's title bar). The template pages'
+// hand-written attribute, data-kitwork-drag (a desktop window's title bar). The template pages'
 // hand-written data-kit-* expressions bring nothing: the kernel stopped reading them on 26/10/2026,
 // and this check on 27/10/2026. CONTROL: the same page in the grouped form is recognised.
 func TestPagesWithTheGrammarAreRecognised(t *testing.T) {
@@ -19,8 +19,8 @@ func TestPagesWithTheGrammarAreRecognised(t *testing.T) {
 	if !UsesGrammar(page(`<b data-kitwork-bind="text: n * qty">0</b><button data-kitwork-event="click: n = n + 1">+</button>`)) {
 		t.Error("a page with grouped bind and event directives must be recognised")
 	}
-	if !UsesGrammar(page(`<header data-kit-drag="true">x</header>`)) {
-		t.Error("a page whose only directive is data-kit-drag needs the runtime for its drag file")
+	if !UsesGrammar(page(`<header data-kitwork-drag="true">x</header>`)) {
+		t.Error("a page whose only directive is data-kitwork-drag needs the runtime for its drag file")
 	}
 	template := `<b data-kit-text="n * qty">0</b><button data-kit-click="n = n + 1">+</button>` +
 		`<span data-kit-show="n > 3">ok</span><form data-kit-bind:disabled="sending"></form>` +
@@ -113,14 +113,14 @@ func TestRenderStrictPrefixOrigin(t *testing.T) {
 // reads no other data-kitwork-* name: not the transport markers, not the retired per-directive
 // spellings that the grouped form folded into bind / event / for / component. A class is its own
 // grouped attribute (data-kitwork-class), so the bind reader no longer special-cases class.<name>.
-// The verb system (data-kit-action / data-kit-target, kit.fire, the compat surface) is gone too
+// The verb system (data-kit-action / data-kit-target, kitwork.fire, the compat surface) is gone too
 // (22/09): behaviour is a component or an expression, transport is Drive.
 func TestRuntimeEmbedded(t *testing.T) {
 	rt := composedRuntime()
 	if strings.Contains(rt, "-ir") {
 		t.Error("the -ir suffix form is retired")
 	}
-	for _, gone := range []string{"kit.fire", "kit.behavior", "kit.action ", "components.action(", "[data-kit-action]", "data-kit-trigger", "window.hydrate = "} {
+	for _, gone := range []string{"kitwork.fire", "kitwork.behavior", "kitwork.action ", "components.action(", "[data-kit-action]", "data-kit-trigger", "window.hydrate = "} {
 		if strings.Contains(rt, gone) {
 			t.Errorf("the runtime still carries the verb system: %q", gone)
 		}
@@ -166,10 +166,10 @@ func TestRuntimeEmbedded(t *testing.T) {
 	for _, want := range []string{
 		"PREC", "function lex", "MutationObserver",
 		// the unified kernel surfaces: boot guard, component registry
-		"kit.runtime", "kit.component", "kit.components",
+		"kitwork.runtime", "kitwork.component", "kitwork.components",
 		// the composed Drive module: navigation fetch header, morph primitive, head reconcile, history,
 		// the two-way lock against the legacy standalone file, and the swap lifecycle events
-		"X-Kitwork-Hydrate", "kit.morph", "mergeHead", "popstate", "kit.hydrate",
+		"X-Kitwork-Hydrate", "kitwork.morph", "mergeHead", "popstate", "kitwork.hydrate",
 		"kitwork:before-swap", "kitwork:load",
 		// nodes the client made for itself (the transition style) survive morph:
 		// remembered in memory (clientOwned), not by an attribute
@@ -177,21 +177,21 @@ func TestRuntimeEmbedded(t *testing.T) {
 		// scopes: the boundary attribute, the resolver, and the page-scope opcode
 		"data-kitwork-scope", "scopeFor", `"=$"`,
 		// blueprint grammar: object/array/lambda/sequence/call ops + tools + boundary modes
-		`"{}"`, `"[]"`, `"=>"`, `"call"`, "function lambda(x, s)", "tryArrowParams", "boundaryScope", "kit.run",
+		`"{}"`, `"[]"`, `"=>"`, `"call"`, "function lambda(x, s)", "tryArrowParams", "boundaryScope", "kitwork.run",
 		// registered components: register fn, activation attr, blueprint registry, method this-bind
-		"kit.component", "data-kitwork-component", "seedComponent", ".test(fn) ? undefined : s, fargs)",
+		"kitwork.component", "data-kitwork-component", "seedComponent", ".test(fn) ? undefined : s, fargs)",
 		// a lambda is a function a native method calls back, walking its tree in the calling scope; every
 		// call counts against one depth (16/10/2026: the lambda was an object wrapped at each native call)
 		"function call(fn, self, args)", "function invokeLambda", "calling || s",
 		// a component registered after boot still paints
 		"scheduleRender",
-		"kit.platform", "kit.bridge", `Object.defineProperty(kit, "isNative"`,
-		"Bridge.prototype.receive", "BRIDGE_TIMEOUT", "kit.destroy", "removeEventListener",
+		"kitwork.platform", "kitwork.bridge", `Object.defineProperty(kitwork, "isNative"`,
+		"Bridge.prototype.receive", "BRIDGE_TIMEOUT", "kitwork.destroy", "removeEventListener",
 		// kit services (Native Bridge RFC): exact namespace grants, bridge-first with web fallback
-		"kit.service", `kit.service("appearance"`, `kit.service("clipboard"`,
+		"kitwork.service", `kitwork.service("appearance"`, `kitwork.service("clipboard"`,
 		`native.call("clipboard.writeText"`, "navigator.clipboard",
-		`kit.service("camera"`, `native.call("camera.capture"`, "readAsDataURL",
-		`kit.service("navigation"`, `kit.service("window"`, `kit.service("capabilities"`,
+		`kitwork.service("camera"`, `native.call("camera.capture"`, "readAsDataURL",
+		`kitwork.service("navigation"`, `kitwork.service("window"`, `kitwork.service("capabilities"`,
 		// data-kitwork-bind: each pair's value → its attribute or property (writeBinding)
 		`[data-kitwork-bind]`, `function writeBinding`,
 		// component init() lifecycle hook stays in core
@@ -213,13 +213,13 @@ func TestRuntimeEmbedded(t *testing.T) {
 	for _, forbid := range []string{
 		"registerRememberedKey", "function loadRemembered", "rememberStoragePrefix", "kitwork:remember:",
 		"function syncApi", "function syncLive", "function liveTarget", "new EventSource",
-		"kit.streams =", "kit.sync =", "kit.syncApi =",
+		"kitwork.streams =", "kitwork.sync =", "kitwork.syncApi =",
 		"[data-kit-api]", "reconcileHooks", "onReconcile", "onDestroy",
 		// data-kit-error went on 02/10 the same way: nothing used it.
 		"[data-kit-error]", "handlingError",
-		// kit.dialog, and kit.theme / toggleTheme (the light/dark service's names before kit.appearance),
+		// kitwork.dialog, and kitwork.theme / toggleTheme (the light/dark service's names before kitwork.appearance),
 		// went on 26/10/2026 with the template pages' client.
-		`kit.service("dialog"`, `kit.service("theme"`, `compatibility("toggleTheme"`,
+		`kitwork.service("dialog"`, `kitwork.service("theme"`, `compatibility("toggleTheme"`,
 	} {
 		if strings.Contains(rt, forbid) {
 			t.Errorf("a removed capability is back in the core runtime: found %q", forbid)

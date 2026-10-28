@@ -2,9 +2,9 @@ package js
 
 import "testing"
 
-// progressbar is the page's view of kit.progress: markup reads value/active from the component, the
+// progressbar is the page's view of kitwork.progress: markup reads value/active from the component, the
 // component's getters read the service, so the bar shows whatever any source reported — JavaScript
-// calling kit.progress, or the page driving it through the alias — and nothing is copied.
+// calling kitwork.progress, or the page driving it through the alias — and nothing is copied.
 func TestBrowserProgressbarShowsKitProgress(t *testing.T) {
 	runBrowserProof(t, "progressbar", nil, `
 <div id="bar" data-kitwork-component="progressbar: $progress" data-kitwork-bind="show: active; aria-valuenow: value" hidden
@@ -20,9 +20,9 @@ func TestBrowserProgressbarShowsKitProgress(t *testing.T) {
   var width = function () { return parseFloat(byId("fill").style.width || "0"); };
   assert(byId("bar").hidden, "hidden while nothing is in flight");
 
-  kit.progress.start(); await wait(700);
+  kitwork.progress.start(); await wait(700);
   assert(!byId("bar").hidden && width() > 10 && width() < 90, "a source in JavaScript starts it; it creeps toward 90: " + width());
-  assert(byId("bar").getAttribute("aria-valuenow") === String(kit.progress.value), "aria-valuenow follows the service: " + byId("bar").getAttribute("aria-valuenow"));
+  assert(byId("bar").getAttribute("aria-valuenow") === String(kitwork.progress.value), "aria-valuenow follows the service: " + byId("bar").getAttribute("aria-valuenow"));
 
   byId("upload").click(); await wait(300);
   assert(width() === 40, "the page drives it through the alias, and a known amount stays put: " + width());
@@ -30,9 +30,9 @@ func TestBrowserProgressbarShowsKitProgress(t *testing.T) {
   byId("done").click(); await wait(40);
   assert(width() === 100, "finish goes to 100: " + width());
   await wait(400);
-  assert(byId("bar").hidden && !kit.progress.active, "then the bar leaves with the work");
+  assert(byId("bar").hidden && !kitwork.progress.active, "then the bar leaves with the work");
 
-  kit.progress.finish(); await wait(40);
+  kitwork.progress.finish(); await wait(40);
   assert(byId("bar").hidden, "finishing nothing shows nothing");
   root.setAttribute("data-kit-test", "passed");
 })().catch(function (error) { var root = document.documentElement; if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });

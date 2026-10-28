@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-const counterSource = `kit.component("counter", {
+const counterSource = `kitwork.component("counter", {
   count: 0, min: 0, max: 10, step: 1, startMax: 0,
   increment: function () { this.set(this.count + this.step); },
   decrement: function () { this.set(this.count - this.step); },
@@ -41,7 +41,7 @@ func TestBrowserAHostLiteralSetsTheComponentsParameters(t *testing.T) {
   for (var j = 0; j < 5; j++) byId("a-minus").click();
   await wait(30);
   assert(t("a-out") === "1", "its min (1) clamps: " + t("a-out"));
-  assert(window.kit.scopeFor(byId("a")).startMax === 3, "init already saw the host's values");
+  assert(window.kitwork.scopeFor(byId("a")).startMax === 3, "init already saw the host's values");
   assert(t("b-out") === "0/10", "a host without a literal keeps the defaults: " + t("b-out"));
   assert(t("c-out") === "5", "the literal reads the scope around the host: " + t("c-out"));
   root.setAttribute("data-kit-test", "passed");
@@ -54,7 +54,7 @@ func TestAHostLiteralKeyTheComponentLacksIsReported(t *testing.T) {
 	check := func(html string) string {
 		return capturedCheck(t, html, namesWith(map[string]string{
 			"counter":   counterSource,
-			"workbench": `kit.component("workbench", { init: function () { var k = "x"; this[k] = 1; } });`,
+			"workbench": `kitwork.component("workbench", { init: function () { var k = "x"; this[k] = 1; } });`,
 		}))
 	}
 

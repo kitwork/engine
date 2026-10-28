@@ -67,7 +67,7 @@ func TestComponentWithJobsRunsInTheBrowser(t *testing.T) {
 	mustContain(t, html,
 		`data-kitwork-component="shop-cart" data-kitwork-at="c1" data-kitwork-scope="shippingFee: 20000"`,
 		`<p data-kitwork-bind="text: label">Giỏ hàng</p>`,
-		`<!--kit-for:start id=s1-->`, `data-kitwork-for="line of items; key: line.id"`,
+		`<!--kitwork-for:start id=s1-->`, `data-kitwork-for="line of items; key: line.id"`,
 		`data-kitwork-event="click: add(&#39;trà&#39;)"`, `data-kitwork-event="click: checkout()"`,
 		`data-kitwork-bind="disabled: checkout.pending || items.length == 0"`, `data-kitwork-bind="show: done"`,
 		`<script type="application/json" data-kitwork-components>{"shop-cart":{"jobs":["add","checkout"],"state":{"done":false,"items":[],"label":"Giỏ hàng","shippingFee":15000},"vars":["done","items"]}}</script></main>`)

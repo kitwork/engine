@@ -3377,7 +3377,7 @@ func (c *compiler) summary(n *Node, cx ctx) (op, error) {
 // The bar belongs to the whole frame, above the header, never inside a region: a page without a
 // header, or one that hides it on a phone, still shows that the next page is coming.
 func (c *compiler) withProgressbar(page *Node) (*Node, error) {
-	// each of these renders as written: a second bar runs with the first on the same kit.progress, a bar
+	// each of these renders as written: a second bar runs with the first on the same kitwork.progress, a bar
 	// written lower still sits on the top edge (fixed), a bar on a site that reloads stays hidden
 	var found *Node
 	for i, ch := range page.Elements() {
@@ -3434,7 +3434,7 @@ func (c *compiler) withReader(page *Node) (*Node, error) {
 }
 
 // reader is what a screen reader says aloud: an invisible live region whose text is the reader
-// component's (kit.reader). Drive says the new page's title through it after every move; a page says
+// component's (kitwork.reader). Drive says the new page's title through it after every move; a page says
 // a sentence of its own through its alias.
 func (c *compiler) reader(n *Node, cx ctx) (op, error) {
 	if !cx.pageChild {
@@ -3629,7 +3629,7 @@ func (c *compiler) lineThickness(px int) string {
 // progressbarMarkup is the web form of a progressbar on a Kitwork UI page: the kernel's progressbar
 // component on a host fixed to the top edge of the window that takes no room (the class progressbar,
 // reboot.css's), holding the line whose classes are given (its thickness and colour). The component
-// reads kit.progress, which Drive reports a move to, and puts the host under a title bar the page
+// reads kitwork.progress, which Drive reports a move to, and puts the host under a title bar the page
 // draws itself (its top getter). delay is the ms a move may take before the bar shows, "" for Drive's
 // own 120. A template page that moves without a reload gets the template form of the same bar
 // (render/progressbar.go). It is the markup before the value of aria-label and after it: the name is

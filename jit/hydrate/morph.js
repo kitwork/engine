@@ -1,14 +1,14 @@
 // DOM morph module. Keeps navigation optional while sharing the kernel lifecycle contract.
 (function (window) {
   "use strict";
-  var kitwork = window.kitwork, kit = kitwork;
-  if (!kitwork || !kit.module || kit.has("morph")) return;
-  var cleanupTree = kit.internal.cleanupTree;
+  var kitwork = window.kitwork;
+  if (!kitwork || !kitwork.module || kitwork.has("morph")) return;
+  var cleanupTree = kitwork.internal.cleanupTree;
   // Nodes the client made for itself (Drive's transition stylesheet): the
   // fetched HTML never has them, so a swap must neither match them nor remove them. Remembered here,
   // in memory, and not by an attribute: data-kitwork-generated also marks what the SERVER generated,
   // which a fetched page does carry and a swap must replace like anything else. Drive adds to it.
-  var clientOwned = kit.internal.clientOwned || (kit.internal.clientOwned = new WeakSet());
+  var clientOwned = kitwork.internal.clientOwned || (kitwork.internal.clientOwned = new WeakSet());
   // What makes an element the same component on both sides of a swap (see morph, below).
   var IDENTITY = ["data-kitwork-component", "data-kitwork-scope"];
 
@@ -27,7 +27,7 @@
     if (fromNode.nodeType === 1) {
       // A different tag is a different element — and so is a different component or scope literal
       // on the same tag. Patched in place, a tabs host that became a toast host kept the tabs'
-      // scope, listeners and alias: kit.components.toast and $note answered as the tabs (02/10).
+      // scope, listeners and alias: kitwork.components.toast and $note answered as the tabs (02/10).
       // The same component on both pages is kept, state and all, which is what Drive is for.
       if (fromNode.tagName !== toNode.tagName || IDENTITY.some(function (name) {
         return fromNode.getAttribute(name) !== toNode.getAttribute(name);
@@ -117,6 +117,6 @@
     }
   }
 
-  kit.morph = morph;
-  kit.module("morph", morph);
+  kitwork.morph = morph;
+  kitwork.module("morph", morph);
 })(window);

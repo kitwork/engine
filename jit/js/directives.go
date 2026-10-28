@@ -14,10 +14,10 @@ import (
 //
 //	data-kitwork-event="intersect-enter[.once][.half|.full][.margin(x)]: …; intersect-leave: …"
 //	                                       → directives/intersect.js
-//	data-kit-drag="true" | "false"         → directives/drag.js (a desktop window's own title bar)
+//	data-kitwork-drag="true" | "false"         → directives/drag.js (a desktop window's own title bar)
 //
 // (data-kit-intersect, the hand-written form of template pages, went on 26/10/2026.)
-var directiveMarkers = map[string]string{"intersect": "intersect-", "drag": "data-kit-drag"}
+var directiveMarkers = map[string]string{"intersect": "intersect-", "drag": "data-kitwork-drag"}
 
 func directiveSource(name string) string {
 	if _, known := directiveMarkers[name]; !known {

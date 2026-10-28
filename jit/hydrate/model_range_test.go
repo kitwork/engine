@@ -8,20 +8,20 @@ import "testing"
 // went with the template pages' pre-render, 27/10/2026.)
 func TestModelRangeCoercesToNumber(t *testing.T) {
 	const assertions = `
-var kit = window.kit;
+var kitwork = window.kitwork;
 var box = el("div", { "data-kitwork-scope": "n: 0; step: 1" });
 var range = el("input", { "type": "range", "data-kitwork-bind": "value: step" });
 var sum = el("b", { "data-kitwork-bind": "text: n + step" });
 box.appendChild(range);
 box.appendChild(sum);
 document.body.appendChild(box);
-kit.render(); // initial: step = 1
+kitwork.render(); // initial: step = 1
 
 // a user drags the slider to 3 — the input carries the new value, then fires input
 range.value = "3";
 document.dispatchEvent({ type: "input", target: range });
 
-var s = kit.scopeFor(box);
+var s = kitwork.scopeFor(box);
 if (typeof s.step !== "number") throw new Error("range model must be a number, got " + typeof s.step + " (" + s.step + ")");
 if (s.step !== 3) throw new Error("step should be 3, got " + s.step);
 

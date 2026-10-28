@@ -627,7 +627,7 @@ func TestBrowserEditorUnsaved(t *testing.T) {
 <b id="unsaved" data-kitwork-bind="show: $body.unsaved" hidden>Chưa lưu</b>`+editorProof(`
   var leave = function () { var event = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(event); return event.defaultPrevented; };
   var holds = [];
-  window.kit.drive.hold = function (key, on) { holds.push(on); };
+  window.kitwork.drive.hold = function (key, on) { holds.push(on); };
   assert(!leave() && $("unsaved").hidden, "saved: leaving asks nothing");
   caretAt("draft", true); type("!"); await wait(10);
   assert(!$("unsaved").hidden && leave() && holds.join() === "true", "unsaved: leaving asks, Drive is held, got " + holds.join());
@@ -796,7 +796,7 @@ formatted</pre></article>`
 	const docs = `<b style="font-weight:normal;" id="docs-internal-guid-1"><p dir="ltr"><span style="font-weight:700;">Docs</span><span style="font-weight:400;"> then </span><span style="font-style:italic;">slant</span></p></b>`
 	start := richtext.Clean(`<h2>Đầu đề</h2><p>Một đoạn <strong>đậm</strong> và <a href="https://kitwork.io/a">liên kết</a>.</p><ul><li>mục một</li><li>mục hai</li></ul><blockquote><p>trích dẫn</p></blockquote><p>cuối</p>`)
 	out := runBrowserDump(t, "editor value", editorWire(strings.ReplaceAll(start.HTML, "\n", ""), startScope(false, start.Words, start.Characters), "")+`<pre id="corpus"></pre>`+editorProof(`
-  var states = [], body = window.kit.scope.$body;
+  var states = [], body = window.kitwork.scope.$body;
   function record(label) {
     states.push({ label: label, html: area.innerHTML, value: field.value, words: body.words, characters: body.characters, empty: body.empty });
   }

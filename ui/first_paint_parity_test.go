@@ -19,7 +19,7 @@ import (
 // ends): the kernel seeds each instance from its data-kitwork-scope, runs every data-kitwork-bind pair,
 // and writes the text and the attributes it gets; nothing may change. This renders a page of
 // instances, then runs the kernel's own code in node on what the server wrote — its parser and walker
-// (kit.compile, kit.run) and its setText and writeAttribute, cut out of the kernel's source — and holds
+// (kitwork.compile, kitwork.run) and its setText and writeAttribute, cut out of the kernel's source — and holds
 // every text and every attribute to what the server painted.
 //
 // It found, before the fixes of 16/10/2026: a text or an attribute of more than one {{ }} handed to the
@@ -127,15 +127,15 @@ func TestFirstPaintIsWhatTheKernelLeaves(t *testing.T) {
 	data, _ := json.Marshal(instances)
 	kernel := hydrate.KernelFile(false)
 	script := firstPaintShim + kernel + "\n" + kernelFunction(t, kernel, "setText") + "\n" + kernelFunction(t, kernel, "writeAttribute") + `
-var kit = window.kit, failures = [], checked = 0;
+var kitwork = window.kitwork, failures = [], checked = 0;
 console.error = function () {};
 ` + string(data) + `.forEach(function (instance) {
   // the instance as the kernel seeds it: each value run once, in the page around the host
   var scope = {};
-  instance.scope.forEach(function (p) { try { scope[p[0]] = kit.run(kit.compile(p[1]), {}); } catch (e) {} });
+  instance.scope.forEach(function (p) { try { scope[p[0]] = kitwork.run(kitwork.compile(p[1]), {}); } catch (e) {} });
   instance.binds.forEach(function (b) {
     var v, failed = false;
-    try { v = kit.run(kit.compile(b.src), scope); } catch (e) { failed = true; } // a failing pair leaves the page
+    try { v = kitwork.run(kitwork.compile(b.src), scope); } catch (e) { failed = true; } // a failing pair leaves the page
     checked++;
     if (b.name === "text") {
       var el = { textContent: b.text };

@@ -57,10 +57,10 @@ func TestGroupedDirectivesAreTheGrammarAndTransportIsNot(t *testing.T) {
 	if UsesGrammar(page(`<pre><code>&lt;b data-kitwork-bind="text: x"&gt;</code></pre>`)) {
 		t.Error("a grouped directive printed in <pre><code> is an example, not grammar")
 	}
-	// the one hand-written attribute that brings the runtime is data-kit-drag (its drag file); a
+	// the one hand-written attribute that brings the runtime is data-kitwork-drag (its drag file); a
 	// template page's data-kit-* expression brings nothing since 27/10/2026
-	if !UsesGrammar(page(`<header data-kit-drag="true">x</header>`)) {
-		t.Error("data-kit-drag brings the runtime")
+	if !UsesGrammar(page(`<header data-kitwork-drag="true">x</header>`)) {
+		t.Error("data-kitwork-drag brings the runtime")
 	}
 	if UsesGrammar(page(`<b data-kit-text="total">0</b>`)) {
 		t.Error("a template page's data-kit-text is not the grammar any more")
@@ -130,7 +130,7 @@ func TestGroupedValuesAreVerified(t *testing.T) {
 		{"the bind form copied into class", `<b data-kitwork-class="class.done: x"></b>`, []string{`data-kitwork-class class.done: toggles a class named "class.done"`, "write done: x"}},
 		{"the bind form copied into class is a warning, so its value is still compiled", `<b data-kitwork-class="class.done: x +"></b>`,
 			[]string{`toggles a class named "class.done"`, "data-kitwork-class class.done: hydrate:"}},
-		{"kit in a class condition", `<b data-kitwork-class="icon-sun: kit.theme.dark"></b>`, []string{"markup does not call kit", `in data-kitwork-class="icon-sun: kit.theme.dark"`}},
+		{"kitwork in a class condition", `<b data-kitwork-class="icon-sun: kitwork.theme.dark"></b>`, []string{"markup does not call kitwork", `in data-kitwork-class="icon-sun: kitwork.theme.dark"`}},
 		{"not an attribute name", `<b data-kitwork-bind="text: x; Title: t"></b>`, []string{"data-kitwork-bind Title: is not text, show", "(at character 10)"}},
 		{"a CSS property in capitals", `<b data-kitwork-style="Width: w"></b>`, []string{"data-kitwork-style Width is not a CSS property name"}},
 		{"the engine's custom properties", `<b data-kitwork-style="--kitwork-brand: c"></b>`, []string{"data-kitwork-style --kitwork-brand writes the engine's own namespace"}},
@@ -176,7 +176,7 @@ func TestGroupedValuesAreVerified(t *testing.T) {
 		{"a version that is not one", `<b data-kitwork-component="theme@one"></b>`, []string{`"one" is not a version`}},
 		{"a capital in a component name", `<b data-kitwork-component="Dialog"></b>`, []string{`"Dialog" is not a component name`}},
 		{"a reserved alias", `<b data-kitwork-component="menu: $this"></b>`, []string{"$this is the kernel's own handle"}},
-		{"kit in markup", `<b data-kitwork-event="click: kit.theme.toggle()"></b>`, []string{"markup does not call kit", "the theme component", `in data-kitwork-event="click: kit.theme.toggle()"`}},
+		{"kitwork in markup", `<b data-kitwork-event="click: kitwork.theme.toggle()"></b>`, []string{"markup does not call kitwork", "the theme component", `in data-kitwork-event="click: kitwork.theme.toggle()"`}},
 	}
 	for _, c := range cases {
 		report := verifyOf(t, c.markup)

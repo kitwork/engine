@@ -17,7 +17,7 @@ import "testing"
 // A later, separate outside click must still close it (click-outside is not broken, just click-scoped).
 func TestModalOpensAndStaysOnClick(t *testing.T) {
 	const assertions = `
-var kit = window.kit;
+var kitwork = window.kitwork;
 
 var app = el("div", { "data-kitwork-component": "modaldemo" });
 var trigger = el("button", { "data-kitwork-event": "click: open()" });
@@ -29,8 +29,8 @@ modal.appendChild(panel);
 app.appendChild(modal);
 document.body.appendChild(app);
 
-kit.component("modaldemo", { adding: false, open: function () { this.adding = true; } });
-kit.render();
+kitwork.component("modaldemo", { adding: false, open: function () { this.adding = true; } });
+kitwork.render();
 
 function mounted() { return document.querySelectorAll("[data-panel]").length > 0; }
 
@@ -42,7 +42,7 @@ document.dispatchEvent({ type: "click", target: trigger });
 // fell to the page scope, so adding read missing); it mounts then self-closes if bug 2 (the opening
 // click's own click-outside handler fired). Either regression leaves the modal absent here.
 if (!mounted()) throw new Error("modal absent after the opening click (bug 1 scope, or bug 2 self-close)");
-if (kit.scopeFor(app).adding !== true) throw new Error("adding should be true after open()");
+if (kitwork.scopeFor(app).adding !== true) throw new Error("adding should be true after open()");
 
 // A genuinely separate later outside click DOES close it (click-outside still works). freshMounts clears on a
 // microtask, so a macrotask (setTimeout) is safely after the opening click's whole dispatch.

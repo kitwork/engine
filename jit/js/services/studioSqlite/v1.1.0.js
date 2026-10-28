@@ -1,4 +1,4 @@
-;(function (global, kit) {
+;(function (global, kitwork) {
 "use strict";
 
 // KitJS staged service: studioSqlite@1.1.0
@@ -1068,7 +1068,7 @@ function close(reference) {
   return state.closing;
 }
 
-kit.service("studioSqlite", {
+kitwork.service("studioSqlite", {
   open: open,
   catalog: catalog,
   tablePage: tablePage,
@@ -1076,4 +1076,4 @@ kit.service("studioSqlite", {
   commit: commit,
   close: close
 });
-})(globalThis, kit);
+})(globalThis, kitwork);

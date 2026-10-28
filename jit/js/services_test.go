@@ -15,16 +15,16 @@ import (
 
 // A native service is delivered like a component: only where something on the page names it — in
 // the markup or in a component the page uses — after the kernel, before the components that call
-// it, with the assembly first. A name that is the kernel's own (kit.appearance) or nothing (kit.nope)
+// it, with the assembly first. A name that is the kernel's own (kitwork.appearance) or nothing (kitwork.nope)
 // brings no service: the control. (No catalogue component calls a service; the one that did was a
 // site's own, and _components/ went on 26/10/2026 — a component's source is read by scanServices.)
 func TestServicesAreDeliveredWhereTheyAreNamed(t *testing.T) {
-	workbench := `kit.component("workbench", { init: function () { kit.studioState.clearHistory(); } });`
+	workbench := `kitwork.component("workbench", { init: function () { kitwork.studioState.clearHistory(); } });`
 	if named := scanServices(`<div data-kitwork-component="workbench"></div>`, workbench); strings.Join(named, ",") != "studioState" {
 		t.Errorf("named from a component's source: %v", named)
 	}
 
-	page := `<html><head></head><body><div data-kitwork-component="toast"></div><button data-kitwork-event="click: kit.studioState.clearHistory()">x</button></body></html>`
+	page := `<html><head></head><body><div data-kitwork-component="toast"></div><button data-kitwork-event="click: kitwork.studioState.clearHistory()">x</button></body></html>`
 	roles, paths := deliveredFiles(t, Deliver(page, Options{}))
 	if strings.Join(roles, ",") != "runtime,service,service,component" ||
 		!strings.HasPrefix(paths[1], "/_kitwork/services/assembly.") || !strings.HasPrefix(paths[2], "/_kitwork/services/studioState.") {
@@ -58,13 +58,13 @@ func TestServicesAreDeliveredWhereTheyAreNamed(t *testing.T) {
 		}
 	}
 
-	markup := `<html><head></head><body><button data-kitwork-event="click: kit.studioSqlite.close('x')">x</button></body></html>`
+	markup := `<html><head></head><body><button data-kitwork-event="click: kitwork.studioSqlite.close('x')">x</button></body></html>`
 	if roles, paths := deliveredFiles(t, Deliver(markup, Options{})); strings.Join(roles, ",") != "runtime,service,service" ||
 		!strings.HasPrefix(paths[2], "/_kitwork/services/studioSqlite.") {
 		t.Errorf("named in markup: roles %v paths %v", roles, paths)
 	}
 
-	control := `<html><head></head><body><button data-kitwork-event="click: kit.appearance.toggle(); kit.nope.x()">x</button></body></html>`
+	control := `<html><head></head><body><button data-kitwork-event="click: kitwork.appearance.toggle(); kitwork.nope.x()">x</button></body></html>`
 	if roles, _ := deliveredFiles(t, Deliver(control, Options{})); strings.Join(roles, ",") != "runtime" {
 		t.Errorf("CONTROL: the kernel's own service and an unknown name bring nothing, got %v", roles)
 	}
@@ -90,11 +90,11 @@ func TestBrowserNativeServiceReachesTheShellsHost(t *testing.T) {
 
 	workbench := `<script>
 document.addEventListener("DOMContentLoaded", function () {
-  kit.component("workbench", {
+  kitwork.component("workbench", {
     result: "", failure: "",
     init: function () {
       var self = this;
-      kit.studioState.clearHistory().then(function (value) { self.result = String(value); }, function (error) { self.failure = error.code || String(error); });
+      kitwork.studioState.clearHistory().then(function (value) { self.result = String(value); }, function (error) { self.failure = error.code || String(error); });
     }
   });
 });
@@ -110,7 +110,7 @@ document[Symbol.for("kitwork:native:host:v1")] = {
 document.addEventListener("DOMContentLoaded", function () { (async function () {
 ` + proofScriptHead + `
   await wait(200);
-  var bench = window.kit.scopeFor(document.getElementById("bench"));
+  var bench = window.kitwork.scopeFor(document.getElementById("bench"));
   RESULT
   root.setAttribute("data-kit-test", "passed");
 })().catch(function (error) { var root = document.documentElement; if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } }); });
@@ -118,7 +118,7 @@ document.addEventListener("DOMContentLoaded", function () { (async function () {
 	withHost := Deliver(`<!doctype html><html><head>`+seed+`</head><body>`+strings.Replace(body, "RESULT", `
   assert(bench.result === "true", "the service answered through the shell's host, got " + JSON.stringify(bench.result) + " / " + bench.failure);
   assert(window.__calls.join(",") === "studioState.clearHistory", "one call reached the host: " + window.__calls.join(","));
-  assert(window.kit.bridge === document[Symbol.for("kitwork:native:host:v1")], "the kernel adopted the same host as its bridge");`, 1)+`</body></html>`, Options{})
+  assert(window.kitwork.bridge === document[Symbol.for("kitwork:native:host:v1")], "the kernel adopted the same host as its bridge");`, 1)+`</body></html>`, Options{})
 	withoutHost := Deliver(`<!doctype html><html><head></head><body>`+strings.Replace(body, "RESULT", `
   assert(bench.failure === "UNAVAILABLE" && bench.result === "", "with no host the service says UNAVAILABLE, got " + JSON.stringify(bench.failure));`, 1)+`</body></html>`, Options{})
 	for _, page := range []string{withHost, withoutHost} {
@@ -175,13 +175,13 @@ func TestBrowserEveryServiceLoadsInOrder(t *testing.T) {
 	defer func() { Native = previous }()
 	var markup, checks strings.Builder
 	for _, name := range names {
-		markup.WriteString(`<button data-kitwork-event="click: kit.` + name + `.x()">x</button>`)
+		markup.WriteString(`<button data-kitwork-event="click: kitwork.` + name + `.x()">x</button>`)
 	}
 	members := map[string]string{"files": "importBlob", "media": "pickImage", "network": "request", "camera": "capture",
 		"notifications": "schedule", "biometric": "authenticate", "geolocation": "getCurrentPosition", "nfc": "scan",
 		"deepLinks": "snapshot", "qr": "scan", "studioState": "loadSnapshot", "studioSqlite": "open", "studioDatabase": "open"}
 	for name, member := range members {
-		checks.WriteString(`  assert(window.kit.` + name + ` && typeof window.kit.` + name + `.` + member + ` === "function", "kit.` + name + `.` + member + ` is missing");` + "\n")
+		checks.WriteString(`  assert(window.kitwork.` + name + ` && typeof window.kitwork.` + name + `.` + member + ` === "function", "kitwork.` + name + `.` + member + ` is missing");` + "\n")
 	}
 	page := Deliver(`<!doctype html><html><head><script>window.__errors = []; window.addEventListener("error", function (e) { window.__errors.push(String(e.message)); });</script></head><body>`+markup.String()+`<script>
 document.addEventListener("DOMContentLoaded", function () { (async function () {
@@ -189,7 +189,7 @@ document.addEventListener("DOMContentLoaded", function () { (async function () {
   await wait(100);
   assert(window.__errors.length === 0, "loading reported: " + window.__errors.join(" | "));
 `+checks.String()+`
-  assert(typeof window.kit.files.read !== "function", "on this page files is the KitJS one, not the kernel's");
+  assert(typeof window.kitwork.files.read !== "function", "on this page files is the KitJS one, not the kernel's");
   root.setAttribute("data-kit-test", "passed");
 })().catch(function (error) { var root = document.documentElement; if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } }); });
 </script></body></html>`, Options{})

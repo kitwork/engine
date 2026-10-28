@@ -115,7 +115,7 @@ window.history = history; window.location = location;
 `
 
 // TestConformanceClientMatchesServer runs the SAME corpus through the composed client runtime in
-// node (window.kit.compile + window.kit.run) and asserts each result equals the same expected value.
+// node (window.kitwork.compile + window.kitwork.run) and asserts each result equals the same expected value.
 // Because both TestConformanceServer and this test check against the corpus's `want`, agreement here
 // means the client walker and the Go evaluator computed the same thing — the conformance guarantee.
 func TestConformanceClientMatchesServer(t *testing.T) {
@@ -124,9 +124,9 @@ func TestConformanceClientMatchesServer(t *testing.T) {
 	// The corpus is injected verbatim so the client reads exactly the bytes the Go side read.
 	assertions := `
 var CORPUS = ` + string(conformanceCorpus) + `;
-var kit = window.kit;
-if (!kit || typeof kit.compile !== "function" || typeof kit.run !== "function") {
-  throw new Error("window.kit.compile/run missing — the runtime did not expose the canonical root");
+var kitwork = window.kitwork;
+if (!kitwork || typeof kitwork.compile !== "function" || typeof kitwork.run !== "function") {
+  throw new Error("window.kitwork.compile/run missing — the runtime did not expose the canonical root");
 }
 function canon(v) {
   if (Array.isArray(v)) return "[" + v.map(canon).join(",") + "]";
@@ -146,7 +146,7 @@ CORPUS.forEach(function (c) {
   // untestable-here structure because Eval only ever sees a flat snapshot.
   var scope = c.scope || {};
   scope["$"] = scope;
-  try { got = kit.run(kit.compile(c.src), scope); }
+  try { got = kitwork.run(kitwork.compile(c.src), scope); }
   catch (e) { failures.push(c.name + ": threw " + e.message); return; }
   if (canon(got) !== canon(c.want)) {
     failures.push(c.name + ": walk(" + JSON.stringify(c.src) + ") = " + canon(got) + ", want " + canon(c.want));

@@ -8,7 +8,7 @@ import (
 )
 
 // The web kernel (KernelFile(false)) carries no native module. Its platform services must take the
-// browser path there instead of reading .available off an undefined bridge: kit.clipboard.writeText
+// browser path there instead of reading .available off an undefined bridge: kitwork.clipboard.writeText
 // reaches navigator.clipboard (stubbed here, a headless browser has no clipboard to read back).
 // CONTROL: a bridge registered after the services were installed is used from then on, so the
 // lookup is made when a service runs, not once when the module loads.
@@ -31,16 +31,16 @@ Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
 var facts = {};
 function report() { document.getElementById("result").textContent = JSON.stringify(facts); }
 window.addEventListener("load", function () { setTimeout(function () {
-  facts.hasNative = !!window.kit.module("native");
-  try { window.kit.clipboard.writeText("web").then(function () { facts.webResolved = true; }); facts.webThrew = ""; }
+  facts.hasNative = !!window.kitwork.module("native");
+  try { window.kitwork.clipboard.writeText("web").then(function () { facts.webResolved = true; }); facts.webThrew = ""; }
   catch (error) { facts.webThrew = String(error && error.message || error); }
-  try { window.kit.storage.get("missing").then(function (value) { facts.storageValue = value === undefined || value === null ? "none" : String(value); }); facts.storageThrew = ""; }
+  try { window.kitwork.storage.get("missing").then(function (value) { facts.storageValue = value === undefined || value === null ? "none" : String(value); }); facts.storageThrew = ""; }
   catch (error) { facts.storageThrew = String(error && error.message || error); }
   setTimeout(function () {
     facts.copied = copied.join(",");
     var calls = [];
-    window.kit.module("native", { available: true, call: function (name, args) { calls.push(name + ":" + (args && args.text)); return Promise.resolve(); } });
-    try { window.kit.clipboard.writeText("bridge"); facts.bridgeThrew = ""; }
+    window.kitwork.module("native", { available: true, call: function (name, args) { calls.push(name + ":" + (args && args.text)); return Promise.resolve(); } });
+    try { window.kitwork.clipboard.writeText("bridge"); facts.bridgeThrew = ""; }
     catch (error) { facts.bridgeThrew = String(error && error.message || error); }
     setTimeout(function () {
       facts.calls = calls.join(",");

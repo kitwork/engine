@@ -54,7 +54,7 @@ func editorFormatPage(value, start, extra string) string {
 
 // editorFormatScript is the hands the format proofs add.
 const editorFormatScript = `
-Object.defineProperty(window, "body", { get: function () { return window.kit.scope.$body; } }); // read when used: the alias is there once the kernel has booted
+Object.defineProperty(window, "body", { get: function () { return window.kitwork.scope.$body; } }); // read when used: the alias is there once the kernel has booted
 var errors = [];
 window.addEventListener("error", function (event) { errors.push(String(event.message)); });
 function surface() { return document.querySelector("#host .editor-text"); }
@@ -714,7 +714,7 @@ func TestBrowserEditorFormatStart(t *testing.T) {
 // CONTROL (run 21/10/2026, a copy of v2.0.0.js through -overlay): with viewing() not taking the format
 // back when the part does not load, "the format reads rich again" failed (again on the code after the
 // integration, c31 in the scratchpad's editor-formats/integrate: got markdown). With it taken back in its
-// slot but not painted (c24 in the scratchpad's editor-formats/integrate: no kit.render after it; a slot
+// slot but not painted (c24 in the scratchpad's editor-formats/integrate: no kitwork.render after it; a slot
 // of a symbol is written without a paint), "the area stays" failed: Rich's aria-pressed, a binding of
 // format since the integration, still false.
 func TestBrowserEditorLoadsItsFormatParts(t *testing.T) {

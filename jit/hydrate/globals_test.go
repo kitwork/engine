@@ -7,15 +7,15 @@ import (
 
 // What each global returns is pinned by the shared corpus (global-*). This file pins what the
 // corpus cannot: that exposing them opened no door, and that they resolve inside real directives —
-// the corpus runs through kit.run, which is a different scope path from a boundary's.
+// the corpus runs through kitwork.run, which is a different scope path from a boundary's.
 
 // A constructor reached through a global must not become a way to Function — the one object that
 // would turn a string into code. Every route is refused by the member/index blocklist that was
 // already there; this test makes sure the globals did not add a route around it.
 func TestKernelGlobalsOpenNoWayToFunction(t *testing.T) {
 	runNodeDOMScript(t, "globals_sandbox.test.js", `
-var kit = window.kit;
-function run(src) { return kit.run(kit.compile(src)); }
+var kitwork = window.kitwork;
+function run(src) { return kitwork.run(kitwork.compile(src)); }
 var escapes = [
   "Array.constructor", "Math.max.constructor", "Number['constructor']", "parseInt.constructor",
   "Array.prototype", "Date.prototype", "Object.defineProperty", "Object.assign", "Object.constructor",
@@ -26,7 +26,7 @@ if (leaked.length) throw new Error("a global leaked a route out of the sandbox: 
 
 // CONTROL: the globals are really there, so the list above is about the routes, not an empty table.
 if (run("Math.max(2, 9)") !== 9) throw new Error("precondition: Math should be reachable");
-if (kit.run(kit.compile("Object.keys(o).length"), { o: { a: 1, b: 2 } }) !== 2) throw new Error("precondition: Object.keys should be reachable");
+if (kitwork.run(kitwork.compile("Object.keys(o).length"), { o: { a: 1, b: 2 } }) !== 2) throw new Error("precondition: Object.keys should be reachable");
 if (run("Array.isArray([1])") !== true) throw new Error("precondition: Array.isArray should be reachable");
 console.log("the globals are reachable and open no route to Function");
 `)
@@ -35,13 +35,13 @@ console.log("the globals are reachable and open no route to Function");
 // Inside a directive, through a boundary's scope — the path a page actually takes.
 func TestKernelGlobalsResolveInsideABoundary(t *testing.T) {
 	runNodeDOMScript(t, "globals_directive.test.js", `
-var kit = window.kit;
+var kitwork = window.kitwork;
 var box = el("div", { "data-kitwork-scope": "total: 7; size: 4; Date: 'mine'" });
 var pages = el("b", { "data-kitwork-bind": "text: Math.ceil(total / size) + ' pages'" });
 var own = el("i", { "data-kitwork-bind": "text: Date" });
 box.appendChild(pages); box.appendChild(own);
 document.body.appendChild(box);
-kit.render();
+kitwork.render();
 if (pages.textContent !== "2 pages") throw new Error("Math did not resolve inside a boundary: " + pages.textContent);
 // A name the page declares wins over the global of the same name.
 if (own.textContent !== "mine") throw new Error("a declared name must shadow the global: " + own.textContent);

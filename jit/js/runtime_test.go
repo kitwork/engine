@@ -16,8 +16,8 @@ import (
 // it is `menu`, which does the part a flag cannot — where focus lands, and how the arrows walk —
 // standing to it as `tabs` stands to the deleted `tab`.
 //
-// `theme` was deleted on 23/09, when markup called kit.theme directly, and returned on 03/10 as the
-// page's view of kit.theme, once markup stopped calling kit. `progressbar` is the view of kit.progress.
+// `theme` was deleted on 23/09, when markup called kitwork.theme directly, and returned on 03/10 as the
+// page's view of kitwork.theme, once markup stopped calling kit. `progressbar` is the view of kitwork.progress.
 //
 // `dropdown` returned on 11/10 for Kitwork UI, where it is a built-in component the engine writes
 // from <box component="dropdown" as="$account"> (docs/components/dropdown.md): the page reaches it through its alias,
@@ -64,10 +64,13 @@ func TestModulesOnlyUsedPlusCore(t *testing.T) {
 		t.Error("only-unknown names should yield no module")
 	}
 	kernel := string(KernelAsset().Body)
-	if !strings.Contains(kernel, "window.kit = window.kit") || !strings.Contains(kernel, "window.kitwork = kit") {
+	if !strings.Contains(kernel, "window.kitwork = window.kitwork || {}") {
 		t.Errorf("core dispatcher missing from the kernel's file")
 	}
-	if strings.Contains(kernel+js, `components.action(`) || strings.Contains(kernel+js, "kit.fire") {
+	if strings.Contains(kernel, "window.kit ") || strings.Contains(kernel, "window.kit=") || strings.Contains(kernel, "window.kit;") {
+		t.Errorf("the kernel names window.kit: window.kitwork is the one root")
+	}
+	if strings.Contains(kernel+js, `components.action(`) || strings.Contains(kernel+js, "kitwork.fire") {
 		t.Error("the verb registry must not ship any more")
 	}
 }

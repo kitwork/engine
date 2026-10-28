@@ -945,7 +945,7 @@ function viewing(mine) {
     else {
       viewFile = null;
       mine.scope[FORMAT] = "";
-      window.kit.render();
+      window.kitwork.render();
     }
   });
 }
@@ -1057,7 +1057,7 @@ function hold(mine, on) {
   mine.held = on;
   if (on) mine.release = mine.context.listen(window, "beforeunload", function (event) { event.preventDefault(); event.returnValue = ""; });
   else if (mine.release) mine.release();
-  var drive = window.kit.drive;
+  var drive = window.kitwork.drive;
   if (drive && drive.hold) drive.hold(mine, on);
 }
 
@@ -1144,7 +1144,7 @@ function stops(bar) {
 }
 // shutMenu closes a dropdown of a toolbar (a component of its own, el its host)
 function shutMenu(el) {
-  var menu = el && window.kit.scopeFor(el);
+  var menu = el && window.kitwork.scopeFor(el);
   if (menu && typeof menu.close === "function") menu.close();
 }
 function attribute(el, name, value) {
@@ -1506,4 +1506,4 @@ var editorDef = {
   }
 };
 
-window.kit.component("editor", editorDef);
+window.kitwork.component("editor", editorDef);

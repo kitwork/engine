@@ -39,15 +39,15 @@ func TestServerCallbackCountsAgainstTheBudget(t *testing.T) {
 // The kernel: the callback's steps run inside the same run(), so they draw on the same 10,000.
 func TestKernelCallbackCountsAgainstTheBudget(t *testing.T) {
 	runNodeDOMScript(t, "array_budget.test.js", `
-var kit = window.kit;
+var kitwork = window.kitwork;
 var big = []; for (var i = 0; i < 20000; i++) big.push(i);
-var ir = kit.compile("big.filter((x) => x > 0).length");
+var ir = kitwork.compile("big.filter((x) => x > 0).length");
 var refused = false;
-try { kit.run(ir, { big: big }); } catch (e) { refused = /budget/.test(e.message); }
+try { kitwork.run(ir, { big: big }); } catch (e) { refused = /budget/.test(e.message); }
 if (!refused) throw new Error("a callback over 20,000 items finished inside the budget — it escaped the limit");
 
 // CONTROL: a short list filters normally.
-if (kit.run(ir, { big: [0, 1, 2, 3] }) !== 3) throw new Error("a short list should filter normally");
+if (kitwork.run(ir, { big: [0, 1, 2, 3] }) !== 3) throw new Error("a short list should filter normally");
 console.log("a callback spends the expression's budget, it does not get its own");
 `)
 }

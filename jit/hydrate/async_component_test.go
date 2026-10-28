@@ -6,9 +6,9 @@ import "testing"
 // effect observes a component method's Promise and repaints on both resolve and reject.
 func TestAsyncComponentMethodRendersWhenPromiseSettles(t *testing.T) {
 	const assertions = `
-var kit = window.kit;
+var kitwork = window.kitwork;
 
-kit.component("native-demo", {
+kitwork.component("native-demo", {
   photo: "",
   error: "",
   capture: function () {
@@ -35,7 +35,7 @@ app.appendChild(fail);
 app.appendChild(photo);
 app.appendChild(error);
 document.body.appendChild(app);
-kit.render();
+kitwork.render();
 
 document.dispatchEvent({ type: "click", target: capture });
 setTimeout(function () {
@@ -57,9 +57,9 @@ setTimeout(function () {
 
 func TestAsyncComponentInitRendersWhenPromiseSettles(t *testing.T) {
 	const assertions = `
-var kit = window.kit;
+var kitwork = window.kitwork;
 
-kit.component("async-init-ok", {
+kitwork.component("async-init-ok", {
   status: "starting",
   init: function () {
     var self = this;
@@ -68,7 +68,7 @@ kit.component("async-init-ok", {
     });
   }
 });
-kit.component("async-init-fail", {
+kitwork.component("async-init-fail", {
   error: "",
   init: function () {
     return Promise.reject(new Error("permission denied"));
@@ -83,7 +83,7 @@ var error = el("i", { "data-kitwork-bind": "text: error" });
 failed.appendChild(error);
 document.body.appendChild(ok);
 document.body.appendChild(failed);
-kit.render();
+kitwork.render();
 
 setTimeout(function () {
   if (status.textContent !== "ready") {

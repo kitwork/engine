@@ -111,9 +111,9 @@ window.addEventListener("load", function () { setTimeout(function () {
   facts.outsideClass = $("panel").className;
   facts.outsideCond = !!$("cond");
   $("field").dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
-  facts.escAfterOtherKey = window.kit.scopeFor($("app")).esc;
+  facts.escAfterOtherKey = window.kitwork.scopeFor($("app")).esc;
   $("field").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-  facts.escAfterEscape = window.kit.scopeFor($("app")).esc;
+  facts.escAfterEscape = window.kitwork.scopeFor($("app")).esc;
   facts.fieldStart = $("field").value;
   $("field").value = "typed";
   $("field").dispatchEvent(new Event("input", { bubbles: true }));
@@ -137,7 +137,7 @@ window.addEventListener("load", function () { setTimeout(function () {
 	files := map[string]string{
 		"/":               page,
 		"/kit/kernel.js":  KernelFile(false),
-		"/kit/counter.js": `window.kit.component("counter", { value: 0, step: 1, inc: function () { this.value += this.step; } });`,
+		"/kit/counter.js": `window.kitwork.component("counter", { value: 0, step: 1, inc: function () { this.value += this.step; } });`,
 	}
 	output := runGroupedBrowserPage(t, browser, files, "3000")
 	match := groupedResultRe.FindSubmatch(output)
@@ -206,7 +206,7 @@ func TestBrowserDriveFindsAGroupedProgressbarHost(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := watchProgressAfter(t, browser, c.host, 40); got != c.showsUp {
-				t.Fatalf("kit.progress seen=%s, want %s", got, c.showsUp)
+				t.Fatalf("kitwork.progress seen=%s, want %s", got, c.showsUp)
 			}
 		})
 	}

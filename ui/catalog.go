@@ -166,7 +166,7 @@ var kitworkComponents = map[string]*kitworkComponent{
 	// one panel at a time, chosen by its tab: <tabs as="$files"> holds the tabs, each a
 	// <button click="select('router')">; a panel anywhere on the page is an element whose show compares
 	// $files.selected with a tab's name (tabs.go). selected is the chosen tab's name (the first tab's
-	// when the page starts), persist the name the choice is kept under (kit.storage), "" for none:
+	// when the page starts), persist the name the choice is kept under (kitwork.storage), "" for none:
 	// persist="true" is the set of the tab names, persist="shell" a name the author chose.
 	"tabs": {
 		state: map[string]any{"selected": "", "persist": "", "select": nil},

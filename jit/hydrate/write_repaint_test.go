@@ -8,9 +8,9 @@ import "testing"
 // once more). This is what lets a component's `copied` flag reset itself two seconds later.
 func TestScopeWriteOutsideAPassRepaints(t *testing.T) {
 	const assertions = `
-var kit = window.kit;
+var kitwork = window.kitwork;
 var paints = 0;
-kit.component("flash", {
+kitwork.component("flash", {
   copied: false,
   copy: function () {
     var self = this;
@@ -25,7 +25,7 @@ var label = el("b", { "data-kitwork-bind": "text: copied ? 'yes' : 'no'" });
 host.appendChild(button);
 host.appendChild(label);
 document.body.appendChild(host);
-kit.render();
+kitwork.render();
 if (label.textContent !== "no") throw new Error("boot paint: " + label.textContent);
 
 document.dispatchEvent({ type: "click", target: button });
@@ -46,20 +46,20 @@ setTimeout(function () {
 // write must not queue a second pass behind the one the handler already runs.
 func TestScopeWriteInsideAPassDoesNotQueueAnotherPaint(t *testing.T) {
 	const assertions = `
-var kit = window.kit;
+var kitwork = window.kitwork;
 var host = el("section", { "data-kitwork-scope": "count: 0; paints: 0" });
 var button = el("button", { "data-kitwork-event": "click: count = count + 1" });
 var label = el("b", { "data-kitwork-bind": "text: count" });
 host.appendChild(button);
 host.appendChild(label);
 document.body.appendChild(host);
-kit.render();
+kitwork.render();
 
 var paints = 0;
 var probe = el("i", { "data-kitwork-bind": "text: tick()" });
-kit.scope.$.tick = function () { paints++; return ""; }; // raw page scope: the probe itself must not schedule a paint
+kitwork.scope.$.tick = function () { paints++; return ""; }; // raw page scope: the probe itself must not schedule a paint
 document.body.appendChild(probe);
-kit.render();
+kitwork.render();
 var before = paints;
 
 document.dispatchEvent({ type: "click", target: button });

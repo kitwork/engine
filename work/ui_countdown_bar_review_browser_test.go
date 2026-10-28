@@ -95,7 +95,7 @@ func TestBrowserCountdownBarReview(t *testing.T) {
 	networkReload(d)
 	const read = countdownBarRead + `
   var all = function () { return [bar(), C.state(), focused()].join(" "); };
-  var playing = function () { var tea = kit.scope.$tea; return (tea.playing ? "playing" : "held") + " " + document.getElementById("toggle").textContent; };`
+  var playing = function () { var tea = kitwork.scope.$tea; return (tea.playing ? "playing" : "held") + " " + document.getElementById("toggle").textContent; };`
 	step := func(body string) string { d.t.Helper(); return countdownStep(d, read+body) }
 
 	check(t, "as the server paints it", step(`return all();`), "00:05:00 300000 0:5:0 held 300000 body")
@@ -157,15 +157,15 @@ func TestBrowserCountdownBarReview(t *testing.T) {
 	countdownKey(d, "Enter")
 	check(t, "Enter plays on", step(`await C.frames(); return playing() + " " + focused();`), "playing Tạm dừng body")
 	countdownKey(d, "Tab")
-	check(t, "Enter, then Tab goes on to +1 phút", step(`await C.frames(); var at = kit.scope.$tea.remaining, was = playing() + " " + document.activeElement.id;
-  await C.wait(1100); return was + " | " + (kit.scope.$tea.remaining < at ? "counting" : "stopped at " + at) + " " + playing();`),
+	check(t, "Enter, then Tab goes on to +1 phút", step(`await C.frames(); var at = kitwork.scope.$tea.remaining, was = playing() + " " + document.activeElement.id;
+  await C.wait(1100); return was + " | " + (kitwork.scope.$tea.remaining < at ? "counting" : "stopped at " + at) + " " + playing();`),
 		"playing Tạm dừng more | counting playing Tạm dừng")
 	countdownClickAt(t, d, "seconds", 1)
 	countdownKey(d, "Escape")
 	check(t, "Escape plays on", step(`await C.frames(); return playing() + " " + focused();`), "playing Tạm dừng body")
 	carouselShiftTab(d)
-	check(t, "Escape, then Shift+Tab goes to the link before the bar", step(`await C.frames(); var at = kit.scope.$tea.remaining, was = playing() + " " + document.activeElement.id;
-  await C.wait(1100); return was + " | " + (kit.scope.$tea.remaining < at ? "counting" : "stopped at " + at) + " " + playing();`),
+	check(t, "Escape, then Shift+Tab goes to the link before the bar", step(`await C.frames(); var at = kitwork.scope.$tea.remaining, was = playing() + " " + document.activeElement.id;
+  await C.wait(1100); return was + " | " + (kitwork.scope.$tea.remaining < at ? "counting" : "stopped at " + at) + " " + playing();`),
 		"playing Tạm dừng first | counting playing Tạm dừng")
 
 	// a press that becomes a drag

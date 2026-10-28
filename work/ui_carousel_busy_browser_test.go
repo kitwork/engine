@@ -63,12 +63,12 @@ func TestBrowserCarouselTakesThePressOnceItRests(t *testing.T) {
   return "slide 1 at " + (`+at+`)(p, 0) + ", left " + Math.round(p.track.scrollLeft);
 })()`), "slide 1 at 0, left 16")
 	check("go() to the slide showing, then next() at once", d.evaluate(`(function () {
-  var scope = kit.scopeFor(window.__carousel.parts("padded").host);
+  var scope = kitwork.scopeFor(window.__carousel.parts("padded").host);
   scope.go(0);
   return String(scope.next());
 })()`), "1")
 	check("next() three frames after the track rests", d.evaluate(`(function () {
-  var p = window.__carousel.parts("padded"), scope = kit.scopeFor(p.host);
+  var p = window.__carousel.parts("padded"), scope = kitwork.scopeFor(p.host);
   return new Promise(function (done) {
     var frames = function (n, then) { requestAnimationFrame(function () { if (n > 1) frames(n - 1, then); else then(); }); };
     p.track.addEventListener("scrollend", function () {
@@ -83,7 +83,7 @@ func TestBrowserCarouselTakesThePressOnceItRests(t *testing.T) {
 	} {
 		carouselVisit(d, server.URL+c.path, c.motion)
 		check(c.name+": next() twice in one task", d.evaluate(`(function () {
-  var scope = kit.scopeFor(window.__carousel.parts("`+c.alias+`").host);
+  var scope = kitwork.scopeFor(window.__carousel.parts("`+c.alias+`").host);
   scope.next();
   return String(scope.next());
 })()`), "2")
@@ -91,7 +91,7 @@ func TestBrowserCarouselTakesThePressOnceItRests(t *testing.T) {
 
 	carouselVisit(d, server.URL+"/", "no-preference")
 	check("a hidden page: go(1) then go(2)", d.evaluate(`(function () {
-  var p = window.__carousel.parts("repeated"), scope = kit.scopeFor(p.host);
+  var p = window.__carousel.parts("repeated"), scope = kitwork.scopeFor(p.host);
   Object.defineProperty(document, "hidden", { configurable: true, get: function () { return true; } });
   scope.go(1);
   var taken = scope.go(2) + " at " + Math.round(p.track.scrollLeft);

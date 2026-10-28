@@ -15,7 +15,7 @@ import (
 // groupedHelpers: an event the shim's document can dispatch, a working classList for the one element
 // that needs it (the shim's is a no-op), and console.error captured as "message@directive".
 const groupedHelpers = `
-var kit = window.kit;
+var kitwork = window.kitwork;
 function evt(type, target, extra) {
   var e = { type: type, target: target, defaultPrevented: false,
     preventDefault: function () { this.defaultPrevented = true; }, stopPropagation: function () {} };
@@ -47,16 +47,16 @@ var text = el("span", { "data-kitwork-bind": "text: label" });
 var panel = el("div", { "data-kitwork-bind": "show: open; aria-expanded: open; title: 'n=' + count" });
 host.appendChild(text); host.appendChild(panel);
 document.body.appendChild(host);
-kit.render();
+kitwork.render();
 
 check(text.textContent === "<b>hi</b>", "text: must be the literal text, got " + JSON.stringify(text.textContent));
 check(panel.hidden === true, "show: false must hide the element");
 check(panel.getAttribute("aria-expanded") === "false", "aria-expanded must read \"false\", got " + panel.getAttribute("aria-expanded"));
 check(panel.getAttribute("title") === "n=2", "title must be written through writeBinding, got " + panel.getAttribute("title"));
 
-kit.scopeFor(host).open = true;
-kit.scopeFor(host).count = 3;
-kit.render();
+kitwork.scopeFor(host).open = true;
+kitwork.scopeFor(host).count = 3;
+kitwork.render();
 check(panel.hidden === false, "show: true must reveal the element");
 check(panel.getAttribute("aria-expanded") === "true", "aria-expanded must read \"true\", got " + panel.getAttribute("aria-expanded"));
 check(panel.getAttribute("title") === "n=3", "title must follow count, got " + panel.getAttribute("title"));
@@ -85,15 +85,15 @@ var oldBind = el("div", { "data-kitwork-bind": "class.active: open" });
 var oldClasses = realClassList(oldBind);
 host.appendChild(row); host.appendChild(broken); host.appendChild(oldBind);
 document.body.appendChild(host);
-kit.render();
+kitwork.render();
 
 check(!classes.done && !classes["icon-sun"] && !classes["py-1.5"], "falsy conditions must leave their classes off, got " + JSON.stringify(classes));
 check(classes.idle === true, "a truthy condition must add its class at the first paint, got " + JSON.stringify(classes));
 check(classes.card === true, "the author's static class must not be touched");
 
-var s = kit.scopeFor(host);
+var s = kitwork.scopeFor(host);
 s.value = 100; s.mode = "dark"; s.open = true;
-kit.render();
+kitwork.render();
 check(classes.done === true, "done: value == 100 must add done, got " + JSON.stringify(classes));
 check(classes["icon-sun"] === true, "icon-sun: mode == 'dark' must add icon-sun, got " + JSON.stringify(classes));
 check(classes["py-1.5"] === true, "a class name with a dot must be toggled whole, got " + JSON.stringify(classes));
@@ -107,7 +107,7 @@ check(!oldClasses.active, "a class.<name> pair in data-kitwork-bind must not tog
 check(oldBind.getAttribute("class.active") === "", "control: the class.<name> bind pair must be read, as an attribute write, got " + JSON.stringify(oldBind.getAttribute("class.active")));
 
 s.value = 40; s.open = false;
-kit.render();
+kitwork.render();
 check(!classes.done && !classes["py-1.5"], "falsy again must remove the classes, got " + JSON.stringify(classes));
 check(classes.idle === true && classes["icon-sun"] === true, "classes whose condition still holds must stay, got " + JSON.stringify(classes));
 check(classes.card === true, "the author's static class must survive removal of the toggled ones");
@@ -131,8 +131,8 @@ var seeded = el("input", { "data-kitwork-bind": "value: fresh" });
 seeded.value = "from the server";
 form.appendChild(input); form.appendChild(check1); form.appendChild(oneWay); form.appendChild(seeded);
 document.body.appendChild(form);
-kit.render();
-var s = kit.scopeFor(form);
+kitwork.render();
+var s = kitwork.scopeFor(form);
 
 check(input.value === "start", "value: query must write the field, got " + JSON.stringify(input.value));
 check(check1.checked === true, "checked: done must check the box");
@@ -152,7 +152,7 @@ check(s.other === "x", "control: a one-way field must not write back, other = " 
 
 s.query = "from state";
 s.done = true;
-kit.render();
+kitwork.render();
 check(input.value === "from state", "state must write the field, got " + JSON.stringify(input.value));
 check(check1.checked === true, "state must check the box again");
 console.error = originalError;
@@ -172,7 +172,7 @@ bar.style.setProperty("color", "blue", "");
 var evil = el("div", { "data-kitwork-style": "background-image: image; height: '3px'" });
 host.appendChild(bar); host.appendChild(evil);
 document.body.appendChild(host);
-kit.render();
+kitwork.render();
 
 check(bar.style.getPropertyValue("width") === "40%", "width not written: " + bar.style.getPropertyValue("width"));
 check(bar.style.getPropertyValue("--progress") === "40", "a custom property must be written: " + bar.style.getPropertyValue("--progress"));
@@ -182,8 +182,8 @@ check(evil.style.getPropertyValue("height") === "3px", "control: the safe pair b
 var named = reported.filter(function (r) { return r === "hydrate: unsafe value for data-kitwork-style background-image@data-kitwork-style background-image"; });
 check(named.length === 1, "the refusal must be reported naming data-kitwork-style background-image, got " + JSON.stringify(reported));
 
-kit.scopeFor(host).tone = null;
-kit.render();
+kitwork.scopeFor(host).tone = null;
+kitwork.render();
 check(bar.style.getPropertyValue("color") === "blue", "null must restore the authored color, got " + bar.style.getPropertyValue("color"));
 console.error = originalError;
 console.log("grouped style: properties + custom property, url() refused and named, null restores");
@@ -209,8 +209,8 @@ hover.appendChild(inner);
 var ready = el("p", { "data-kitwork-event": "ready: readies++; saved: saved++" });
 box.appendChild(button); box.appendChild(search); box.appendChild(hover); box.appendChild(ready);
 document.body.appendChild(box);
-kit.render();
-var s = kit.scopeFor(box);
+kitwork.render();
+var s = kitwork.scopeFor(box);
 check(s.readies === 1, "ready must run once after the first paint, readies = " + s.readies);
 
 document.dispatchEvent(evt("click", button));
@@ -238,8 +238,8 @@ check(s.enters === 1, "pointer-enter must run for the element's own pointerenter
 document.dispatchEvent(evt("saved", ready));
 check(s.saved === 1, "an unknown name must listen for a custom event of that name, saved = " + s.saved);
 
-kit.render();
-kit.render();
+kitwork.render();
+kitwork.render();
 check(s.readies === 1, "ready must not run again on a later paint, readies = " + s.readies);
 
 document.dispatchEvent(evt("input", search));
@@ -265,7 +265,7 @@ setTimeout(function () {
 // lookup since 26/10/2026: the engine writes none.)
 func TestGroupedComponentAliasAndScope(t *testing.T) {
 	const assertions = groupedHelpers + `
-kit.component("counter", { count: 0, step: 1, inc: function () { this.count += this.step; } });
+kitwork.component("counter", { count: 0, step: 1, inc: function () { this.count += this.step; } });
 var page = el("section", { "data-kitwork-scope": "limit: 5" });
 var host = el("div", { "data-kitwork-component": "counter: $counter", "data-kitwork-scope": "step: limit; count: 10" });
 var label = el("span", { "data-kitwork-bind": "text: count" });
@@ -280,17 +280,17 @@ var missing = el("div", { "data-kitwork-component": "nowhere" });
 var broken = el("div", { "data-kitwork-component": "counter: counter" });
 document.body.appendChild(page); document.body.appendChild(secondHost); document.body.appendChild(secondLabel);
 document.body.appendChild(missing); document.body.appendChild(broken);
-kit.render();
-kit.render();
+kitwork.render();
+kitwork.render();
 
 check(secondLabel.textContent === "2", "control: the second host and its own alias, got " + secondLabel.textContent);
 check(label.textContent === "10", "data-kitwork-scope must override the blueprint's count, got " + label.textContent);
-check(kit.scopeFor(host).step === 5, "step: limit must be run in the scope around the host, step = " + kit.scopeFor(host).step);
+check(kitwork.scopeFor(host).step === 5, "step: limit must be run in the scope around the host, step = " + kitwork.scopeFor(host).step);
 document.dispatchEvent({ type: "click", target: plus, preventDefault: function () {}, stopPropagation: function () {} });
 check(label.textContent === "15", "inc() must run the blueprint's method in the host's scope, got " + label.textContent);
 document.dispatchEvent({ type: "click", target: outside, preventDefault: function () {}, stopPropagation: function () {} });
 check(label.textContent === "20" && outLabel.textContent === "20", "$counter must reach the host from outside its subtree, got " + label.textContent + " / " + outLabel.textContent);
-var counters = kit.components.counter;
+var counters = kitwork.components.counter;
 check(Array.isArray(counters) && counters.length === 2, "both hosts must be active under the component's name, got " + JSON.stringify(counters && counters.length));
 
 var missed = reported.filter(function (r) { return r === 'hydrate: no component registered as "nowhere"@data-kitwork-component'; });
@@ -318,11 +318,11 @@ var row = el("li", { "data-kitwork-for": "row, i of rows; key: row.id", "data-ki
 list.appendChild(row);
 host.appendChild(branch); host.appendChild(list);
 document.body.appendChild(host);
-kit.render();
+kitwork.render();
 
 check(document.querySelectorAll("[data-probe]").length === 0, "if: a false condition must leave the branch out");
-kit.scopeFor(host).open = true;
-kit.render();
+kitwork.scopeFor(host).open = true;
+kitwork.render();
 var probes = document.querySelectorAll("[data-probe]");
 check(probes.length === 1, "if: a true condition must mount the branch, got " + probes.length);
 check(!probes[0].parentNode.hasAttribute("data-kitwork-if"), "if: the mounted copy must not carry data-kitwork-if");
@@ -334,14 +334,14 @@ check(r[0].getAttribute("data-kitwork-key") === "a" && r[1].getAttribute("data-k
 check(r[0].textContent === "0:A" && r[1].textContent === "1:B", "for: row content, got " + r.map(function (n) { return n.textContent; }));
 check(!r[0].hasAttribute("data-kitwork-for"), "for: a row must not carry data-kitwork-for");
 var nodeB = r[1];
-kit.scopeFor(host).rows = [{ id: "b", name: "B" }, { id: "a", name: "A" }];
-kit.render();
+kitwork.scopeFor(host).rows = [{ id: "b", name: "B" }, { id: "a", name: "A" }];
+kitwork.render();
 r = rows();
 check(r.length === 2 && r[0] === nodeB, "for: the keyed row must move, not be rebuilt");
 check(r[0].textContent === "0:B", "for: a moved row must take its new index, got " + r[0].textContent);
 
-kit.scopeFor(host).open = false;
-kit.render();
+kitwork.scopeFor(host).open = false;
+kitwork.render();
 check(document.querySelectorAll("[data-probe]").length === 0, "if: a false condition must unmount the branch again");
 check(reported.length === 0, "nothing should be reported: " + reported.join(" | "));
 console.error = originalError;
@@ -363,8 +363,8 @@ var badge = el("i", { "data-kitwork-class": "first: true" });
 var badgeClasses = realClassList(badge);
 host.appendChild(span); host.appendChild(button); host.appendChild(bar); host.appendChild(badge);
 document.body.appendChild(host);
-kit.render();
-var s = kit.scopeFor(host);
+kitwork.render();
+var s = kitwork.scopeFor(host);
 check(span.textContent === "first", "control: the bind was not read at all, got " + span.textContent);
 check(badgeClasses.first === true && !badgeClasses.second, "control: the class was not read at all, got " + JSON.stringify(badgeClasses));
 document.dispatchEvent(evt("click", button));
@@ -374,7 +374,7 @@ span.setAttribute("data-kitwork-bind", "text: b");
 button.setAttribute("data-kitwork-event", "click: m++");
 bar.setAttribute("data-kitwork-style", "width: '20px'");
 badge.setAttribute("data-kitwork-class", "second: true");
-kit.render();
+kitwork.render();
 check(span.textContent === "second", "a rewritten data-kitwork-bind must be read again, got " + span.textContent);
 check(bar.style.getPropertyValue("width") === "20px", "a rewritten data-kitwork-style must be read again, got " + bar.style.getPropertyValue("width"));
 check(badgeClasses.second === true, "a rewritten data-kitwork-class must be read again, got " + JSON.stringify(badgeClasses));
@@ -400,18 +400,18 @@ function page(component, scopeLiteral) {
 }
 var same = page("tabs: $tabs");
 var kept = same.childNodes[0];
-kit.morph(same, page("tabs: $tabs"));
+kitwork.morph(same, page("tabs: $tabs"));
 check(same.childNodes[0] === kept, "control: the same grouped component must be kept across the swap");
 
 var other = page("tabs: $tabs");
 var was = other.childNodes[0];
-kit.morph(other, page("toast: $note"));
+kitwork.morph(other, page("toast: $note"));
 check(other.childNodes[0] !== was, "a different data-kitwork-component must replace the element, not patch it");
 check(other.childNodes[0].getAttribute("data-kitwork-component") === "toast: $note", "the new host must arrive, got " + other.childNodes[0].getAttribute("data-kitwork-component"));
 
 var scoped = page("tabs", "index: 0");
 var before = scoped.childNodes[0];
-kit.morph(scoped, page("tabs", "index: 2"));
+kitwork.morph(scoped, page("tabs", "index: 2"));
 check(scoped.childNodes[0] !== before, "a different data-kitwork-scope must replace the element");
 console.error = originalError;
 console.log("morph: grouped component and scope are identity");
@@ -455,8 +455,8 @@ document.body.appendChild(host);
 // The shim's kernel booted before these elements existed, so the intersect file's start hook ran at
 // once (scanning them); the paint below is the one a page gets at boot, where the kernel learns to
 // listen for each pair's name.
-kit.render();
-var s = kit.scopeFor(host);
+kitwork.render();
+var s = kitwork.scopeFor(host);
 check(observers.length === 4, "one observer per intersect pair, got " + observers.length);
 function report(observer, inside) { observer.callback([{ isIntersecting: inside, intersectionRatio: inside ? 1 : 0 }]); }
 var enter = observers[0], leave = observers[1], onceObserver = observers[2], marginObserver = observers[3];

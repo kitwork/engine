@@ -19,7 +19,7 @@ import "testing"
 // instead of removing, steps 1/4's element count never drops to 0. Either regression turns this red.
 func TestKitIfMountsUnmountsAndDisposes(t *testing.T) {
 	const assertions = `
-var kit = window.kit;
+var kitwork = window.kitwork;
 
 // <section component=panel> <div if="open"> <span text="title"> </div> </section>
 var section = el("section", { "data-kitwork-component": "panel" });
@@ -29,12 +29,12 @@ section.appendChild(div);
 document.body.appendChild(section);
 
 // REAL-JS component: state on the boundary, a plain-function method. No IR.
-kit.component("panel", {
+kitwork.component("panel", {
   open: false,
   title: "Editor",
   toggle: function () { this.open = !this.open; }
 });
-kit.render();
+kitwork.render();
 
 function texts() { return document.querySelectorAll("[data-kitwork-bind]"); }
 
@@ -42,8 +42,8 @@ function texts() { return document.querySelectorAll("[data-kitwork-bind]"); }
 if (texts().length !== 0) throw new Error("closed: branch should be absent, found " + texts().length);
 
 // 2. open=true → mount; the ordinary text pass binds the span in the same render.
-kit.scopeFor(section).toggle();
-kit.render();
+kitwork.scopeFor(section).toggle();
+kitwork.render();
 if (texts().length !== 1) throw new Error("opened: expected 1 mounted node, got " + texts().length);
 var span1 = texts()[0];
 var mount1 = span1.parentNode; // the mounted branch root — data-kitwork-if removed, so it never re-collects
@@ -51,25 +51,25 @@ if (span1.textContent !== "Editor") throw new Error("opened: span text = " + spa
 
 // The dispose probe: a cleanup registered on the mounted subtree. cleanupTree must fire it on unmount.
 var disposed = 0;
-kit.onCleanup(span1, function () { disposed++; });
+kitwork.onCleanup(span1, function () { disposed++; });
 
 // 3. mutate state while mounted → re-binds, same node (no rebuild, no churn).
-kit.scopeFor(section).title = "Renamed";
-kit.render();
+kitwork.scopeFor(section).title = "Renamed";
+kitwork.render();
 if (texts().length !== 1) throw new Error("relabel: expected 1 node, got " + texts().length);
 if (texts()[0] !== span1) throw new Error("relabel: mounted node was rebuilt — identity lost");
 if (span1.textContent !== "Renamed") throw new Error("relabel: span text = " + span1.textContent);
 
 // 4. open=false → unmount: absent, detached, and the subtree's effects disposed.
-kit.scopeFor(section).toggle();
-kit.render();
+kitwork.scopeFor(section).toggle();
+kitwork.render();
 if (texts().length !== 0) throw new Error("reclose: branch should be gone, found " + texts().length);
 if (mount1.parentNode !== null) throw new Error("reclose: unmounted branch root is still attached");
 if (disposed !== 1) throw new Error("reclose: cleanupTree did not dispose the subtree (disposed=" + disposed + ")");
 
 // 5. open=true again → a FRESH node, carrying the latest boundary state.
-kit.scopeFor(section).toggle();
-kit.render();
+kitwork.scopeFor(section).toggle();
+kitwork.render();
 if (texts().length !== 1) throw new Error("reopen: expected 1 node, got " + texts().length);
 if (texts()[0] === span1) throw new Error("reopen: same node returned — it was never truly unmounted");
 if (texts()[0].textContent !== "Renamed") throw new Error("reopen: state did not survive unmount, got " + texts()[0].textContent);
@@ -102,11 +102,11 @@ markers.appendChild(el("span", { "data-marker-probe": "yes" }));
 document.body.appendChild(markers);
 function probes(kind) { return document.querySelectorAll('[data-if-probe="' + kind + '"]').length; }
 
-window.kit.set("count", 0);
+window.kitwork.set("count", 0);
 if (probes("grouped") !== 0) throw new Error("data-kitwork-if with a false condition must take its element out");
 if (probes("legacy") !== 1 || !legacy.parentNode) throw new Error("data-kit-if is not a directive any more: a false condition must leave its element in place");
 
-window.kit.set("count", 2);
+window.kitwork.set("count", 2);
 if (probes("grouped") !== 1) throw new Error("data-kitwork-if must mount when its condition turns true");
 if (probes("legacy") !== 1) throw new Error("data-kit-if must stay inert when its condition turns true");
 

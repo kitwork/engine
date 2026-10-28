@@ -36,7 +36,7 @@ func TestBrowserDriveLastClickWins(t *testing.T) {
 			`[["/a",60],["/b",300],["/c",500]]`, `at450=loading,bar end=/c:content c:c`},
 		// a fades: in headless Chrome its swap waits for the transition guard (1s), so a's change is still
 		// pending when b, clicked at 400ms, lands at 440ms. a's late change (at about 1.1s) must not undo b.
-		// At 450ms b is done (idle) and its bar is finishing: kit.progress holds 100% for 300ms.
+		// At 450ms b is done (idle) and its bar is finishing: kitwork.progress holds 100% for 300ms.
 		{"a waiting swap overtaken", `{"/a":40,"/b":40}`, `{"/a":"fade"}`,
 			`[["/a",60],["/b",400]]`, `at450=idle,bar end=/b:content b:b`},
 	}
@@ -83,10 +83,10 @@ func overlappingMoves(t *testing.T, browser, delays, transitions, clicks string)
 				 window.addEventListener("load", function () {
 				   var root = document.documentElement, at450 = "";
 				   clicks.forEach(function (click) {
-				     setTimeout(function () { window.kit.drive.visit(new URL(click[0], location.href).href, true, 0); }, click[1]);
+				     setTimeout(function () { window.kitwork.drive.visit(new URL(click[0], location.href).href, true, 0); }, click[1]);
 				   });
 				   setTimeout(function () {
-				     at450 = (root.classList.contains("kitwork-loading") ? "loading" : "idle") + "," + (window.kit.progress.active ? "bar" : "nobar");
+				     at450 = (root.classList.contains("kitwork-loading") ? "loading" : "idle") + "," + (window.kitwork.progress.active ? "bar" : "nobar");
 				   }, 450);
 				   setTimeout(function () {
 				     var h1 = document.querySelector("main h1");

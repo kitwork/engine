@@ -1,4 +1,4 @@
-;(function (global, kit) {
+;(function (global, kitwork) {
 "use strict";
 
 // KitJS staged service: files@1.4.0
@@ -1050,7 +1050,7 @@ function installFileAdopter() {
   });
 }
 
-kit.service("files", {
+kitwork.service("files", {
   pick: pick,
   importBlob: importBlob,
   stat: stat,
@@ -1061,4 +1061,4 @@ kit.service("files", {
   release: release
 });
 installFileAdopter();
-})(globalThis, kit);
+})(globalThis, kitwork);

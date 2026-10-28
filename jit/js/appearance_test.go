@@ -71,10 +71,10 @@ var firstPaint = (document.documentElement.classList.contains("dark") ? "dark" :
   var icon = function () { return byId("icon").className; };
   var first = "` + load.first + `", mode = "` + load.mode + `";
   assert(firstPaint === first + "/" + first, "the pre-paint's first frame: " + firstPaint + ", want " + first);
-  assert(window.kit.theme === undefined && window.kit.appearance, "kit.appearance, and no kit.theme (the alias went on 26/10/2026)");
+  assert(window.kitwork.theme === undefined && window.kitwork.appearance, "kitwork.appearance, and no kitwork.theme (the alias went on 26/10/2026)");
   assert(byId("mode").textContent === mode, "mode after the kernel started: " + byId("mode").textContent + ", want " + mode);
-  assert(icon() === (first === "dark" ? "icon icon-sun" : "icon icon-moon") && window.kit.appearance.dark === (first === "dark"),
-    "the component shows what the pre-paint painted: " + icon() + " / dark " + window.kit.appearance.dark);` + systemStep + `
+  assert(icon() === (first === "dark" ? "icon icon-sun" : "icon icon-moon") && window.kitwork.appearance.dark === (first === "dark"),
+    "the component shows what the pre-paint painted: " + icon() + " / dark " + window.kitwork.appearance.dark);` + systemStep + `
   root.setAttribute("data-kit-test", "passed");
 })().catch(function (error) { var root = document.documentElement; if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
 </script></body></html>`
@@ -127,8 +127,8 @@ func serveAppearancePage(t *testing.T, browser string, delivered *testPage) ([]b
 
 // component="appearance" as the engine writes it (grouped data-kitwork-* attributes): the icon swaps on dark,
 // a second host reached through its alias agrees, and under "system" dark is what the operating
-// system shows. (The theme component, which read resolved off kit.theme beside it, went with template
-// pages on 26/10/2026, and kit.theme with it.)
+// system shows. (The theme component, which read resolved off kitwork.theme beside it, went with template
+// pages on 26/10/2026, and kitwork.theme with it.)
 func TestBrowserAppearanceComponentShowsDark(t *testing.T) {
 	runBrowserProof(t, "appearance", nil, `
 <div id="host" data-kitwork-component="appearance">
@@ -149,12 +149,12 @@ func TestBrowserAppearanceComponentShowsDark(t *testing.T) {
   var html = document.documentElement;
   var icon = function () { return byId("icon").className; };
 
-  assert(window.kit.theme === undefined && window.kit.appearance, "kit.appearance, and no kit.theme (the alias went on 26/10/2026)");
+  assert(window.kitwork.theme === undefined && window.kitwork.appearance, "kitwork.appearance, and no kitwork.theme (the alias went on 26/10/2026)");
   // Nothing stored, a light OS (headless default): system, and not dark.
   assert(byId("mode").textContent === "system" && icon() === "icon icon-moon" && byId("shown").textContent === "light",
     "first paint: " + byId("mode").textContent + " / " + icon() + " / " + byId("shown").textContent);
   // resolved is not the appearance component's (it was the theme component's)
-  var scope = window.kit.scopeFor(byId("icon"));
+  var scope = window.kitwork.scopeFor(byId("icon"));
   assert(scope.dark === false && typeof scope.mode === "string" && typeof scope.resolved !== "string",
     "the appearance scope holds mode and dark, not resolved: " + typeof scope.resolved);
 
@@ -178,7 +178,7 @@ func TestBrowserAppearanceComponentShowsDark(t *testing.T) {
   // A choice saved before the rename, under "theme" alone, is still the visitor's.
   localStorage.removeItem("appearance");
   localStorage.setItem("theme", "light");
-  window.kit.render(); await wait(30);
+  window.kitwork.render(); await wait(30);
   assert(byId("mode").textContent === "light", "the old theme key is still read: " + byId("mode").textContent);
   root.setAttribute("data-kit-test", "passed");
 })().catch(function (error) { var root = document.documentElement; if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });

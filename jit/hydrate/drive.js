@@ -1,16 +1,16 @@
 // Optional Kitwork Drive module: same-origin navigation, head reconciliation and scroll restore.
 (function (window, document) {
   "use strict";
-  var kitwork = window.kitwork, kit = kitwork;
-  if (!kitwork || !kit.module || kit.has("drive")) return;
-  var listen = kit.internal.listen;
-  var cleanup = kit.cleanup;
+  var kitwork = window.kitwork;
+  if (!kitwork || !kitwork.module || kitwork.has("drive")) return;
+  var listen = kitwork.internal.listen;
+  var cleanup = kitwork.cleanup;
 
   // ---- Drive: optional SPA navigation over the kernel's morph/lifecycle contracts ----
   // Ported from the proven standalone hydrate.js. This file is on the page only when the SITE asked
   // for Drive (router.reload(false), the default of a Kitwork UI site): the engine delivers it to no
   // other page, so being loaded is the answer and there is no flag to read. It activates at boot
-  // unless a drive is already running: kit.hydrate is the two-way lock, so a page still carrying the
+  // unless a drive is already running: kitwork.hydrate is the two-way lock, so a page still carrying the
   // legacy standalone file keeps it and the two never double-drive.
   // Contract unchanged: intercept same-origin links + GET forms (unless data-kitwork-reload="true"),
   // fetch with X-Kitwork-Hydrate, swap <main> (fallback <body>), morph, mergeHead swaps
@@ -18,9 +18,9 @@
   // swap, which waits for it —,
   // history + scroll restoration and bounded hover prefetch.
   function start() {
-    if (typeof kit.morph !== "function") return;
-    if (kit.hydrate || !window.history.pushState || !window.fetch || !window.DOMParser) return;
-    kit.hydrate = true;
+    if (typeof kitwork.morph !== "function") return;
+    if (kitwork.hydrate || !window.history.pushState || !window.fetch || !window.DOMParser) return;
+    kitwork.hydrate = true;
 
     var inflight = null;                  // AbortController for the current visit
     var watchdog = null;                  // fetch-timeout watchdog timer
@@ -31,7 +31,7 @@
 
     // The bar between pages is the progressbar COMPONENT, not something Drive draws (10/10/2026): a
     // Kitwork UI page has one first in <page>, and the engine puts one at the top of <body> on any
-    // other page of a site that moves without a reload. Drive only reports the move to kit.progress,
+    // other page of a site that moves without a reload. Drive only reports the move to kitwork.progress,
     // which the component shows (and which it places under a title bar the page draws itself). One
     // bar, written once, with the same color / thickness / delay everywhere.
     var barTimer = 0, barShown = false;
@@ -72,19 +72,19 @@
         // timer could fire, and would otherwise never show it.
         var show = function () {
           barShown = true;
-          if (kit.progress) kit.progress.start();
+          if (kitwork.progress) kitwork.progress.start();
         };
         var wait = progressDelay();
         if (wait === 0) show();
         else barTimer = setTimeout(show, wait);
       } else if (barShown) {
         barShown = false;
-        if (kit.progress) kit.progress.finish();
+        if (kitwork.progress) kitwork.progress.finish();
       }
     }
 
     // Elements this file makes for itself: morph and mergeHead leave them alone (morph.js, clientOwned).
-    var clientOwned = kit.internal.clientOwned || (kit.internal.clientOwned = new WeakSet());
+    var clientOwned = kitwork.internal.clientOwned || (kitwork.internal.clientOwned = new WeakSet());
 
     function region(doc) { return doc.querySelector("main") || doc.body; }
 
@@ -121,7 +121,7 @@
     // A value that does not read has no handler the kernel runs either.
     function clicks(a) {
       var list = [];
-      try { list = kit.internal.grouped.pairs(a.getAttribute("data-kitwork-event") || ""); } catch (e) { }
+      try { list = kitwork.internal.grouped.pairs(a.getAttribute("data-kitwork-event") || ""); } catch (e) { }
       return list.some(function (pair) { return pair[0].split(".")[0] === "click"; });
     }
     // Should this click be driven, or left to the browser (or to another kernel behavior)?
@@ -293,7 +293,7 @@
     // The colour a mobile browser paints its bar in is the arriving page's <meta name="theme-color"> (a
     // Kitwork UI page with a backdrop writes one per mode), as a whole load would show: one that names
     // none goes back to the browser's own. A meta that carries both modes' colours (data-kitwork-light,
-    // data-kitwork-dark) takes the mode shown, as the pre-paint and kit.appearance set it: its colour, no
+    // data-kitwork-dark) takes the mode shown, as the pre-paint and kitwork.appearance set it: its colour, no
     // media, so a visitor's choice of the other mode than the device's holds across the move.
     function swapThemeColor(doc) {
       var key = function (list) { return Array.prototype.map.call(list, function (n) { return n.outerHTML; }).join(""); };
@@ -357,7 +357,7 @@
     // The page arriving says it on <html data-kitwork-appearance="light|dark"> (nothing for "system",
     // the default), and a branch of a site may say another than its root. A whole load would paint
     // that page in its own default when the visitor has stored no choice, so a move does too: the
-    // attribute is carried over, and when it differs from the page left behind, kit.appearance
+    // attribute is carried over, and when it differs from the page left behind, kitwork.appearance
     // shows the mode again by its one rule (stored choice, then this default, then the device — the
     // web module's showAppearance). Equal on both sides, nothing is repainted: a site that never
     // speaks of appearance is never touched.
@@ -367,7 +367,7 @@
       if (root.getAttribute(APPEARANCE) === next) return;
       if (next === null) root.removeAttribute(APPEARANCE);
       else root.setAttribute(APPEARANCE, next);
-      var web = kit.module("web");
+      var web = kitwork.module("web");
       if (web && typeof web.showAppearance === "function") web.showAppearance();
     }
 
@@ -506,7 +506,7 @@
         if (nextTransition) document.documentElement.setAttribute("data-kitwork-transition", nextTransition);
         else document.documentElement.removeAttribute("data-kitwork-transition");
         carryAppearance(nextAppearance);
-        kit.morph(cur, next);
+        kitwork.morph(cur, next);
         if (!sameLayout && doc.body) {
           document.body.className = doc.body.className;
           document.body.setAttribute("data-kitwork-layout", layoutKey(doc));
@@ -530,8 +530,8 @@
         var t = region(document);
         if (t) { t.setAttribute("tabindex", "-1"); try { t.focus({ preventScroll: true }); } catch (e) { } }
         // A move without a reload does not tell a screen reader the page changed: the reader component
-        // (on every page that moves this way) says the new title, as Drive reports a move to kit.progress.
-        if (kit.reader) kit.reader.say(document.title);
+        // (on every page that moves this way) says the new title, as Drive reports a move to kitwork.progress.
+        if (kitwork.reader) kitwork.reader.say(document.title);
         document.dispatchEvent(new CustomEvent("kitwork:load", { detail: { url: url } }));
         settle();
       }
@@ -718,8 +718,8 @@
       clearTimeout(watchdog);
       clearTimeout(hoverTimer);
       clearTimeout(barTimer);
-      if (barShown && kit.progress) kit.progress.finish(); // a move cut short must not leave the bar running
-      kit.hydrate = false;
+      if (barShown && kitwork.progress) kitwork.progress.finish(); // a move cut short must not leave the bar running
+      kitwork.hydrate = false;
     });
 
     drive.visit = visit;
@@ -732,7 +732,7 @@
   // link, a GET form, Back and Forward are the browser's, which asks before the page goes.
   var holds = new Set();
   var drive = { start: start, hold: function (key, on) { if (on) holds.add(key); else holds.delete(key); } };
-  kit.drive = drive;
-  kit.module("drive", drive);
-  kit.onStart(start);
+  kitwork.drive = drive;
+  kitwork.module("drive", drive);
+  kitwork.onStart(start);
 })(window, document);

@@ -672,4 +672,4 @@ function swipes(own, context) {
   context.listen(own.host, "pointercancel", end);
 }
 
-window.kit.component("toast", toastDef);
+window.kitwork.component("toast", toastDef);

@@ -29,19 +29,19 @@ func TestBrowserComponentEventsReachTheMarkup(t *testing.T) {
 <script>
 // Registered while the page parses, before the kernel boots: bell emits when rung, probe emits from
 // init, which runs inside the first paint; refuse tries a DOM event's name.
-kit.component("bell", { init: function (context) { this.ring = function () { context.emit("ring"); }; } });
-kit.component("probe", { init: function (context) { context.emit("started", { n: 7 }); } });
-kit.component("refuse", {
+kitwork.component("bell", { init: function (context) { this.ring = function () { context.emit("ring"); }; } });
+kitwork.component("probe", { init: function (context) { context.emit("started", { n: 7 }); } });
+kitwork.component("refuse", {
   refused: "",
   init: function (context) { try { context.emit("click"); } catch (error) { this.refused = error.message; } }
 });
 (async function () {
   await wait(150);
-  var page = function () { return window.kit.scopeFor(document.getElementById("page")); };
+  var page = function () { return window.kitwork.scopeFor(document.getElementById("page")); };
 
   assert(page().started === "probe:7", "an event emitted from init is heard after the paint, with its detail and target: " + page().started);
 
-  var near = window.kit.scopeFor(document.getElementById("near"));
+  var near = window.kitwork.scopeFor(document.getElementById("near"));
   assert(page().hostHeard === 0, "not rung yet: no event");
   near.ring(); await wait(40);
   assert(page().hostHeard === 1 && page().outerHeard === 0, "rung: heard on the host, and not on its ancestor, got " + page().hostHeard + "/" + page().outerHeard);
@@ -54,7 +54,7 @@ kit.component("refuse", {
   field.dispatchEvent(paste); await wait(20);
   assert(page().pasted === 1 && paste.defaultPrevented, "a DOM event by name, with .prevent: " + page().pasted + " " + paste.defaultPrevented);
 
-  var refused = window.kit.scopeFor(document.getElementById("refuse")).refused;
+  var refused = window.kitwork.scopeFor(document.getElementById("refuse")).refused;
   assert(refused.indexOf("DOM event") >= 0, "emit(\"click\") must be refused, got " + JSON.stringify(refused));
 
   root.setAttribute("data-kit-test", "passed");

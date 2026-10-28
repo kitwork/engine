@@ -29,7 +29,7 @@ const exampleNetworkSay = `(function (want) {
   var host = function () { return document.querySelector('[data-kitwork-component^="network"]'); };
   var shown = function (el) { return !!el && !el.hidden && el.getClientRects().length > 0; };
   var ready = function () {
-    var h = host(), n = window.kit && kit.scope && kit.scope.$network;
+    var h = host(), n = window.kitwork && kitwork.scope && kitwork.scope.$network;
     if (want === "") return true;
     if (!h || !n || !h.firstElementChild) return false;
     if (want === "closed") return !n.open && !shown(h.firstElementChild);
@@ -44,10 +44,10 @@ const exampleNetworkSay = `(function (want) {
       var card = host() && host().firstElementChild;
       Promise.all(card ? card.getAnimations().map(function (a) { return a.finished.catch(function () {}); }) : []).then(function () {
       requestAnimationFrame(function () { requestAnimationFrame(function () {
-        var h = host(), n = window.kit && kit.scope && kit.scope.$network;
+        var h = host(), n = window.kitwork && kitwork.scope && kitwork.scope.$network;
         var out = { reached: reached, waited: waited, path: location.pathname, loading: document.documentElement.classList.contains("kitwork-loading"),
-          menu: !!(window.kit && kit.scope && kit.scope.$menu && kit.scope.$menu.open),
-          bar: window.kit && kit.progress && kit.progress.active ? Math.round(kit.progress.value) + "%" : "idle",
+          menu: !!(window.kitwork && kitwork.scope && kitwork.scope.$menu && kitwork.scope.$menu.open),
+          bar: window.kitwork && kitwork.progress && kitwork.progress.active ? Math.round(kitwork.progress.value) + "%" : "idle",
           overflow: Math.max(document.documentElement.scrollWidth, innerWidth) - innerWidth,
           dark: matchMedia("(prefers-color-scheme: dark)").matches, scrollX: scrollX, scrollY: scrollY };
         if (!h || !n) { out.notice = "no network host"; done(JSON.stringify(out)); return; }
@@ -335,7 +335,7 @@ func TestBrowserExampleNetworkShots(t *testing.T) {
 			t.Errorf("link-%s: the notice opened again %.0fms after the click (reached %v), want at once: Drive's stay does not wait the delay", suffix, again.Waited, again.Reached)
 		}
 		// the move's bar runs to its end (100%, then gone in 300ms): pictured once it is gone
-		d.evaluate(`new Promise(function (done) { var start = Date.now(); (function poll() { if (kit.progress.active && Date.now() - start < 2000) setTimeout(poll, 50); else done(""); })(); })`)
+		d.evaluate(`new Promise(function (done) { var start = Date.now(); (function poll() { if (kitwork.progress.active && Date.now() - start < 2000) setTimeout(poll, 50); else done(""); })(); })`)
 		at = say("offline")
 		if !at.Reached || at.Notice != offline || at.Path != "/" || at.Loading || at.Bar != "idle" {
 			t.Errorf("link-%s: %q on %s, moving %v, bar %s; want the page to stay on / with the move over, and the notice open again: %q",
@@ -359,8 +359,8 @@ func TestBrowserExampleNetworkShots(t *testing.T) {
 		// (some tens of milliseconds after online was said)
 		if open := d.evaluate(fmt.Sprintf(`new Promise(function (done) {
   var open = [];
-  setTimeout(function () { open.push(kit.scope.$network.open); }, %d);
-  setTimeout(function () { open.push(kit.scope.$network.open); done(open.join(" ")); }, %d);
+  setTimeout(function () { open.push(kitwork.scope.$network.open); }, %d);
+  setTimeout(function () { open.push(kitwork.scope.$network.open); done(open.join(" ")); }, %d);
 })`, exampleNetworkDuration-1000, exampleNetworkDuration+300)); open != "true false" {
 			t.Errorf("online-%s: open is %s a second before the duration (%dms) is over and just after, want true false: it stays for the duration, then closes by itself",
 				suffix, open, exampleNetworkDuration)
@@ -405,7 +405,7 @@ func TestBrowserExampleNetworkShots(t *testing.T) {
 		if at.Covered > 0 {
 			t.Errorf("%s: the network notice (%s) covers %.0fpx² of the toast's (%s)", name, at.Parts, at.Covered, at.Toast)
 		}
-		d.evaluate(`(function () { kit.scope.$toast.clear(); return new Promise(function (done) { setTimeout(function () { done(""); }, 400); }); })()`)
+		d.evaluate(`(function () { kitwork.scope.$toast.clear(); return new Promise(function (done) { setTimeout(function () { done(""); }, 400); }); })()`)
 		at = say("offline")
 		if at.Toasts != 0 {
 			t.Errorf("%s, the toast cleared: %d notices left", name, at.Toasts)

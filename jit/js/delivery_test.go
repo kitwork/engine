@@ -151,7 +151,7 @@ func TestAssetsAreNamedByTheirBytes(t *testing.T) {
 func TestAnOldHashFindsTodaysFile(t *testing.T) {
 	defer func(minify bool) { Minify = minify }(Minify)
 	Minify = false
-	page := `<html><head></head><body><div data-kitwork-component="tabs"></div><b data-kitwork-event="intersect-enter: x(); click: kit.studioState.clearHistory()"></b></body></html>`
+	page := `<html><head></head><body><div data-kitwork-component="tabs"></div><b data-kitwork-event="intersect-enter: x(); click: kitwork.studioState.clearHistory()"></b></body></html>`
 	roles, paths := deliveredFiles(t, Deliver(page, Options{Drive: true}))
 	if strings.Join(roles, ",") != "runtime,drive,directive,service,service,component" {
 		t.Fatalf("roles: %v %v", roles, paths)
@@ -338,7 +338,7 @@ document.addEventListener("DOMContentLoaded", function () { (async function () {
 // and on a <pre> itself — which is the control: a scan that ignored everything would fail it.
 func TestExamplesBringNoFiles(t *testing.T) {
 	docs := `<html><head></head><body><p data-kitwork-bind="text: title">x</p>
-<pre><code>&lt;section data-kitwork-component="carousel" data-kitwork-event="intersect-enter: x(); click: kit.studioState.clearHistory()"&gt;</code></pre></body></html>`
+<pre><code>&lt;section data-kitwork-component="carousel" data-kitwork-event="intersect-enter: x(); click: kitwork.studioState.clearHistory()"&gt;</code></pre></body></html>`
 	if roles, paths := deliveredFiles(t, Deliver(docs, Options{})); len(roles) != 1 || roles[0] != "runtime" {
 		t.Fatalf("an example brought files: %v %v", roles, paths)
 	}

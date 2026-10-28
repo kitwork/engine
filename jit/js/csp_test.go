@@ -58,7 +58,7 @@ func TestBrowserUnderAStrictContentSecurityPolicy(t *testing.T) {
 
     // THE RUNTIME SURVIVES. No eval, no new Function, so an expression compiles and runs under a
     // policy that grants neither.
-    assert(window.kit, "the kernel did not load under the policy");
+    assert(window.kitwork, "the kernel did not load under the policy");
     assert(document.getElementById("out").textContent === "21", "an expression did not evaluate: got " + JSON.stringify(document.getElementById("out").textContent));
     document.getElementById("go").click();
     await wait(50);

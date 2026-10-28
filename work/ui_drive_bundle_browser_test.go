@@ -257,7 +257,7 @@ router.bundle({ javascript: "split" });
 </content>`,
 }
 
-// driveScriptController counts every component registration after the first load (kit.component
+// driveScriptController counts every component registration after the first load (kitwork.component
 // wrapped), walks / → /hai → /ba by the links, and at each arrival clicks what the page offers and
 // reads the answer a tick later: whether the dropdown's aria-expanded changed (a dropdown the morph
 // kept from the page before keeps its state), the appearance switch's dark mode, how
@@ -267,8 +267,8 @@ const driveScriptController = `<script>
 (function () {
   var log = {}, registered = {}, arrivals = ["hai", "ba"];
   function count() { // the kernel is a deferred file: it stands once the page has loaded
-    var component = window.kit.component;
-    window.kit.component = function (name) { registered[name] = (registered[name] || 0) + 1; return component.apply(this, arguments); };
+    var component = window.kitwork.component;
+    window.kitwork.component = function (name) { registered[name] = (registered[name] || 0) + 1; return component.apply(this, arguments); };
   }
   function counts() { return Object.keys(registered).sort().map(function (name) { return name + ":" + registered[name]; }).join(",") || "none"; }
   function ran() { return document.head.querySelectorAll("script[data-kitwork-part]:not([type])").length; }

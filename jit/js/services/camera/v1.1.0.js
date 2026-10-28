@@ -1,4 +1,4 @@
-;(function (global, kit) {
+;(function (global, kitwork) {
 "use strict";
 
 // KitJS staged service: camera@1.1.0
@@ -32,7 +32,7 @@ var promiseReject = call.bind(PromiseType.reject, PromiseType);
 var promiseResolve = call.bind(PromiseType.resolve, PromiseType);
 var assembly = global.document && global.document[Symbol.for("kitjs:assembly")];
 var nativeHost = assembly && assembly.nativeHost;
-var capabilities = kit.capabilities;
+var capabilities = kitwork.capabilities;
 var supportsCapability = capabilities && capabilities.supports;
 var adopterDescriptor = assembly && objectGetOwnPropertyDescriptor(assembly, FILE_ADOPTER);
 var adoptFile = adopterDescriptor && adopterDescriptor.value;
@@ -394,8 +394,8 @@ function capture(input) {
   return result;
 }
 
-kit.service("camera", {
+kitwork.service("camera", {
   available: available,
   capture: capture
 });
-})(globalThis, kit);
+})(globalThis, kitwork);

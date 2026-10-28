@@ -1,4 +1,4 @@
-;(function (global, document, kit) {
+;(function (global, document, kitwork) {
 "use strict";
 
 // KitJS service: lifecycle@1.0.0
@@ -158,5 +158,5 @@ function subscribe(listener) {
   };
 }
 
-kit.service("lifecycle", { snapshot: snapshot, subscribe: subscribe });
-})(globalThis, document, kit);
+kitwork.service("lifecycle", { snapshot: snapshot, subscribe: subscribe });
+})(globalThis, document, kitwork);

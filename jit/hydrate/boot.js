@@ -12,12 +12,12 @@
 // "interactive" on both sides of the event. The navigation timing entry can say it:
 // domContentLoadedEventStart is 0 until the event begins. A kernel injected after that (by a script,
 // long after load) starts at once; otherwise it waits for the event, with `load` as a fallback for a
-// browser without the timing entry. kit.start is idempotent, so both firing is harmless.
+// browser without the timing entry. kitwork.start is idempotent, so both firing is harmless.
 (function (window, document) {
   "use strict";
 
-  var kitwork = window.kitwork, kit = kitwork;
-  if (!kitwork || typeof kit.start !== "function") return;
+  var kitwork = window.kitwork;
+  if (!kitwork || typeof kitwork.start !== "function") return;
 
   function contentLoaded() {
     if (document.readyState === "loading") return false;
@@ -29,9 +29,9 @@
   }
 
   if (contentLoaded()) {
-    kit.start();
+    kitwork.start();
   } else {
-    kit.internal.listen(document, "DOMContentLoaded", kit.start, { once: true });
-    kit.internal.listen(window, "load", kit.start, { once: true });
+    kitwork.internal.listen(document, "DOMContentLoaded", kitwork.start, { once: true });
+    kitwork.internal.listen(window, "load", kitwork.start, { once: true });
   }
 })(window, document);

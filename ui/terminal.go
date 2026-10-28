@@ -45,7 +45,7 @@ import (
 // language, so shell="…" is an error that says so.
 //
 // The browser runs the kernel's terminal component (jit/js/components/terminal): copy() puts the
-// commands on the clipboard (kit.clipboard), one a line, and copied is true for two seconds after;
+// commands on the clipboard (kitwork.clipboard), one a line, and copied is true for two seconds after;
 // with typing it types the commands out while the terminal is on screen. The whole text is in the HTML
 // from the first byte and typing never moves it: what is not typed yet is only painted transparent
 // (the CSS Custom Highlight API), so a screen reader, a reader without JavaScript and find in page have

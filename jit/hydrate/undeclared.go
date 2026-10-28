@@ -26,7 +26,7 @@ import (
 //     blueprint's keys and every property its code assigns — and a component it reads is checked
 //     like a scope. One it cannot read (no source, a computed key, a shape the reader does not
 //     follow) stays opaque, and anything inside it is never reported.
-//   - a page that writes its own page scope from a script (kit.set, kit.scope.x = …) → skip the
+//   - a page that writes its own page scope from a script (kitwork.set, kitwork.scope.x = …) → skip the
 //     page scope entirely, since a name can then arrive from somewhere the markup does not show.
 //     Every other page HAS a readable page scope: a two-way data-kitwork-bind written outside any
 //     boundary declares a name there, and a nested boundary reads it by falling through, which is
@@ -46,7 +46,7 @@ import (
 // It holds no $-names: the scanner skips those before it looks here (a $alias belongs to the page,
 // and the scanner cannot know a page's aliases), so a $-name in this map would be unreachable.
 var reservedReadNames = map[string]bool{
-	"kit": true,
+	"kitwork": true,
 	// the expression globals (globals.go) — present on every page, declared by no scope
 	"Math": true, "Date": true, "JSON": true, "Number": true, "String": true, "Boolean": true,
 	"Array": true, "Object": true, "parseInt": true, "parseFloat": true,
@@ -329,7 +329,7 @@ func pageDataNames(html string) map[string]bool {
 // pageScopeIsWritten reports whether the page pokes its own page scope from a script, which makes
 // every page-scope name unknowable from the markup alone.
 func pageScopeIsWritten(html string) bool {
-	return strings.Contains(html, "kit.set(") || strings.Contains(html, "kit.scope.") ||
+	return strings.Contains(html, "kitwork.set(") || strings.Contains(html, "kitwork.scope.") ||
 		strings.Contains(html, "kitwork.set(") || strings.Contains(html, "kitwork.scope.")
 }
 

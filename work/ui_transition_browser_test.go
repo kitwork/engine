@@ -456,7 +456,7 @@ func TestBrowserTransition(t *testing.T) {
 			}
 			// in: the toast says a notice that stays; Drive's word opens every network's notice at once.
 			// out: the toast's notice by its own dismiss button, each network's by its close().
-			come := `kit.scope.$toast.info("Một thông báo.", { duration: 0 }); document.dispatchEvent(new CustomEvent("kitwork:offline"));`
+			come := `kitwork.scope.$toast.info("Một thông báo.", { duration: 0 }); document.dispatchEvent(new CustomEvent("kitwork:offline"));`
 			leave := `document.querySelector('[data-kitwork-component^="toast"] > [data-kitwork-key] button').click();
   ["placed", "faded", "plain"].forEach(function (id) { document.getElementById("close-" + id).click(); });`
 			for _, motion := range []string{"no-preference", "reduce"} {

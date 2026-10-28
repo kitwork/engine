@@ -246,7 +246,7 @@ func TestBrowserCountdownClock(t *testing.T) {
 // its timer released with it.
 //
 // CONTROL, against copies of v1.0.0.js served through -overlay: with the cleanup in init emptied, the
-// removed countdown's scope (held from kit.components) went on counting and ended, "2000 then 0" (the
+// removed countdown's scope (held from kitwork.components) went on counting and ended, "2000 then 0" (the
 // test failed; the kernel drops the finish of a host no longer in the document, so the count alone
 // could not tell); with finish() sending its event twice, the repeat counted 4 (the test failed).
 func TestBrowserCountdownReadyFinishAndRemoval(t *testing.T) {
@@ -273,7 +273,7 @@ function finished(id) { return finishes.filter(function (f) { return f.id === id
   var shown = function (id) { var time = document.querySelector("#" + id + " time"); return time ? time.textContent : "(removed)"; };
   assert(shown("again") === "1000|playing", "ready=\"play()\" starts it, got " + shown("again"));
   assert(shown("gone") === "2000|playing", "ready=\"play()\" starts the second too, got " + shown("gone"));
-  var instances = window.kit.components.countdown;
+  var instances = window.kitwork.components.countdown;
   assert(instances && instances.length === 2, "two countdowns are alive");
   var held = instances[1];
 

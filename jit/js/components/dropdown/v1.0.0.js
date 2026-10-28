@@ -23,4 +23,4 @@ var dropdownDef = {
   close: function () { this.open = false; }
 };
 
-window.kit.component("dropdown", dropdownDef);
+window.kitwork.component("dropdown", dropdownDef);

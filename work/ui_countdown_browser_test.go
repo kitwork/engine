@@ -72,7 +72,7 @@ const countdownHeard = `(function () {
   document.addEventListener("freeze", function () { at("page", "frozen"); });
   document.addEventListener("resume", function () { at("page", "resumed"); });
   window.addEventListener("finish", function (event) {
-    var host = event.target, time = host.querySelector("time"), toggle = host.querySelector("#toggle"), scope = kit.scopeFor(host);
+    var host = event.target, time = host.querySelector("time"), toggle = host.querySelector("#toggle"), scope = kitwork.scopeFor(host);
     window.__finishes.push({ at: performance.now(), detail: event.detail, page: document.visibilityState,
       shown: [time.textContent, time.getAttribute("datetime"), toggle ? toggle.textContent : "", "remaining " + scope.remaining, "playing " + scope.playing].join(" ") });
   }, true);
@@ -99,7 +99,7 @@ const countdownProbe = `(function () {
     click: function (id) { document.getElementById(id).click(); return performance.now(); },
     finished: function () { return window.__finishes.length; },
     screen: function () { return document.getElementById("left").textContent + " " + document.getElementById("toggle").textContent; },
-    state: function () { var tea = kit.scope.$tea; return [tea.remaining, tea.hours + ":" + tea.minutes + ":" + tea.seconds, tea.playing ? "playing" : "held", tea.duration].join(" "); },
+    state: function () { var tea = kitwork.scope.$tea; return [tea.remaining, tea.hours + ":" + tea.minutes + ":" + tea.seconds, tea.playing ? "playing" : "held", tea.duration].join(" "); },
     first: function (what) { var list = window.__seen.filter(function (e) { return e[0] === what; }); return list.length ? list[0][1] : "nothing"; },
     when: function (what, value, after) {
       var list = window.__seen.filter(function (e) { return e[0] === what && e[1] === value && e[2] >= after; });
@@ -119,7 +119,7 @@ const countdownProbe = `(function () {
       var rows = Array.prototype.filter.call(toast.children, function (c) { return c.hasAttribute("data-kitwork-key") && !c.hasAttribute("data-leaving"); });
       return rows.map(function (row) { return row.querySelectorAll("p")[1].textContent; }).join(" ; ") || "no notice";
     },
-    clear: function () { kit.scope.$toast.clear(); return C.wait(250); }
+    clear: function () { kitwork.scope.$toast.clear(); return C.wait(250); }
   };
   return "installed";
 })()`
@@ -381,7 +381,7 @@ func TestBrowserCountdown(t *testing.T) {
   await C.until(function () { return C.screen() === "0:03 Tạm dừng"; }, 2000);
   var played = C.when("toggle", "Tạm dừng", 0);
   await C.wait(1300 - (C.now() - played));
-  var host = document.querySelector('[data-kitwork-component^="countdown"]'), held = kit.scopeFor(host), heard = 0;
+  var host = document.querySelector('[data-kitwork-component^="countdown"]'), held = kitwork.scopeFor(host), heard = 0;
   host.addEventListener("finish", function () { heard++; });
   var arrived = new Promise(function (done) { document.addEventListener("kitwork:load", function () { done(); }, { once: true }); });
   C.click("next");
@@ -807,7 +807,7 @@ func TestBrowserCountdownSegmentEdits(t *testing.T) {
 		if slow {
 			name = "a click on Dừng held 150 ms"
 		}
-		countdownStep(d, `if (!kit.scope.$tea.playing) C.click("toggle"); await C.wait(1300); return "";`)
+		countdownStep(d, `if (!kitwork.scope.$tea.playing) C.click("toggle"); await C.wait(1300); return "";`)
 		carouselClick(t, d, "#seconds", 0, 0)
 		held := step(`await C.frames(); window.__events = []; return rect("stop") + " " + read();`)
 		if slow {
@@ -882,10 +882,10 @@ func TestBrowserCountdownSegmentEdits(t *testing.T) {
 	// a run started while a segment has the focus
 	countdownStep(d, `await C.clear(); document.getElementById("first-toggle").click(); return "";`)
 	carouselClick(t, d, "#second", 0, 0)
-	check(t, "$first's end plays $second, whose segment is focused: held", step(`await C.wait(2600); var s = kit.scope.$second;
+	check(t, "$first's end plays $second, whose segment is focused: held", step(`await C.wait(2600); var s = kitwork.scope.$second;
   return [document.getElementById("second").value, s.remaining, s.playing ? "playing" : "held", document.activeElement.id].join(" ");`), "03 3000 held second")
 	countdownKey(d, "Tab")
-	check(t, "Tab plays it to its end", step(`await C.wait(3500); var s = kit.scope.$second;
+	check(t, "Tab plays it to its end", step(`await C.wait(3500); var s = kitwork.scope.$second;
   return [document.getElementById("second").value, s.remaining, s.playing ? "playing" : "held", C.toast()].join(" | ");`), "00 | 0 | held | Hết lượt hai")
 	check(t, "complaints of the page", d.evaluate(`JSON.stringify(window.__complaints)`), "[]")
 }

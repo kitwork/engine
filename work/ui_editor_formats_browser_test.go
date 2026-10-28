@@ -345,7 +345,7 @@ func TestBrowserEditorFormatSelectWithoutJavaScript(t *testing.T) {
 	d.loaded(`(document.querySelector(".editor-field") ? "the editor's page" : "a wait of 0")`)
 	got := d.evaluate(`(function () {
   function shown(selector) { var el = document.querySelector(selector); return el ? getComputedStyle(el).display : "missing"; }
-  return JSON.stringify({ select: shown("select"), toolbar: shown(".editor-toolbar"), area: shown(".editor-area"), field: getComputedStyle(document.querySelector(".editor-field")).position, scripts: typeof window.kit });
+  return JSON.stringify({ select: shown("select"), toolbar: shown(".editor-toolbar"), area: shown(".editor-area"), field: getComputedStyle(document.querySelector(".editor-field")).position, scripts: typeof window.kitwork });
 })()`)
 	if want := `{"select":"none","toolbar":"none","area":"none","field":"static","scripts":"undefined"}`; got != want {
 		t.Errorf("without JavaScript:\n got  %s\n want %s", got, want)

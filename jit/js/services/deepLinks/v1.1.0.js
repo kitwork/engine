@@ -1,4 +1,4 @@
-;(function (global, document, kit) {
+;(function (global, document, kitwork) {
 "use strict";
 
 // KitJS staged service: deepLinks@1.1.0
@@ -307,5 +307,5 @@ function subscribe(listener) {
   };
 }
 
-kit.service("deepLinks", { snapshot: snapshot, subscribe: subscribe });
-})(globalThis, document, kit);
+kitwork.service("deepLinks", { snapshot: snapshot, subscribe: subscribe });
+})(globalThis, document, kitwork);

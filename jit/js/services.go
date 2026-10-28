@@ -3,13 +3,13 @@ package js
 // Native services: the capabilities a desktop or mobile shell offers a page — studioState,
 // studioSqlite, studioDatabase, and the mobile ones that follow — as kit.<name>. They were KitJS's
 // (removed 01/10) and are kept as they were written: one file per service, services/<name>/v<x>.js,
-// each registering itself with kit.service and reaching the shell through the adapter the shell
+// each registering itself with kitwork.service and reaching the shell through the adapter the shell
 // seeds at document-start (native/bridge). They went with KitJS by mistake: the Studio desktop app
 // lost its state, its SQLite browser and its database connections, silently, because each call
 // checks for its service first (found 02/10).
 //
 // A page gets a service the way it gets a component — one file, only when something on the page
-// names it: kit.studioSqlite in the markup, or in the source of a component the page uses (Studio
+// names it: kitwork.studioSqlite in the markup, or in the source of a component the page uses (Studio
 // calls its services from its own component, never from markup). Before the first service comes
 // one small file, the assembly (services/assembly.js), which hands every service what KitJS used to:
 // the shell's host adapter, its file channel, and the list of service versions this engine carries.
@@ -23,7 +23,7 @@ import (
 	"strings"
 )
 
-// serviceUseRe finds a name read off kit — kit.studioState, kitwork.nfc — in markup or in source.
+// serviceUseRe finds a name read off kit — kitwork.studioState, kitwork.nfc — in markup or in source.
 var serviceUseRe = regexp.MustCompile(`\bkit(?:work)?\.([a-z][A-Za-z0-9]*)\b`)
 
 // serviceRequiresRe reads a service's own note of what it needs loaded first:

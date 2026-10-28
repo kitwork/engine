@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// After Drive swaps a page, kit.components and the $aliases describe the NEW page: a component that
+// After Drive swaps a page, kitwork.components and the $aliases describe the NEW page: a component that
 // left is gone from both, and one that arrived is in both. The toast arrives on the very <div> the
 // tabs left — same tag, same place — which morph used to patch in place, keeping the tabs' scope
 // under the toast's name (02/10). The arriving toast is also the control: a registry that simply
@@ -33,19 +33,19 @@ func TestBrowserDriveLeavesNoStaleComponents(t *testing.T) {
 document.addEventListener("DOMContentLoaded", function () { (async function () {
 `+proofScriptHead+`
   await wait(100);
-  var before = Object.keys(window.kit.components).sort().join(",");
+  var before = Object.keys(window.kitwork.components).sort().join(",");
   assert(before === "dropdown,tabs", "page A registers its components, got " + before);
   document.getElementById("go").click();
   for (var i = 0; i < 40 && !document.getElementById("arrived"); i++) await wait(100);
   await wait(200);
   assert(document.getElementById("arrived"), "Drive swapped in page B");
-  var after = Object.keys(window.kit.components).sort().join(",");
-  assert(after === "toast", "kit.components describes page B only, got " + after);
+  var after = Object.keys(window.kitwork.components).sort().join(",");
+  assert(after === "toast", "kitwork.components describes page B only, got " + after);
   // Aliases resolve on the page scope, where markup reads them.
-  var page = window.kit.scope;
+  var page = window.kitwork.scope;
   assert(!page.$docs, "the alias of a component that left is gone, got " + typeof page.$docs);
   assert(page.$note && typeof page.$note.show === "function", "the alias of the component that arrived resolves, got " + typeof page.$note);
-  assert(typeof window.kit.components.toast.show === "function", "kit.components.toast is the toast, not the tabs a morph patched into its place");
+  assert(typeof window.kitwork.components.toast.show === "function", "kitwork.components.toast is the toast, not the tabs a morph patched into its place");
   root.setAttribute("data-kit-test", "passed");
 })().catch(function (error) { var root = document.documentElement; if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } }); });
 </script></body></html>`, Options{Drive: true})

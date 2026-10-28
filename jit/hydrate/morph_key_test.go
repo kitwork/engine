@@ -8,7 +8,7 @@ import "testing"
 // either are ordinary same-tag siblings, matched by position.
 func TestMorphKeysOnAuthoredAttributesOnly(t *testing.T) {
 	const assertions = `
-var kit = window.kit;
+var kitwork = window.kitwork;
 function list(keyAttr, keys) {
   var ul = el("ul", {});
   keys.forEach(function (k) { var li = el("li", {}); li.setAttribute(keyAttr, k); li.setAttribute("data-id", k); ul.appendChild(li); });
@@ -19,7 +19,7 @@ function ids(ul) { return ul.childNodes.map(function (n) { return n.getAttribute
 ["data-kitwork-key"].forEach(function (attr) {
   var from = list(attr, ["a", "b", "c"]);
   var a = from.childNodes[0], b = from.childNodes[1], c = from.childNodes[2];
-  kit.morph(from, list(attr, ["c", "b", "a"]));
+  kitwork.morph(from, list(attr, ["c", "b", "a"]));
   if (ids(from) !== "c,b,a") throw new Error(attr + ": order not reconciled: " + ids(from));
   if (from.childNodes[0] !== c || from.childNodes[1] !== b || from.childNodes[2] !== a) {
     throw new Error(attr + ": keyed rows must MOVE (same nodes, new order), not be rewritten in place");
@@ -32,7 +32,7 @@ function ids(ul) { return ul.childNodes.map(function (n) { return n.getAttribute
 ["data-kit-key", "data-key"].forEach(function (attr) {
   var inert = list(attr, ["a", "b", "c"]);
   var i0 = inert.childNodes[0], i1 = inert.childNodes[1], i2 = inert.childNodes[2];
-  kit.morph(inert, list(attr, ["c", "b", "a"]));
+  kitwork.morph(inert, list(attr, ["c", "b", "a"]));
   if (inert.childNodes.length !== 3) throw new Error(attr + ": positional match should keep three rows, got " + inert.childNodes.length);
   if (inert.childNodes[0] !== i0 || inert.childNodes[1] !== i1 || inert.childNodes[2] !== i2) {
     throw new Error(attr + " must not key rows — expected positional matching (nodes stay put), got keyed moves");

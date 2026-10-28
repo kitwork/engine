@@ -153,7 +153,7 @@ const editorBrowserProbe = `(function () {
     },
     read: function () {
       return E.frames().then(function () {
-        var b = kit.scope.$body, popover = document.querySelector(".editor-popover"), input = document.querySelector(".editor-address");
+        var b = kitwork.scope.$body, popover = document.querySelector(".editor-popover"), input = document.querySelector(".editor-address");
         var error = document.querySelector(".editor-address-error"), active = document.activeElement, writing = area();
         var unsaved = document.querySelector('[data-kitwork-bind="show: $body.unsaved"]');
         var names = function (selector, attribute) {
@@ -886,7 +886,7 @@ func editorCaretIn(d *devtools, words string) {
 const editorPopoverState = `new Promise(function (done) { requestAnimationFrame(function () { requestAnimationFrame(function () {
   var pop = document.querySelector(".editor-popover"), a = document.activeElement, link = document.querySelector('.editor-toolbar [data-kitwork-command="link"]');
   var focus = a === document.querySelector(".editor-area") ? "area" : a === document.querySelector(".editor-address") ? "address" : a && a.closest(".editor-popover") ? "popover " + a.textContent : a ? a.tagName.toLowerCase() : "none";
-  done((pop.hidden ? "closed" : "open") + ", expanded " + link.getAttribute("aria-expanded") + ", open " + kit.scope.$body.open + ", focus " + focus);
+  done((pop.hidden ? "closed" : "open") + ", expanded " + link.getAttribute("aria-expanded") + ", open " + kitwork.scope.$body.open + ", focus " + focus);
 }); }); })`
 
 // The link popover closes however the writer leaves it: Escape wherever its focus is (a button of its
@@ -964,7 +964,7 @@ func TestBrowserEditorLinkInTheAreaIsNoMove(t *testing.T) {
 	from := site.heard()
 	editorClick(d, ".editor-area a")
 	time.Sleep(1500 * time.Millisecond)
-	got := d.evaluate(`location.pathname + " " + !!window.__before + " " + !!document.querySelector(".editor-area") + " unsaved " + kit.scope.$body.unsaved + " caret in the link " + !!(getSelection().anchorNode && getSelection().anchorNode.parentNode.closest(".editor-area a"))`)
+	got := d.evaluate(`location.pathname + " " + !!window.__before + " " + !!document.querySelector(".editor-area") + " unsaved " + kitwork.scope.$body.unsaved + " caret in the link " + !!(getSelection().anchorNode && getSelection().anchorNode.parentNode.closest(".editor-area a"))`)
 	if want := "/ true true unsaved false caret in the link true"; got != want || site.pages(from) != "" || site.drive(from) != "" {
 		t.Errorf("a click on a link in the area:\n got  %s; loaded %q; Drive %q\n want %s, nothing loaded", got, site.pages(from), site.drive(from), want)
 	}
@@ -1135,7 +1135,7 @@ const editorV2Probe = `(function () {
         return JSON.stringify({
           pressed: names('.editor [aria-pressed="true"]'),
           disabled: names('.editor-toolbar [aria-disabled="true"]'),
-          menu: (pop.hidden ? "closed" : "open") + ", expanded " + trigger.getAttribute("aria-expanded") + ", open " + kit.scopeFor(menu).open,
+          menu: (pop.hidden ? "closed" : "open") + ", expanded " + trigger.getAttribute("aria-expanded") + ", open " + kitwork.scopeFor(menu).open,
           focus: active === document.querySelector(".editor-area") ? "area" : active === trigger ? "trigger" : active ? active.tagName.toLowerCase() + (name(active) ? "[" + name(active) + "]" : "") : "none"
         });
       });

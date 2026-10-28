@@ -20,7 +20,7 @@ import (
 // the page's scheme.
 const exampleToastSay = `(function (labels) {
   var host = document.querySelector('[data-kitwork-component^="toast"]');
-  if (labels.length) kit.scope.$toast.clear();
+  if (labels.length) kitwork.scope.$toast.clear();
   return new Promise(function (done) { setTimeout(function () {
     var buttons = Array.prototype.slice.call(document.querySelectorAll("#toast button"));
     labels.forEach(function (label) { buttons.filter(function (b) { return b.textContent.trim() === label; })[0].click(); });
@@ -56,9 +56,9 @@ const exampleToastSay = `(function (labels) {
 // the stack and the page scroll sideways, and the rectangle around the notice (to picture it).
 const exampleToastLong = `(function () {
   var host = document.querySelector('[data-kitwork-component^="toast"]');
-  kit.scope.$toast.clear();
+  kitwork.scope.$toast.clear();
   return new Promise(function (done) { setTimeout(function () {
-    kit.scope.$toast.danger("Could not open https://example.com/uploads/2026/10/17/a-very-long-file-name-without-any-break-points-abcdefghijklmnopqrstuvwxyz.jpg", { title: "Upload failed" });
+    kitwork.scope.$toast.danger("Could not open https://example.com/uploads/2026/10/17/a-very-long-file-name-without-any-break-points-abcdefghijklmnopqrstuvwxyz.jpg", { title: "Upload failed" });
     setTimeout(function () { requestAnimationFrame(function () { requestAnimationFrame(function () {
       var row = host.querySelector(":scope > [data-kitwork-key]"), card = row.getBoundingClientRect();
       var x = row.querySelector('button[data-kitwork-event^="click: dismiss"]').getBoundingClientRect();
@@ -77,11 +77,11 @@ const exampleToastLong = `(function () {
 // is inside the screen, and whether the stack is taller than its room (it scrolls inside).
 const exampleToastTall = `(function () {
   var host = document.querySelector('[data-kitwork-component^="toast"]');
-  kit.scope.$toast.clear();
+  kitwork.scope.$toast.clear();
   return new Promise(function (done) { setTimeout(function () {
-    kit.scope.$toast.success("The menu is saved and on the site.", { title: "Menu saved", action: { label: "Open the menu", link: "#toast" } });
-    kit.scope.$toast.success("The photo is on the page of the dish.", { title: "Photo uploaded", action: { label: "Open the dish", link: "#toast" } });
-    kit.scope.$toast.danger("The order is still in the cart: try again.", { title: "Order not saved", action: { label: "Open the cart", link: "#toast" } });
+    kitwork.scope.$toast.success("The menu is saved and on the site.", { title: "Menu saved", action: { label: "Open the menu", link: "#toast" } });
+    kitwork.scope.$toast.success("The photo is on the page of the dish.", { title: "Photo uploaded", action: { label: "Open the dish", link: "#toast" } });
+    kitwork.scope.$toast.danger("The order is still in the cart: try again.", { title: "Order not saved", action: { label: "Open the cart", link: "#toast" } });
     setTimeout(function () { requestAnimationFrame(function () { requestAnimationFrame(function () {
       var rows = Array.prototype.filter.call(host.children, function (c) { return c.hasAttribute("data-kitwork-key"); });
       var newest = rows[rows.length - 1].getBoundingClientRect();
@@ -306,7 +306,7 @@ func TestBrowserExampleToastShots(t *testing.T) {
   button.click();
   return new Promise(function (done) { setTimeout(function () {
     var rows = document.querySelectorAll('[data-kitwork-component^="toast"] > [data-kitwork-key]').length;
-    done(kit.scope.$files.selected + " " + rows);
+    done(kitwork.scope.$files.selected + " " + rows);
   }, 300); });
 })()`)
 	if chosen != "page 0" {

@@ -234,7 +234,7 @@ func parityHandoff(t *testing.T, f parityFile, c parityCase) parityHandoffCase {
 }
 
 // TestParityCorpusClientMatchesServer runs the same corpus through the composed client runtime in node
-// (window.kit.compile + window.kit.run) and holds each answer and each text to the same corpus: with
+// (window.kitwork.compile + window.kitwork.run) and holds each answer and each text to the same corpus: with
 // TestParityCorpusServer passing, the kernel and the server answer alike. Each value is also handed on
 // as the server hands a component's input to the browser (Literal), and the kernel must read it back as
 // the server does (16/10/2026: NaN, undefined, a lambda, a global read back as null in the browser).
@@ -255,7 +255,7 @@ func TestParityCorpusClientMatchesServer(t *testing.T) {
 process.on("unhandledRejection", function () {}); // Array.fromAsync() settles after the expression
 var CORPUS = ` + string(parityCorpus) + `;
 var HANDOFF = ` + string(handoffJSON) + `;
-var kit = window.kit;
+var kitwork = window.kitwork;
 var GLOBALS = new Map([[Math, "Math"], [Date, "Date"], [JSON, "JSON"], [Number, "Number"], [String, "String"], [Boolean, "Boolean"],
   [Array, "Array"], [parseInt, "parseInt"], [parseFloat, "parseFloat"], [encodeURIComponent, "encodeURIComponent"],
   [decodeURIComponent, "decodeURIComponent"], [isNaN, "isNaN"], [isFinite, "isFinite"]]);
@@ -302,14 +302,14 @@ CORPUS.cases.forEach(function (c, i) {
   var h = HANDOFF[i];
   if (h) {
     var back;
-    try { back = describe(kit.run(kit.compile(h.literal), {})); } catch (e) { back = "throws"; }
+    try { back = describe(kitwork.run(kitwork.compile(h.literal), {})); } catch (e) { back = "throws"; }
     if (back !== h.want) failures.push(c.group + ": " + c.src + " is handed on as " + h.literal + ", which reads back as " + back + ", want " + h.want);
     handed++;
   }
   // host data reaches the browser as literal() writes it, an object's keys sorted
   var scope = sorted(Object.assign(copy(CORPUS.scope), c.scope ? copy(c.scope) : {}));
   var got, v, failed = false;
-  try { v = kit.run(kit.compile(c.src.trim()), scope); got = describe(v); } catch (e) { failed = true; got = "throws"; }
+  try { v = kitwork.run(kitwork.compile(c.src.trim()), scope); got = describe(v); } catch (e) { failed = true; got = "throws"; }
   if (got !== c.want) { failures.push(c.group + ": " + c.src + " = " + got + ", want " + c.want); return; }
   if (failed) return;
   var text;

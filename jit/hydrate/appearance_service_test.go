@@ -7,7 +7,7 @@ import "testing"
 // classList.contains is always false), which would let every assertion below pass for the wrong
 // reason.
 const appearanceShim = `
-var kit = window.kit;
+var kitwork = window.kitwork;
 var store = {};
 var classes = {};
 var systemDark = false;
@@ -34,10 +34,10 @@ window.matchMedia = global.matchMedia = function (query) {
 func TestAppearanceDarkFollowsWhatIsShown(t *testing.T) {
 	const assertions = appearanceShim + `
 function check(label, mode, dark) {
-  if (kit.appearance.mode !== mode) throw new Error(label + ": mode = " + kit.appearance.mode + ", want " + mode);
-  if (kit.appearance.dark !== dark) throw new Error(label + ": dark = " + kit.appearance.dark + ", want " + dark);
+  if (kitwork.appearance.mode !== mode) throw new Error(label + ": mode = " + kitwork.appearance.mode + ", want " + mode);
+  if (kitwork.appearance.dark !== dark) throw new Error(label + ": dark = " + kitwork.appearance.dark + ", want " + dark);
   if (document.documentElement.classList.contains("dark") !== dark) throw new Error(label + ": the dark class disagrees with dark");
-  if (kit.appearance.resolved !== (dark ? "dark" : "light")) throw new Error(label + ": resolved = " + kit.appearance.resolved);
+  if (kitwork.appearance.resolved !== (dark ? "dark" : "light")) throw new Error(label + ": resolved = " + kitwork.appearance.resolved);
   // data-theme carries what is SHOWN, as the pre-paint writes it — never "system", which a site that
   // scopes its dark under [data-theme="dark"] would paint light on a dark device.
   var attribute = document.documentElement.getAttribute("data-theme");
@@ -45,35 +45,35 @@ function check(label, mode, dark) {
 }
 
 systemDark = true;
-kit.appearance.system();
+kitwork.appearance.system();
 check("system, OS dark", "system", true);
 
 systemDark = false;
-kit.appearance.system();
+kitwork.appearance.system();
 check("system, OS light", "system", false);
 
 // An explicit choice is shown whatever the OS says.
 systemDark = true;
-kit.appearance.set("light");
+kitwork.appearance.set("light");
 check("light on a dark OS", "light", false);
 systemDark = false;
-kit.appearance.set("dark");
+kitwork.appearance.set("dark");
 check("dark on a light OS", "dark", true);
 
 // toggle() flips what is shown, and dark follows it.
-kit.appearance.toggle();
+kitwork.appearance.toggle();
 check("toggled from dark", "light", false);
-kit.appearance.toggle();
+kitwork.appearance.toggle();
 check("toggled from light", "dark", true);
 
 // dark reads the page, not the store: the pre-paint put the class there before the kernel ran.
 store = {};
 document.documentElement.classList.add("dark");
-if (kit.appearance.mode !== "system" || kit.appearance.dark !== true) {
-  throw new Error("with nothing stored and a dark page, dark must be true: " + kit.appearance.mode + "/" + kit.appearance.dark);
+if (kitwork.appearance.mode !== "system" || kitwork.appearance.dark !== true) {
+  throw new Error("with nothing stored and a dark page, dark must be true: " + kitwork.appearance.mode + "/" + kitwork.appearance.dark);
 }
 document.documentElement.classList.remove("dark");
-if (kit.appearance.dark !== false) throw new Error("a light page must read dark = false");
+if (kitwork.appearance.dark !== false) throw new Error("a light page must read dark = false");
 
 console.log("dark follows what is shown");
 `
@@ -85,25 +85,25 @@ console.log("dark follows what is shown");
 // three words — the rule the pre-paint uses too. A new choice is written under "appearance".
 func TestAppearanceReadsTheNewKeyThenTheOldOne(t *testing.T) {
 	const assertions = appearanceShim + `
-function modeWith(saved) { store = saved; return kit.appearance.mode; }
+function modeWith(saved) { store = saved; return kitwork.appearance.mode; }
 
 if (modeWith({}) !== "system") throw new Error("nothing stored: system");
-if (modeWith({ theme: "dark" }) !== "dark") throw new Error("the old key alone must still be honoured, got " + kit.appearance.mode);
-if (modeWith({ theme: "Light" }) !== "light") throw new Error("the old key is read case-insensitively, got " + kit.appearance.mode);
-if (modeWith({ appearance: "dark" }) !== "dark") throw new Error("the new key alone, got " + kit.appearance.mode);
-if (modeWith({ appearance: "light", theme: "dark" }) !== "light") throw new Error("the new key must win over the old, got " + kit.appearance.mode);
-if (modeWith({ appearance: "system", theme: "dark" }) !== "system") throw new Error("system under the new key must win over an old explicit choice, got " + kit.appearance.mode);
-if (modeWith({ appearance: "sepia", theme: "dark" }) !== "dark") throw new Error("a word that is not a choice under the new key must fall back to the old, got " + kit.appearance.mode);
-if (modeWith({ appearance: "sepia" }) !== "system") throw new Error("no choice under either key: system, got " + kit.appearance.mode);
+if (modeWith({ theme: "dark" }) !== "dark") throw new Error("the old key alone must still be honoured, got " + kitwork.appearance.mode);
+if (modeWith({ theme: "Light" }) !== "light") throw new Error("the old key is read case-insensitively, got " + kitwork.appearance.mode);
+if (modeWith({ appearance: "dark" }) !== "dark") throw new Error("the new key alone, got " + kitwork.appearance.mode);
+if (modeWith({ appearance: "light", theme: "dark" }) !== "light") throw new Error("the new key must win over the old, got " + kitwork.appearance.mode);
+if (modeWith({ appearance: "system", theme: "dark" }) !== "system") throw new Error("system under the new key must win over an old explicit choice, got " + kitwork.appearance.mode);
+if (modeWith({ appearance: "sepia", theme: "dark" }) !== "dark") throw new Error("a word that is not a choice under the new key must fall back to the old, got " + kitwork.appearance.mode);
+if (modeWith({ appearance: "sepia" }) !== "system") throw new Error("no choice under either key: system, got " + kitwork.appearance.mode);
 
 // Writing goes to "appearance" alone; the old key is left as it was (it no longer decides anything).
 store = { theme: "dark" };
-kit.appearance.set("light");
+kitwork.appearance.set("light");
 if (store.appearance !== "light") throw new Error("set() must store under \"appearance\", got " + JSON.stringify(store));
 if (store.theme !== "dark") throw new Error("set() must not rewrite the old key, got " + JSON.stringify(store));
-if (kit.appearance.mode !== "light") throw new Error("after set('light') the new key decides, got " + kit.appearance.mode);
-kit.appearance.system();
-if (store.appearance !== "system" || kit.appearance.mode !== "system") {
+if (kitwork.appearance.mode !== "light") throw new Error("after set('light') the new key decides, got " + kitwork.appearance.mode);
+kitwork.appearance.system();
+if (store.appearance !== "system" || kitwork.appearance.mode !== "system") {
   throw new Error("system() must store \"system\" under the new key and win over the old dark: " + JSON.stringify(store));
 }
 
@@ -113,7 +113,7 @@ console.log("appearance key first, theme key as the fallback");
 }
 
 // router.appearance(mode) is the mode a page shows BEFORE the visitor chooses. The server writes it on
-// <html data-kitwork-appearance> (nothing for "system", the default), and kit.appearance reads it
+// <html data-kitwork-appearance> (nothing for "system", the default), and kitwork.appearance reads it
 // only when nothing is stored: a stored choice — under either key — beats it, and system() stores
 // "system", so a visitor follows the device even on a site whose default is dark.
 func TestAppearanceSiteDefaultAppliesOnlyWhenNothingIsStored(t *testing.T) {
@@ -123,7 +123,7 @@ function modeWith(siteDefault, saved) {
   if (siteDefault == null) root.removeAttribute("data-kitwork-appearance");
   else root.setAttribute("data-kitwork-appearance", siteDefault);
   store = saved;
-  return kit.appearance.mode;
+  return kitwork.appearance.mode;
 }
 function expect(got, want, why) { if (got !== want) throw new Error(why + ": got " + got + ", want " + want); }
 
@@ -148,23 +148,23 @@ expect(modeWith("dark", { appearance: "system" }), "system", "a stored system be
 systemDark = false;
 modeWith("dark", {});
 root.classList.add("dark"); // the pre-paint painted the site's dark default
-if (kit.appearance.dark !== true) throw new Error("the page painted dark: dark must be true");
-kit.appearance.system();
+if (kitwork.appearance.dark !== true) throw new Error("the page painted dark: dark must be true");
+kitwork.appearance.system();
 expect(store.appearance, "system", "system() must store the word, not empty the store");
-expect(kit.appearance.mode, "system", "after system() on a dark-default site");
-if (kit.appearance.dark !== false || root.classList.contains("dark")) {
+expect(kitwork.appearance.mode, "system", "after system() on a dark-default site");
+if (kitwork.appearance.dark !== false || root.classList.contains("dark")) {
   throw new Error("system() on a dark-default site with a light device must show light");
 }
 
 // toggle() from the site's default flips what is shown and stores the visitor's choice
 modeWith("dark", {});
 root.classList.add("dark");
-kit.appearance.toggle();
+kitwork.appearance.toggle();
 expect(store.appearance, "light", "toggle() from a dark default stores light");
-expect(kit.appearance.mode, "light", "after toggle() from a dark default");
+expect(kitwork.appearance.mode, "light", "after toggle() from a dark default");
 
 // What Drive calls after a move whose page says another default: the rule is applied again.
-var web = kit.module("web");
+var web = kitwork.module("web");
 if (!web || typeof web.showAppearance !== "function") throw new Error("the web module must offer showAppearance to Drive");
 systemDark = false;
 modeWith("dark", {});

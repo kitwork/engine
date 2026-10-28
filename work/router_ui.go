@@ -146,8 +146,8 @@ func (f *FolderRouter) Fonts(args ...value.Value) (*FolderRouter, error) {
 //
 // "system" (the default) follows the device; "light" and "dark" fix it. Inherited down the folders
 // like router.transition: a branch may set its own, "system" included. The visitor's own choice (the
-// appearance component, kit.appearance) always wins over it: a .ui page writes the mode on <html> as
-// data-kitwork-appearance only for the pre-paint and kit.appearance to fall back on when the visitor
+// appearance component, kitwork.appearance) always wins over it: a .ui page writes the mode on <html> as
+// data-kitwork-appearance only for the pre-paint and kitwork.appearance to fall back on when the visitor
 // has stored none. A "dark" route whose colours have no dark value gets its dark derived from the
 // tokens, so it is dark rather than unchanged (routeCSS).
 func (f *FolderRouter) Appearance(args ...value.Value) (*FolderRouter, error) {

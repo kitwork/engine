@@ -106,7 +106,7 @@ const toastProbe = `(function () {
   window.__toast = {
     host: host, rows: rows,
     state: function (still) {
-      var scope = kit.scopeFor(host);
+      var scope = kitwork.scopeFor(host);
       var waitingText = Array.prototype.filter.call(host.children, function (c) { return c.tagName === "P"; })[0];
       var drawn = rows().filter(function (row) { return !still || !row.hasAttribute("data-leaving"); });
       return JSON.stringify({ rows: drawn.map(describe), waiting: scope.waiting, paused: scope.paused,
@@ -130,7 +130,7 @@ const toastProbe = `(function () {
       var icon = at.querySelector("i[aria-label]");
       return row.getAttribute("data-kitwork-key") + ":" + (at.textContent.trim() || (icon ? icon.getAttribute("aria-label") : at.tagName));
     },
-    clear: function () { kit.scope.$toast.clear(); return new Promise(function (done) { start(done, 250); }); }
+    clear: function () { kitwork.scope.$toast.clear(); return new Promise(function (done) { start(done, 250); }); }
   };
   return "installed";
 })()`
@@ -298,8 +298,8 @@ func TestBrowserToast(t *testing.T) {
   await T.frames();
   await T.wait(400);
   var after = T.state(), same = T.rows()[0] === node, said = T.last("status", 2);
-  kit.scope.$toast.dismiss("save");
-  var again = kit.scope.$toast.update("save", "Lại.", { tone: "danger" });
+  kitwork.scope.$toast.dismiss("save");
+  var again = kitwork.scope.$toast.update("save", "Lại.", { tone: "danger" });
   await T.wait(250);
   return [loading || "none", done, same, before, after, said, again, T.rows().length].join(" ");`),
 		`none 4000 true {"rows":["save|loader-2||Đang lưu…||||"],"waiting":0,"paused":false,"told":""} {"rows":["save|circle-check||Đã lưu.||||"],"waiting":0,"paused":false,"told":""} `+
@@ -319,7 +319,7 @@ func TestBrowserToast(t *testing.T) {
 		`8000 {"rows":["5|info-circle|Ghi chú|Đã xoá ghi chú.||Hoàn tác||"],"waiting":0,"paused":false,"told":""} Ghi chú. Đã xoá ghi chú. Nhấn F8 để tới “Hoàn tác”. b 0`)
 	check("a link", toastStep(d, `
   T.click("linked");
-  var bad = kit.scope.$toast.show("Xấu.", { action: { label: "X", link: "javascript:alert(1)" } });
+  var bad = kitwork.scope.$toast.show("Xấu.", { action: { label: "X", link: "javascript:alert(1)" } });
   await T.frames();
   var before = T.state(), warned = window.__warned.filter(function (w) { return w.indexOf("link") >= 0; }).join(" + ");
   var link = T.rows()[0].querySelector("a");
@@ -352,10 +352,10 @@ func TestBrowserToast(t *testing.T) {
   await T.frames();
   Object.defineProperty(document, "hidden", { configurable: true, get: function () { return true; } });
   document.dispatchEvent(new Event("visibilitychange"));
-  var hidden = kit.scope.$toast.paused;
+  var hidden = kitwork.scope.$toast.paused;
   delete document.hidden;
   document.dispatchEvent(new Event("visibilitychange"));
-  var shown = kit.scope.$toast.paused;
+  var shown = kitwork.scope.$toast.paused;
   await T.clear();
   return hidden + " " + shown;`),
 		`true false`)
@@ -370,7 +370,7 @@ func TestBrowserToast(t *testing.T) {
   await T.frames();
   return document.activeElement.id + " " + T.rows().length;`), "before 2")
 	toastKey(d, "F8", 119)
-	check("F8 reaches the stack", toastStep(d, `return (document.activeElement === T.host) + " " + kit.scope.$toast.paused;`), "true true")
+	check("F8 reaches the stack", toastStep(d, `return (document.activeElement === T.host) + " " + kitwork.scope.$toast.paused;`), "true true")
 	toastKey(d, "Tab", 9)
 	check("Tab reaches a notice", d.evaluate(`document.activeElement.closest("[data-kitwork-key]").getAttribute("data-kitwork-key") + " " + document.activeElement.querySelector("i").getAttribute("aria-label")`), "10 Đóng thông báo")
 	toastKey(d, "Escape", 27)
@@ -415,7 +415,7 @@ func TestBrowserToast(t *testing.T) {
 	check("less motion", toastStep(d, `
   T.click("stay");
   await T.frames();
-  kit.scope.$toast.dismiss(T.rows()[0].getAttribute("data-kitwork-key"));
+  kitwork.scope.$toast.dismiss(T.rows()[0].getAttribute("data-kitwork-key"));
   await T.frames();
   return String(T.rows().length);`), "0")
 	d.call("Emulation.setEmulatedMedia", map[string]any{"features": []map[string]string{{"name": "prefers-reduced-motion", "value": "no-preference"}}})
@@ -456,7 +456,7 @@ func TestBrowserToast(t *testing.T) {
 	reduce := map[string]any{"features": []map[string]string{{"name": "prefers-reduced-motion", "value": "reduce"}}}
 	moving := map[string]any{"features": []map[string]string{{"name": "prefers-reduced-motion", "value": "no-preference"}}}
 	d.call("Emulation.setEmulatedMedia", reduce)
-	toastStep(d, `await T.clear(); kit.scope.$toast.info("Một.", { duration: 0 }); kit.scope.$toast.info("Hai.", { duration: 0 }); await T.frames(); document.getElementById("again").focus(); return "";`)
+	toastStep(d, `await T.clear(); kitwork.scope.$toast.info("Một.", { duration: 0 }); kitwork.scope.$toast.info("Hai.", { duration: 0 }); await T.frames(); document.getElementById("again").focus(); return "";`)
 	toastKey(d, "F8", 119)
 	toastKey(d, "Tab", 9)
 	toastKey(d, "Escape", 27)
@@ -464,11 +464,11 @@ func TestBrowserToast(t *testing.T) {
   await T.frames();
   var soon = T.focus();
   await T.wait(300);
-  return [soon, T.focus(), T.rows().length, kit.scope.$toast.paused].join(" ");`), "18:Đóng thông báo 18:Đóng thông báo 1 true")
+  return [soon, T.focus(), T.rows().length, kitwork.scope.$toast.paused].join(" ");`), "18:Đóng thông báo 18:Đóng thông báo 1 true")
 	d.call("Emulation.setEmulatedMedia", moving)
 
 	// the action of the first of two notices, pressed with Enter: the focus goes to the next and stays
-	toastStep(d, `await T.clear(); window.__acted = 0; kit.scope.$toast.show("Làm.", { action: { label: "Làm", click: function () { window.__acted++; } } }); kit.scope.$toast.info("Ba.", { duration: 0 }); await T.frames(); document.getElementById("again").focus(); return "";`)
+	toastStep(d, `await T.clear(); window.__acted = 0; kitwork.scope.$toast.show("Làm.", { action: { label: "Làm", click: function () { window.__acted++; } } }); kitwork.scope.$toast.info("Ba.", { duration: 0 }); await T.frames(); document.getElementById("again").focus(); return "";`)
 	toastKey(d, "F8", 119)
 	toastKey(d, "Tab", 9)
 	check("Tab reaches the action", d.evaluate(`window.__toast.focus()`), "19:Làm")
@@ -484,25 +484,25 @@ func TestBrowserToast(t *testing.T) {
 
 	// all closed while the keyboard is in the stack, with nowhere known to go back to: the focus goes to
 	// the page and stays there, never back into a notice fading out (nor its pause)
-	toastStep(d, `kit.scope.$toast.info("Bốn.", { duration: 0 }); kit.scope.$toast.info("Năm.", { duration: 0 }); await T.frames(); document.activeElement.blur(); return "";`)
+	toastStep(d, `kitwork.scope.$toast.info("Bốn.", { duration: 0 }); kitwork.scope.$toast.info("Năm.", { duration: 0 }); await T.frames(); document.activeElement.blur(); return "";`)
 	toastKey(d, "F8", 119)
 	toastKey(d, "Tab", 9)
 	check("all closed from the keyboard", toastStep(d, `
   var at = T.focus();
-  kit.scope.$toast.clear();
+  kitwork.scope.$toast.clear();
   await T.frames();
-  var soon = T.focus() + " " + kit.scope.$toast.paused;
+  var soon = T.focus() + " " + kitwork.scope.$toast.paused;
   await T.wait(300);
-  return [at, soon, T.focus(), kit.scope.$toast.paused, T.rows().length].join(" ");`), "21:Đóng thông báo BODY false BODY false 0")
+  return [at, soon, T.focus(), kitwork.scope.$toast.paused, T.rows().length].join(" ");`), "21:Đóng thông báo BODY false BODY false 0")
 
 	// each region says what is added to it, alone (aria-atomic="false"), holds only the newest line
 	// (two in one moment both) and drops it soon after: a reader that reaches the stack hears each
 	// notice once, in the notice
 	check("said once, alone", toastStep(d, `
   window.__heard = [];
-  kit.scope.$toast.success("Một lần.");
+  kitwork.scope.$toast.success("Một lần.");
   await T.wait(400);
-  kit.scope.$toast.info("Lần hai.");
+  kitwork.scope.$toast.info("Lần hai.");
   await T.wait(300);
   return T.said();`), "status: Lần hai. | alert: ")
 	check("the regions say what is added, alone", toastRegionsHeard(d), "status live=polite atomic=false; alert live=assertive atomic=false")
@@ -511,10 +511,10 @@ func TestBrowserToast(t *testing.T) {
 
 	// F8 while the page cannot give the stack the focus (a modal dialog is open) is the browser's: the
 	// time does not stand still for a focus that never came
-	toastStep(d, `var dialog = document.createElement("dialog"); dialog.id = "modal"; dialog.innerHTML = '<button id="inside">Trong</button>'; document.body.appendChild(dialog); dialog.showModal(); document.getElementById("inside").focus(); kit.scope.$toast.info("Sau hộp thoại.", { duration: "2s" }); await T.frames(); return "";`)
+	toastStep(d, `var dialog = document.createElement("dialog"); dialog.id = "modal"; dialog.innerHTML = '<button id="inside">Trong</button>'; document.body.appendChild(dialog); dialog.showModal(); document.getElementById("inside").focus(); kitwork.scope.$toast.info("Sau hộp thoại.", { duration: "2s" }); await T.frames(); return "";`)
 	toastKey(d, "F8", 119)
 	check("F8 under a modal dialog", toastStep(d, `
-  var at = T.focus(), paused = kit.scope.$toast.paused;
+  var at = T.focus(), paused = kitwork.scope.$toast.paused;
   var dialog = document.getElementById("modal");
   dialog.close();
   dialog.remove();
@@ -525,9 +525,9 @@ func TestBrowserToast(t *testing.T) {
 	// notice under it goes, and the time of the others goes on
 	var dismiss struct{ X, Y float64 }
 	if err := json.Unmarshal([]byte(toastStep(d, `
-  kit.scope.$toast.info("A.", { duration: 0 });
-  kit.scope.$toast.info("B.", { duration: "3s" });
-  kit.scope.$toast.info("C.", { duration: "3s" });
+  kitwork.scope.$toast.info("A.", { duration: 0 });
+  kitwork.scope.$toast.info("B.", { duration: "3s" });
+  kitwork.scope.$toast.info("C.", { duration: "3s" });
   await T.frames();
   await T.wait(300);
   var r = T.rows()[0].querySelector('button[data-kitwork-event^="click: dismiss"]').getBoundingClientRect();
@@ -540,7 +540,7 @@ func TestBrowserToast(t *testing.T) {
 	}
 	check("a mouse that closes a notice and stays still", toastStep(d, `
   await T.wait(400);
-  var held = kit.scope.$toast.paused + " " + T.rows().length;
+  var held = kitwork.scope.$toast.paused + " " + T.rows().length;
   await T.wait(3000);
   return held + " " + T.rows().length;`), "false 2 0")
 	d.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 5, "y": 5})
@@ -550,13 +550,13 @@ func TestBrowserToast(t *testing.T) {
 	check("an id the author gives is a name", toastStep(d, `
   await T.clear();
   window.__warned = [];
-  var n = kit.scope.$toast.info("Thăm dò.");
-  kit.scope.$toast.dismiss(n);
+  var n = kitwork.scope.$toast.info("Thăm dò.");
+  kitwork.scope.$toast.dismiss(n);
   await T.wait(250);
-  var author = kit.scope.$toast.info("Của người viết.", { id: n + 2, duration: 0 });
-  var one = kit.scope.$toast.info("Tự đánh số một.", { duration: 0 });
-  var two = kit.scope.$toast.info("Tự đánh số hai.", { duration: 0 });
-  var gone = kit.scope.$toast.dismiss(two);
+  var author = kitwork.scope.$toast.info("Của người viết.", { id: n + 2, duration: 0 });
+  var one = kitwork.scope.$toast.info("Tự đánh số một.", { duration: 0 });
+  var two = kitwork.scope.$toast.info("Tự đánh số hai.", { duration: 0 });
+  var gone = kitwork.scope.$toast.dismiss(two);
   await T.wait(250);
   var rows = T.rows().map(function (row) { return (Number(row.getAttribute("data-kitwork-key")) - n) + ":" + row.querySelectorAll("p")[1].textContent; });
   var warned = window.__warned.join(" + ").replace(String(n + 2), "N");

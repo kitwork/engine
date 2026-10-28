@@ -8,9 +8,9 @@ var modules = Object.create(null);
 var platformServices = Object.create(null);
 var page = Object.create(null);
 var cleanups = [];
-var kit = {
+var kitwork = {
   bridge: null,
-  runtime: { info: function () { return { engine: kit.platform || "web" }; } },
+  runtime: { info: function () { return { engine: kitwork.platform || "web" }; } },
   module: function (name, value) {
     if (arguments.length > 1) {
       modules[name] = value;
@@ -37,7 +37,7 @@ var kit = {
     return error;
   }
 };
-global.window = { kit: kit, kitwork: kit };
+global.window = { kit: kitwork, kitwork: kitwork };
 var dark = false;
 global.document = {
   body: { appendChild: function () {} },
@@ -99,34 +99,34 @@ window.location = global.location;
 
 	assertions := `
 (async function () {
-  var native = kit.module("native");
+  var native = kitwork.module("native");
   if (native.available !== false) {
     throw new Error("native module should start unavailable");
   }
   if (native.bridge !== undefined) throw new Error("native module leaked the raw bridge");
-  if (typeof kit.host !== "object") throw new Error("kit.host lifecycle API missing");
-  if (kit.app !== kit.host) throw new Error("deprecated kit.app compatibility alias changed");
-  if (typeof kit.clipboard !== "object" || typeof kit.camera !== "object") {
+  if (typeof kitwork.host !== "object") throw new Error("kitwork.host lifecycle API missing");
+  if (kitwork.app !== kitwork.host) throw new Error("deprecated kitwork.app compatibility alias changed");
+  if (typeof kitwork.clipboard !== "object" || typeof kitwork.camera !== "object") {
     throw new Error("clipboard/camera must be service objects, not callable shims");
   }
-  if (typeof kit.appearance.toggle !== "function" || typeof kit.navigation.back !== "function") {
+  if (typeof kitwork.appearance.toggle !== "function" || typeof kitwork.navigation.back !== "function") {
     throw new Error("appearance/navigation namespaces missing");
   }
-  if (typeof kit.window.restore !== "function" || typeof kit.capabilities.supports !== "function") {
+  if (typeof kitwork.window.restore !== "function" || typeof kitwork.capabilities.supports !== "function") {
     throw new Error("window/capabilities namespaces missing");
   }
-  if (typeof kit.network.status !== "function") {
+  if (typeof kitwork.network.status !== "function") {
     throw new Error("network namespace missing");
   }
-  if (typeof kit.back !== "function" || typeof kit.minimize !== "function") {
+  if (typeof kitwork.back !== "function" || typeof kitwork.minimize !== "function") {
     throw new Error("trusted-JavaScript compatibility aliases missing");
   }
-  // kit.theme / kit.toggleTheme (the light/dark service's old names) and kit.dialog went on 26/10/2026.
-  if (kit.theme !== undefined || kit.toggleTheme !== undefined || kit.dialog !== undefined) {
+  // kitwork.theme / kitwork.toggleTheme (the light/dark service's old names) and kitwork.dialog went on 26/10/2026.
+  if (kitwork.theme !== undefined || kitwork.toggleTheme !== undefined || kitwork.dialog !== undefined) {
     throw new Error("a service removed on 26/10/2026 is still installed");
   }
 
-  var unavailable = kit.host.info();
+  var unavailable = kitwork.host.info();
   if (!unavailable || typeof unavailable.then !== "function") {
     throw new Error("unsupported host call must still return a Promise");
   }
@@ -137,53 +137,53 @@ window.location = global.location;
       if (error.code !== "UNSUPPORTED") throw error;
   }
 
-  var webMinimize = kit.window.minimize();
+  var webMinimize = kitwork.window.minimize();
   if (!webMinimize || typeof webMinimize.then !== "function" || await webMinimize !== false) {
     throw new Error("web window command must resolve false through a Promise");
   }
 
-  var webWrite = kit.clipboard.writeText(42);
+  var webWrite = kitwork.clipboard.writeText(42);
   if (!webWrite || typeof webWrite.then !== "function") {
     throw new Error("clipboard.writeText web fallback is not Promise-based");
   }
   await webWrite;
-  if (await kit.clipboard.writeText("void result") !== undefined) {
+  if (await kitwork.clipboard.writeText("void result") !== undefined) {
     throw new Error("clipboard.writeText must resolve without a value");
   }
   if (navigator.clipboard.writes[0] !== "42") throw new Error("web clipboard write mismatch");
-  if (await kit.clipboard.readText() !== "web clipboard") throw new Error("web clipboard read mismatch");
-  if (await kit.clipboard.copy("copy") !== undefined) {
+  if (await kitwork.clipboard.readText() !== "web clipboard") throw new Error("web clipboard read mismatch");
+  if (await kitwork.clipboard.copy("copy") !== undefined) {
     throw new Error("clipboard.copy must share Promise<void> write semantics");
   }
   if (navigator.clipboard.writes[2] !== "copy") throw new Error("clipboard.copy write mismatch");
-  if (await kit.capabilities.supports("clipboard.writeText") !== true) {
+  if (await kitwork.capabilities.supports("clipboard.writeText") !== true) {
     throw new Error("web capabilities.supports did not accept the public method path");
   }
-  if (await kit.capabilities.supports("clipboard.write") !== false) {
+  if (await kitwork.capabilities.supports("clipboard.write") !== false) {
     throw new Error("legacy capability id should not be canonical");
   }
-  if (await kit.capabilities.supports("window.minimize") !== false) {
+  if (await kitwork.capabilities.supports("window.minimize") !== false) {
     throw new Error("web should not report native window controls as supported");
   }
 
   // mode is the CHOICE, resolved is what is painted. With nothing stored, the choice is "system"
   // and the paint follows prefers-color-scheme — the same three modes the server pre-paint reads.
-  if (kit.appearance.mode !== "system") throw new Error("with nothing stored the choice is system, got " + kit.appearance.mode);
-  if (kit.appearance.resolved !== "light" && kit.appearance.resolved !== "dark") {
-    throw new Error("resolved must be a painted mode, got " + kit.appearance.resolved);
+  if (kitwork.appearance.mode !== "system") throw new Error("with nothing stored the choice is system, got " + kitwork.appearance.mode);
+  if (kitwork.appearance.resolved !== "light" && kitwork.appearance.resolved !== "dark") {
+    throw new Error("resolved must be a painted mode, got " + kitwork.appearance.resolved);
   }
-  if (kit.appearance.system() !== "system" || kit.appearance.mode !== "system") {
+  if (kitwork.appearance.system() !== "system" || kitwork.appearance.mode !== "system") {
     throw new Error("appearance.system() should hand the choice back to the OS");
   }
-  if (kit.appearance.set("dark") !== "dark" || kit.appearance.mode !== "dark" || kit.appearance.resolved !== "dark") {
+  if (kitwork.appearance.set("dark") !== "dark" || kitwork.appearance.mode !== "dark" || kitwork.appearance.resolved !== "dark") {
     throw new Error("appearance.set did not update mode/resolved state");
   }
-  if (kit.appearance.toggle() !== "light" || kit.appearance.mode !== "light") {
+  if (kitwork.appearance.toggle() !== "light" || kitwork.appearance.mode !== "light") {
     throw new Error("appearance.toggle did not switch the resolved mode");
   }
-  kit.navigation.back();
-  kit.navigation.forward();
-  kit.navigation.reload();
+  kitwork.navigation.back();
+  kitwork.navigation.forward();
+  kitwork.navigation.reload();
   if (history.backs !== 1 || history.forwards !== 1 || location.reloads !== 1) {
     throw new Error("navigation namespace did not delegate to browser history/location");
   }
@@ -207,41 +207,41 @@ window.location = global.location;
       return Promise.resolve(true);
     }
   };
-  kit.bridge = lateBridge;
+  kitwork.bridge = lateBridge;
   if (!native.available) {
     throw new Error("late bridge attachment was not observed dynamically");
   }
-  // kit.isNative / kit.platform / runtime.info().engine are the KERNEL's view of the bridge, and this
+  // kitwork.isNative / kitwork.platform / runtime.info().engine are the KERNEL's view of the bridge, and this
   // test deliberately runs without the kernel — see TestPlatformFactsFollowTheBridge.
-  if (!kit.bridge || typeof kit.bridge.call !== "function") {
+  if (!kitwork.bridge || typeof kitwork.bridge.call !== "function") {
     throw new Error("late bridge attachment left the adapter unusable");
   }
 
-  if (await kit.clipboard.writeText("native write") !== undefined) {
+  if (await kitwork.clipboard.writeText("native write") !== undefined) {
     throw new Error("native clipboard.writeText must resolve without a value");
   }
   if (calls[0].action !== "clipboard.writeText" || calls[0].params.text !== "native write") {
     throw new Error("native clipboard write contract mismatch");
   }
-  if (await kit.clipboard.readText() !== "native clipboard") {
+  if (await kitwork.clipboard.readText() !== "native clipboard") {
     throw new Error("native clipboard read contract mismatch");
   }
-  await kit.host.info();
+  await kitwork.host.info();
   if (!calls.some(function (entry) { return entry.action === "host.info"; })) {
     throw new Error("host lifecycle transport changed");
   }
 
-  await kit.secureStorage.set("note", "private");
-  if (await kit.secureStorage.get("note") !== "stored value") {
+  await kitwork.secureStorage.set("note", "private");
+  if (await kitwork.secureStorage.get("note") !== "stored value") {
     throw new Error("secureStorage.get result mismatch");
   }
-  await kit.secureStorage.remove("note");
-  var deviceInfo = await kit.device.info();
+  await kitwork.secureStorage.remove("note");
+  var deviceInfo = await kitwork.device.info();
   if (!deviceInfo || deviceInfo.platform !== "android") {
     throw new Error("device.info result mismatch");
   }
-  await kit.device.vibrate([10, 20]);
-  await kit.shell.open("https://example.test/");
+  await kitwork.device.vibrate([10, 20]);
+  await kitwork.shell.open("https://example.test/");
   if (!calls.some(function (entry) {
     return entry.action === "secureStorage.set" && entry.params.key === "note" && entry.params.value === "private";
   }) || !calls.some(function (entry) {
@@ -254,7 +254,7 @@ window.location = global.location;
     throw new Error("native service parameter contract mismatch");
   }
 
-  var capture = kit.camera.capture({ facingMode: "user" });
+  var capture = kitwork.camera.capture({ facingMode: "user" });
   if (!capture || typeof capture.then !== "function") {
     throw new Error("camera.capture is not Promise-based");
   }
@@ -264,30 +264,30 @@ window.location = global.location;
   })) {
     throw new Error("camera options were not forwarded");
   }
-  if (await kit.capabilities.supports("camera.capture") !== true) {
+  if (await kitwork.capabilities.supports("camera.capture") !== true) {
     throw new Error("native capability probe mismatch");
   }
-  if (await kit.capabilities.supports("window.minimize") !== true) {
+  if (await kitwork.capabilities.supports("window.minimize") !== true) {
     throw new Error("native window capability probe mismatch");
   }
-  if (await kit.capabilities.supports("network.status") !== true) {
+  if (await kitwork.capabilities.supports("network.status") !== true) {
     throw new Error("native network capability probe mismatch");
   }
-  var networkStatus = await kit.network.status();
+  var networkStatus = await kitwork.network.status();
   if (!networkStatus || networkStatus.online !== true || !calls.some(function (entry) {
     return entry.action === "network.status";
   })) {
     throw new Error("native network.status contract mismatch");
   }
   var callsBeforeRuntimeOwnedProbe = calls.length;
-  if (await kit.capabilities.supports("appearance.toggle") !== true ||
-      await kit.capabilities.supports("navigation.back") !== true) {
+  if (await kitwork.capabilities.supports("appearance.toggle") !== true ||
+      await kitwork.capabilities.supports("navigation.back") !== true) {
     throw new Error("runtime-owned capabilities became dependent on the native shell");
   }
   if (calls.length !== callsBeforeRuntimeOwnedProbe) {
     throw new Error("runtime-owned capability probe was incorrectly sent to the native shell");
   }
-  var restored = kit.window.restore();
+  var restored = kitwork.window.restore();
   if (!restored || typeof restored.then !== "function" || await restored !== true) {
     throw new Error("native window.restore must return the bridge Promise");
   }
@@ -295,10 +295,10 @@ window.location = global.location;
     throw new Error("window.restore action mismatch");
   }
 
-  kit.bridge = {
+  kitwork.bridge = {
     call: function () { throw new Error("sync adapter failure"); }
   };
-  var rejected = kit.clipboard.writeText("reject");
+  var rejected = kitwork.clipboard.writeText("reject");
   if (!rejected || typeof rejected.then !== "function") {
     throw new Error("sync adapter failure escaped instead of becoming a rejected Promise");
   }
@@ -309,20 +309,20 @@ window.location = global.location;
     if (error.message !== "sync adapter failure") throw error;
   }
 
-  kit.bridge = null;
+  kitwork.bridge = null;
   if (native.available !== false) {
     throw new Error("bridge removal was not observed dynamically");
   }
-  if (kit.bridge) {
+  if (kitwork.bridge) {
     throw new Error("bridge removal left the adapter in place");
   }
-  await kit.clipboard.writeText("web again");
+  await kitwork.clipboard.writeText("web again");
   if (navigator.clipboard.writes[3] !== "web again") {
     throw new Error("clipboard did not return to its web fallback");
   }
 
   var destroyed = false;
-  kit.bridge = {
+  kitwork.bridge = {
     call: function () { return Promise.resolve(true); },
     destroy: function () { destroyed = true; }
   };

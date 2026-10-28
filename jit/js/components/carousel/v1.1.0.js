@@ -653,4 +653,4 @@ var carouselDef = {
   }
 };
 
-window.kit.component("carousel", carouselDef);
+window.kitwork.component("carousel", carouselDef);

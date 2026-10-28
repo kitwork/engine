@@ -1,4 +1,4 @@
-;(function (global, document, kit) {
+;(function (global, document, kitwork) {
 "use strict";
 
 // KitJS service: wakeLock@1.0.0
@@ -453,8 +453,8 @@ function pageShow() {
   pageHidden = false;
 }
 
-kit.service("wakeLock", { request: request });
+kitwork.service("wakeLock", { request: request });
 listen(document, "visibilitychange", visibilityChange);
 listen(global, "pagehide", pageHide);
 listen(global, "pageshow", pageShow);
-})(globalThis, document, kit);
+})(globalThis, document, kitwork);

@@ -13,7 +13,7 @@ import (
 // End to end: a site that sends `script-src 'self'` still gets its anti-flash pre-paint, because
 // the engine declares the script it injected. Nothing else in the policy moves. The pre-paint follows
 // the site's declared dark look (a { light, dark } pair of router.colors), not the markup (the page called
-// kit.theme.toggle() until kit.theme went, 26/10/2026).
+// kitwork.theme.toggle() until kitwork.theme went, 26/10/2026).
 func TestServedPageCarriesThePrepaintHashInItsOwnPolicy(t *testing.T) {
 	const policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
 	tenant := buildUISiteMode(t, map[string]string{

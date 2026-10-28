@@ -16,14 +16,14 @@ import (
 // kernel runs. Everything below is a mistake made in this repo, each of which cost an hour to find
 // by hand:
 //
-//   · kit.theme.system() — on the service, missing from markup's grant (25/09); since 03/10 markup
+//   · kitwork.theme.system() — on the service, missing from markup's grant (25/09); since 03/10 markup
 //     has no kit at all, and any kit.<service> in an expression is named
 //   · $element.nosuch.textContent — copy(undefined) reaching the clipboard (25/09)
 
 // Markup never calls kit (03/10): a service reaches the page through the component that is its view,
-// and the kernel gives expressions no kit at all. kit.theme.toggle() would then read as nothing and
+// and the kernel gives expressions no kit at all. kitwork.theme.toggle() would then read as nothing and
 // do nothing, in silence — so it is named here, with where the service is reached instead.
-var kitReadRe = regexp.MustCompile(`(?:^|[^A-Za-z0-9_$.])kit\s*\??\.\s*([A-Za-z][A-Za-z0-9]*)`)
+var kitReadRe = regexp.MustCompile(`(?:^|[^A-Za-z0-9_$.])(?:kitwork|kit)\s*\??\.\s*([A-Za-z][A-Za-z0-9]*)`)
 
 // kitViews is the component that is each service's view, for the services a page reaches for most.
 var kitViews = map[string]string{
@@ -38,10 +38,10 @@ func checkKitReads(expression, where string, into *[]string) {
 	for _, m := range kitReadRe.FindAllStringSubmatch(withoutStringLiterals(expression), -1) {
 		via, known := kitViews[m[1]]
 		if !known {
-			via = "a component whose JavaScript calls kit." + m[1]
+			via = "a component whose JavaScript calls kitwork." + m[1]
 		}
 		*into = append(*into, fmt.Sprintf(
-			"markup does not call kit — kit.%s reads as nothing in an expression, so this does nothing. "+
+			"markup does not call kitwork — kitwork.%s reads as nothing in an expression, so this does nothing. "+
 				"Reach it through %s — in %s", m[1], via, where))
 	}
 }

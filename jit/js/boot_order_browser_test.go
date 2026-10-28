@@ -44,7 +44,7 @@ func TestBrowserComponentsRegisterBeforeTheFirstPaint(t *testing.T) {
     <img id="photo" data-kitwork-bind="src: photo" alt="">
     <b id="label" data-kitwork-bind="text: photo"></b>
   </div>
-  <script>kit.component("probe-photo", { photo: "/ok.png" });</script>
+  <script>kitwork.component("probe-photo", { photo: "/ok.png" });</script>
   <script>
   window.addEventListener("load", function () {
     var root = document.documentElement;
@@ -58,7 +58,7 @@ func TestBrowserComponentsRegisterBeforeTheFirstPaint(t *testing.T) {
 	run := func(t *testing.T, startEarly bool) []string {
 		t.Helper()
 		delivered := deliverTestPage(t, page, nil)
-		if !strings.Contains(delivered.files["/test-scripts/0.js"], `kit.component("probe-photo"`) ||
+		if !strings.Contains(delivered.files["/test-scripts/0.js"], `kitwork.component("probe-photo"`) ||
 			strings.Index(delivered.html, `src="/test-scripts/0.js"`) < strings.Index(delivered.html, `src="/_kitwork/kernel.`) {
 			t.Fatalf("the page should get the component as a deferred file of its own, after the kernel's:\n%s", delivered.html)
 		}
@@ -67,7 +67,7 @@ func TestBrowserComponentsRegisterBeforeTheFirstPaint(t *testing.T) {
 			// boot before the modules.
 			at := strings.LastIndex(delivered.html[:strings.Index(delivered.html, `src="/test-scripts/0.js"`)], "<script")
 			delivered.html = delivered.html[:at] + `<script src="/test-scripts/start.js" defer></script>` + delivered.html[at:]
-			delivered.files["/test-scripts/start.js"] = "window.kit.start();"
+			delivered.files["/test-scripts/start.js"] = "window.kitwork.start();"
 		}
 		var mu sync.Mutex
 		var seen []string

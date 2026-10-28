@@ -57,10 +57,10 @@ func TestRenderMarker(t *testing.T) {
 func TestRenderAutoScan(t *testing.T) {
 	// A page that uses the kernel API (no marker) gets the pre-paint injected at the top of <head>.
 	in := `<html><head><link rel="stylesheet" href="a.css"></head>` +
-		`<body><button data-kit-click="kit.theme.toggle()">t</button></body></html>`
+		`<body><button data-kit-click="kitwork.theme.toggle()">t</button></body></html>`
 	out := Render(in)
 	if !injected(out) {
-		t.Fatal("pre-paint not auto-injected for kit.theme.toggle() page")
+		t.Fatal("pre-paint not auto-injected for kitwork.theme.toggle() page")
 	}
 	// It must land BEFORE the stylesheet (earliest point wins the anti-flash race).
 	if strings.Index(out, `data-kitwork-generated="appearance"`) > strings.Index(out, "a.css") {
@@ -69,9 +69,9 @@ func TestRenderAutoScan(t *testing.T) {
 
 	// The other recognised forms also trigger it.
 	for _, use := range []string{
-		`<head></head><body><button data-kit-click="kit.appearance.toggle()"></button></body>`,
+		`<head></head><body><button data-kit-click="kitwork.appearance.toggle()"></button></body>`,
 		`<head></head><body><button data-kit-click="$app.appearance.system()"></button></body>`,
-		`<head></head><body><i data-kit-text="kit.theme.mode"></i></body>`,
+		`<head></head><body><i data-kit-text="kitwork.theme.mode"></i></body>`,
 		`<head></head><body><div data-kit-component="theme"></div></body>`,
 		`<HEAD></HEAD><body><div DATA-KIT-COMPONENT='theme'></div></body>`,
 		`<head></head><body><main data-kit-component='app' data-kit-alias='$app'></main></body>`,
@@ -84,7 +84,7 @@ func TestRenderAutoScan(t *testing.T) {
 		`<head></head><body><main data-kit-component="&#xfeff;app@1.1.0" data-kit-alias="$app"></main></body>`,
 		`<head></head><body><div data-kit-component='&#x1680;theme&#x3000;'></div></body>`,
 		`<head></head><body><button data-kit-click="$app . appearance . toggle()"></button></body>`,
-		`<head></head><body><button data-kit-click="kit . appearance . system()"></button></body>`,
+		`<head></head><body><button data-kit-click="kitwork . appearance . system()"></button></body>`,
 	} {
 		if !injected(Render(use)) {
 			t.Errorf("theme system not detected in: %s", use)
@@ -100,8 +100,8 @@ func TestRenderDoesNotConfuseAppearanceLookalikes(t *testing.T) {
 		`<head></head><body><div data-kit-action="themed"></div></body>`,
 		`<head></head><body><button data-kitwork-action="theme"></button></body>`,
 		`<head></head><body><button data-kit-action="theme"></button></body>`,
-		`<head></head><body><p>kit&#46;theme</p></body>`,
-		`<head></head><body><script>kit&#46;theme</script></body>`,
+		`<head></head><body><p>kitwork&#46;theme</p></body>`,
+		`<head></head><body><script>kitwork&#46;theme</script></body>`,
 		`<head></head><body><div data-kit-component="th&notit;eme"></div></body>`,
 		`<head></head><body><button data-kit-action="th&notit;eme"></button></body>`,
 	} {

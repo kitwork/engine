@@ -1,4 +1,4 @@
-;(function (global, kit) {
+;(function (global, kitwork) {
 "use strict";
 
 // KitJS staged service: studioState@1.0.0
@@ -360,7 +360,7 @@ function updatePreference(key, value) {
   return nativeCall("updatePreference", { key: key, value: clone }, "updatePreference", preferenceResult);
 }
 
-kit.service("studioState", {
+kitwork.service("studioState", {
   loadSnapshot: loadSnapshot,
   upsertConnection: upsertConnection,
   deleteConnection: deleteConnection,
@@ -370,4 +370,4 @@ kit.service("studioState", {
   clearHistory: clearHistory,
   updatePreference: updatePreference
 });
-})(globalThis, kit);
+})(globalThis, kitwork);

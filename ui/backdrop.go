@@ -114,7 +114,7 @@ func (c *compiler) pinnedGround(n *Node, cx ctx) (background string, ok bool) {
 // mode, for the device's (media="(prefers-color-scheme: …)"). With a dark look each also carries the
 // colour of both modes, data-kitwork-light and data-kitwork-dark: the mode the page shows decides the
 // bar, a visitor's choice of the other mode than the device's too — the pre-paint (jit/theme) and
-// kit.appearance (jit/hydrate/modules/web.js) set the content of that mode and drop the media, and a
+// kitwork.appearance (jit/hydrate/modules/web.js) set the content of that mode and drop the media, and a
 // move by Drive keeps the mode shown. Without a script the device decides, as before. "" for a page
 // without such a backdrop.
 func (p *Page) themeColor(appearance string) string {

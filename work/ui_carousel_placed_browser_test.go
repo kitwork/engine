@@ -57,7 +57,7 @@ func TestBrowserCarouselPlacedBeforeTheListStandsAbove(t *testing.T) {
   var button = document.getElementById("before"), box = button.getBoundingClientRect();
   document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2).click();
   await new Promise(function (done) { setTimeout(done, 900); });
-  return [before, after, "current " + kit.scope.$hero.current].join(" | ");
+  return [before, after, "current " + kitwork.scope.$hero.current].join(" | ");
 })()`)
 	// previous() from the first comes round to the last: current 1
 	if want := "before on top | after on top | current 1"; got != want {

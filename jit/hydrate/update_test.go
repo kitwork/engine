@@ -40,15 +40,15 @@ func TestKernelRefusesWhatCannotBeUpdated(t *testing.T) {
 		sources[i] = `"` + c.src + `"`
 	}
 	runNodeDOMScript(t, "update_refusals.test.js", `
-var kit = window.kit;
+var kitwork = window.kitwork;
 var accepted = [];
 [`+strings.Join(sources, ", ")+`].forEach(function (src) {
-  try { kit.compile(src); accepted.push(src); } catch (e) {}
+  try { kitwork.compile(src); accepted.push(src); } catch (e) {}
 });
 if (accepted.length) throw new Error("the kernel accepted what the server refuses: " + accepted.join(", "));
 
 // CONTROL: the parser is not simply refusing every ++, or the loop above would pass for nothing.
-kit.compile("count++"); kit.compile("--count"); kit.compile("$.count++");
+kitwork.compile("count++"); kitwork.compile("--count"); kitwork.compile("$.count++");
 console.log("the kernel refuses the same updates the server does");
 `)
 }

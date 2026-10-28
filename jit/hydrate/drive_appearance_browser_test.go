@@ -19,7 +19,7 @@ import (
 // mode a page shows before the visitor chooses, and a branch of a site may say another than its root.
 // A move without a reload must look like a whole load of the page arriving: the attribute is carried
 // over, and with no choice stored the page shows the new default; a stored choice (light, or system)
-// still beats it. The binding of a component reading kit.appearance.dark shows the same thing after
+// still beats it. The binding of a component reading kitwork.appearance.dark shows the same thing after
 // the move, so the mode is applied before the kernel renders.
 //
 // One controller script outside <main> (Drive swaps only <main>, so it lives through every move) walks
@@ -66,8 +66,8 @@ func TestBrowserDriveCarriesTheSiteAppearanceDefault(t *testing.T) {
 	  var steps = [
 	    function () { try { localStorage.clear(); } catch (e) {} go("dark"); },
 	    function () { log.push(state()); go("home"); },
-	    function () { log.push(state()); window.kit.appearance.set("light"); go("dark"); },
-	    function () { log.push(state()); window.kit.appearance.system(); go("home"); },
+	    function () { log.push(state()); window.kitwork.appearance.set("light"); go("dark"); },
+	    function () { log.push(state()); window.kitwork.appearance.system(); go("home"); },
 	    function () { log.push(state()); go("dark"); },
 	    function () { log.push(state()); localStorage.clear(); go("home"); },
 	    function () { log.push(state()); go("dark"); },
@@ -101,7 +101,7 @@ func TestBrowserDriveCarriesTheSiteAppearanceDefault(t *testing.T) {
 			_, _ = response.Write([]byte(pageRuntimeFile(request.URL.Path)))
 		case "/probe.js":
 			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-			_, _ = response.Write([]byte(`window.kit.component("probe", { get dark() { return window.kit.appearance.dark; } });`))
+			_, _ = response.Write([]byte(`window.kitwork.component("probe", { get dark() { return window.kitwork.appearance.dark; } });`))
 		case "/":
 			if request.Header.Get("X-Kitwork-Hydrate") == "" {
 				_, _ = response.Write([]byte(page("home", "", controller, true)))

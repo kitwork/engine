@@ -278,7 +278,7 @@ func TestBrowserCarouselMouseDrag(t *testing.T) {
 	// goes moves a carousel to slide n by its instance and waits until the track rests there
 	goes := func(t *testing.T, d *devtools, alias string, n int) {
 		t.Helper()
-		w := carouselWatch(t, d, alias, fmt.Sprintf(`kit.scopeFor(window.__carousel.parts(%q).host).go(%d);`, alias, n))
+		w := carouselWatch(t, d, alias, fmt.Sprintf(`kitwork.scopeFor(window.__carousel.parts(%q).host).go(%d);`, alias, n))
 		if last := w.Samples[len(w.Samples)-1]; last.Current != float64(n) {
 			t.Fatalf("go(%d): current %g\n frames %s", n, last.Current, carouselTrace(w))
 		}

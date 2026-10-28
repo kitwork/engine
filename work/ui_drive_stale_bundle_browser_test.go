@@ -50,7 +50,7 @@ const driveStaleController = `<script>
       var mode = document.querySelector("#mode button");
       if (mode) mode.click();
       setTimeout(function () {
-        var drive = !!(window.kit && window.kit.drive);
+        var drive = !!(window.kitwork && window.kitwork.drive);
         log[at] = "toggled=" + (document.getElementById("open").getAttribute("aria-expanded") !== was) +
           " dark=" + document.documentElement.classList.contains("dark") + " drive=" + drive;
         if (drive && then) then(); else send();

@@ -2,16 +2,16 @@
 (function (window) {
   "use strict";
 
-  var kit = window.kit || window.kitwork;
-  if (!kit || !kit.module || !kit.service || kit.has("storage")) return;
+  var kitwork = window.kitwork;
+  if (!kitwork || !kitwork.module || !kitwork.service || kitwork.has("storage")) return;
 
   // Looked up when used: the web kernel has no native module (KernelFile(false)).
   var native = {
     get available() {
-      var bridge = kit.module("native");
+      var bridge = kitwork.module("native");
       return !!(bridge && bridge.available);
     },
-    call: function (name, args) { return kit.module("native").call(name, args); }
+    call: function (name, args) { return kitwork.module("native").call(name, args); }
   };
   var prefix = "kitwork:";
 
@@ -68,6 +68,6 @@
     }
   };
 
-  kit.service("storage", storage);
-  kit.module("storage", storage);
+  kitwork.service("storage", storage);
+  kitwork.module("storage", storage);
 })(window);

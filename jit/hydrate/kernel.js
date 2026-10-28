@@ -1,8 +1,8 @@
 // Kitwork hydrate kernel — the whole client runtime. Delivered as /_kitwork/kernel.<hash>.js with the
 // bridge and platform modules; Drive and each component a page names come as files of their own.
 // Expressions, boundaries, components, structure and events all ride one
-// window.kit root (window.kitwork is a deprecated alias to the SAME object), one registry, one
-// delegated event system and one DOM observer.
+// window.kitwork root (the only one since 28/10/2026), one registry, one delegated event system and one
+// DOM observer.
 //
 // Boot-guarded: safe under double inclusion and under Kitwork Drive re-running head scripts.
 // The directives are the eight grouped data-kitwork-* attributes (component, scope, bind, class,
@@ -16,19 +16,16 @@
 // and auto-closed when their last subscriber leaves the DOM.
 (function () {
   "use strict";
-  // `kit` is the canonical root going forward: the engine delivers the kernel, and components
-  // reach the runtime through window.kit. `window.kitwork` remains a DEPRECATED alias pointing at the
-  // SAME object, so every existing component file and module keeps working during the migration —
-  // it is removed only after every caller uses window.kit. (An older page that only seeded
-  // window.kitwork is adopted, so a cached bundle never double-initialises.)
-  var kit = (window.kit = window.kit || window.kitwork || {});
-  var kitwork = (window.kitwork = kit);
+  // window.kitwork is the runtime's one root: the engine delivers the kernel, and components, services and
+  // the page's program reach it there (the shorter name beside it went on 28/10/2026). A root the
+  // bridge seeded first is adopted, so nothing initialises twice.
+  var kitwork = (window.kitwork = window.kitwork || {});
 
   // Two facts that belong to the RUNTIME, not to the native bridge, even though the bridge is what
   // makes them interesting. They live here so a page that ships no bridge at all still has them:
   // web.js throws KitworkError from theme.set(), and runtimeMeta reads platform two lines below.
-  if (typeof kit.KitworkError !== "function") {
-    kit.KitworkError = function (message, code, moduleName, actionName, details) {
+  if (typeof kitwork.KitworkError !== "function") {
+    kitwork.KitworkError = function (message, code, moduleName, actionName, details) {
       var err = new Error(message || "Kitwork execution error");
       err.name = "KitworkError";
       err.code = code || "INTERNAL_ERROR";
@@ -38,27 +35,27 @@
       return err;
     };
   }
-  if (!Object.getOwnPropertyDescriptor(kit, "platform")) {
-    Object.defineProperty(kit, "platform", {
+  if (!Object.getOwnPropertyDescriptor(kitwork, "platform")) {
+    Object.defineProperty(kitwork, "platform", {
       get: function () {
-        var bridge = kit.bridge;
+        var bridge = kitwork.bridge;
         return bridge && typeof bridge.call === "function" ? (bridge.platform || "native") : "web";
       },
       configurable: true,
       enumerable: true
     });
-    Object.defineProperty(kit, "isNative", {
-      get: function () { return !!(kit.bridge && typeof kit.bridge.call === "function"); },
+    Object.defineProperty(kitwork, "isNative", {
+      get: function () { return !!(kitwork.bridge && typeof kitwork.bridge.call === "function"); },
       configurable: true,
       enumerable: true
     });
   }
 
-  if (kit.runtime && kit.runtime.loaded) return;
-  var runtimeMeta = kit.runtime && typeof kit.runtime === "object" ? kit.runtime : {};
+  if (kitwork.runtime && kitwork.runtime.loaded) return;
+  var runtimeMeta = kitwork.runtime && typeof kitwork.runtime === "object" ? kitwork.runtime : {};
   runtimeMeta.name = "kitwork";
   runtimeMeta.version = "2.0.0";
-  runtimeMeta.engine = kit.platform || "web";
+  runtimeMeta.engine = kitwork.platform || "web";
   runtimeMeta.development = !!runtimeMeta.development;
   runtimeMeta.loaded = true;
   runtimeMeta.booted = false;
@@ -66,26 +63,26 @@
     return {
       name: this.name,
       version: this.version,
-      engine: kit.platform || this.engine,
+      engine: kitwork.platform || this.engine,
       development: this.development
     };
   };
-  kit.runtime = runtimeMeta;
+  kitwork.runtime = runtimeMeta;
 
   var modules = Object.create(null);
   var startHooks = [];
-  kit.modules = modules;
-  kit.module = function (name, value) {
+  kitwork.modules = modules;
+  kitwork.module = function (name, value) {
     if (arguments.length === 1) return modules[name];
     modules[name] = value;
     return value;
   };
-  kit.has = function (name) {
+  kitwork.has = function (name) {
     return has(modules, name);
   };
 
   // Platform capabilities are services, separate from the runtime's control API, and JavaScript
-  // only: component code reaches kit.<name>; markup never calls kit (03/10) — it reaches a service
+  // only: component code reaches kitwork.<name>; markup never calls kitwork (03/10) — it reaches a service
   // through the component that is its view (theme, progressbar, titlebar, clipboard…).
   var services = Object.create(null);
   var reservedServiceNames = Object.create(null);
@@ -102,7 +99,7 @@
       !has(reservedServiceNames, name);
   }
 
-  kit.service = function (name, value) {
+  kitwork.service = function (name, value) {
     name = String(name || "");
     if (arguments.length === 1) {
       return has(services, name) ? services[name] : undefined;
@@ -110,11 +107,11 @@
     if (!validServiceName(name)) throw new Error("kit: invalid or reserved service name '" + name + "'");
 
     services[name] = value;
-    kit[name] = value;
+    kitwork[name] = value;
     return value;
   };
 
-  kit.onStart = function (callback) {
+  kitwork.onStart = function (callback) {
     if (typeof callback !== "function") return function () { };
     startHooks.push(callback);
     if (runtimeMeta.booted) callback();
@@ -134,7 +131,7 @@
     cleanup(function () { target.removeEventListener(eventName, handler, options); });
     return handler;
   }
-  kit.cleanup = cleanup;
+  kitwork.cleanup = cleanup;
 
   // ---- expressions: source → IR (same grammar as engine/jit/hydrate/compile.go) ----
   var PREC = { "||": 1, "??": 1, "&&": 2, "==": 3, "!=": 3, "===": 3, "!==": 3, ">": 4, "<": 4, ">=": 4, "<=": 4, "+": 5, "-": 5, "*": 6, "/": 6, "%": 6 };
@@ -645,7 +642,7 @@
       var next = LIVE_BOOLEAN[name] ? !!v : v == null ? "" : v;
       // Written only when the value changed since the kernel last wrote it (28/10/2026): what the person
       // did to the field stays until the data says otherwise. A box ticked while the call it made is out
-      // is not unticked by the paint that shows the call pending; kit.forget(el) is how a failed call puts
+      // is not unticked by the paint that shows the call pending; kitwork.forget(el) is how a failed call puts
       // the field back to its data.
       var written = state(el).written || (state(el).written = {});
       if (has(written, name) && written[name] === next) return;
@@ -693,7 +690,7 @@
   var scope = new Proxy(raw, {
     get: function (t, k) {
       if (k === "$") return t;
-      if (k in aliases) return aliases[k]; // kit / $app / $sidebar … → a public surface or component handle
+      if (k in aliases) return aliases[k]; // kitwork / $app / $sidebar … → a public surface or component handle
       return has(t, k) ? t[k] : globalOrZero(k);
     },
     set: function (t, k, v) {
@@ -709,16 +706,16 @@
   // `$` addresses the page scope explicitly ($.total = $.total + 1) — the same $ the server's
   // template language uses for its root data. Scope objects live in the node's Symbol state,
   // so they die with their node; two sibling scopes never see each other.
-  // A boundary is either: data-kitwork-component names a REGISTERED blueprint (see kit.component);
+  // A boundary is either: data-kitwork-component names a REGISTERED blueprint (see kitwork.component);
   // data-kitwork-scope carries a literal's values.
   // (HOST is the same list without the rows a live for makes, which are not hosts.)
   var HOST = "[data-kitwork-component],[data-kitwork-scope]";
   var SCOPE = HOST + ",[data-kitwork-item]";
 
-  // The component registry: kit.component("counter", { count: 0, inc() {…} }). A blueprint is a
+  // The component registry: kitwork.component("counter", { count: 0, inc() {…} }). A blueprint is a
   // plain JS object — state values + methods. Methods are real functions (called with this = the
   // component scope); state is deep-cloned per instance so two boundaries never share it.
-  // (Named `blueprints` to stay clear of kit.components, which is the registry of live surface.)
+  // (Named `blueprints` to stay clear of kitwork.components, which is the registry of live surface.)
   var blueprints = {};
   function cloneState(v) {
     if (v === null || typeof v !== "object") return v;
@@ -777,10 +774,10 @@
     var tag = hostOf(b);
     if (tag) {
       var cname = tag.name;
-      // Component registration (kit.component) can run AFTER the first render — so seed lazily,
+      // Component registration (kitwork.component) can run AFTER the first render — so seed lazily,
       // the first time the blueprint is available, and never re-seed once done (keeps mutations).
       // HOST_KEY ties the scope to its host, unseen by markup (a Symbol is never a name), so
-      // kit.context(this) finds the host along the same chain a name is read through.
+      // kitwork.context(this) finds the host along the same chain a name is read through.
       if (!st.scope) Object.defineProperty(st.scope = {}, HOST_KEY, { value: b });
       registerAlias(tag.alias, st.scope, b);
       if (!st.seeded) {
@@ -822,7 +819,7 @@
   // Every resource lives on the host's state, so cleanupTree releases it when the host leaves.
   var afterRenders = [];
   var HOST_KEY = Symbol("kit:host");
-  // contextOf is the ONE context a host has: init receives it, kit.context(this) returns the same.
+  // contextOf is the ONE context a host has: init receives it, kitwork.context(this) returns the same.
   function contextOf(b) { var st = state(b); return st.context || (st.context = initContext(b)); }
   function initContext(b) {
     function owned(selector) {
@@ -934,7 +931,7 @@
         if (k === "$this") return el;
         if (k === "$host") return (el.closest && el.closest(SCOPE)) || document.documentElement;
         if (k === "$event") return event || null;
-        if (k in aliases) return aliases[k]; // kit / $app / $sidebar … → a public surface or component handle
+        if (k in aliases) return aliases[k]; // kitwork / $app / $sidebar … → a public surface or component handle
         return base[k];
       },
       set: function (t, k, v) { base[k] = v; return true; }
@@ -1000,7 +997,7 @@
     st.scopeProxy = new Proxy(boundaryScope(b), {
       get: function (t, k) {
         if (k === "$") return raw;
-        if (k in aliases) return aliases[k]; // kit / $app / $sidebar … → a public surface or component handle
+        if (k in aliases) return aliases[k]; // kitwork / $app / $sidebar … → a public surface or component handle
         var objs = chainFor(b);
         for (var i = 0; i < objs.length; i++) { if (has(objs[i], k)) return objs[i][k]; }
         return globalOrZero(k);
@@ -1079,7 +1076,7 @@
     if (store) store.componentAlias = alias;
     return true;
   }
-  // Markup has no `kit` (03/10): a read of it is a name nothing declares, and the server names it at
+  // Markup has no `kitwork` (03/10): a read of it is a name nothing declares, and the server names it at
   // render. `$app` is not installed either — an application's state is its own components, each
   // reached through its alias.
 
@@ -1138,8 +1135,8 @@
   // marker pair already, its template hidden right after the start marker (data-kitwork-template) and its
   // rows after that, each with the list's id and its key:
   //
-  //   <!--kit-for:start id=s1--><li data-kitwork-for="todo of todos; key: todo.id" data-kitwork-template hidden>…</li>
-  //   <li data-kitwork-item="s1" data-kitwork-key="45">…</li>…<!--kit-for:end-->
+  //   <!--kitwork-for:start id=s1--><li data-kitwork-for="todo of todos; key: todo.id" data-kitwork-template hidden>…</li>
+  //   <li data-kitwork-item="s1" data-kitwork-key="45">…</li>…<!--kitwork-for:end-->
   //
   // Those markers are kept and the rows adopted by key: the first pass moves and rebuilds nothing the
   // server drew, so a row keeps its focus and what was typed in it from the first paint on.
@@ -1157,9 +1154,9 @@
         template.removeAttribute("data-kitwork-template");
         template.removeAttribute("hidden");
         var start = el.previousSibling;
-        var opened = start && start.nodeType === 8 && /^kit-for:start id=(\S+)$/.exec(start.nodeValue);
+        var opened = start && start.nodeType === 8 && /^kitwork-for:start id=(\S+)$/.exec(start.nodeValue);
         var close = el.nextSibling;
-        while (close && !(close.nodeType === 8 && close.nodeValue === "kit-for:end")) close = close.nextSibling;
+        while (close && !(close.nodeType === 8 && close.nodeValue === "kitwork-for:end")) close = close.nextSibling;
         if (opened && close) {
           parent.removeChild(el);
           forRegistry.push({ id: opened[1], anchor: start, end: close, template: template, spec: spec, keyIR: spec.keyIR });
@@ -1169,8 +1166,8 @@
       // The list's place in the document is the marker pair of ideaship-final §7 — the same shape
       // a server-rendered list arrives in — and every row carries the list's id in data-kitwork-item.
       var id = "f" + (++forSerial);
-      var anchor = document.createComment("kit-for:start id=" + id);
-      var end = document.createComment("kit-for:end");
+      var anchor = document.createComment("kitwork-for:start id=" + id);
+      var end = document.createComment("kitwork-for:end");
       parent.insertBefore(anchor, el);
       parent.insertBefore(end, el);
       parent.removeChild(el);
@@ -1269,7 +1266,7 @@
       el.removeAttribute("data-kitwork-if");
       if (!cond) return;
       var template = el.cloneNode(true);
-      var anchor = document.createComment("kit-if");
+      var anchor = document.createComment("kitwork-if");
       parent.insertBefore(anchor, el);
       parent.removeChild(el);
       ifRegistry.push({ anchor: anchor, template: template, cond: cond, mounted: null });
@@ -1374,7 +1371,7 @@
     cleanupElement(node);
     node.querySelectorAll("*").forEach(cleanupElement);
   }
-  kit.onCleanup = onCleanup;
+  kitwork.onCleanup = onCleanup;
   // Register a reusable stateful component blueprint. Activate it with data-kitwork-component="name".
   // A component has state + methods + a scope boundary. Registering (re)renders on the next tick,
   // so components registered after boot still paint.
@@ -1392,23 +1389,23 @@
   // DOMContentLoaded — and a render scheduled by the first would paint while the rest had not run,
   // reporting every one of them missing. Boot's first pass sees them all; after boot, a component
   // that arrives later (a file Drive added) still schedules its own render.
-  kit.component = function (name, def) {
+  kitwork.component = function (name, def) {
     blueprints[name] = def;
     if (runtimeMeta.booted) scheduleRender();
     return kitwork;
   };
-  // kit.context(this) — a component method reaching its context after init (emit, element,
+  // kitwork.context(this) — a component method reaching its context after init (emit, element,
   // listen…) without stashing it. `this` is whatever scope the call ran in: the host's own, a
   // nested scope inside it, or the host's through its alias from outside — all find the same host.
   // Anything else is refused by name, never answered with a context that belongs to something else.
-  kit.context = function (self) {
+  kitwork.context = function (self) {
     var host = self && self[HOST_KEY];
-    if (!host) throw new TypeError("kitwork: kit.context(this) needs the this of a component method");
+    if (!host) throw new TypeError("kitwork: kitwork.context(this) needs the this of a component method");
     return contextOf(host);
   };
-  kit.state = state;
-  kit.components = activeComponents;
-  kit.blueprints = blueprints;
+  kitwork.state = state;
+  kitwork.components = activeComponents;
+  kitwork.blueprints = blueprints;
 
   function observeEffect(result, current) {
     if (result && typeof result.then === "function") {
@@ -1434,7 +1431,7 @@
     if (typeof console !== "undefined" && console.error) console.error(error, directive || "", el || "");
   }
   // acting is the element whose directive runs now (a binding painted, an event handled), null between:
-  // kit.element() lets a function the markup calls know where it was called from, and a value it reads
+  // kitwork.element() lets a function the markup calls know where it was called from, and a value it reads
   // know where it is painted (a job's pending, read in a row, is that row's call: call.js).
   var acting = null;
   function guarded(el, directive, fn) {
@@ -1442,14 +1439,14 @@
     acting = el;
     try { return fn(); } catch (error) { reportError(error, el, directive); } finally { acting = was; }
   }
-  kit.element = function () { return acting; };
-  // kit.forget(el): the fields at and under el are written again by the next paint, whatever the person
+  kitwork.element = function () { return acting; };
+  // kitwork.forget(el): the fields at and under el are written again by the next paint, whatever the person
   // did to them (writeBinding).
-  // kit.write(el, name, v) and kit.text(el, v): how the kernel writes a bound value and a text, for a page's
+  // kitwork.write(el, name, v) and kitwork.text(el, v): how the kernel writes a bound value and a text, for a page's
   // program to write the same way (call.js, ui/page_program.go).
-  kit.write = function (el, name, v) { writeBinding(el, String(name).toLowerCase(), v); };
-  kit.text = setText;
-  kit.forget = function (el) {
+  kitwork.write = function (el, name, v) { writeBinding(el, String(name).toLowerCase(), v); };
+  kitwork.text = setText;
+  kitwork.forget = function (el) {
     if (!el || el.nodeType !== 1) return;
     delete state(el).written;
     el.querySelectorAll("[data-kitwork-bind]").forEach(function (x) { delete state(x).written; });
@@ -1703,20 +1700,20 @@
       }
     });
   }
-  kit.compile = function (src) { return parse(lex(src)); };
-  kit.run = function (ir, s) { return run(ir, publicScope(s)); };
-  kit.scope = scope;
-  kit.scopeFor = scopeFor;
-  kit.render = render;
-  kit.set = function (k, v) { pass(function () { scope[k] = v; }); render(); };
-  kit.destroy = function () {
+  kitwork.compile = function (src) { return parse(lex(src)); };
+  kitwork.run = function (ir, s) { return run(ir, publicScope(s)); };
+  kitwork.scope = scope;
+  kitwork.scopeFor = scopeFor;
+  kitwork.render = render;
+  kitwork.set = function (k, v) { pass(function () { scope[k] = v; }); render(); };
+  kitwork.destroy = function () {
     while (globalCleanups.length) {
       try { globalCleanups.pop()(); } catch (_) { }
     }
     cleanupTree(document.documentElement);
-    kit.hydrate = false;
-    kit.runtime.booted = false;
-    kit.runtime.loaded = false;
+    kitwork.hydrate = false;
+    kitwork.runtime.booted = false;
+    kitwork.runtime.loaded = false;
   };
 
   function boot() {
@@ -1736,7 +1733,7 @@
     }));
     return kitwork;
   }
-  kit.start = boot;
+  kitwork.start = boot;
 
   Object.defineProperty(kitwork, "internal", {
     value: {
@@ -1751,10 +1748,10 @@
     configurable: true,
     enumerable: false
   });
-  kit.module("kernel", {
+  kitwork.module("kernel", {
     start: boot,
-    compile: kit.compile,
-    run: kit.run,
+    compile: kitwork.compile,
+    run: kitwork.run,
     render: render
   });
   // After every swap: seed any new inputs, re-render expressions.

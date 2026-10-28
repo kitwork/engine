@@ -24,7 +24,7 @@ const exampleCarouselSay = `(function () {
   var section = document.getElementById("carousel");
   section.scrollIntoView({ block: "center" });
   return document.fonts.ready.then(function () { return new Promise(function (done) { requestAnimationFrame(function () { requestAnimationFrame(function () {
-    var host = section.querySelector('[data-kitwork-component^="carousel"]'), scope = kit.scopeFor(host);
+    var host = section.querySelector('[data-kitwork-component^="carousel"]'), scope = kitwork.scopeFor(host);
     var track = host.querySelector(".carousel-track"), slides = Array.prototype.slice.call(track.children);
     var box = function (el) { if (!el) return "-"; var r = el.getBoundingClientRect(); return Math.round(r.left) + "," + Math.round(r.top) + " " + Math.round(r.width) + "x" + Math.round(r.height); };
     var button = function (call) {
@@ -182,7 +182,7 @@ func TestBrowserExampleCarouselShots(t *testing.T) {
     track.addEventListener("scrollend", function () { done(""); }, { once: true });
     host.querySelectorAll("button[aria-controls]")[2].click();
     setTimeout(function () { done("no scrollend"); }, 2000);
-  }).then(function (said) { kit.scopeFor(host).pause(); return said; });
+  }).then(function (said) { kitwork.scopeFor(host).pause(); return said; });
 })()`)
 		at = say()
 		check("third-"+suffix, state(at), fmt.Sprintf("current 2 of 4, playing false, live polite, dots 0010, counter 3 / 4, overflow 0, dark %v", dark))
@@ -213,7 +213,7 @@ func TestBrowserExampleCarouselShots(t *testing.T) {
 const exampleScenesSay = `(function () {
   var section = document.getElementById("carousel-pictures");
   section.scrollIntoView({ block: "center" });
-  var host = section.querySelector('[data-kitwork-component="carousel: $scenes"]'), scope = kit.scopeFor(host);
+  var host = section.querySelector('[data-kitwork-component="carousel: $scenes"]'), scope = kitwork.scopeFor(host);
   var track = host.querySelector(".carousel-track"), slides = Array.prototype.slice.call(track.children);
   var picture = slides[scope.current].querySelector("img");
   return document.fonts.ready.then(function () { return picture.decode().catch(function () {}); }).then(function () { return new Promise(function (done) { requestAnimationFrame(function () { requestAnimationFrame(function () {

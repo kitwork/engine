@@ -1,4 +1,4 @@
-;(function (global, kit) {
+;(function (global, kitwork) {
 "use strict";
 
 // KitJS staged service: biometric@1.0.0
@@ -34,7 +34,7 @@ var promiseReject = call.bind(PromiseType.reject, PromiseType);
 var promiseResolve = call.bind(PromiseType.resolve, PromiseType);
 var assembly = global.document && global.document[Symbol.for("kitjs:assembly")];
 var nativeHost = assembly && assembly.nativeHost;
-var capabilities = kit.capabilities;
+var capabilities = kitwork.capabilities;
 var supportsCapability = capabilities && capabilities.supports;
 var activeScan = null;
 var BEGIN_TIMEOUT_MS = 15000;
@@ -482,9 +482,9 @@ function status() {
   });
 }
 
-kit.service("biometric", {
+kitwork.service("biometric", {
   available: available,
   status: status,
   authenticate: scan
 });
-})(globalThis, kit);
+})(globalThis, kitwork);

@@ -2,7 +2,7 @@ package js
 
 import "testing"
 
-// kit.context(this): a component method reaches the context its init received — the same object —
+// kitwork.context(this): a component method reaches the context its init received — the same object —
 // without stashing it in a Symbol slot of its own. In a real browser (the page hears each changed in
 // one write, the hosts it came from in order: a pair runs one expression):
 //
@@ -14,7 +14,7 @@ import "testing"
 //	· anything that is not a component's this — the page's scope, a plain scope, a stray object —
 //	  is refused by name.
 func TestBrowserKitContextFromAMethod(t *testing.T) {
-	runBrowserProof(t, "kit.context", nil, `
+	runBrowserProof(t, "kitwork.context", nil, `
 <div id="page" data-kitwork-scope="heard: ''">
   <div id="one" data-kitwork-component="counter: $one" data-kitwork-event="changed: heard = heard + $event.target.id + ','">
     <button id="inside" data-kitwork-event="click: increment()">+</button>
@@ -28,22 +28,22 @@ func TestBrowserKitContextFromAMethod(t *testing.T) {
   <div id="plain" data-kitwork-scope="x: 1"></div>
 </div>
 <script>
-kit.component("counter", {
+kitwork.component("counter", {
   count: 0,
   same: 0,
   init: function (context) { this.initContext = context; },
   increment: function () {
-    var context = kit.context(this);
+    var context = kitwork.context(this);
     if (context === this.initContext) this.same++;
     this.count++;
     context.emit("changed", { count: this.count });
   },
-  valueText: function () { return kit.context(this).owned(".value")[0].textContent; }
+  valueText: function () { return kitwork.context(this).owned(".value")[0].textContent; }
 });
 (async function () {
   await wait(150);
-  var page = function () { return window.kit.scopeFor(document.getElementById("page")); };
-  var one = function () { return window.kit.scopeFor(document.getElementById("one")); };
+  var page = function () { return window.kitwork.scopeFor(document.getElementById("page")); };
+  var one = function () { return window.kitwork.scopeFor(document.getElementById("one")); };
 
   document.getElementById("inside").click(); await wait(40);
   assert(one().count === 1 && page().heard === "one,", "a click inside the host: " + one().count + " " + page().heard);
@@ -57,15 +57,15 @@ kit.component("counter", {
   assert(one().same === 3, "every call answered with the context init received, got " + one().same + " of 3");
   assert(one().valueText() === "3", "context.owned from a method finds the host's own part, got " + one().valueText());
 
-  var two = window.kit.scopeFor(document.getElementById("two"));
+  var two = window.kitwork.scopeFor(document.getElementById("two"));
   two.increment(); await wait(40);
   assert(two.count === 1 && one().count === 3 && page().heard === "one,one,one,", "the second instance answers for itself (its event has no listener): " + two.count + " " + one().count + " " + page().heard);
-  assert(kit.context(two) !== kit.context(one()), "two instances, two contexts");
-  assert(kit.context(two).host === document.getElementById("two"), "the context's host is the instance's own host");
+  assert(kitwork.context(two) !== kitwork.context(one()), "two instances, two contexts");
+  assert(kitwork.context(two).host === document.getElementById("two"), "the context's host is the instance's own host");
 
   var refusals = 0;
-  [page(), window.kit.scopeFor(document.getElementById("plain")), {}, null].forEach(function (self) {
-    try { kit.context(self); } catch (error) { if (String(error.message).indexOf("kit.context(this)") >= 0) refusals++; }
+  [page(), window.kitwork.scopeFor(document.getElementById("plain")), {}, null].forEach(function (self) {
+    try { kitwork.context(self); } catch (error) { if (String(error.message).indexOf("kitwork.context(this)") >= 0) refusals++; }
   });
   assert(refusals === 4, "the page scope, a plain scope, an object and null are each refused by name, got " + refusals + " of 4");
 

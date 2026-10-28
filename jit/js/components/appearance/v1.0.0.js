@@ -9,7 +9,7 @@
  * the tag builds, and a data-kitwork-class on the icon that turns icon-sun or icon-moon on while its
  * condition holds.
  *
- * Markup never calls kit: kit.appearance owns the choice (stored, applied before paint by the
+ * Markup never calls kit: kitwork.appearance owns the choice (stored, applied before paint by the
  * pre-paint script); this component is how markup sees it. mode and dark are getters that read the
  * service, so every host on a page agrees.
  *
@@ -24,12 +24,12 @@
  * contract (mode, resolved) for the pages written before this one.
  */
 var appearanceDef = {
-  get mode() { return window.kit.appearance.mode; },
-  get dark() { return window.kit.appearance.dark; },
+  get mode() { return window.kitwork.appearance.mode; },
+  get dark() { return window.kitwork.appearance.dark; },
 
-  toggle: function () { window.kit.appearance.toggle(); },
-  set: function (mode) { window.kit.appearance.set(mode); },
-  system: function () { window.kit.appearance.system(); }
+  toggle: function () { window.kitwork.appearance.toggle(); },
+  set: function (mode) { window.kitwork.appearance.set(mode); },
+  system: function () { window.kitwork.appearance.system(); }
 };
 
-window.kit.component("appearance", appearanceDef);
+window.kitwork.component("appearance", appearanceDef);

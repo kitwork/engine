@@ -225,7 +225,7 @@ func TestBrowserCarouselMouseDragEdges(t *testing.T) {
 		_, y := carouselTrackCentre(t, d, "cards")
 		g := carouselDrag(t, d, "cards", slow(860, y, -50, -150, -250, -350, -450, -520))
 		letGo(t, "dragged 520px from the first card", g, "current 2 | slides 001000 | dots  | counter 3 / 6 | seen 3 | 520 → 600 only forward, smoothly | rests at 600, order none, slide 3 seen at 300, by its scrollend")
-		w := carouselWatch(t, d, "cards", `kit.scopeFor(window.__carousel.parts("cards").host).go(3);`)
+		w := carouselWatch(t, d, "cards", `kitwork.scopeFor(window.__carousel.parts("cards").host).go(3);`)
 		if last := w.Samples[len(w.Samples)-1]; last.Current != 3 {
 			t.Fatalf("go(3): current %g\n frames %s", last.Current, carouselTrace(w))
 		}
@@ -233,7 +233,7 @@ func TestBrowserCarouselMouseDragEdges(t *testing.T) {
 		letGo(t, "dragged on at the last place", g, "current 3 | slides 000100 | dots  | counter 4 / 6 | seen 4 | 900 → 900 stays, at once | rests at 900, order none, slide 4 seen at 300, no scrollend")
 		check(t, "dragged on at the last place, then", carouselAt(t, d, "cards"),
 			`current 3 | slides 000100 | counter 4 / 6 | left 900 | slide 4 seen at 300 | order none | style ""`)
-		w = carouselWatch(t, d, "cards", `kit.scopeFor(window.__carousel.parts("cards").host).go(0);`)
+		w = carouselWatch(t, d, "cards", `kitwork.scopeFor(window.__carousel.parts("cards").host).go(0);`)
 		if last := w.Samples[len(w.Samples)-1]; last.Current != 0 {
 			t.Fatalf("go(0): current %g\n frames %s", last.Current, carouselTrace(w))
 		}
@@ -360,12 +360,12 @@ func TestBrowserCarouselRightToLeft(t *testing.T) {
 		if got, want := carouselLetGoSays(g.Watch), "current 0 | slides 100 | dots  | counter 1 / 3 | seen 1 0 | -440 → 0 only forward, smoothly | rests at 0, order none, slide 0 seen at 0, by its scrollend"; got != want {
 			t.Errorf("dragged left 200px, let go:\n got  %s\n want %s\n frames %s", got, want, carouselTrace(g.Watch))
 		}
-		check(t, "go(2)", carouselMove(carouselWatch(t, d, "written", `kit.scopeFor(window.__carousel.parts("written").host).go(2);`)),
+		check(t, "go(2)", carouselMove(carouselWatch(t, d, "written", `kitwork.scopeFor(window.__carousel.parts("written").host).go(2);`)),
 			"current 2 | slides 001 | dots  | counter 3 / 3 | 0 → -1280 smoothly, rests by its scrollend")
 		w := carouselWatch(t, d, "written", `document.getElementById("written-next").click();`)
 		check(t, "next() at the last", carouselRound(w),
 			"current 0 | slides 100 | dots  | counter 1 / 3 | seen 2 0 | slide 0 comes round (order 1): slide 2 at 0 → slide 2 at 0, left -1280 → -640 | while round -640 → -1280 only back, smoothly | home: slide 0 at 0 → slide 0 at 0, left -1280 → 0 | rests at 0, order none, slide 0 seen at 0, by its scrollend")
-		check(t, "go(2) again", carouselMove(carouselWatch(t, d, "written", `kit.scopeFor(window.__carousel.parts("written").host).go(2);`)),
+		check(t, "go(2) again", carouselMove(carouselWatch(t, d, "written", `kitwork.scopeFor(window.__carousel.parts("written").host).go(2);`)),
 			"current 2 | slides 001 | dots  | counter 3 / 3 | 0 → -1280 smoothly, rests by its scrollend")
 		g = carouselDrag(t, d, "written", slow(x, y, 20, 60, 100, 140, 180, 200))
 		if got, want := carouselLetGoSays(g.Watch), "current 0 | slides 100 | dots  | counter 1 / 3 | seen 2 0 | while round -840 → -1280 only back, smoothly | rests at 0, order none, slide 0 seen at 0, by its scrollend"; got != want {

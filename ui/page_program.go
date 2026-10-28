@@ -12,15 +12,15 @@ import (
 
 // The program of a page that runs in the kernel (28/10/2026, docs/KITWORK_BRIDGE.md, lát 1 of the compiled
 // page). The page's elements carry no expression: each element whose values follow the page's data carries
-// one short mark, data-k="n", and the page's program, a file of its own (/_kitwork/page.<hash>.js), says for
+// one short mark, data-kitwork-mark="n", and the page's program, a file of its own (/_kitwork/page.<hash>.js), says for
 // mark n what to write, from which expression (its IR, compiled here), and which names of the page it reads.
 // In the browser a name that changes runs again only what reads it (call.js), where the kernel's paint ran
 // every binding of the page on every write: at 1.000 rows a keystroke cost 14 ms, and the expressions written
 // on every row were half of the page's HTML.
 //
-//	<input value="{{ title }}" />                 →  <input data-k="0" value="">        g[0]: value: title, reads title
-//	<item for="todo of todos; key: todo.id">      →  rows marked data-kitwork-item/key, the template data-k-for="0"
-//	  <text>{{ todo.title }}</text>              →  <p data-k="3">…</p>                g[3]: text: todo.title, row of list 0
+//	<input value="{{ title }}" />                 →  <input data-kitwork-mark="0" value="">        g[0]: value: title, reads title
+//	<item for="todo of todos; key: todo.id">      →  rows marked data-kitwork-item/key, the template data-kitwork-template="0"
+//	  <text>{{ todo.title }}</text>              →  <p data-kitwork-mark="3">…</p>                g[3]: text: todo.title, row of list 0
 //
 // A page with a component of Kitwork in it (a dropdown, a countdown…) is not compiled this way yet: what is
 // inside the component is the kernel's, and the page is written as before (runtime.go), the whole page.
@@ -121,7 +121,7 @@ func (c *compiler) programGroup(scope *frame, pairs runtimePairs) (string, bool)
 		return "", false
 	}
 	c.program.Groups = append(c.program.Groups, group)
-	return ` data-k="` + strconv.Itoa(len(c.program.Groups)-1) + `"`, true
+	return ` data-kitwork-mark="` + strconv.Itoa(len(c.program.Groups)-1) + `"`, true
 }
 
 // pageReads are the names of the page an expression reads: what makes it run again when they change.
