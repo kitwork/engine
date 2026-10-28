@@ -28,6 +28,25 @@ func (fixture *navigationReflectFixture) Pair() (string, error) {
 	return fixture.Name, nil
 }
 
+func (fixture *navigationReflectFixture) Check() error {
+	if fixture.Name == "" {
+		return errors.New("no name")
+	}
+	return nil
+}
+
+// A Go method of no argument that returns only an error is read as a field, and the read keeps the error:
+// it fails with it, as a call does (14/10/2026; napas.validate() showed it until napas went on 28/10/2026).
+// CONTROL: with a name the read gives nothing.
+func TestReflectedGetterKeepsItsError(t *testing.T) {
+	if got := New(&navigationReflectFixture{}).Get("check"); got.K != Invalid || !strings.Contains(got.Text(), "call check: no name") {
+		t.Fatalf("a getter that returns only an error dropped it: %#v", got)
+	}
+	if got := New(&navigationReflectFixture{Name: "kitwork"}).Get("check"); got.K != Nil {
+		t.Fatalf("a getter that returns only a nil error = %#v", got)
+	}
+}
+
 func TestStructReflectionMetadataCachePreservesSemantics(t *testing.T) {
 	item := New(&navigationReflectFixture{Name: "kitwork", hidden: "private"})
 

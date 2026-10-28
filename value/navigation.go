@@ -406,7 +406,7 @@ func (v Value) reflect(key string, bind bool) Value {
 		method := ptrRv.Method(descriptor.index)
 		if descriptor.getter && !callOnly(v.V, foldedKey) {
 			// a method read as a field still has its error channel: a Go method of no argument that
-			// returns only an error (napas.validate()) fails with it, as a call of it does
+			// returns only an error fails with it, as a call of it does
 			return reflectedCallResult(key, method.Call(nil))
 		}
 		if bind && members.bound {
