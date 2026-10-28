@@ -85,7 +85,7 @@ func RemovedWord(word string) (string, bool) {
 
 // helpersRemoved are helpers of the module kitwork the engine took out on 28/10/2026 because no spec stood
 // behind them (KITWORK_ENGINE.md mục 7). One needed again is written as a spec first, then a module.
-var helpersRemoved = map[string]bool{"qrcode": true, "napas": true, "jwt": true, "shortbase": true, "webhook": true}
+var helpersRemoved = map[string]bool{"qrcode": true, "napas": true, "jwt": true, "shortbase": true, "webhook": true, "insights": true}
 
 const helperRemoved = "không có spec nên engine gỡ ngày 28/10/2026; cần lại thì viết spec trước, rồi thêm thành một module (KITWORK_ENGINE.md mục 7)"
 
