@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/kitwork/engine/jit/hydrate"
 )
 
 // The todo page of demo.kitwork.io, as its author wrote it (28/10/2026): router.view binds a var, data and
@@ -88,47 +91,35 @@ func TestPageWithJobsRunsInTheKernel(t *testing.T) {
 	}
 	html := page.Render(Request{Path: "/todo", Scope: liveTodoScope()})
 
+	// the page has a program (page_program.go): marks, no expression on the elements
 	for _, want := range []string{
-		// the list as the kernel adopts it: markers, the template hidden, each row with the list's id and its key
-		`<!--kit-for:start id=s1-->`,
-		`data-kitwork-for="todo of todos; key: todo.id" data-kitwork-template`,
-		`data-kitwork-item="s1" data-kitwork-key="45"`,
-		`data-kitwork-item="s1" data-kitwork-key="46"`,
-		`<!--kit-for:end-->`,
-		// what reads the bind follows it in the browser
-		`checked: todo.done`, `disabled: toggle.pending`, `text: todo.title`, `disabled: add.pending`,
-		`show: add.error`, `text: add.error.message`, `show: todos.length === 0`,
-		`change: toggle(todo.id, !todo.done)`, `click: remove(todo.id)`,
-		// a form that calls a job stays on the page
-		`submit.prevent: add()`,
-		// the two-way field of the var
-		`value: title`,
+		`<!--kit-for:start id=s1-->`, `data-k-for="0" data-kitwork-template`,
+		`data-kitwork-item="s1" data-kitwork-key="45"`, `data-kitwork-item="s1" data-kitwork-key="46"`, `<!--kit-for:end-->`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("the page should hold %q:\n%s", want, html)
 		}
 	}
-	if strings.Contains(html, "data-kitwork-job-") || strings.Contains(html, "data-kitwork-var") {
-		t.Errorf("the marks of the v0 bridge should be gone:\n%s", html)
+	for _, gone := range []string{"data-kitwork-bind", "data-kitwork-event", "data-kitwork-class", "data-kitwork-for", "data-kitwork-job-", "data-kitwork-var"} {
+		if strings.Contains(html, gone) {
+			t.Errorf("a page with a program should carry no %s:\n%s", gone, html)
+		}
 	}
 	// if follows its data like show: drawn hidden while false
-	if !regexp.MustCompile(`<[a-z]+[^>]*data-kitwork-bind="show: todos.length === 0"[^>]* hidden>Chưa có việc nào.`).MatchString(html) {
+	if !regexp.MustCompile(`<p[^>]*data-k="\d+"[^>]* hidden>Chưa có việc nào.`).MatchString(html) {
 		t.Errorf("the if of an empty list should be drawn hidden while the list has rows:\n%s", html)
 	}
-	// the template's row is no item of the list: two rows, three copies of the row (template + 2)
-	if got := strings.Count(html, `change: toggle(todo.id, !todo.done)`); got != 3 {
-		t.Errorf("expected the row three times (template + 2 rows), got %d", got)
-	}
 
-	// the data the kernel repaints from, at the end of <content />
+	// the data the page repaints from, at the end of <content />, naming its program
 	m := regexp.MustCompile(`<script type="application/json" data-kitwork-page>(.*?)</script>`).FindStringSubmatch(html)
 	if m == nil {
 		t.Fatalf("the page should end its content with its data:\n%s", html)
 	}
 	var data struct {
-		State map[string]any `json:"state"`
-		Jobs  []string       `json:"jobs"`
-		Vars  []string       `json:"vars"`
+		State   map[string]any `json:"state"`
+		Jobs    []string       `json:"jobs"`
+		Vars    []string       `json:"vars"`
+		Program string         `json:"program"`
 	}
 	if err := json.Unmarshal([]byte(m[1]), &data); err != nil {
 		t.Fatal(err)
@@ -144,6 +135,86 @@ func TestPageWithJobsRunsInTheKernel(t *testing.T) {
 	}
 	if !strings.Contains(html, `</script></main>`) && !strings.Contains(html, `</script></div>`) {
 		t.Errorf("the data should close the content:\n%s", html)
+	}
+
+	// the program: registered under the id the page names, each mark with what it writes and reads
+	script := string(page.Script())
+	if data.Program == "" || !strings.Contains(script, `["`+data.Program+`"]=`) {
+		t.Fatalf("the program should register under the page's id %q:\n%s", data.Program, script)
+	}
+	body := script[strings.Index(script, "]=")+2 : strings.Index(script, ";if(k.pageReady")]
+	var program pageProgram
+	if err := json.Unmarshal([]byte(body), &program); err != nil {
+		t.Fatalf("the program is no JSON: %v\n%s", err, body)
+	}
+	for _, mark := range regexp.MustCompile(`data-k="(\d+)"`).FindAllStringSubmatch(html, -1) {
+		if n, _ := strconv.Atoi(mark[1]); n >= len(program.Groups) {
+			t.Errorf("mark %d has no group in the program", n)
+		}
+	}
+	find := func(name, source string) (programGroup, programPair, bool) {
+		ir, _ := hydrate.Compile(source)
+		want, _ := json.Marshal(ir)
+		for _, g := range program.Groups {
+			for _, pairs := range [][]programPair{g.Binds, g.Classes, g.Events} {
+				for _, p := range pairs {
+					got, _ := json.Marshal(p.IR)
+					if p.Name == name && string(got) == string(want) {
+						return g, p, true
+					}
+				}
+			}
+		}
+		return programGroup{}, programPair{}, false
+	}
+	for _, c := range []struct {
+		name, source string
+		list         int
+		reads        string
+	}{
+		{"value", "title", -1, "title"},
+		{"disabled", "add.pending", -1, "add"},
+		{"submit.prevent", "add()", -1, "add"},
+		{"show", "todos.length === 0", -1, "todos"},
+		{"checked", "todo.done", 0, ""},
+		{"disabled", "toggle.pending", 0, "toggle"},
+		{"change", "toggle(todo.id, !todo.done)", 0, "toggle"},
+		{"text", "todo.title", 0, ""},
+		{"click", "remove(todo.id)", 0, "remove"},
+	} {
+		g, p, ok := find(c.name, c.source)
+		if !ok {
+			t.Errorf("the program should hold %s: %s", c.name, c.source)
+			continue
+		}
+		if g.List != c.list || strings.Join(p.Reads, ",") != c.reads {
+			t.Errorf("%s: %s is in list %d reading %v, want list %d reading %q", c.name, c.source, g.List, p.Reads, c.list, c.reads)
+		}
+	}
+	if len(program.Lists) != 1 || program.Lists[0].Item != "todo" {
+		t.Errorf("the program should hold the list todos: %+v", program.Lists)
+	}
+	// the template's row is no item of the list: the row's marks three times (template + 2 rows)
+	if got := strings.Count(html, `type="checkbox" data-k=`); got != 3 {
+		t.Errorf("expected the row's box three times (template + 2 rows), got %d", got)
+	}
+}
+
+// A page that holds a component of Kitwork has no program yet: it is written for the kernel, as before.
+func TestPageWithAComponentHasNoProgramYet(t *testing.T) {
+	s := givenSite(map[string]string{"/site/todo/router.work": liveTodoRoute, "/site/todo/content.ui": `<content>` +
+		`<dropdown><button click="toggle()">{{ left }}</button><popover><text>{{ title }}</text></popover></dropdown>` +
+		`<form submit="add()"><input value="{{ title }}" /></form><button click="remove(1)">x</button></content>`})
+	page, err := s.Compile(filepath.Join(s.Root, "todo"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Script() != nil {
+		t.Errorf("a page with a dropdown should have no program yet")
+	}
+	html := page.Render(Request{Path: "/todo", Scope: liveTodoScope()})
+	if !strings.Contains(html, `data-kitwork-event="submit.prevent: add()"`) || strings.Contains(html, `data-k="`) {
+		t.Errorf("a page with no program is written for the kernel:\n%s", html)
 	}
 }
 

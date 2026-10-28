@@ -33,6 +33,8 @@ type frame struct {
 	file string
 	// client: the kernel runs the component, so its names are live in the browser
 	client bool
+	// list is the list of a page with a program whose rows this frame is (page_program.go), nil for any other
+	list *liveListRef
 	// countdown is the countdown this frame is the instance of, nil for any other: what its names are
 	// called and written with is checked wherever they reach (countdownEvents)
 	countdown *countdownScope
@@ -609,6 +611,7 @@ func (s *frame) bindPairs(n *Node, o *elemOp) ([]string, error) {
 				return nil, errAt(n, "%s for theo trạng thái của component chưa chạy ở trình duyệt", s.within())
 			}
 			o.liveFor = true // a list of a page that runs in the kernel (page_live.go)
+			o.liveList = s.list
 		}
 	}
 	return pairs, nil
@@ -842,6 +845,14 @@ func (c *compiler) withText(n *Node, o *elemOp, scope *frame, pairs runtimePairs
 			_, source, _ := strings.Cut(pair, ": ")
 			c.noteWired(n, source, aliases)
 		}
+	}
+	if c.program != nil && !scope.inComponent() && len(pairs.binds)+len(pairs.classes)+len(pairs.events) > 0 {
+		// a page with a program: one mark, what it writes in the program (page_program.go)
+		if mark, ok := c.programGroup(scope, pairs); ok {
+			o.staticAttrs += mark
+			return nil
+		}
+		c.programOff = true
 	}
 	var w strings.Builder
 	writeRuntime(&w, pairs)

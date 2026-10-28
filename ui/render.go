@@ -206,6 +206,7 @@ type elemOp struct {
 	// liveFor: the for of a page that runs in the kernel, drawn as the kernel adopts it (renderLive);
 	// pageState: on the root of that page's content, which ends with the data the kernel repaints from
 	liveFor   bool
+	liveList  *liveListRef // the list in the page's program, on a page that has one (page_program.go)
 	pageState *livePage
 }
 

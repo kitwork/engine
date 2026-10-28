@@ -80,7 +80,7 @@ func writeSkeleton(b *strings.Builder, o op) {
 			writeAttr(b, "class", strings.Join(classes, " "))
 		}
 		b.WriteString(o.staticAttrs)
-		if o.liveFor {
+		if o.liveFor && o.liveList == nil {
 			// a list the kernel adopts, once, as it reads it: its item is declared inside (jit/hydrate Check)
 			writeAttr(b, "data-kitwork-for", forText(o.forEach))
 		}

@@ -42,6 +42,8 @@ type Page struct {
 	aliases []aliasStart
 	// live is set on a page that runs in the kernel: its router.view binds a job or a var (page_live.go)
 	live *livePage
+	// fellBack says a compile for a program met what the program cannot run yet (compileProgram)
+	fellBack bool
 }
 
 // element is what the class rules need to know about the element being compiled.
@@ -250,6 +252,10 @@ type compiler struct {
 	// live in the browser (page_live.go); listKeys is the key of each list of the bind it draws by key
 	page     *frame
 	listKeys map[string]string
+	// program is the program of a page that runs in the kernel (page_program.go), nil for any other or when
+	// compiled without; programOff says the page holds what the program cannot run yet
+	program    *pageProgram
+	programOff bool
 	// aliasUses are the $alias reads of the page, checked once every as is known
 	aliasUses []aliasUse
 	// wired are the aliases read by what is written for the kernel, checked once every as is known to
@@ -374,6 +380,18 @@ func (s *Site) HasContent(routeDir string) bool {
 }
 
 func (s *Site) compile(routeDir, contentFile, kind string) (*Page, error) {
+	// a page that runs in the kernel is compiled to a program (page_program.go); one that holds a component
+	// of Kitwork is not, yet, and is compiled again the way it was
+	page, err := s.compileProgram(routeDir, contentFile, kind, true)
+	if err == nil && page != nil && page.fellBack {
+		page, err = s.compileProgram(routeDir, contentFile, kind, false)
+	}
+	return page, err
+}
+
+// compileProgram compiles a page; with program, a page that runs in the kernel gets a program, and the page
+// says fellBack when it could not (programOff), for the caller to compile it again without.
+func (s *Site) compileProgram(routeDir, contentFile, kind string, program bool) (*Page, error) {
 	switch s.Contrast {
 	case "", ContrastWarning, ContrastStrict:
 	default:
@@ -387,6 +405,9 @@ func (s *Site) compile(routeDir, contentFile, kind string) (*Page, error) {
 	c.given = s.given(routeDir, kind)
 	c.view = c.given.names
 	c.startLivePage(kind) // a page whose router.view binds a job or a var runs in the kernel (page_live.go)
+	if program && c.page != nil {
+		c.program = &pageProgram{}
+	}
 	if c.given.file != "" {
 		c.files[c.given.file] = true
 	}
@@ -468,6 +489,13 @@ func (s *Site) compile(routeDir, contentFile, kind string) (*Page, error) {
 		return nil, err
 	}
 	out := c.out
+	if c.program != nil && c.programOff {
+		out.fellBack = true
+		return out, nil
+	}
+	if c.program != nil {
+		out.live.script, out.live.program = c.program.build()
+	}
 	if out.live != nil {
 		out.live.keys = map[string]string{}
 		for name, key := range c.listKeys {
@@ -549,6 +577,9 @@ func (c *compiler) element(n *Node, cx ctx, site *callSite) (op, error) {
 				if live, _ := around.onClient(each.list, n, a); live {
 					cx.scope.client = true
 					c.noteLiveList(each)
+					if c.program != nil {
+						cx.scope.list = c.program.addList(each, c.page)
+					}
 				}
 			}
 			cx.forAt = &forSite{node: n, attr: a}

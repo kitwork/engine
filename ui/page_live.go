@@ -28,6 +28,9 @@ type livePage struct {
 	// keys is the key of each list of the bind the page draws by key, as a path into a row ("id"): the
 	// server sends that list's change by row (work/view_patch.go)
 	keys map[string]string
+	// script is the file of the page's program and program its id, when it has one (page_program.go)
+	script  []byte
+	program string
 }
 
 // startLivePage makes the page a component the kernel runs when its router.view binds a job or a var and
@@ -148,12 +151,16 @@ func (l *livePage) writeState(b *strings.Builder, scope map[string]any) {
 			state[name] = v
 		}
 	}
-	data, err := json.Marshal(map[string]any{"state": state, "jobs": emptyList(l.jobs), "vars": emptyList(l.vars)})
+	block := map[string]any{"state": state, "jobs": emptyList(l.jobs), "vars": emptyList(l.vars)}
+	if l.program != "" {
+		block["program"] = l.program
+	}
+	data, err := json.Marshal(block)
 	if err != nil {
 		return
 	}
 	b.WriteString(`<script type="application/json" data-kitwork-page>`)
-	b.Write(data) // json.Marshal writes <, > and & as <…: nothing here closes the script
+	b.Write(data) // json.Marshal writes <, > and & as unicode escapes: nothing here closes the script
 	b.WriteString(`</script>`)
 }
 
@@ -216,6 +223,10 @@ func (o *elemOp) renderLive(r *run, scope map[string]any) {
 	}
 	items := r.items
 	r.mark = ` data-kitwork-for="` + html.EscapeString(forText(o.forEach)) + `" data-kitwork-template`
+	if o.liveList != nil {
+		// a page with a program: the template is the program's list, which the kernel leaves alone
+		r.mark = ` data-k-for="` + strconv.Itoa(o.liveList.index) + `" data-kitwork-template`
+	}
 	r.markHidden = true
 	o.renderOne(r, scope)
 	r.items = items

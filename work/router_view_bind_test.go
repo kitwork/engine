@@ -98,9 +98,9 @@ func TestRouterViewJobErrors(t *testing.T) {
 	}
 }
 
-// The page of a router.view that binds jobs runs in the kernel (docs/KITWORK_BRIDGE.md): its events call the
-// jobs by name, its list is drawn as the kernel adopts it, its data closes its content, and it loads the
-// kernel and call.js.
+// The page of a router.view that binds jobs runs in the browser on its program (docs/KITWORK_BRIDGE.md,
+// ui/page_program.go): its elements carry marks, its list is drawn as the program adopts it, its data closes
+// its content and names its program, and it loads the kernel and call.js.
 func TestRouterViewPageWiresItsJobs(t *testing.T) {
 	tn := NewTenant(writeSite(t, map[string]string{
 		"router.work": `import * as router from "kitwork/router";`,
@@ -125,12 +125,18 @@ func TestRouterViewPageWiresItsJobs(t *testing.T) {
 		t.Fatalf("/todo: %d\n%.1500s", r.Code, body)
 	}
 	for _, part := range []string{
-		`data-kitwork-event="submit.prevent: add()"`, `data-kitwork-event="click: remove(todo.id)"`,
-		`<!--kit-for:start id=s1-->`, `data-kitwork-item="s1" data-kitwork-key="7"`, `data-kitwork-bind="value: title"`,
-		`<script type="application/json" data-kitwork-page>`, `/_kitwork/kernel.`, `/_kitwork/call.`,
+		`data-k="`, `data-k-for="0"`, `<!--kit-for:start id=s1-->`, `data-kitwork-item="s1" data-kitwork-key="7"`,
+		`<script type="application/json" data-kitwork-page>`, `"program":"`, `/_kitwork/kernel.`, `/_kitwork/call.`,
 	} {
 		if !strings.Contains(body, part) {
 			t.Errorf("/todo lacks %q\n%.3000s", part, body)
+		}
+	}
+	// the page's expressions are in its program; what still carries the kernel's attributes is the engine's
+	// own progressbar and reader
+	for _, expression := range []string{"add()", "remove(todo.id)", "todo.title", "value: title"} {
+		if strings.Contains(body, expression) {
+			t.Errorf("a page with a program carries no expression on its elements, found %q\n%.3000s", expression, body)
 		}
 	}
 }

@@ -435,6 +435,7 @@ func (c *compiler) componentCall(n *Node, cx ctx) (op, error) {
 	}
 	inner = componentFrame(def, inner)
 	inner.countdown = countdown // nil for any other component (countdown.go)
+	c.programOff = true         // what is inside a component of Kitwork is the kernel's: no program yet (page_program.go)
 	inside := cx
 	inside.scope = inner
 	inside.terminal = nil // a component's code is its own, never a command of a terminal around it
