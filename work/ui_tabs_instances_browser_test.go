@@ -9,7 +9,8 @@ import (
 	"time"
 )
 
-// tabsInstanceFiles is a site whose component code-window holds, in its own .ui, a tabs that persists
+// tabsInstanceFiles is a site whose component code-window holds, in its look (code-window.ui, whose root is its
+// tag), a tabs that persists
 // (router and page, so page+router) and its two panels; the page uses it twice, each in a box of its own.
 var tabsInstanceFiles = map[string]string{
 	"localhost/router.work": `import * as router from "kitwork/router";
@@ -21,14 +22,14 @@ router.colors({ brand: "#c8742c" });
   <box id="one"><code-window /></box>
   <box id="two"><code-window /></box>
 </content>`,
-	"localhost/code-window.ui": `<box gap="2">
+	"localhost/code-window.ui": `<code-window gap="2">
   <tabs as="$files" persist="true" alt="Files" flex="row" gap="1">
     <button click="select('router')" selected:underline="true">router.work</button>
     <button click="select('page')" selected:underline="true">view.ui</button>
   </tabs>
   <box show="$files.selected == 'router'"><text>router</text></box>
   <box show="$files.selected == 'page'"><text>page</text></box>
-</box>`,
+</code-window>`,
 	"localhost/code-window.work": `import { component } from "kitwork";
 
 component.define("code-window", () => {
