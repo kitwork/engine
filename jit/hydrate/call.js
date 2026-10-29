@@ -17,7 +17,9 @@
 //
 // patch is written into the state name by name, a list by row. Calls go one at a time, in the order they
 // were made: the next leaves when the one before has answered, so an answer never lands on a page newer
-// than the one it was computed from. While a call waits or is out, job.pending is true, read in a row of a
+// than the one it was computed from. A call made as a field is typed in waits for a pause in the typing, and
+// the next keystroke's call to the same job takes its place: a word typed in a search is one call, not one a
+// letter. While a call waits or is out, job.pending is true, read in a row of a
 // list for the call made from that row; job.error is the failed call's { code, message }, null once a call
 // of the job is made again. A call that fails changes nothing, and what the person did to the element that
 // made it (a box ticked) goes back to the data.
@@ -40,6 +42,8 @@
   var epoch = 0;     // the page drawn now: an answer to a page Drive has left is dropped
   var seq = 0;       // the number of the last call sent
   var queue = [];    // calls waiting for the one in flight
+  var typed = [];    // calls made as a field is typed in, waiting for a pause in the typing
+  var handling = null; // the event whose handler the program runs now
   var flying = null; // the call in flight
   var track = {};    // job → { pending, error, rows: { row → { pending, error } } }
   var current = null; // the element whose binding or event the program runs now
@@ -48,6 +52,8 @@
   var told = 0;       // the newest stamp the server told while the page listens, not asked about yet
 
   function acting() { return current || (typeof kitwork.element === "function" ? kitwork.element() : null); }
+  // the event a call is made in, while it is dispatched: the program's, or the kernel's on a page it paints
+  function dispatching() { return handling || (typeof kitwork.event === "function" ? kitwork.event() : null); }
   function get(name) { return view ? view.state[name] : kitwork.scope.$[name]; }
   function put(name, value) {
     if (view) view.set(name, value);
@@ -94,10 +100,7 @@
   function job(name) {
     var fn = function () {
       var el = acting();
-      var call = { name: name, args: Array.prototype.slice.call(arguments), row: rowOf(el), el: el, epoch: epoch };
-      mark(call, true);
-      queue.push(call);
-      pump();
+      make({ name: name, args: Array.prototype.slice.call(arguments), row: rowOf(el), el: el, epoch: epoch });
     };
     Object.defineProperty(fn, "pending", { get: function () { return read(name, "pending"); } });
     Object.defineProperty(fn, "error", { get: function () { return read(name, "error"); } });
@@ -129,10 +132,7 @@
         return;
       }
       var el = acting();
-      var call = { name: wire, at: at, host: host, vars: vars, args: Array.prototype.slice.call(arguments), row: rowOf(el), el: el, epoch: epoch };
-      mark(call, true);
-      queue.push(call);
-      pump();
+      make({ name: wire, at: at, host: host, vars: vars, args: Array.prototype.slice.call(arguments), row: rowOf(el), el: el, epoch: epoch });
     };
     Object.defineProperty(fn, "pending", { get: function () { return read(wire + "@" + atOf(acting()), "pending"); } });
     Object.defineProperty(fn, "error", { get: function () { return read(wire + "@" + atOf(acting()), "error"); } });
@@ -186,6 +186,51 @@
       paint();
     }
   };
+
+  // A call made as a field is typed in (in its input event) waits TYPING_PAUSE for the typing to stop: the call
+  // the next keystroke makes in the same field, to the same job, takes its place. A call made any other way takes
+  // those waiting with it, them first, so calls still leave in the order they were made: typing then pressing a
+  // button sends what was typed, then the button's. A box ticked or a choice made fires input too, and is not
+  // typing: each such call goes as it is made.
+  var TYPING_PAUSE = 200;
+  function make(call) {
+    mark(call, true);
+    var e = dispatching();
+    if (e && e.type === "input" && typedIn(e.target)) {
+      call.field = e.target;
+      typed = typed.filter(function (waiting) {
+        if (!sameField(waiting, call)) return true;
+        clearTimeout(waiting.timer);
+        mark(waiting, false, null);
+        return false;
+      });
+      call.typed = true;
+      call.timer = setTimeout(function () { release(call); }, TYPING_PAUSE);
+      typed.push(call);
+      return;
+    }
+    release(typed[typed.length - 1]);
+    queue.push(call);
+    pump();
+  }
+  // a call waiting for a pause in the typing goes, and those made before it, in order
+  function release(call) {
+    var at = typed.indexOf(call);
+    if (at < 0) return;
+    typed.splice(0, at + 1).forEach(function (waiting) {
+      clearTimeout(waiting.timer);
+      queue.push(waiting);
+    });
+    pump();
+  }
+  function sameField(a, b) { return a.name === b.name && (a.at || "") === (b.at || "") && a.field === b.field; }
+  // a field one types in: a textarea, an element one edits, an input but a box, a choice, a file or a button
+  var NOT_TYPED = { checkbox: true, radio: true, file: true, color: true, button: true, submit: true, reset: true, image: true };
+  function typedIn(el) {
+    if (!el || el.nodeType !== 1) return false;
+    if (el.isContentEditable || el.tagName === "TEXTAREA") return true;
+    return el.tagName === "INPUT" && !NOT_TYPED[String(el.type || "text").toLowerCase()];
+  }
 
   function pump() {
     if (flying || !queue.length) return;
@@ -740,9 +785,10 @@
           if (parts.indexOf("prevent") > 0 && e.preventDefault) e.preventDefault();
           if (parts.indexOf("stop") > 0) { stop = true; if (e.stopPropagation) e.stopPropagation(); }
           current = el;
+          handling = e;
           try { kitwork.run(p.x, scopeOf(el)); }
           catch (error) { if (window.console) console.error("kitwork:", error, el); }
-          finally { current = null; }
+          finally { current = null; handling = null; }
         }
         if (stop) break;
       }
@@ -770,6 +816,8 @@
   document.addEventListener("kitwork:before-swap", function () {
     epoch++;
     told = 0;
+    typed.forEach(function (waiting) { clearTimeout(waiting.timer); });
+    typed = [];
     queue = [];
     track = {};
     view = null;

@@ -1440,6 +1440,10 @@
     try { return fn(); } catch (error) { reportError(error, el, directive); } finally { acting = was; }
   }
   kitwork.element = function () { return acting; };
+  // kitwork.event() is the event whose handler runs now, while it is dispatched; null between, and for a handler
+  // a timing modifier runs later (debounce(n)): a call made as a field is typed in waits for a pause (call.js).
+  var dispatching = null;
+  kitwork.event = function () { return dispatching; };
   // kitwork.forget(el): the fields at and under el are written again by the next paint, whatever the person
   // did to them (writeBinding).
   // kitwork.write(el, name, v) and kitwork.text(el, v): how the kernel writes a bound value and a text, for a page's
@@ -1576,22 +1580,25 @@
     if (h.stop && e.stopPropagation) e.stopPropagation();
     var program = h.program;
     if (!program) return h.stop;
-    var execute = function () {
+    var execute = function (now) {
       if (h.once) { (st.once || (st.once = {}))[h.attr] = true; }
-      pass(function () { guarded(el, h.attr, function () { runEffect(program, el, e); }); });
+      var was = dispatching;
+      dispatching = now ? e : null;
+      try { pass(function () { guarded(el, h.attr, function () { runEffect(program, el, e); }); }); }
+      finally { dispatching = was; }
       render();
     };
     if (h.debounce) {
       var timers = st.timers || (st.timers = {});
       if (timers[h.attr]) clearTimeout(timers[h.attr]);
-      timers[h.attr] = setTimeout(function () { timers[h.attr] = null; execute(); }, h.debounce);
+      timers[h.attr] = setTimeout(function () { timers[h.attr] = null; execute(false); }, h.debounce);
     } else if (h.throttle) {
       var last = st.lastRun || (st.lastRun = {}), now = Date.now();
       if (last[h.attr] && now - last[h.attr] < h.throttle) return h.stop;
       last[h.attr] = now;
-      execute();
+      execute(true);
     } else {
-      execute();
+      execute(true);
     }
     return h.stop;
   }
