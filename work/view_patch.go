@@ -278,14 +278,15 @@ func rowKey(row any, path []string) any {
 	return v
 }
 
-// keyText is a key as the kernel compares it, String(key): a number as JavaScript writes it, a string as
-// it is; false for anything else.
+// keyText is a key as the kernel compares it, String(key): a number as JavaScript writes it (value.AppendNumber:
+// 1e+21, 1.5e-7, where Go's 'f' wrote every digit and the browser never found the row), a string as it is; false
+// for anything else.
 func keyText(k any) (string, bool) {
 	switch v := k.(type) {
 	case string:
 		return v, true
 	case float64:
-		return strconv.FormatFloat(v, 'f', -1, 64), true
+		return string(value.AppendNumber(nil, v)), true
 	case bool:
 		return strconv.FormatBool(v), true
 	}

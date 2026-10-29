@@ -139,6 +139,20 @@ func TestNewRowsComeInTheListsOrder(t *testing.T) {
 	}
 }
 
+// A row's key is the text the browser compares it by, String(key) (29/10/2026): a number as JavaScript writes it.
+// Go's 'f' wrote 1e21 with every digit and 1.5e-7 as 0.00000015, and the browser, finding no row by that key,
+// kept the row gone and put the changed one at the end again.
+//
+// CONTROL (by hand, 29/10/2026): with keyText writing a number by strconv.FormatFloat(v, 'f', -1, 64), the first
+// two were red.
+func TestARowKeyIsWrittenAsJavaScriptWritesIt(t *testing.T) {
+	for n, want := range map[float64]string{1e21: "1e+21", 1.5e-7: "1.5e-7", 45: "45", 0.1: "0.1", 1234567.5: "1234567.5", -3: "-3"} {
+		if got, ok := keyText(n); !ok || got != want {
+			t.Errorf("keyText(%v) = %q, want %q as String(n) writes it", n, got, want)
+		}
+	}
+}
+
 // What changed in one instance, by value and by row, name#key, the rows only when they are shorter and the rows
 // that stay kept their order.
 func TestViewPatch(t *testing.T) {
