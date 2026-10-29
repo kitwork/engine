@@ -1,4 +1,4 @@
-<box click-outside="close()" keydown:escape="close()">
+<shop-cart click-outside="close()" keydown:escape="close()">
   <button click="toggle()" expanded="{{ open }}" background="panel" radius="full" padding="2" border="none">
     <icon value="shopping-cart" alt="Giỏ hàng"></icon>
     <badge place="top-right" show="items.length > 0" color="brand" alt="{{ items.length }} món trong giỏ">
@@ -49,4 +49,4 @@
 
     <text show="orderId" color="success+25">Đã nhận đơn {{ orderId }}. Cảm ơn bạn!</text>
   </card>
-</box>
+</shop-cart>

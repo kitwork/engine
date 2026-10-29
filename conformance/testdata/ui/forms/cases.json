@@ -9,7 +9,7 @@
       "route": ".",
       "files": {
         "content.ui": "<content><shop-cart as=\"$cart\" /></content>",
-        "shop-cart.ui": "<box><text>{{ items.length }}</text></box>",
+        "shop-cart.ui": "<shop-cart><text>{{ items.length }}</text></shop-cart>",
         "../.components/shop-cart.work": "import { component } from \"kitwork\";\ncomponent.define(\"shop-cart\", () => {\n  var items = [];\n});\n"
       }
     },
@@ -50,21 +50,21 @@
       "error": { "at": "content.ui:1:15", "says": "component= đã bỏ: component là một thẻ, viết <shop-cart as=\"$cart\" />; tên component của site có gạch ngang, tên không gạch ngang là của Kitwork: đổi tên cart thành shop-cart" }
     },
     {
-      "name": "content-inside-a-call-of-a-component-with-a-ui",
+      "name": "a-components-look-whose-root-is-not-its-tag",
       "route": ".",
       "files": {
-        "content.ui": "<content><shop-cart><text>Giỏ</text></shop-cart></content>",
+        "content.ui": "<content><shop-cart /></content>",
         "shop-cart.ui": "<box><text>{{ items.length }}</text></box>",
         "../.components/shop-cart.work": "import { component } from \"kitwork\";\ncomponent.define(\"shop-cart\", () => {\n  var items = [];\n});\n"
       },
-      "error": { "at": "content.ui:1:10", "says": "<shop-cart> có giao diện (shop-cart.ui) nên thẻ gọi để rỗng: nội dung con không phải slot" }
+      "error": { "at": "shop-cart.ui:1:1", "says": "shop-cart.ui là giao diện của component shop-cart (logic ở .components/shop-cart.work): gốc của nó là thẻ của chính component, <shop-cart …>…</shop-cart>" }
     },
     {
       "name": "presentation-at-a-call-of-a-component-with-a-ui",
       "route": ".",
       "files": {
         "content.ui": "<content><shop-cart padding=\"2\" /></content>",
-        "shop-cart.ui": "<box><text>{{ items.length }}</text></box>",
+        "shop-cart.ui": "<shop-cart><text>{{ items.length }}</text></shop-cart>",
         "../.components/shop-cart.work": "import { component } from \"kitwork\";\ncomponent.define(\"shop-cart\", () => {\n  var items = [];\n});\n"
       },
       "error": { "at": "content.ui:1:21", "says": "trình bày của shop-cart nằm trong shop-cart.ui; chỗ gọi nhận as, if, show, for, span, place và dữ liệu nó đọc" }
@@ -101,7 +101,7 @@
       "route": ".",
       "files": {
         "content.ui": "<content><grid><product-card for=\"product of products\" /></grid></content>",
-        "product-card.ui": "<card><text>{{ product.name }}</text></card>",
+        "product-card.ui": "<product-card><card><text>{{ product.name }}</text></card></product-card>",
         "product-card.work": "import { component } from \"kitwork\";\ncomponent.define(\"product-card\", () => {\n  var open = false;\n});\n"
       }
     },
