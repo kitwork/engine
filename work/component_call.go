@@ -23,12 +23,12 @@ import (
 //	});
 //
 // and its job is called as a job of the page is, a POST to the page's URL, named by the component and the job,
-// with the place the instance is called from (data-kitwork-at, ui/component_live.go), the instance's vars and the
-// revisions of its data the tab holds (scopeRevs, 29/10/2026: the components block brings them, the answers
-// renew them):
+// with the place the instance is called from (data-kitwork-at, ui/component_live.go), the instance's vars under
+// that place, as the page's stand under "page" (docs/KITWORK_BRIDGE.md mục 3), and the revisions of its data the
+// tab holds (29/10/2026: the page's data block brings them, the answers renew them):
 //
 //	POST /cart?kitwork-call=shop-cart.checkout
-//	{ "args": [], "vars": { …the page's }, "seq": 5, "revs": { …the page's }, "at": "c1", "scope": { "items": [ … ] }, "scopeRevs": { "total": "3f1a…" } }
+//	{ "seq": 5, "at": "c1", "args": [], "page": { …the page's vars }, "c1": { "items": [ … ] }, "bridge": { "revs": { "page": { … }, "c1": { "total": "3f1a…" } } } }
 //
 // The folder's guards and the origin check run as for any POST of it, then the view's function. The server
 // draws the page from what it bound to find the instance at that place, the component it is and the inputs
@@ -41,7 +41,7 @@ import (
 // than the run before the job comes whole (a search's results, read through the query its field set in the
 // browser, which the run before the job already read).
 //
-//	{ "seq": 5, "patch": { "count": 2 }, "revs": { "count": "9c0e…" }, "components": { "c1": { "patch": { "items": [], "done": true }, "revs": { "total": "77b2…" } } } }
+//	{ "seq": 5, "page": { "count": 2 }, "c1": { "items": [], "done": true }, "bridge": { "revs": { "page": { "count": "9c0e…" }, "c1": { "total": "77b2…" } } } }
 
 // componentModule is "kitwork/component" (KITWORK_ENGINE.md mục 6): define, which only the loader of a
 // component's job reads (componentDefines); anywhere else it says where a component is defined.
@@ -434,29 +434,27 @@ func (t *Tenant) serveComponentCall(vm *runtime.VM, ctxObj *Context, reqRouter *
 	}
 	after := response.Data()
 	answer := map[string]any{"seq": call.seq}
+	bridge, held := map[string]any{}, map[string]any{}
 	// the page's data the job changed, for a page that holds its data in the browser (one that runs in the
 	// kernel), as a job of the page answers it (view_call.go): by name, a list by row, and whole for a name the
 	// page held at another revision than the run before the job; a page the server draws whole holds none
 	if page := t.viewPage(node); page != nil && page.Live() {
-		answer["stamp"] = stamp // a tab takes no data read before the data it holds (call.js)
-		t.answerTickets(answer, reqRouter, leaf, call.marks)
+		bridge["stamp"] = stamp // a tab takes no data read before the data it holds (call.js)
+		t.answerTickets(bridge, reqRouter, leaf, call.marks)
 		now := viewSnapshot(after)
 		if viewDataChanged(before, now, pageVars) {
-			t.tellViewChanged(leaf, stamp) // the tabs listening to the page ask for what changed (view_listen.go)
+			t.tellViewChanged(leaf, stamp) // the tabs holding a ticket for the page ask for what changed (view_changes.go)
 		}
-		patch, lists := viewPatch(before, now, t.viewListKeys(node))
+		changes := viewPatch(before, now, t.viewListKeys(node))
 		if call.revs != nil {
-			if revs := staleRevs(call.revs, before, now, pageVars, patch, lists); len(revs) > 0 {
-				answer["revs"] = revs
+			if revs := staleRevs(call.revs, before, now, pageVars, changes); len(revs) > 0 {
+				held[pagePlace] = revs
 			}
-			t.rowsSince(leaf, call.revs, patch, lists) // a list the tab held older comes by row (view_rows.go)
+			t.rowsSince(leaf, call.revs, changes) // a list the tab held older comes by row (view_rows.go)
 		}
 		t.keepViewRows(leaf, now)
-		if len(patch) > 0 {
-			answer["patch"] = patch
-		}
-		if len(lists) > 0 {
-			answer["lists"] = lists
+		if len(changes) > 0 {
+			answer[pagePlace] = changes
 		}
 	}
 	// the instance again, its inputs read where it stands on the page as it is now; a page that no longer
@@ -468,22 +466,24 @@ func (t *Tenant) serveComponentCall(vm *runtime.VM, ctxObj *Context, reqRouter *
 			return
 		}
 		mineAfter := viewSnapshot(again.bound)
-		mine, _ := viewPatch(mineBefore, mineAfter, nil)
-		changed := map[string]any{}
+		mine := viewPatch(mineBefore, mineAfter, nil)
 		if call.scopeRevs != nil {
 			// the instance's data as the tab holds it (29/10/2026), as a page's (view_patch.go staleRevs): a name it
 			// held at another revision than the run before the job comes whole, a search's results read through
 			// the query the field set in the browser among them; every name that changed brings its new revision
-			if revs := staleRevs(call.scopeRevs, mineBefore, mineAfter, isVar, mine, map[string]any{}); len(revs) > 0 {
-				changed["revs"] = revs
+			if revs := staleRevs(call.scopeRevs, mineBefore, mineAfter, isVar, mine); len(revs) > 0 {
+				held[call.at] = revs
 			}
 		}
 		if len(mine) > 0 {
-			changed["patch"] = mine
+			answer[call.at] = mine
 		}
-		if len(changed) > 0 {
-			answer["components"] = map[string]any{call.at: changed}
-		}
+	}
+	if len(held) > 0 {
+		bridge["revs"] = held
+	}
+	if len(bridge) > 0 {
+		answer["bridge"] = bridge
 	}
 	answerViewCall(reqRouter, answer)
 }

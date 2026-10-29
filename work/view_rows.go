@@ -5,9 +5,9 @@ import "sync"
 // The rows that changed since the revision a tab holds (28/10/2026): a tab that asks for what changed
 // (kitwork-refresh), or calls a job holding a list older than the job ran on, held a keyed list at a revision
 // of its own. The server keeps the last versions of each list a page draws by key, by revision, as its runs
-// read them; a tab holding one of them gets the list's change by row since then (the rows removed, the rows
-// set, the order), as a job's answer gives it, not the list whole. A tab holding a revision no longer kept
-// gets the list whole, as before.
+// read them; a tab holding one of them gets the list's rows that changed since then (name#key, a row gone
+// null), as a job's answer gives them, not the list whole. A tab holding a revision no longer kept gets the
+// list whole, as before.
 
 // viewRowsKept is how many versions of one list of one page are kept.
 const viewRowsKept = 8
@@ -72,25 +72,29 @@ func (t *Tenant) keptAt(leaf *FolderRouter, name, rev string) (any, bool) {
 	return nil, false
 }
 
-// rowsSince puts in lists, for each keyed list patch carries whole, its change by row since the revision the
-// tab holds, when that version is kept.
-func (t *Tenant) rowsSince(leaf *FolderRouter, held map[string]string, patch, lists map[string]any) {
+// rowsSince puts in an instance's changes, for each keyed list they carry whole, its rows changed since the
+// revision the tab holds, when that version is kept.
+func (t *Tenant) rowsSince(leaf *FolderRouter, held map[string]string, changes map[string]any) {
 	if leaf == nil || len(held) == 0 {
 		return
 	}
 	keys := t.viewListKeys(leaf.node)
-	for name, now := range patch {
-		key := keys[name]
-		if key == "" || held[name] == "" {
-			continue
+	var whole []string
+	for name := range changes {
+		if keys[name] != "" && held[name] != "" {
+			whole = append(whole, name)
 		}
+	}
+	for _, name := range whole {
 		was, kept := t.keptAt(leaf, name, held[name])
 		if !kept {
 			continue
 		}
-		if change, ok := listPatch(was, now, key); ok {
-			delete(patch, name)
-			lists[name] = change
+		if rows, ok := listPatch(name, was, changes[name], keys[name]); ok {
+			delete(changes, name)
+			for k, row := range rows {
+				changes[k] = row
+			}
 		}
 	}
 }

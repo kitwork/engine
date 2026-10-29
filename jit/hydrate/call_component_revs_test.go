@@ -13,20 +13,21 @@ const componentRevsAssertions = `
   global.fetch = function (url, options) {
     var body = JSON.parse(options.body);
     sent.push({ job: new URL(url, "http://x").searchParams.get("kitwork-call"), body: body });
-    var answer = { seq: body.seq, components: {} };
-    answer.components[body.at] = { patch: { items: [], done: true }, revs: { total: body.at === "c1" ? "t1" : "u1" } };
+    var answer = { seq: body.seq, bridge: { revs: {} } };
+    answer[body.at] = { items: [], done: true };
+    answer.bridge.revs[body.at] = { total: body.at === "c1" ? "t1" : "u1" };
     return Promise.resolve({ redirected: false, ok: true, status: 200, headers: { get: function () { return "application/json"; } }, json: function () { return Promise.resolve(answer); } });
   };
   kitwork.render();
   click(one.button);
   await tick(); await tick(); await tick();
-  if (JSON.stringify(sent[0].body.scopeRevs) !== JSON.stringify({ total: "t0" })) throw new Error("a call should send the revisions of its instance's data the block brought, sent " + JSON.stringify(sent[0].body));
+  if (JSON.stringify(sent[0].body.bridge.revs.c1) !== JSON.stringify({ total: "t0" })) throw new Error("a call should send the revisions of its instance's data the block brought, sent " + JSON.stringify(sent[0].body));
   click(two.button);
   await tick(); await tick(); await tick();
-  if (JSON.stringify(sent[1].body.scopeRevs) !== JSON.stringify({ total: "u0" })) throw new Error("a call of the other cart should send that cart's revisions, sent " + JSON.stringify(sent[1].body));
+  if (JSON.stringify(sent[1].body.bridge.revs.c2) !== JSON.stringify({ total: "u0" })) throw new Error("a call of the other cart should send that cart's revisions, sent " + JSON.stringify(sent[1].body));
   click(one.button);
   await tick(); await tick(); await tick();
-  if (JSON.stringify(sent[2].body.scopeRevs) !== JSON.stringify({ total: "t1" })) throw new Error("the next call should send the revisions the answer brought, sent " + JSON.stringify(sent[2].body));
+  if (JSON.stringify(sent[2].body.bridge.revs.c1) !== JSON.stringify({ total: "t1" })) throw new Error("the next call should send the revisions the answer brought, sent " + JSON.stringify(sent[2].body));
   console.log("each instance sends the revisions it holds, and keeps those an answer brings");
 })().catch(function (e) { console.error(e && e.stack || e); process.exit(1); });
 `
@@ -46,8 +47,8 @@ func TestAnInstanceSendsTheRevisionsItHolds(t *testing.T) {
 // The controls: a call that sends no revisions, and one that keeps not what the answer brought, are caught.
 func TestAnInstanceThatSendsWrongRevisionsIsCaught(t *testing.T) {
 	cases := []struct{ name, from, to, want string }{
-		{"none sent", "      if (scopeRevs[call.at]) body.scopeRevs = scopeRevs[call.at];\n", "", "the block brought"},
-		{"the answer's not kept", "        if (mine.revs[k]) kept[k] = mine.revs[k];", "        if (false) kept[k] = mine.revs[k];", "the answer brought"},
+		{"none sent", "      if (scopeRevs[call.at]) held[call.at] = scopeRevs[call.at];\n", "", "the block brought"},
+		{"the answer's not kept", "        if (all[call.at][k]) kept[k] = all[call.at][k];", "        if (false) kept[k] = all[call.at][k];", "the answer brought"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

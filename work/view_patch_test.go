@@ -72,80 +72,66 @@ func TestJobAnswersTheDataItChanged(t *testing.T) {
 		t.Fatalf("/todo: %d %.1500s", r.Code, r.Body.String())
 	}
 	for i, title := range []string{"buy milk", "call mum", "send letter"} {
-		callAnswer(t, tn, "add", `{"args":[],"vars":{"title":"`+title+`"},"seq":`+string(rune('1'+i))+`}`)
+		callAnswer(t, tn, "add", callBody{Seq: float64(1 + i), Args: []any{}, Page: vars("title", title)}.String())
 	}
 
-	// tick one box: the row that changed and the count, nothing else, well under 200 bytes; the page holds
-	// tickets for the keys it reads, made lately, so none come again (view_changes.go)
+	// tick one box: under the page, the row that changed and the count, nothing else, well under 200 bytes; the
+	// page holds tickets for the keys it reads, made lately, so none come again (view_changes.go)
 	tickets := pageTickets(t, serveGet(tn, "/todo", nil).Body.String())
-	answer, body := callAnswer(t, tn, "toggle", `{"args":[2,true],"vars":{"title":""},"seq":4,"marks":"`+ticketMarks(tickets)+`"}`)
+	answer, body := callAnswer(t, tn, "toggle", callBody{Seq: 4, Args: []any{2, true}, Page: vars("title", ""), Marks: ticketMarks(tickets)}.String())
 	if len(body) >= 200 {
 		t.Errorf("a ticked box answered %d bytes, want under 200: %s", len(body), body)
 	}
 	if answer["seq"] != float64(4) {
 		t.Errorf("seq %v, want 4", answer["seq"])
 	}
-	if patch, _ := answer["patch"].(map[string]any); len(patch) != 1 || patch["left"] != float64(2) {
-		t.Errorf("patch %v, want only left 2: %s", answer["patch"], body)
+	page := instanceOf(answer, pagePlace)
+	if len(page) != 2 || page["left"] != float64(2) {
+		t.Errorf("the page should change left and the one row: %s", body)
 	}
-	todos, _ := answer["lists"].(map[string]any)["todos"].(map[string]any)
-	if todos["key"] != "id" {
-		t.Fatalf("the list todos should change by row, by id: %s", body)
-	}
-	set, _ := todos["set"].([]any)
-	if row, _ := set[0].(map[string]any); len(set) != 1 || row["id"] != float64(2) || row["done"] != true {
-		t.Errorf("set %v, want the one row 2, done: %s", todos["set"], body)
-	}
-	if _, has := todos["remove"]; has {
-		t.Errorf("nothing was removed: %s", body)
+	if row, _ := page["todos#2"].(map[string]any); row["id"] != float64(2) || row["done"] != true {
+		t.Errorf("the list todos should change by row, todos#2 now done: %s", body)
 	}
 
-	// remove a row: its key, nothing else of the list
-	answer, body = callAnswer(t, tn, "remove", `{"args":[1],"vars":{"title":""},"seq":5}`)
-	todos, _ = answer["lists"].(map[string]any)["todos"].(map[string]any)
-	if removed, _ := todos["remove"].([]any); len(removed) != 1 || removed[0] != float64(1) {
-		t.Errorf("remove 1: %s", body)
-	}
-	if _, has := todos["set"]; has {
-		t.Errorf("remove 1 set rows: %s", body)
-	}
-	if _, has := todos["order"]; has {
-		t.Errorf("remove 1 kept the order of the rest: %s", body)
+	// remove a row: its key, null, nothing else of the list
+	answer, body = callAnswer(t, tn, "remove", callBody{Seq: 5, Args: []any{1}, Page: vars("title", "")}.String())
+	rows := rowsIn(instanceOf(answer, pagePlace), "todos")
+	if gone, has := rows["1"]; len(rows) != 1 || !has || gone != nil {
+		t.Errorf("remove 1 should bring todos#1 null, nothing else of the list: %s", body)
 	}
 
 	// a job that sends the page away answers where to, nothing run again
-	answer, body = callAnswer(t, tn, "leave", `{"args":[],"vars":{},"seq":6}`)
-	if answer["redirect"] != "/login" || answer["seq"] != float64(6) || answer["patch"] != nil {
+	answer, body = callAnswer(t, tn, "leave", callBody{Seq: 6, Args: []any{}, Page: vars()}.String())
+	if answer["redirect"] != "/login" || answer["seq"] != float64(6) || answer[pagePlace] != nil {
 		t.Errorf("leave: %s", body)
 	}
 }
 
-// What changed, by value and by row, the row form only when it is shorter.
+// What changed in one instance, by value and by row, name#key, the rows only when they are shorter and the rows
+// that stay kept their order.
 func TestViewPatch(t *testing.T) {
 	row := func(id float64, done bool) map[string]any {
 		return map[string]any{"id": id, "title": "a fairly long title for row", "done": done}
 	}
+	keys := map[string]string{"todos": "id"}
 	before := map[string]any{"left": float64(2), "title": "x", "todos": []any{row(1, false), row(2, false), row(3, true)}, "gone": true}
-	after := map[string]any{"left": float64(1), "title": "x", "todos": []any{row(3, true), row(2, true), row(4, false)}}
-	patch, lists := viewPatch(before, after, map[string]string{"todos": "id"})
-	if len(patch) != 2 || patch["left"] != float64(1) || patch["gone"] != nil {
-		t.Errorf("patch %v", patch)
+	after := map[string]any{"left": float64(1), "title": "x", "todos": []any{row(2, true), row(3, true), row(4, false)}}
+	changes := viewPatch(before, after, keys)
+	b, _ := json.Marshal(changes)
+	if string(b) != `{"gone":null,"left":1,"todos#1":null,"todos#2":{"done":true,"id":2,"title":"a fairly long title for row"},"todos#4":{"done":false,"id":4,"title":"a fairly long title for row"}}` {
+		t.Errorf("changes: %s", b)
 	}
-	if _, has := patch["gone"]; !has {
-		t.Errorf("a name the page lost should be null: %v", patch)
-	}
-	todos, _ := lists["todos"].(map[string]any)
-	b, _ := json.Marshal(todos)
-	if string(b) != `{"key":"id","order":[3,2,4],"remove":[1],"set":[{"done":true,"id":2,"title":"a fairly long title for row"},{"done":false,"id":4,"title":"a fairly long title for row"}]}` {
-		t.Errorf("todos by row: %s", b)
+	// rows that stay in another order: the list whole
+	if changes := viewPatch(before, map[string]any{"todos": []any{row(3, true), row(2, false), row(1, false)}}, keys); changes["todos"] == nil || len(rowsIn(changes, "todos")) != 0 {
+		t.Errorf("a list sorted again should change whole: %v", changes)
 	}
 	// rows with no key, or one key twice, change whole
-	if _, lists := viewPatch(map[string]any{"l": []any{row(1, false), row(1, true)}}, map[string]any{"l": []any{row(1, true)}}, map[string]string{"l": "id"}); len(lists) != 0 {
-		t.Errorf("a list with a key twice should change whole: %v", lists)
+	if changes := viewPatch(map[string]any{"l": []any{row(1, false), row(1, true)}}, map[string]any{"l": []any{row(1, true)}}, map[string]string{"l": "id"}); changes["l"] == nil || len(rowsIn(changes, "l")) != 0 {
+		t.Errorf("a list with a key twice should change whole: %v", changes)
 	}
 	// a short list is sent whole when that is shorter
-	if patch, lists := viewPatch(map[string]any{"l": []any{}}, map[string]any{"l": []any{map[string]any{"id": float64(1)}}}, map[string]string{"l": "id"}); len(lists) != 0 || patch["l"] == nil {
-		t.Errorf("a list shorter whole should be sent whole: %v %v", patch, lists)
+	if changes := viewPatch(map[string]any{"l": []any{}}, map[string]any{"l": []any{map[string]any{"id": float64(1)}}}, map[string]string{"l": "id"}); changes["l"] == nil || len(rowsIn(changes, "l")) != 0 {
+		t.Errorf("a list shorter whole should be sent whole: %v", changes)
 	}
 }
 
@@ -165,17 +151,16 @@ func TestStalePageGetsWhatItMissed(t *testing.T) {
 		Bridge struct {
 			Revs map[string]map[string]string `json:"revs"`
 		} `json:"bridge"`
-		Revs map[string]string `json:"-"`
 	}
 	if err := json.Unmarshal([]byte(m[1]), &block); err != nil {
 		t.Fatal(err)
 	}
-	block.Revs = block.Bridge.Revs["page"]
-	if block.Revs["todos"] == "" || block.Revs["left"] == "" {
-		t.Fatalf("the page should carry the revision of each name of its data: %v", block.Revs)
+	drawn := block.Bridge.Revs[pagePlace]
+	if drawn["todos"] == "" || drawn["left"] == "" {
+		t.Fatalf("the page should carry the revision of each name of its data: %v", drawn)
 	}
-	if _, has := block.Revs["title"]; has {
-		t.Errorf("a var has no revision: %v", block.Revs)
+	if _, has := drawn["title"]; has {
+		t.Errorf("a var has no revision: %v", drawn)
 	}
 	copyRevs := func(r map[string]string) map[string]string {
 		out := map[string]string{}
@@ -184,14 +169,13 @@ func TestStalePageGetsWhatItMissed(t *testing.T) {
 		}
 		return out
 	}
-	tabA, tabB := copyRevs(block.Revs), copyRevs(block.Revs)
+	tabA, tabB := copyRevs(drawn), copyRevs(drawn)
 	call := func(revs map[string]string, job, args string) (map[string]any, string) {
-		held, _ := json.Marshal(revs)
-		answer, body := callAnswer(t, tn, job, `{"args":`+args+`,"vars":{"title":"row"},"seq":1,"revs":`+string(held)+`}`)
-		if got, ok := answer["revs"].(map[string]any); ok {
-			for k, v := range got {
-				revs[k], _ = v.(string)
-			}
+		var list []any
+		json.Unmarshal([]byte(args), &list)
+		answer, body := callAnswer(t, tn, job, callBody{Seq: 1, Args: list, Page: vars("title", "row"), Revs: map[string]map[string]string{pagePlace: revs}}.String())
+		for k, v := range revsOf(answer, pagePlace) {
+			revs[k], _ = v.(string)
 		}
 		return answer, body
 	}
@@ -201,41 +185,41 @@ func TestStalePageGetsWhatItMissed(t *testing.T) {
 
 	// tab A holds what the server holds: a tick is its row
 	answer, body := call(tabA, "toggle", "[1,true]")
-	if lists, _ := answer["lists"].(map[string]any); lists["todos"] == nil {
+	if len(rowsIn(instanceOf(answer, pagePlace), "todos")) == 0 {
 		t.Errorf("a tab that holds the server's rows gets its tick by row: %s", body)
 	}
-	if patch, _ := answer["patch"].(map[string]any); patch["todos"] != nil {
+	if instanceOf(answer, pagePlace)["todos"] != nil {
 		t.Errorf("a tab that holds the server's rows does not get them whole: %s", body)
 	}
 
 	// tab B was drawn before the rows: its tick gets the list whole, and the count with it
 	answer, body = call(tabB, "toggle", "[2,true]")
-	patch, _ := answer["patch"].(map[string]any)
-	rows, _ := patch["todos"].([]any)
+	mine := instanceOf(answer, pagePlace)
+	rows, _ := mine["todos"].([]any)
 	if len(rows) != 3 {
 		t.Fatalf("a tab drawn before the rows should get them whole (3), got %s", body)
 	}
-	if lists, _ := answer["lists"].(map[string]any); lists["todos"] != nil {
+	if len(rowsIn(mine, "todos")) != 0 {
 		t.Errorf("a whole list is not also sent by row: %s", body)
 	}
-	if patch["left"] != float64(1) {
+	if mine["left"] != float64(1) {
 		t.Errorf("the count should come with the rows (1 left): %s", body)
 	}
-	if tabB["todos"] == block.Revs["todos"] {
+	if tabB["todos"] == drawn["todos"] {
 		t.Errorf("tab B should hold the new revision of todos now: %v", tabB)
 	}
 
 	// tab A, one call behind tab B, gets what it missed by row: its version is kept; a call that changes
 	// nothing sends nothing
 	answer, body = call(tabA, "toggle", "[3,true]")
-	if lists, _ := answer["lists"].(map[string]any); lists["todos"] == nil {
+	if len(rowsIn(instanceOf(answer, pagePlace), "todos")) == 0 {
 		t.Errorf("tab A, behind tab B's tick, should get the rows it missed by row: %s", body)
 	}
-	if patch, _ := answer["patch"].(map[string]any); patch["todos"] != nil {
+	if instanceOf(answer, pagePlace)["todos"] != nil {
 		t.Errorf("tab A, holding a kept version, should not get the rows whole: %s", body)
 	}
 	answer, body = call(tabA, "toggle", "[3,true]")
-	if answer["patch"] != nil || answer["lists"] != nil {
+	if answer[pagePlace] != nil {
 		t.Errorf("a call that changes nothing a tab does not hold sends nothing: %s", body)
 	}
 
@@ -243,18 +227,15 @@ func TestStalePageGetsWhatItMissed(t *testing.T) {
 	// the removal by row, so the ghost leaves
 	call(tabA, "remove", "[1]")
 	answer, body = call(tabB, "toggle", "[1,false]")
-	lists, _ := answer["lists"].(map[string]any)
-	change, _ := lists["todos"].(map[string]any)
-	if removed, _ := change["remove"].([]any); len(removed) != 1 || removed[0] != float64(1) {
-		t.Fatalf("a tick on a row removed elsewhere should bring its removal, so the ghost leaves: %s", body)
+	if gone, has := rowsIn(instanceOf(answer, pagePlace), "todos")["1"]; !has || gone != nil {
+		t.Fatalf("a tick on a row removed elsewhere should bring todos#1 null, so the ghost leaves: %s", body)
 	}
 
 	// a tab holding a revision no longer kept gets the list whole
 	stale := copyRevs(tabB)
 	stale["todos"] = "not-kept"
 	answer, body = call(stale, "toggle", "[2,false]")
-	patch, _ = answer["patch"].(map[string]any)
-	rows, _ = patch["todos"].([]any)
+	rows, _ = instanceOf(answer, pagePlace)["todos"].([]any)
 	if len(rows) != 2 {
 		t.Fatalf("a tab holding a revision not kept should get the rows whole (2), got %s", body)
 	}
@@ -276,20 +257,17 @@ func TestRefreshAnswersWhatChangedSinceTheRevisions(t *testing.T) {
 		Bridge struct {
 			Revs map[string]map[string]string `json:"revs"`
 		} `json:"bridge"`
-		Revs map[string]string `json:"-"`
 	}
-	if m != nil && json.Unmarshal([]byte(m[1]), &block) == nil {
-		block.Revs = block.Bridge.Revs["page"]
-	}
-	if m == nil || block.Revs["todos"] == "" {
+	if m == nil || json.Unmarshal([]byte(m[1]), &block) != nil || block.Bridge.Revs[pagePlace]["todos"] == "" {
 		t.Fatalf("no revisions in the page:\n%.2000s", page)
 	}
-	old, _ := json.Marshal(block.Revs)
+	drawn := block.Bridge.Revs[pagePlace]
 	for i := 0; i < 2; i++ { // another tab adds two rows
-		callAnswer(t, tn, "add", `{"args":[],"vars":{"title":"row"},"seq":1}`)
+		callAnswer(t, tn, "add", callBody{Seq: 1, Args: []any{}, Page: vars("title", "row")}.String())
 	}
-	refresh := func(revs []byte) (map[string]any, string) {
-		req := httptest.NewRequest(http.MethodPost, "http://localhost/todo?"+ViewRefreshParameter+"=1", strings.NewReader(`{"seq":3,"revs":`+string(revs)+`}`))
+	refresh := func(revs map[string]string) (map[string]any, string) {
+		body := callBody{Seq: 3, Revs: map[string]map[string]string{pagePlace: revs}}.String()
+		req := httptest.NewRequest(http.MethodPost, "http://localhost/todo?"+ViewRefreshParameter+"=1", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		tn.Serve(rec, req)
@@ -299,28 +277,27 @@ func TestRefreshAnswersWhatChangedSinceTheRevisions(t *testing.T) {
 		}
 		return answer, rec.Body.String()
 	}
-	answer, body := refresh(old)
-	patch, _ := answer["patch"].(map[string]any)
-	rows, _ := patch["todos"].([]any)
-	if len(rows) != 2 || patch["left"] != float64(2) {
+	answer, body := refresh(drawn)
+	mine := instanceOf(answer, pagePlace)
+	rows, _ := mine["todos"].([]any)
+	if len(rows) != 2 || mine["left"] != float64(2) {
 		t.Fatalf("a tab drawn before two rows were added should get them whole, and the count: %s", body)
 	}
-	if _, has := patch["title"]; has {
+	if _, has := mine["title"]; has {
 		t.Errorf("a var is the tab's own, never sent back: %s", body)
 	}
-	revs, _ := answer["revs"].(map[string]any)
-	if revs["todos"] == "" || revs["todos"] == block.Revs["todos"] {
+	revs := revsOf(answer, pagePlace)
+	if revs["todos"] == "" || revs["todos"] == drawn["todos"] {
 		t.Errorf("the new revision of todos should come with it: %s", body)
 	}
 	held := map[string]string{}
-	for k, v := range block.Revs {
+	for k, v := range drawn {
 		held[k] = v
 	}
 	for k, v := range revs {
 		held[k], _ = v.(string)
 	}
-	now, _ := json.Marshal(held)
-	if answer, body = refresh(now); answer["patch"] != nil || answer["revs"] != nil {
+	if answer, body = refresh(held); answer[pagePlace] != nil || revsOf(answer, pagePlace) != nil {
 		t.Errorf("a tab that holds the data as it is should get nothing: %s", body)
 	}
 }

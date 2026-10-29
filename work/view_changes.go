@@ -270,14 +270,14 @@ func (t *Tenant) viewTickets(reqRouter *Router, leaf *FolderRouter) []string {
 	return hub.tickets(reqRouter.request, keys)
 }
 
-// answerTickets puts in an answer the tickets of the run, unless the page holds tickets for the same keys made
-// lately (held: the marks it sent, sorted, call.js): the answer of a ticked box stays small.
-func (t *Tenant) answerTickets(answer map[string]any, reqRouter *Router, leaf *FolderRouter, held string) {
+// answerTickets puts in the bridge part of an answer the tickets of the run, unless the page holds tickets for the
+// same keys made lately (held: the marks it sent, sorted, call.js): the answer of a ticked box stays small.
+func (t *Tenant) answerTickets(bridge map[string]any, reqRouter *Router, leaf *FolderRouter, held string) {
 	tickets := t.viewTickets(reqRouter, leaf)
 	if held != "" && ticketMarks(tickets) == held {
 		return
 	}
-	answer["tickets"] = tickets
+	bridge["tickets"] = tickets
 }
 
 // ticketMarks are the marks of tickets, sorted, one space between.

@@ -16,7 +16,7 @@ import (
 // kernel, with the fake server and the wire.
 const callPage = drawnList + `
 var page = el("script", { "type": "application/json", "data-kitwork-page": "" });
-page.textContent = JSON.stringify({ page: { title: "", left: 1, todos: kitwork.scope.$.todos }, jobs: { page: ["toggle", "remove"] }, vars: { page: ["title"] } });
+page.textContent = JSON.stringify({ page: { title: "", left: 1, todos: kitwork.scope.$.todos }, jobs: { page: ["toggle", "remove"] }, vars: { page: ["title"] }, bridge: { keys: { page: { todos: "id" } } } });
 document.body.appendChild(page);
 first.childNodes[0].setAttribute("data-kitwork-event", "change: toggle(todo.id, !todo.done)");
 first.childNodes[0].setAttribute("data-kitwork-bind", "checked: todo.done; disabled: toggle.pending");
@@ -37,7 +37,9 @@ global.fetch = function (url, options) {
     var id = body.args[0], done = body.args[1];
     server = server.map(function (t) { return t.id === id ? { id: t.id, title: t.title, done: done } : t; });
     var row = server.filter(function (t) { return t.id === id; })[0];
-    answer = { seq: body.seq, patch: { left: server.filter(function (t) { return !t.done; }).length }, lists: { todos: { key: "id", set: [row] } } };
+    var changes = { left: server.filter(function (t) { return !t.done; }).length };
+    changes["todos#" + row.id] = row; // the row, by its key (docs/KITWORK_BRIDGE.md mục 3)
+    answer = { seq: body.seq, page: changes };
   }
   return new Promise(function (resolve) {
     out.push(function () {
@@ -138,20 +140,21 @@ func TestCallPendingErrorAndSeed(t *testing.T) {
 `))
 }
 
-// A list's change by row: removed rows go, set rows replace theirs or come at the end, an order reorders.
+// A list's change by row, name#key: a row null goes, a row set replaces its own or comes at the end when new; the
+// rows the tab keeps keep their order and their nodes.
 func TestCallAppliesAListByRow(t *testing.T) {
 	runNodeDOMScript(t, "call_list.test.js", callScript(callJS, `
 (async function () {
   kitwork.render();
   global.fetch = function () {
     return Promise.resolve({ redirected: false, ok: true, status: 200, headers: { get: function () { return "application/json"; } },
-      json: function () { return Promise.resolve({ seq: 1, lists: { todos: { key: "id", remove: [1], set: [{ id: 3, title: "Gọi mẹ", done: false }], order: [3, 2] } } }); } });
+      json: function () { return Promise.resolve({ seq: 1, page: { "todos#1": null, "todos#3": { id: 3, title: "Gọi mẹ", done: false } } }); } });
   };
   kitwork.scope.$.toggle(1, true);
   await tick(); await tick(); await tick();
   var ids = kitwork.scope.$.todos.map(function (t) { return t.id; }).join(",");
-  if (ids !== "3,2") throw new Error("after remove 1, set 3 and order 3,2 the list should be 3,2, got " + ids);
-  if (rows().length !== 2 || rows()[1] !== second) throw new Error("the kept row should stay the same node");
+  if (ids !== "2,3") throw new Error("after todos#1 null and todos#3 set the list should be 2,3, got " + ids);
+  if (rows().length !== 2 || rows()[0] !== second) throw new Error("the kept row should stay the same node");
   console.log("a list's change applies by row");
 })().catch(function (e) { console.error(e && e.stack || e); process.exit(1); });
 `))

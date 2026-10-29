@@ -152,19 +152,21 @@ func TestAWriteTellsTheTabsOfEveryPageThatReadTheKey(t *testing.T) {
 	}
 
 	// a job of page b writes the key page a read
-	call, err := http.Post(server.URL+"/b?kitwork-call=act", "application/json", strings.NewReader(`{"args":[],"vars":{"note":""},"seq":1}`))
+	call, err := http.Post(server.URL+"/b?kitwork-call=act", "application/json", strings.NewReader(`{"args":[],"page":{"note":""},"seq":1}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var answer struct {
-		Stamp int64 `json:"stamp"`
+		Bridge struct {
+			Stamp int64 `json:"stamp"`
+		} `json:"bridge"`
 	}
 	json.NewDecoder(call.Body).Decode(&answer)
 	call.Body.Close()
 	frame, _ := frameWithin(frames, 3*time.Second)
 	stamp, err := strconv.ParseInt(strings.TrimPrefix(frame, ":"), 10, 64)
-	if err != nil || stamp == 0 || stamp >= answer.Stamp {
-		t.Fatalf("a write of page b should tell the tab of page a a stamp before b's answer read the data (%d), told %q", answer.Stamp, frame)
+	if err != nil || stamp == 0 || stamp >= answer.Bridge.Stamp {
+		t.Fatalf("a write of page b should tell the tab of page a a stamp before b's answer read the data (%d), told %q", answer.Bridge.Stamp, frame)
 	}
 
 	// a channel opened later, holding the same tickets, is told the last change at once
@@ -182,7 +184,7 @@ func TestAJobThatChangesOnlyVarsTellsNoTab(t *testing.T) {
 	id, frames, stop := openChanges(t, server)
 	defer stop()
 	holdOn(t, server, id, pageTickets(t, serveGet(tn, "/a", nil).Body.String()), nil)
-	call, err := http.Post(server.URL+"/a?kitwork-call=act", "application/json", strings.NewReader(`{"args":[],"vars":{"note":""},"seq":1}`))
+	call, err := http.Post(server.URL+"/a?kitwork-call=act", "application/json", strings.NewReader(`{"args":[],"page":{"note":""},"seq":1}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,11 +250,11 @@ func TestAPageItsGuardRefusesGivesNoTickets(t *testing.T) {
 func TestAnAnswerBringsTicketsOnlyWhenThePageHoldsOthers(t *testing.T) {
 	tn := patchTodoSite(t)
 	marks := ticketMarks(pageTickets(t, serveGet(tn, "/todo", nil).Body.String()))
-	if answer, body := callAnswer(t, tn, "add", `{"args":[],"vars":{"title":"a"},"seq":1,"marks":"`+marks+`"}`); answer["tickets"] != nil {
+	if answer, body := callAnswer(t, tn, "add", callBody{Seq: 1, Args: []any{}, Page: vars("title", "a"), Marks: marks}.String()); bridgeOf(answer)["tickets"] != nil {
 		t.Errorf("a page that holds tickets for the keys should get none again: %s", body)
 	}
-	for _, sent := range []string{``, `,"marks":"other"`} {
-		if answer, body := callAnswer(t, tn, "add", `{"args":[],"vars":{"title":"b"},"seq":2`+sent+`}`); answer["tickets"] == nil {
+	for _, sent := range []string{"", "other"} {
+		if answer, body := callAnswer(t, tn, "add", callBody{Seq: 2, Args: []any{}, Page: vars("title", "b"), Marks: sent}.String()); bridgeOf(answer)["tickets"] == nil {
 			t.Errorf("a page that holds no tickets for those keys should get them (%s): %s", sent, body)
 		}
 	}
@@ -294,7 +296,7 @@ func TestWhatAComponentReadsGivesItsPageATicket(t *testing.T) {
 	id, frames, stop := openChanges(t, server)
 	defer stop()
 	holdOn(t, server, id, tickets, nil)
-	call, err := http.Post(server.URL+"/w?kitwork-call=rename", "application/json", strings.NewReader(`{"args":["An"],"vars":{"note":""},"seq":1}`))
+	call, err := http.Post(server.URL+"/w?kitwork-call=rename", "application/json", strings.NewReader(`{"args":["An"],"page":{"note":""},"seq":1}`))
 	if err != nil {
 		t.Fatal(err)
 	}

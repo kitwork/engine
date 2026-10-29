@@ -40,26 +40,22 @@ func pagesSite(t *testing.T) *Tenant {
 func TestComponentJobOnAPageWithoutRouterView(t *testing.T) {
 	tn := pagesSite(t)
 	at := placesOf(t, tn, "/bare")[0]
-	r := postCall(tn, "/bare", "shop-cart.add", `{"args":["trà"],"vars":{},"seq":1,"at":"`+at+`","scope":{"items":[],"done":false,"receipt":""}}`)
+	r := postCall(tn, "/bare", "shop-cart.add", `{"args":["trà"],"page":{},"seq":1,"at":"`+at+`","`+at+`":{"items":[],"done":false,"receipt":""}}`)
 	if r.Code != http.StatusOK {
 		t.Fatalf("a job on a page with no data: %d %s", r.Code, r.Body.String())
 	}
 	answer := componentAnswer(t, r.Body.String())
-	mine, _ := answer["components"].(map[string]any)[at].(map[string]any)
-	patch, _ := mine["patch"].(map[string]any)
-	if items, _ := patch["items"].([]any); len(items) != 1 || answer["patch"] != nil {
+	if items, _ := instanceOf(answer, at)["items"].([]any); len(items) != 1 || answer[pagePlace] != nil {
 		t.Errorf("the instance's data, never the page's: %s", r.Body.String())
 	}
-	r = postCall(tn, "/bare", "shop-cart.checkout", `{"args":[],"vars":{},"seq":2,"at":"`+at+`","scope":{"items":[{"id":1,"name":"trà"}],"owner":"mallory"}}`)
-	mine, _ = componentAnswer(t, r.Body.String())["components"].(map[string]any)[at].(map[string]any)
-	if patch, _ := mine["patch"].(map[string]any); patch["receipt"] != "khách:15000:1" {
+	r = postCall(tn, "/bare", "shop-cart.checkout", `{"args":[],"page":{},"seq":2,"at":"`+at+`","`+at+`":{"items":[{"id":1,"name":"trà"}],"owner":"mallory"}}`)
+	if instanceOf(componentAnswer(t, r.Body.String()), at)["receipt"] != "khách:15000:1" {
 		t.Errorf("checkout on the inputs where the call stands: %d %s", r.Code, r.Body.String())
 	}
 
 	got := placesOf(t, tn, "/got")[0]
-	r = postCall(tn, "/got", "shop-cart.checkout", `{"args":[],"vars":{},"seq":1,"at":"`+got+`","scope":{"items":[],"owner":"mallory"}}`)
-	mine, _ = componentAnswer(t, r.Body.String())["components"].(map[string]any)[got].(map[string]any)
-	if patch, _ := mine["patch"].(map[string]any); r.Code != http.StatusOK || patch["receipt"] != "bình:30000:0" {
+	r = postCall(tn, "/got", "shop-cart.checkout", `{"args":[],"page":{},"seq":1,"at":"`+got+`","`+got+`":{"items":[],"owner":"mallory"}}`)
+	if r.Code != http.StatusOK || instanceOf(componentAnswer(t, r.Body.String()), got)["receipt"] != "bình:30000:0" {
 		t.Errorf("router.get's data, read where the call stands: %d %s", r.Code, r.Body.String())
 	}
 

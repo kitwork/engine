@@ -44,14 +44,16 @@ func TestAnswersOfAPageAreStampedInTheOrderTheirDataWasRead(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			<-start
-			r := postCall(tn, "/todo", "add", `{"args":[],"vars":{"title":"R`+strconv.Itoa(i)+`"},"seq":1,"revs":`+string(revs)+`}`)
+			r := postCall(tn, "/todo", "add", `{"args":[],"page":{"title":"R`+strconv.Itoa(i)+`"},"seq":1,"bridge":{"revs":{"page":`+string(revs)+`}}}`)
 			var a struct {
-				Stamp float64        `json:"stamp"`
-				Patch map[string]any `json:"patch"`
+				Page   map[string]any `json:"page"`
+				Bridge struct {
+					Stamp float64 `json:"stamp"`
+				} `json:"bridge"`
 			}
 			json.Unmarshal(r.Body.Bytes(), &a)
-			left, _ := a.Patch["left"].(float64)
-			answers[i] = answer{a.Stamp, left, r.Body.String()}
+			left, _ := a.Page["left"].(float64)
+			answers[i] = answer{a.Bridge.Stamp, left, r.Body.String()}
 		}(i)
 	}
 	close(start)
@@ -68,14 +70,16 @@ func TestAnswersOfAPageAreStampedInTheOrderTheirDataWasRead(t *testing.T) {
 		last = a.stamp
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "http://localhost/todo?"+ViewRefreshParameter+"=1", strings.NewReader(`{"seq":3,"revs":`+string(revs)+`}`))
+	req := httptest.NewRequest(http.MethodPost, "http://localhost/todo?"+ViewRefreshParameter+"=1", strings.NewReader(`{"seq":3,"bridge":{"revs":{"page":`+string(revs)+`}}}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	tn.Serve(rec, req)
 	var refreshed struct {
-		Stamp float64 `json:"stamp"`
+		Bridge struct {
+			Stamp float64 `json:"stamp"`
+		} `json:"bridge"`
 	}
-	if json.Unmarshal(rec.Body.Bytes(), &refreshed) != nil || refreshed.Stamp <= last {
+	if json.Unmarshal(rec.Body.Bytes(), &refreshed) != nil || refreshed.Bridge.Stamp <= last {
 		t.Fatalf("a refresh after the adds should come after them all (%.0f): %d %q", last, rec.Code, rec.Body.String())
 	}
 }

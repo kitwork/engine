@@ -61,7 +61,7 @@ var left = el("p", { "data-kitwork-mark": "8" });
 left.textContent = "Còn " + N + " việc chưa xong.";
 main.appendChild(left);
 var block = el("script", { "type": "application/json", "data-kitwork-page": "" });
-block.textContent = JSON.stringify({ page: { title: "", todos: todos, left: N }, jobs: { page: ["add", "toggle", "remove"] }, vars: { page: ["title"] }, bridge: { program: "p1" } });
+block.textContent = JSON.stringify({ page: { title: "", todos: todos, left: N }, jobs: { page: ["add", "toggle", "remove"] }, vars: { page: ["title"] }, bridge: { program: "p1", keys: { page: { todos: "id" } } } });
 main.appendChild(block);
 document.body.appendChild(main);
 
@@ -72,15 +72,17 @@ global.fetch = function (url, options) {
   if (refuse) answer = { seq: body.seq, error: { code: 500, message: "đơn đã khoá" } };
   else if (job === "toggle") {
     server = server.map(function (t) { return t.id === body.args[0] ? { id: t.id, title: t.title, done: body.args[1] } : t; });
-    answer = { seq: body.seq, patch: { left: server.filter(function (t) { return !t.done; }).length },
-      lists: { todos: { key: "id", set: server.filter(function (t) { return t.id === body.args[0]; }) } } };
+    answer = { seq: body.seq, page: { left: server.filter(function (t) { return !t.done; }).length } };
+    answer.page["todos#" + body.args[0]] = server.filter(function (t) { return t.id === body.args[0]; })[0];
   } else if (job === "remove") {
     server = server.filter(function (t) { return t.id !== body.args[0]; });
-    answer = { seq: body.seq, patch: { left: server.filter(function (t) { return !t.done; }).length }, lists: { todos: { key: "id", remove: [body.args[0]] } } };
+    answer = { seq: body.seq, page: { left: server.filter(function (t) { return !t.done; }).length } };
+    answer.page["todos#" + body.args[0]] = null;
   } else if (job === "add") {
-    var made = { id: server.length + 1000, title: body.vars.title, done: false };
+    var made = { id: server.length + 1000, title: body.page.title, done: false };
     server = server.concat([made]);
-    answer = { seq: body.seq, patch: { title: "", left: server.filter(function (t) { return !t.done; }).length }, lists: { todos: { key: "id", set: [made] } } };
+    answer = { seq: body.seq, page: { title: "", left: server.filter(function (t) { return !t.done; }).length } };
+    answer.page["todos#" + made.id] = made;
   }
   return new Promise(function (resolve) {
     out.push(function () {
@@ -210,7 +212,7 @@ func TestProgramRowsFormAndErrors(t *testing.T) {
 // A page's revisions (work/view_patch.go): seeded from its data block, sent with each call, replaced by those
 // an answer brings; a name an answer sends whole replaces the page's value.
 func TestProgramSendsAndKeepsRevisions(t *testing.T) {
-	page := strings.Replace(programPage, `bridge: { program: "p1" } });`, `bridge: { program: "p1", revs: { page: { todos: "r0", left: "l0" } } } });`, 1)
+	page := strings.Replace(programPage, `bridge: { program: "p1", keys: { page: { todos: "id" } } } });`, `bridge: { program: "p1", keys: { page: { todos: "id" } }, revs: { page: { todos: "r0", left: "l0" } } } });`, 1)
 	if page == programPage {
 		t.Fatal("the data block of the test page moved: update this test")
 	}
@@ -219,10 +221,10 @@ func TestProgramSendsAndKeepsRevisions(t *testing.T) {
   var sent = [];
   global.fetch = function (url, options) {
     var body = JSON.parse(options.body);
-    sent.push(body.revs);
+    sent.push(body.bridge.revs.page);
     var answer = sent.length === 1
-      ? { seq: body.seq, patch: { left: 7, todos: [{ id: 1, title: "Một", done: false }] }, revs: { todos: "r1", left: "l1" } }
-      : { seq: body.seq, revs: {} };
+      ? { seq: body.seq, page: { left: 7, todos: [{ id: 1, title: "Một", done: false }] }, bridge: { revs: { page: { todos: "r1", left: "l1" } } } }
+      : { seq: body.seq, bridge: { revs: { page: {} } } };
     return Promise.resolve({ redirected: false, ok: true, status: 200, headers: { get: function () { return "application/json"; } }, json: function () { return Promise.resolve(answer); } });
   };
   var view = kitwork.page.view();
@@ -253,14 +255,14 @@ global.fetch = function (url, options) {
   }
   global.__sent.push({ url: url, headers: options.headers, body: body });
   var answer = new URL(url, "http://x").searchParams.has("kitwork-refresh")
-    ? { seq: body.seq, patch: { left: 1, todos: [{ id: 1, title: "Một", done: false }, { id: 2, title: "Hai", done: true }] }, revs: { todos: "r2", left: "l2" }, stamp: 300, tickets: ["t1", "t3"] }
-    : { seq: body.seq, patch: { left: 0, title: "" }, lists: { todos: { key: "id", set: [{ id: 1, title: "Việc số 1", done: true }] } }, revs: { todos: "r1", left: "l1" }, stamp: 200 };
+    ? { seq: body.seq, page: { left: 1, todos: [{ id: 1, title: "Một", done: false }, { id: 2, title: "Hai", done: true }] }, bridge: { revs: { page: { todos: "r2", left: "l2" } }, stamp: 300, tickets: ["t1", "t3"] } }
+    : { seq: body.seq, page: { left: 0, title: "", "todos#1": { id: 1, title: "Việc số 1", done: true } }, bridge: { revs: { page: { todos: "r1", left: "l1" } }, stamp: 200 } };
   return Promise.resolve({ redirected: false, ok: true, status: 200, headers: { get: function () { return "application/json"; } }, json: function () { return Promise.resolve(answer); } });
 };
 `
 
 func keptAcrossTabsScript(callJS, assertions string) string {
-	page := strings.Replace(programPage, `bridge: { program: "p1" } });`, `bridge: { program: "p1", revs: { page: { todos: "r0", left: "l0" } }, stamp: 100 } });`, 1)
+	page := strings.Replace(programPage, `bridge: { program: "p1", keys: { page: { todos: "id" } } } });`, `bridge: { program: "p1", keys: { page: { todos: "id" } }, revs: { page: { todos: "r0", left: "l0" } }, stamp: 100 } });`, 1)
 	return strings.Replace(page, "__CALL_JS__", keptAcrossTabsPage+callJS, 1) + assertions
 }
 
@@ -273,8 +275,8 @@ const seenAgainAssertions = `
   await tick(); await tick(); await tick();
   var asked = global.__sent.filter(function (s) { return s.url.indexOf("kitwork-refresh=1") >= 0; });
   if (asked.length !== 1) throw new Error("a tab seen again should ask for what changed, asked " + asked.length + " times");
-  if (JSON.stringify(asked[0].body.revs) !== JSON.stringify({ todos: "r0", left: "l0" })) throw new Error("it should send its revisions, sent " + JSON.stringify(asked[0].body));
-  if (!asked[0].body.vars || asked[0].body.vars.title !== "mua sữa") throw new Error("it should send the vars it holds, so data a var reads comes as it shows it, sent " + JSON.stringify(asked[0].body));
+  if (JSON.stringify(asked[0].body.bridge.revs.page) !== JSON.stringify({ todos: "r0", left: "l0" })) throw new Error("it should send its revisions, sent " + JSON.stringify(asked[0].body));
+  if (!asked[0].body.page || asked[0].body.page.title !== "mua sữa") throw new Error("it should send the vars it holds, so data a var reads comes as it shows it, sent " + JSON.stringify(asked[0].body));
   if (rows().length !== 2 || view.state.left !== 1) throw new Error("what changed should replace the page's: " + rows().length + " rows, left " + view.state.left);
   console.log("a tab seen again asks with its revisions and takes what changed");
 })().catch(function (e) { console.error(e && e.stack || e); process.exit(1); });
@@ -286,11 +288,11 @@ func TestTabSeenAgainAsksForWhatChanged(t *testing.T) {
 
 // The control: a refresh that sends no vars is caught.
 func TestTabSeenAgainWithoutItsVarsIsCaught(t *testing.T) {
-	body := `var body = call.refresh ? { vars: vars, seq: call.seq, revs: revs }`
+	body := "      body.page = vars;\n"
 	if !strings.Contains(callJS, body) {
 		t.Fatal("the body of a refresh moved: update this control")
 	}
-	out, err := runNodeDOMWith(t, composedRuntime(), keptAcrossTabsScript(strings.Replace(callJS, body, `var body = call.refresh ? { seq: call.seq, revs: revs }`, 1), seenAgainAssertions))
+	out, err := runNodeDOMWith(t, composedRuntime(), keptAcrossTabsScript(strings.Replace(callJS, body, "", 1), seenAgainAssertions))
 	if err == nil || !strings.Contains(out, "should send the vars it holds") {
 		t.Fatalf("a refresh without vars should be caught; got err=%v\n%s", err, out)
 	}
@@ -316,13 +318,13 @@ const tellOtherTabsAssertions = `
   view.state.toggle(1, true);
   await tick(); await tick(); await tick();
   var told = channel.sent[channel.sent.length - 1];
-  if (!told || told.page !== "/" || told.stamp !== 200 || told.revs.todos !== "r1" || told.values.left !== 0 || told.values.todos.length !== N) {
-    throw new Error("an answer should be told to the other tabs with its data whole and its stamp: " + JSON.stringify(told && { page: told.page, stamp: told.stamp, revs: told.revs, left: told.values.left }));
+  if (!told || told.url !== "/" || told.bridge.stamp !== 200 || told.bridge.revs.page.todos !== "r1" || told.page.left !== 0 || told.page.todos.length !== N) {
+    throw new Error("an answer should be told to the other tabs with its data whole and its stamp: " + JSON.stringify(told && { url: told.url, bridge: told.bridge, left: told.page.left }));
   }
   // another tab of the browser told this one
-  channel.onmessage({ data: { page: "/", stamp: 250, values: { left: 7, todos: [{ id: 9, title: "Từ tab khác", done: false }] }, revs: { left: "l9", todos: "r9" } } });
+  channel.onmessage({ data: { url: "/", page: { left: 7, todos: [{ id: 9, title: "Từ tab khác", done: false }] }, bridge: { stamp: 250, revs: { page: { left: "l9", todos: "r9" } } } } });
   if (rows().length !== 1 || view.state.left !== 7) throw new Error("what another tab told should replace the page's: " + rows().length + " rows, left " + view.state.left);
-  channel.onmessage({ data: { page: "/khac", stamp: 260, values: { left: 1 }, revs: { left: "x" } } });
+  channel.onmessage({ data: { url: "/khac", page: { left: 1 }, bridge: { stamp: 260, revs: { page: { left: "x" } } } } });
   if (view.state.left !== 7) throw new Error("what another page told is not this page's");
   console.log("an answer is told to the other tabs, and what they tell is taken");
 })().catch(function (e) { console.error(e && e.stack || e); process.exit(1); });
@@ -340,9 +342,9 @@ const olderDataAssertions = `
 (async function () {
   var view = kitwork.page.view();
   var channel = global.__channels.filter(function (c) { return c.name === "kitwork:page"; })[0];
-  channel.onmessage({ data: { page: "/", stamp: 250, values: { left: 7, todos: [{ id: 9, title: "Từ tab khác", done: false }] }, revs: { left: "l9", todos: "r9" } } });
+  channel.onmessage({ data: { url: "/", page: { left: 7, todos: [{ id: 9, title: "Từ tab khác", done: false }] }, bridge: { stamp: 250, revs: { page: { left: "l9", todos: "r9" } } } } });
   if (rows().length !== 1 || view.state.left !== 7) throw new Error("data read after the tab's should be taken: " + rows().length + " rows, left " + view.state.left);
-  channel.onmessage({ data: { page: "/", stamp: 240, values: { left: 3, todos: [] }, revs: { left: "l3", todos: "r3" } } });
+  channel.onmessage({ data: { url: "/", page: { left: 3, todos: [] }, bridge: { stamp: 240, revs: { page: { left: "l3", todos: "r3" } } } } });
   if (rows().length !== 1 || view.state.left !== 7) throw new Error("a message read before what the tab holds should not take it back: " + rows().length + " rows, left " + view.state.left);
   view.set("title", "mua sữa");
   view.state.add();
@@ -361,8 +363,8 @@ func TestTabsTakeNoDataReadBeforeTheirs(t *testing.T) {
 // that takes every answer goes back to its own late answer's.
 func TestTabsThatIgnoreTheStampGoBack(t *testing.T) {
 	for _, c := range []struct{ name, drop, keep, want string }{
-		{"a message", " || !(m.stamp > stamp)) return;", ") return;", "a message read before"},
-		{"an answer", "if (answer.stamp && answer.stamp <= stamp) {", "if (false) {", "an answer read before"},
+		{"a message", " || !(b.stamp > stamp)) return;", ") return;", "a message read before"},
+		{"an answer", "if (bridge.stamp && bridge.stamp <= stamp) {", "if (false) {", "an answer read before"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			if !strings.Contains(callJS, c.drop) {
@@ -468,7 +470,7 @@ const listenAssertions = `
   if (global.__held[global.__held.length - 1].url !== "/_kitwork/changes?connection=c2") throw new Error("the tab should hand its tickets to the new channel");
   // Drive brings another page: the channel stays and holds that page's tickets
   document.dispatchEvent({ type: "kitwork:before-swap" });
-  block.textContent = JSON.stringify({ page: { title: "", todos: [], left: 0 }, jobs: { page: ["add", "toggle", "remove"] }, vars: { page: ["title"] }, bridge: { program: "p1", revs: { page: { todos: "r9", left: "l9" } }, stamp: 900, tickets: ["t9"] } });
+  block.textContent = JSON.stringify({ page: { title: "", todos: [], left: 0 }, jobs: { page: ["add", "toggle", "remove"] }, vars: { page: ["title"] }, bridge: { program: "p1", keys: { page: { todos: "id" } }, revs: { page: { todos: "r9", left: "l9" } }, stamp: 900, tickets: ["t9"] } });
   document.dispatchEvent({ type: "kitwork:load" });
   await tick(); await tick();
   if (global.__sources.length !== 2 || again.closed) throw new Error("the tab should keep its channel across the pages it moves to, opened " + global.__sources.length);
@@ -478,7 +480,7 @@ const listenAssertions = `
 `
 
 func listenScript(callJS string) string {
-	page := strings.Replace(programPage, `bridge: { program: "p1" } });`, `bridge: { program: "p1", revs: { page: { todos: "r0", left: "l0" } }, stamp: 100, tickets: ["t1", "t2"] } });`, 1)
+	page := strings.Replace(programPage, `bridge: { program: "p1", keys: { page: { todos: "id" } } } });`, `bridge: { program: "p1", keys: { page: { todos: "id" } }, revs: { page: { todos: "r0", left: "l0" } }, stamp: 100, tickets: ["t1", "t2"] } });`, 1)
 	return strings.Replace(page, "__CALL_JS__", keptAcrossTabsPage+listenerPrefix+callJS, 1) + listenAssertions
 }
 
@@ -524,7 +526,7 @@ func TestTabsThatListenWrongAreCaught(t *testing.T) {
 
 // The control: a tab that does not take what it is told keeps its old rows.
 func TestTabsThatDoNotTakeWhatTheyAreToldStayOld(t *testing.T) {
-	take := "        put(k, m.values[k]);\n"
+	take := "        put(k, (m.page || {})[k]);\n"
 	if !strings.Contains(callJS, take) {
 		t.Fatal("the channel's listener of call.js moved: update this control")
 	}

@@ -36,9 +36,9 @@ document.body.appendChild(main);
 var sent = [], out = [];
 global.fetch = function (url, options) {
   var body = JSON.parse(options.body), job = new URL(url, "http://x").searchParams.get("kitwork-call");
-  sent.push({ job: job, vars: body.vars });
-  var answer = job === "clear" ? { seq: body.seq, patch: { query: "", found: 0 } }
-    : job === "flip" ? { seq: body.seq } : { seq: body.seq, patch: { found: body.vars.query.length } };
+  sent.push({ job: job, vars: body.page });
+  var answer = job === "clear" ? { seq: body.seq, page: { query: "", found: 0 } }
+    : job === "flip" ? { seq: body.seq } : { seq: body.seq, page: { found: body.page.query.length } };
   return new Promise(function (resolve) {
     out.push(function () {
       resolve({ redirected: false, ok: true, status: 200, headers: { get: function () { return "application/json"; } }, json: function () { return Promise.resolve(answer); } });

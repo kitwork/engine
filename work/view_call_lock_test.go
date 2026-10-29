@@ -24,7 +24,7 @@ func TestCallsOfOnePageAtTheSameTimeLoseNothing(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			<-start
-			r := postCall(tn, "/todo", "add", `{"args":[],"vars":{"title":"R`+strconv.Itoa(i)+`"},"seq":1}`)
+			r := postCall(tn, "/todo", "add", callBody{Seq: 1, Args: []any{}, Page: vars("title", "R"+strconv.Itoa(i))}.String())
 			codes[i] = r.Code
 		}(i)
 	}

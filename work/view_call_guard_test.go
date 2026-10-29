@@ -47,7 +47,7 @@ router.view((context) => {
 
 func guardedCall(t *testing.T, tn *Tenant, job string) (map[string]any, *httptest.ResponseRecorder) {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "http://localhost/desk?"+ViewCallParameter+"="+job, strings.NewReader(`{"args":[],"vars":{"note":""},"seq":5}`))
+	req := httptest.NewRequest(http.MethodPost, "http://localhost/desk?"+ViewCallParameter+"="+job, strings.NewReader(callBody{Seq: 5, Args: []any{}, Page: vars("note", "")}.String()))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Cookie", "session=in; name=An")
 	rec := httptest.NewRecorder()
@@ -64,13 +64,13 @@ func TestRunAfterAJobGoesThroughTheGuards(t *testing.T) {
 
 	// the guard lets the page on: the run after the job reads the cookie the job set
 	answer, rec := guardedCall(t, tn, "rename")
-	if patch, _ := answer["patch"].(map[string]any); rec.Code != http.StatusOK || patch["name"] != "Binh" {
+	if rec.Code != http.StatusOK || instanceOf(answer, pagePlace)["name"] != "Binh" {
 		t.Errorf("rename: the run after the job should read the cookie it set (name Binh): %d %s", rec.Code, rec.Body.String())
 	}
 
 	// the job signs out: the guard sends the page to /login, with the cookie removed, and no data of the page
 	answer, rec = guardedCall(t, tn, "logout")
-	if answer["redirect"] != "/login" || answer["seq"] != float64(5) || answer["patch"] != nil {
+	if answer["redirect"] != "/login" || answer["seq"] != float64(5) || answer[pagePlace] != nil {
 		t.Errorf("logout: the guard of the run after the job should send the page to /login: %d %s", rec.Code, rec.Body.String())
 	}
 	if cookie := rec.Header().Get("Set-Cookie"); !strings.Contains(cookie, "session=") || !strings.Contains(cookie, "Max-Age=0") {
@@ -79,7 +79,7 @@ func TestRunAfterAJobGoesThroughTheGuards(t *testing.T) {
 
 	// the job takes the page away from the caller: the guard refuses, the page reloads, no data of the page
 	answer, rec = guardedCall(t, tn, "demote")
-	if answer["reload"] != true || answer["patch"] != nil || strings.Contains(rec.Body.String(), "only for") {
+	if answer["reload"] != true || answer[pagePlace] != nil || strings.Contains(rec.Body.String(), "only for") {
 		t.Errorf("demote: the guard of the run after the job refuses, the page should reload: %d %s", rec.Code, rec.Body.String())
 	}
 	if !strings.Contains(rec.Header().Get("Set-Cookie"), "role=guest") {

@@ -17,31 +17,28 @@ import (
 func TestARefreshBringsTheRowsThatChanged(t *testing.T) {
 	tn := patchTodoSite(t)
 	for i := 0; i < 30; i++ {
-		callAnswer(t, tn, "add", `{"args":[],"vars":{"title":"row"},"seq":1}`)
+		callAnswer(t, tn, "add", `{"args":[],"page":{"title":"row"},"seq":1}`)
 	}
-	held, _ := json.Marshal(pageRevs(t, serveGet(tn, "/todo", nil).Body.String()))
-	callAnswer(t, tn, "add", `{"args":[],"vars":{"title":"new"},"seq":2}`)
-	callAnswer(t, tn, "toggle", `{"args":[7,true],"vars":{"title":""},"seq":3}`)
+	held := pageRevs(t, serveGet(tn, "/todo", nil).Body.String())
+	callAnswer(t, tn, "add", `{"args":[],"page":{"title":"new"},"seq":2}`)
+	callAnswer(t, tn, "toggle", `{"args":[7,true],"page":{"title":""},"seq":3}`)
 
-	req := httptest.NewRequest(http.MethodPost, "http://localhost/todo?"+ViewRefreshParameter+"=1", strings.NewReader(`{"seq":4,"revs":`+string(held)+`}`))
+	req := httptest.NewRequest(http.MethodPost, "http://localhost/todo?"+ViewRefreshParameter+"=1", strings.NewReader(callBody{Seq: 4, Revs: map[string]map[string]string{pagePlace: held}}.String()))
 	rec := httptest.NewRecorder()
 	tn.Serve(rec, req)
-	var answer struct {
-		Patch map[string]any `json:"patch"`
-		Lists map[string]struct {
-			Set    []map[string]any `json:"set"`
-			Remove []any            `json:"remove"`
-		} `json:"lists"`
-	}
+	answer := map[string]any{}
 	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &answer) != nil {
 		t.Fatalf("refresh: %d %q", rec.Code, rec.Body.String())
 	}
-	if _, whole := answer.Patch["todos"]; whole {
+	page := instanceOf(answer, pagePlace)
+	if _, whole := page["todos"]; whole {
 		t.Fatalf("a tab holding a kept version should get the rows that changed, not the list whole: %.300s", rec.Body.String())
 	}
-	set := answer.Lists["todos"].Set
-	if len(set) != 2 || set[0]["id"] != float64(7) || set[1]["id"] != float64(31) {
-		t.Fatalf("the refresh should bring the row ticked (7) and the row added (31): %s", rec.Body.String())
+	rows := rowsIn(page, "todos")
+	ticked, _ := rows["7"].(map[string]any)
+	added, _ := rows["31"].(map[string]any)
+	if len(rows) != 2 || ticked["done"] != true || added["title"] != "new" {
+		t.Fatalf("the refresh should bring the row ticked (todos#7) and the row added (todos#31): %s", rec.Body.String())
 	}
 }
 
@@ -86,12 +83,12 @@ router.view((context) => {
 		t.Fatalf("run: %v", err)
 	}
 	for _, word := range []string{"apple", "banana", "cherry", "blueberry"} {
-		postCall(tn, "/s", "add", `{"args":["`+word+`"],"vars":{"query":""},"seq":1}`)
+		postCall(tn, "/s", "add", `{"args":["`+word+`"],"page":{"query":""},"seq":1}`)
 	}
 	rec := httptest.NewRecorder()
-	tn.Serve(rec, httptest.NewRequest(http.MethodPost, "http://localhost/s?"+ViewRefreshParameter+"=1", strings.NewReader(`{"seq":2,"revs":{},"vars":{"query":"b"}}`)))
+	tn.Serve(rec, httptest.NewRequest(http.MethodPost, "http://localhost/s?"+ViewRefreshParameter+"=1", strings.NewReader(`{"seq":2,"page":{"query":"b"},"bridge":{"revs":{"page":{}}}}`)))
 	var answer struct {
-		Patch map[string]any `json:"patch"`
+		Patch map[string]any `json:"page"`
 	}
 	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &answer) != nil {
 		t.Fatalf("refresh: %d %q", rec.Code, rec.Body.String())

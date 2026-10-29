@@ -12,15 +12,14 @@ import (
 
 // What a job of router.view's page sends back (28/10/2026, docs/KITWORK_BRIDGE.md): not the page, the data
 // it changed. The view's function runs before the job and again after it; what differs between the two
-// objects it bound is the patch, and a list the page draws with a key (for="todo of todos; key: todo.id")
-// differs by row:
+// objects it bound goes back by instance (29/10/2026, mục 3), each name set straight into it, and a list the
+// page draws with a key (for="todo of todos; key: todo.id") by row, name#key:
 //
-//	{ "seq": 4, "patch": { "left": 1 }, "lists": { "todos": { "key": "id", "set": [{ "id": 45, "done": true, … }] } } }
+//	{ "seq": 4, "page": { "left": 1, "todos#45": { "id": 45, "done": true, … }, "todos#46": null } }
 //
-// patch holds each name whose value is new, whole (null for a name the page no longer has); lists holds a
-// keyed list as the rows it removes (by key), the rows it sets (new, or changed: whole), and its order when
-// that is not the old one's without the removed rows and with the new ones at the end. A list's rows are
-// written whole when that is shorter.
+// A name whose value is new goes whole (null for a name the page no longer has); a row set goes whole (new,
+// at the end, or changed in place), a row gone is null. A list goes whole when that is shorter, or when the
+// rows that stay changed their order.
 
 // A page's revisions (28/10/2026): each name of its data has one, a hash of its value as JSON, written with the
 // page and sent back with every call. The run before the job is what the patch is computed from; a page whose
@@ -41,11 +40,11 @@ func viewRevs(snapshot map[string]any) map[string]string {
 	return revs
 }
 
-// staleRevs makes the patch right for a page that held the revisions held: a name it held at another revision
-// than the run before the job is sent whole, a name it already holds at the new one is not sent, and the new
-// revision of every other name the page does not hold yet is returned. vars are the page's own: never sent
+// staleRevs makes an instance's changes right for a tab that held the revisions held: a name it held at another
+// revision than the run before the job is sent whole, a name it already holds at the new one is not sent, and the
+// new revision of every other name the tab does not hold yet is returned. vars are the instance's own: never sent
 // whole, never given a revision.
-func staleRevs(held map[string]string, before, after map[string]any, vars map[string]bool, patch, lists map[string]any) map[string]string {
+func staleRevs(held map[string]string, before, after map[string]any, vars map[string]bool, changes map[string]any) map[string]string {
 	revs := map[string]string{}
 	for name, now := range after {
 		if vars[name] {
@@ -53,14 +52,14 @@ func staleRevs(held map[string]string, before, after map[string]any, vars map[st
 		}
 		rev := revOf(now)
 		if held[name] == rev {
-			delete(patch, name)
-			delete(lists, name)
+			delete(changes, name)
+			dropRows(changes, name)
 			continue
 		}
 		revs[name] = rev
 		if was, had := before[name]; !had || held[name] != revOf(was) {
-			delete(lists, name)
-			patch[name] = now
+			dropRows(changes, name)
+			changes[name] = now
 		}
 	}
 	for name := range before {
@@ -69,6 +68,15 @@ func staleRevs(held map[string]string, before, after map[string]any, vars map[st
 		}
 	}
 	return revs
+}
+
+// dropRows takes out of an instance's changes the rows of a list (name#key).
+func dropRows(changes map[string]any, name string) {
+	for key := range changes {
+		if strings.HasPrefix(key, name+"#") {
+			delete(changes, key)
+		}
+	}
 }
 
 // viewSnapshot is the data of one run of the view's function: each name the page can read that is no
@@ -95,34 +103,40 @@ func viewSnapshot(data value.Value) map[string]any {
 	return out
 }
 
-// viewPatch is what changed from before to after: the names whose value is new, and the keyed lists by row.
-// keys are the key of each list the page draws by key, as a path into a row ("id", "author.id").
-func viewPatch(before, after map[string]any, keys map[string]string) (patch, lists map[string]any) {
-	patch, lists = map[string]any{}, map[string]any{}
+// viewPatch is what changed from before to after in one instance, as the wire carries it (docs/KITWORK_BRIDGE.md
+// mục 3): each name whose value is new, whole (null for a name the instance no longer has), and a list drawn by key
+// as its rows, name#key, each the row as it is now or null for one gone (listPatch). keys are the key of each list
+// the instance draws by key, as a path into a row ("id", "author.id").
+func viewPatch(before, after map[string]any, keys map[string]string) map[string]any {
+	changes := map[string]any{}
 	for name, now := range after {
 		was, had := before[name]
 		if had && sameValue(was, now) {
 			continue
 		}
 		if key := keys[name]; had && key != "" {
-			if rows, ok := listPatch(was, now, key); ok {
-				lists[name] = rows
+			if rows, ok := listPatch(name, was, now, key); ok {
+				for k, row := range rows {
+					changes[k] = row
+				}
 				continue
 			}
 		}
-		patch[name] = now
+		changes[name] = now
 	}
 	for name := range before {
 		if _, kept := after[name]; !kept {
-			patch[name] = nil
+			changes[name] = nil
 		}
 	}
-	return patch, lists
+	return changes
 }
 
-// listPatch is a keyed list's change by row, false when either list is not one (a row with no key, two rows
-// with one key) or when the whole list is shorter.
-func listPatch(was, now any, key string) (map[string]any, bool) {
+// listPatch is a keyed list's change by row, name#key: each row set (new, or changed: whole) and each row gone
+// (null); the browser keeps the rows it has in their order, puts each new one at the end and takes out each one
+// gone. False when either list is not one (a row with no key, two rows with one key), when the rows that stay
+// changed their order (sorted again: the list goes whole), or when the whole list is shorter.
+func listPatch(name string, was, now any, key string) (map[string]any, bool) {
 	before, ok := was.([]any)
 	if !ok {
 		return nil, false
@@ -140,13 +154,13 @@ func listPatch(was, now any, key string) (map[string]any, bool) {
 	if !ok {
 		return nil, false
 	}
-	var removed, set []any
+	rows := map[string]any{}
 	kept := map[string]bool{}
-	for i, k := range oldKeys {
+	for _, k := range oldKeys {
 		if _, stays := newRows[k]; stays {
 			kept[k] = true
 		} else {
-			removed = append(removed, rowKey(before[i], path))
+			rows[name+"#"+k] = nil
 		}
 	}
 	expected := make([]string, 0, len(newKeys))
@@ -158,27 +172,16 @@ func listPatch(was, now any, key string) (map[string]any, bool) {
 	for i, k := range newKeys {
 		if old, had := oldRows[k]; !had {
 			expected = append(expected, k)
-			set = append(set, after[i])
+			rows[name+"#"+k] = after[i]
 		} else if !sameValue(old, after[i]) {
-			set = append(set, after[i])
+			rows[name+"#"+k] = after[i]
 		}
-	}
-	rows := map[string]any{"key": key}
-	if len(removed) > 0 {
-		rows["remove"] = removed
-	}
-	if len(set) > 0 {
-		rows["set"] = set
 	}
 	if !sameKeys(expected, newKeys) {
-		order := make([]any, len(after))
-		for i := range after {
-			order[i] = rowKey(after[i], path)
-		}
-		rows["order"] = order
+		return nil, false
 	}
 	byRow, err1 := json.Marshal(rows)
-	whole, err2 := json.Marshal(now)
+	whole, err2 := json.Marshal(map[string]any{name: now})
 	if err1 != nil || err2 != nil || len(byRow) >= len(whole) {
 		return nil, false
 	}

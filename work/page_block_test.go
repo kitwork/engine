@@ -17,7 +17,8 @@ import (
 // place and revisions were missing (red); with the page's data left out, "page" was missing (red).
 func TestOneBlockHoldsThePageAndItsInstances(t *testing.T) {
 	tn := ordersSite(t)
-	postCall(tn, "/shop", "shop-cart.checkout", `{"args":[],"vars":{"note":""},"seq":1,"at":"`+placesOf(t, tn, "/shop")[0]+`","scope":{"items":[{"id":1,"name":"trà"}]}}`)
+	postCall(tn, "/shop", "shop-cart.checkout", callBody{Seq: 1, Args: []any{}, Page: vars("note", ""), At: placesOf(t, tn, "/shop")[0],
+		Mine: vars("items", []any{map[string]any{"id": 1, "name": "trà"}})}.String())
 	body := serveGet(tn, "/shop", nil).Body.String()
 	if n := strings.Count(body, "data-kitwork-page"); n != 1 || strings.Contains(body, "data-kitwork-components") {
 		t.Fatalf("the page should carry one data block, and no block of its components (%d):\n%.3000s", n, body)

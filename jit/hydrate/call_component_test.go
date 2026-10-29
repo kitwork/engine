@@ -31,8 +31,8 @@ var out = [], sent = [], refuse = false;
 global.fetch = function (url, options) {
   var body = JSON.parse(options.body);
   sent.push({ job: new URL(url, "http://x").searchParams.get("kitwork-call"), body: body });
-  var answer = refuse ? { seq: body.seq, error: { code: 500, message: "hết hàng" } } : { seq: body.seq, components: {} };
-  if (!refuse) answer.components[body.at] = { patch: { items: [], done: true } };
+  var answer = refuse ? { seq: body.seq, error: { code: 500, message: "hết hàng" } } : { seq: body.seq };
+  if (!refuse) answer[body.at] = { items: [], done: true };
   return new Promise(function (resolve) {
     out.push(function () {
       resolve({ redirected: false, ok: !refuse, status: refuse ? 500 : 200, headers: { get: function () { return "application/json"; } }, json: function () { return Promise.resolve(answer); } });
@@ -64,7 +64,8 @@ const componentAssertions = `
   if (sent.length !== 1 || sent[0].job !== "shop-cart.checkout") throw new Error("the call should name the component and the job: " + JSON.stringify(sent));
   var body = sent[0].body;
   if (body.at !== "c1") throw new Error("the call should name the place of the instance clicked, got " + body.at);
-  if (Object.keys(body.scope).sort().join(",") !== "done,items" || body.scope.items.length !== 1) throw new Error("the call should carry the instance's vars, nothing else: " + JSON.stringify(body.scope));
+  var mine = body[body.at] || {};
+  if (Object.keys(mine).sort().join(",") !== "done,items" || mine.items.length !== 1) throw new Error("the call should carry the instance's vars under its place, nothing else: " + JSON.stringify(body));
   if (one.button.disabled !== true || two.button.disabled === true) throw new Error("the cart whose call is out is pending, the other is not");
   await deliver();
   kitwork.render();
@@ -95,7 +96,7 @@ func TestCallOfAComponentJobLandsInItsInstance(t *testing.T) {
 // The control: with the instance's patch not written, the cart that called keeps what it had and the test goes
 // red at the instance (the answer reached call.js, and nothing put it where it belongs).
 func TestCallOfAComponentJobWithoutItsPatchKeepsTheOldState(t *testing.T) {
-	write := "if (instance) Object.keys(mine.patch || {}).forEach(function (k) { instance[k] = mine.patch[k]; });"
+	write := "if (instance) apply(mine, function (k) { return instance[k]; }, function (k, v) { instance[k] = v; }, keys[call.at]);"
 	if !strings.Contains(callJS, write) {
 		t.Fatal("the patch of an instance in call.js moved: update this control")
 	}

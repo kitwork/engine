@@ -20,7 +20,7 @@ import (
 func TestAnInstanceGetsWhatItsTabHoldsOlder(t *testing.T) {
 	tn := pickerSite(t)
 	for _, word := range []string{"apple", "apricot", "banana"} {
-		postCall(tn, "/pick", "word-picker.add", `{"args":["`+word+`"],"vars":{},"seq":1,"at":"`+placesOf(t, tn, "/pick")[0]+`","scope":{"query":""}}`)
+		postCall(tn, "/pick", "word-picker.add", callBody{Seq: 1, Args: []any{word}, Page: vars(), At: placesOf(t, tn, "/pick")[0], Mine: vars("query", "")}.String())
 	}
 	page := serveGet(tn, "/pick", nil).Body.String()
 	m := regexp.MustCompile(`data-kitwork-page>(.*?)</script>`).FindStringSubmatch(page)
@@ -37,22 +37,19 @@ func TestAnInstanceGetsWhatItsTabHoldsOlder(t *testing.T) {
 		t.Fatalf("the block should carry the revisions of the instance's consts, not of its vars nor jobs: %s", m[1])
 	}
 
+	at := placesOf(t, tn, "/pick")[0]
 	call := func(query string, revs map[string]string) (map[string]any, string) {
-		held, _ := json.Marshal(revs)
-		r := postCall(tn, "/pick", "word-picker.search", `{"args":["`+query+`"],"vars":{},"seq":2,"at":"`+placesOf(t, tn, "/pick")[0]+`","scope":{"query":"`+query+`"},"scopeRevs":`+string(held)+`}`)
+		r := postCall(tn, "/pick", "word-picker.search", callBody{Seq: 2, Args: []any{query}, Page: vars(), At: at, Mine: vars("query", query),
+			Revs: map[string]map[string]string{at: revs}}.String())
 		if r.Code != http.StatusOK {
 			t.Fatalf("search: %d %s", r.Code, r.Body.String())
 		}
-		answer := componentAnswer(t, r.Body.String())
-		components, _ := answer["components"].(map[string]any)
-		mine, _ := components[placesOf(t, tn, "/pick")[0]].(map[string]any)
-		return mine, r.Body.String()
+		return componentAnswer(t, r.Body.String()), r.Body.String()
 	}
 
 	// typed "ap" in the field: the tab shows found as drawn, for an empty query
-	mine, body := call("ap", drawn)
-	patch, _ := mine["patch"].(map[string]any)
-	revs, _ := mine["revs"].(map[string]any)
+	answer, body := call("ap", drawn)
+	patch, revs := instanceOf(answer, at), revsOf(answer, at)
 	if patch["found"] != float64(2) || revs["found"] == nil || revs["found"] == drawn["found"] {
 		t.Fatalf("a tab holding found as drawn should get it whole, with its new revision: %s", body)
 	}
@@ -61,11 +58,11 @@ func TestAnInstanceGetsWhatItsTabHoldsOlder(t *testing.T) {
 	}
 
 	// the same again, holding what the answer brought: nothing
-	if mine, body := call("ap", map[string]string{"found": revs["found"].(string)}); mine != nil {
+	if answer, body := call("ap", map[string]string{"found": revs["found"].(string)}); answer[at] != nil || revsOf(answer, at) != nil {
 		t.Errorf("a tab that holds the instance as it is should get nothing of it: %s", body)
 	}
 	// the query the page was drawn with, holding the block's revisions: nothing, the page and the server agree
-	if mine, body := call("", drawn); mine != nil {
+	if answer, body := call("", drawn); answer[at] != nil || revsOf(answer, at) != nil {
 		t.Errorf("a tab that holds the instance as drawn should get nothing of it: the page's revisions should be the server's: %s", body)
 	}
 }

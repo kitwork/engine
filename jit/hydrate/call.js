@@ -11,12 +11,14 @@
 // list changes by row; a row whose item is the same object is left alone. A page with no program (one that
 // holds a component of Kitwork) is painted by the kernel from its data-kitwork-* attributes, as before.
 //
-// A call is a POST to the page's own URL naming the job (?kitwork-call=remove), its body { args, vars, seq }. The
-// answer is the data the job changed, never the page (work/view_call.go):
+// A call is a POST to the page's own URL naming the job (?kitwork-call=remove), its body by instance, the vars
+// each holds under its place: { seq, args, page: { … }, bridge: { … } }. The answer is the data the job changed,
+// never the page, by instance too (work/view_call.go, docs/KITWORK_BRIDGE.md mục 3):
 //
-//   { "seq": 4, "patch": { "left": 1 }, "lists": { "todos": { "key": "id", "set": [ … ], "remove": [45] } } }
+//   { "seq": 4, "page": { "left": 1, "todos#3": { "id": 3, "done": true, … }, "todos#45": null } }
 //
-// patch is written into the state name by name, a list by row. Calls go one at a time, in the order they
+// Each name is set straight into its instance; name#key is a row of a list drawn by key, set (or put at the end
+// when new), null when it is gone. bridge holds the bridge's own bookkeeping: revisions, stamp, tickets. Calls go one at a time, in the order they
 // were made: the next leaves when the one before has answered, so an answer never lands on a page newer
 // than the one it was computed from. A call made as a field is typed in waits for a pause in the typing, and
 // the next keystroke's call to the same job takes its place: a word typed in a search is one call, not one a
@@ -29,13 +31,13 @@
 // A component of the site whose jobs go through the bridge (ui/component_live.go) is registered with the
 // kernel from the same block: the values its source writes out (bridge.defaults), and each job a function that
 // calls shop-cart.checkout on the instance it runs in. That call names the place the instance
-// is called from (data-kitwork-at on its host) and carries the instance's vars in scope, and the revisions of
-// its data the tab holds in scopeRevs, as the page's in revs (the block brings them by place); its answer holds
-// the data of that instance the job changed, under the same place, written into the instance, and the new
-// revisions; a name the tab held at another revision than the job ran on comes whole (a search's results, read
-// through the query the field set here):
+// is called from (data-kitwork-at on its host) and carries the instance's vars under that place, and the
+// revisions of its data the tab holds, by place as the page's (the block brings them); its answer holds the data
+// of that instance the job changed, under the same place, written into the instance, and the new revisions; a name
+// the tab held at another revision than the job ran on comes whole (a search's results, read through the query the
+// field set here):
 //
-//   { "seq": 5, "components": { "c1": { "patch": { "items": [], "done": true }, "revs": { "total": "9c0e…" } } } }
+//   { "seq": 5, "c1": { "items": [], "done": true }, "bridge": { "revs": { "c1": { "total": "9c0e…" } } } }
 (function () {
   "use strict";
   var kitwork = window.kitwork;
@@ -53,6 +55,7 @@
   var track = {};    // job → { pending, error, rows: { row → { pending, error } } }
   var current = null; // the element whose binding or event the program runs now
   var revs = {};      // the revision of each name of the page's data it holds, sent with each call
+  var keys = {};      // the key of each list an instance draws by key, by place: its rows come as name#key
   var scopeRevs = {}; // the same of each instance of a site component, by place: sent with a call of its jobs
   var stamp = 0;      // the moment the server read the data the page holds: no data read before it is taken
   var told = 0;       // the newest stamp the server told while the page listens, not asked about yet
@@ -179,6 +182,7 @@
     if (!data || !data.page) return;
     var bridge = data.bridge || {};
     page = { jobs: (data.jobs || {}).page || [], vars: (data.vars || {}).page || [], program: bridge.program || "", tickets: bridge.tickets || [] };
+    keys = bridge.keys || {};
     ticketsAt = Date.now();
     revs = (bridge.revs || {}).page || {};
     stamp = bridge.stamp || 0;
@@ -267,20 +271,26 @@
       told = 0;
     }
     call.seq = ++seq;
-    var vars = {};
-    if (page) page.vars.forEach(function (k) { vars[k] = get(k); });
-    // a refresh runs the page with the vars the tab holds, as a job does: data a var reads (a search's query)
-    // comes as the tab shows it
-    var body = call.refresh ? { vars: vars, seq: call.seq, revs: revs } : { args: call.args, vars: vars, seq: call.seq, revs: revs };
+    // by instance: the vars each holds under its place, read as the call leaves, the page's under "page"; the
+    // bridge's own bookkeeping apart. A refresh runs the page with the vars the tab holds, as a job does: data a
+    // var reads (a search's query) comes as the tab shows it
+    var held = {}, bridge = { revs: held }, body = { seq: call.seq, bridge: bridge };
+    if (!call.refresh) body.args = call.args;
+    if (page) {
+      var vars = {};
+      page.vars.forEach(function (k) { vars[k] = get(k); });
+      body.page = vars;
+      held.page = revs;
+    }
     // the keys its tickets are for, while they are new: the answer brings tickets only when they are not those
-    if (tickets().length && Date.now() - ticketsAt < 5 * 60 * 1000) body.marks = marksOf(tickets());
+    if (tickets().length && Date.now() - ticketsAt < 5 * 60 * 1000) bridge.marks = marksOf(tickets());
     if (call.at) {
-      // the instance's vars, read as the call leaves; its inputs never go: the server reads them where it stands
+      // the instance's vars; its inputs never go: the server reads them where it stands
       var own = {}, instance = instanceOf(call.host) || {};
       call.vars.forEach(function (k) { own[k] = instance[k]; });
       body.at = call.at;
-      body.scope = own;
-      if (scopeRevs[call.at]) body.scopeRevs = scopeRevs[call.at];
+      body[call.at] = own;
+      if (scopeRevs[call.at]) held[call.at] = scopeRevs[call.at];
     }
     send(call, body).then(function (answer) {
       settle(call, answer);
@@ -335,20 +345,19 @@
       paint();
       return;
     }
-    var patch = answer.patch || {}, lists = answer.lists || {}, held = answer.revs || {};
-    if (answer.stamp && answer.stamp <= stamp) {
+    var bridge = answer.bridge || {}, all = bridge.revs || {}, changes = answer.page || {}, held = all.page || {};
+    if (bridge.stamp && bridge.stamp <= stamp) {
       // another tab told this page data read after this answer's: the data it holds is newer, and of the
       // answer only the page's own vars are taken
       var own = {};
-      if (page) page.vars.forEach(function (k) { if (Object.prototype.hasOwnProperty.call(patch, k)) own[k] = patch[k]; });
-      patch = own;
-      lists = {};
+      if (page) page.vars.forEach(function (k) { if (Object.prototype.hasOwnProperty.call(changes, k)) own[k] = changes[k]; });
+      changes = own;
       held = {};
-    } else if (answer.stamp) {
-      stamp = answer.stamp;
+    } else if (bridge.stamp) {
+      stamp = bridge.stamp;
       // the tickets of what the run of this answer read: the channel holds them in place of the page's
-      if (answer.tickets && page) {
-        page.tickets = answer.tickets;
+      if (bridge.tickets && page) {
+        page.tickets = bridge.tickets;
         ticketsAt = Date.now();
       }
     }
@@ -358,14 +367,13 @@
       if (held[k]) revs[k] = held[k];
       else delete revs[k];
     });
-    Object.keys(patch).forEach(function (k) { put(k, patch[k]); });
-    Object.keys(lists).forEach(function (k) { put(k, applyList(get(k), lists[k])); });
-    var mine = call.at && answer.components ? answer.components[call.at] : null, instance = mine ? instanceOf(call.host) : null;
-    if (instance) Object.keys(mine.patch || {}).forEach(function (k) { instance[k] = mine.patch[k]; });
-    if (mine && mine.revs) {
+    apply(changes, get, put, keys.page);
+    var mine = call.at ? answer[call.at] : null, instance = mine ? instanceOf(call.host) : null;
+    if (instance) apply(mine, function (k) { return instance[k]; }, function (k, v) { instance[k] = v; }, keys[call.at]);
+    if (call.at && all[call.at]) {
       var kept = scopeRevs[call.at] || (scopeRevs[call.at] = {});
-      Object.keys(mine.revs).forEach(function (k) {
-        if (mine.revs[k]) kept[k] = mine.revs[k];
+      Object.keys(all[call.at]).forEach(function (k) {
+        if (all[call.at][k]) kept[k] = all[call.at][k];
         else delete kept[k];
       });
     }
@@ -387,22 +395,23 @@
     if (!channel || !page || !stamp || !Object.keys(held || {}).length) return;
     var values = {};
     Object.keys(revs).forEach(function (k) { values[k] = get(k); });
-    try { channel.postMessage({ page: here(), stamp: stamp, values: values, revs: revs }); } catch (e) { /* a value that does not clone */ }
+    // the answer's shape: the page's data under its place, the bookkeeping apart, and the URL it is of
+    try { channel.postMessage({ url: here(), page: values, bridge: { stamp: stamp, revs: { page: revs } } }); } catch (e) { /* a value that does not clone */ }
   }
   if (channel) {
     channel.onmessage = function (e) {
-      var m = e && e.data;
-      if (!m || !page || m.page !== here() || !m.revs || !(m.stamp > stamp)) return;
-      stamp = m.stamp;
+      var m = e && e.data, b = m && m.bridge, theirs = b && b.revs && b.revs.page;
+      if (!m || !page || m.url !== here() || !theirs || !(b.stamp > stamp)) return;
+      stamp = b.stamp;
       var changed = false;
-      Object.keys(m.revs).forEach(function (k) {
-        if (revs[k] === m.revs[k]) return; // this tab holds it already
-        put(k, m.values[k]);
-        revs[k] = m.revs[k];
+      Object.keys(theirs).forEach(function (k) {
+        if (revs[k] === theirs[k]) return; // this tab holds it already
+        put(k, (m.page || {})[k]);
+        revs[k] = theirs[k];
         changed = true;
       });
       Object.keys(revs).forEach(function (k) {
-        if (Object.prototype.hasOwnProperty.call(m.revs, k)) return;
+        if (Object.prototype.hasOwnProperty.call(theirs, k)) return;
         put(k, null); // a name the page's data no longer has
         delete revs[k];
         changed = true;
@@ -490,38 +499,40 @@
     }, function () { /* the channel tells again on the next change */ });
   }
 
-  // a keyed list's change by row: the rows removed, the rows set (changed in place, or new at the end), and
-  // the order when the server sent one; a row nothing changed stays the same object
-  function applyList(list, change) {
-    var path = String(change.key || "").split(".");
+  // an instance's changes as the wire carries them (docs/KITWORK_BRIDGE.md mục 3): each name set straight into
+  // it; name#key a row of a list it draws by key (keys: the key of each, by name), set in place, put at the end
+  // when new, taken out when null. A row nothing changed stays the same object.
+  function apply(changes, read, write, keys) {
+    var rows = {};
+    Object.keys(changes || {}).forEach(function (k) {
+      var cut = k.indexOf("#");
+      if (cut < 0) { write(k, changes[k]); return; }
+      var name = k.slice(0, cut), list = rows[name] || (rows[name] = { set: {}, order: [] });
+      list.set[k.slice(cut + 1)] = changes[k];
+      list.order.push(k.slice(cut + 1));
+    });
+    Object.keys(rows).forEach(function (name) {
+      write(name, applyRows(read(name), (keys || {})[name] || "", rows[name]));
+    });
+  }
+  function applyRows(list, key, change) {
+    var path = String(key).split(".");
     function keyOf(row) {
       var v = row;
       for (var i = 0; i < path.length; i++) v = v == null ? undefined : v[path[i]];
       return String(v);
     }
-    var removed = {}, set = {}, seen = {}, out = [];
-    (change.remove || []).forEach(function (k) { removed[String(k)] = true; });
-    (change.set || []).forEach(function (row) { set[keyOf(row)] = row; });
+    var seen = {}, out = [];
     (list instanceof Array ? list : []).forEach(function (row) {
       var k = keyOf(row);
-      if (removed[k] || seen[k]) return;
+      if (seen[k]) return;
       seen[k] = true;
-      out.push(k in set ? set[k] : row);
+      if (!(k in change.set)) out.push(row);
+      else if (change.set[k] !== null) out.push(change.set[k]);
     });
-    (change.set || []).forEach(function (row) {
-      var k = keyOf(row);
-      if (!seen[k]) { seen[k] = true; out.push(row); }
+    change.order.forEach(function (k) {
+      if (!seen[k] && change.set[k] !== null) { seen[k] = true; out.push(change.set[k]); }
     });
-    if (change.order instanceof Array) {
-      var by = {}, ordered = [];
-      out.forEach(function (row) { by[keyOf(row)] = row; });
-      change.order.forEach(function (k) {
-        k = String(k);
-        if (by[k]) { ordered.push(by[k]); delete by[k]; }
-      });
-      out.forEach(function (row) { if (by[keyOf(row)]) ordered.push(row); });
-      out = ordered;
-    }
     return out;
   }
 

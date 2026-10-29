@@ -58,7 +58,7 @@ func answered(call func() *httptest.ResponseRecorder) <-chan *httptest.ResponseR
 func TestAReadOnlyJobWaitsForNoOtherCall(t *testing.T) {
 	tn := readOnlySite(t)
 	for _, word := range []string{"apple", "apricot", "banana"} {
-		if r := postCall(tn, "/find", "add", `{"args":["`+word+`"],"vars":{"query":""},"seq":1}`); r.Code != http.StatusOK {
+		if r := postCall(tn, "/find", "add", `{"args":["`+word+`"],"page":{"query":""},"seq":1}`); r.Code != http.StatusOK {
 			t.Fatalf("add %s: %d %s", word, r.Code, r.Body.String())
 		}
 	}
@@ -67,12 +67,12 @@ func TestAReadOnlyJobWaitsForNoOtherCall(t *testing.T) {
 	lock.Lock() // a call that writes is out
 
 	search := answered(func() *httptest.ResponseRecorder {
-		return postCall(tn, "/find", "search", `{"args":[" ap "],"vars":{"query":""},"seq":2}`)
+		return postCall(tn, "/find", "search", `{"args":[" ap "],"page":{"query":""},"seq":2}`)
 	})
 	select {
 	case r := <-search:
 		var answer struct {
-			Patch map[string]any `json:"patch"`
+			Patch map[string]any `json:"page"`
 		}
 		if json.Unmarshal(r.Body.Bytes(), &answer) != nil || answer.Patch["query"] != "ap" || answer.Patch["found"] != float64(2) {
 			t.Fatalf("the search should answer what it finds: %d %s", r.Code, r.Body.String())
@@ -83,7 +83,7 @@ func TestAReadOnlyJobWaitsForNoOtherCall(t *testing.T) {
 	}
 
 	refresh := answered(func() *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodPost, "http://localhost/find?"+ViewRefreshParameter+"=1", strings.NewReader(`{"vars":{"query":"b"},"seq":3,"revs":{}}`))
+		req := httptest.NewRequest(http.MethodPost, "http://localhost/find?"+ViewRefreshParameter+"=1", strings.NewReader(`{"page":{"query":"b"},"seq":3,"bridge":{"revs":{"page":{}}}}`))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		tn.Serve(rec, req)
@@ -100,7 +100,7 @@ func TestAReadOnlyJobWaitsForNoOtherCall(t *testing.T) {
 	}
 
 	add := answered(func() *httptest.ResponseRecorder {
-		return postCall(tn, "/find", "add", `{"args":["cherry"],"vars":{"query":""},"seq":4}`)
+		return postCall(tn, "/find", "add", `{"args":["cherry"],"page":{"query":""},"seq":4}`)
 	})
 	select {
 	case r := <-add:
@@ -126,7 +126,7 @@ func TestAReadOnlyJobWaitsForNoOtherCall(t *testing.T) {
 // told the tab (red).
 func TestAReadOnlyJobTellsNoTab(t *testing.T) {
 	tn := readOnlySite(t)
-	postCall(tn, "/find", "add", `{"args":["apple"],"vars":{"query":""},"seq":1}`)
+	postCall(tn, "/find", "add", `{"args":["apple"],"page":{"query":""},"seq":1}`)
 	server := httptest.NewServer(http.HandlerFunc(tn.Serve))
 	defer server.Close()
 	id, frames, stop := openChanges(t, server)
@@ -134,13 +134,13 @@ func TestAReadOnlyJobTellsNoTab(t *testing.T) {
 	if answer, code := holdOn(t, server, id, pageTickets(t, serveGet(tn, "/find", nil).Body.String()), nil); code != http.StatusOK || answer["taken"] == 0 {
 		t.Fatalf("the channel should take the page's tickets: %d %v", code, answer)
 	}
-	if r := postCall(tn, "/find", "search", `{"args":["zz"],"vars":{"query":""},"seq":2}`); !strings.Contains(r.Body.String(), `"found":0`) {
+	if r := postCall(tn, "/find", "search", `{"args":["zz"],"page":{"query":""},"seq":2}`); !strings.Contains(r.Body.String(), `"found":0`) {
 		t.Fatalf("the search should change what the page finds: %s", r.Body.String())
 	}
 	if frame, ok := frameWithin(frames, 400*time.Millisecond); ok {
 		t.Fatalf("a read-only job should tell no tab, told %s", frame)
 	}
-	postCall(tn, "/find", "add", `{"args":["banana"],"vars":{"query":""},"seq":3}`)
+	postCall(tn, "/find", "add", `{"args":["banana"],"page":{"query":""},"seq":3}`)
 	if _, ok := frameWithin(frames, 3*time.Second); !ok {
 		t.Fatal("a job that writes should still tell the tab")
 	}
@@ -193,7 +193,7 @@ func TestAReadOnlyJobOfAComponentWaitsForNoOtherCall(t *testing.T) {
 		t.Fatalf("/pick should draw the picker for the bridge: %d %.1500s", r.Code, r.Body.String())
 	}
 	for _, word := range []string{"apple", "apricot", "banana"} {
-		if r := postCall(tn, "/pick", "word-picker.add", `{"args":["`+word+`"],"vars":{},"seq":1,"at":"`+at+`","scope":{"query":""}}`); r.Code != http.StatusOK {
+		if r := postCall(tn, "/pick", "word-picker.add", `{"args":["`+word+`"],"page":{},"seq":1,"at":"`+at+`","`+at+`":{"query":""}}`); r.Code != http.StatusOK {
 			t.Fatalf("add %s: %d %s", word, r.Code, r.Body.String())
 		}
 	}
@@ -202,16 +202,12 @@ func TestAReadOnlyJobOfAComponentWaitsForNoOtherCall(t *testing.T) {
 	lock.Lock() // a call that writes is out
 
 	search := answered(func() *httptest.ResponseRecorder {
-		return postCall(tn, "/pick", "word-picker.search", `{"args":[" ap "],"vars":{},"seq":2,"at":"`+at+`","scope":{"query":""}}`)
+		return postCall(tn, "/pick", "word-picker.search", `{"args":[" ap "],"page":{},"seq":2,"at":"`+at+`","`+at+`":{"query":""}}`)
 	})
 	select {
 	case r := <-search:
-		var answer struct {
-			Components map[string]struct {
-				Patch map[string]any `json:"patch"`
-			} `json:"components"`
-		}
-		if json.Unmarshal(r.Body.Bytes(), &answer) != nil || answer.Components[at].Patch["query"] != "ap" || answer.Components[at].Patch["found"] != float64(2) {
+		answer := map[string]any{}
+		if json.Unmarshal(r.Body.Bytes(), &answer) != nil || instanceOf(answer, at)["query"] != "ap" || instanceOf(answer, at)["found"] != float64(2) {
 			t.Fatalf("the search should answer what it finds: %d %s", r.Code, r.Body.String())
 		}
 	case <-time.After(3 * time.Second):
@@ -220,7 +216,7 @@ func TestAReadOnlyJobOfAComponentWaitsForNoOtherCall(t *testing.T) {
 	}
 
 	add := answered(func() *httptest.ResponseRecorder {
-		return postCall(tn, "/pick", "word-picker.add", `{"args":["cherry"],"vars":{},"seq":3,"at":"`+at+`","scope":{"query":""}}`)
+		return postCall(tn, "/pick", "word-picker.add", `{"args":["cherry"],"page":{},"seq":3,"at":"`+at+`","`+at+`":{"query":""}}`)
 	})
 	select {
 	case r := <-add:

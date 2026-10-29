@@ -42,16 +42,16 @@ func TestACallNamesItsJobInTheURL(t *testing.T) {
 	tn := patchTodoSite(t)
 
 	// as the desktop's shell sends it: method, URL and body, no header at all
-	req := httptest.NewRequest(http.MethodPost, "http://localhost/todo?kitwork-call=add", strings.NewReader(`{"args":[],"vars":{"title":"Mua sữa"},"seq":1}`))
+	req := httptest.NewRequest(http.MethodPost, "http://localhost/todo?kitwork-call=add", strings.NewReader(`{"args":[],"page":{"title":"Mua sữa"},"seq":1}`))
 	rec := httptest.NewRecorder()
 	tn.Serve(rec, req)
 	var answer map[string]any
-	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &answer) != nil || answer["patch"] == nil {
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &answer) != nil || answer[pagePlace] == nil {
 		t.Fatalf("a call naming its job in the URL, with no header, should be answered with what changed: %d %q", rec.Code, rec.Body.String())
 	}
 
 	// the job's name in a header, and none in the URL, is no call
-	req = httptest.NewRequest(http.MethodPost, "http://localhost/todo", strings.NewReader(`{"args":[],"vars":{"title":"x"},"seq":2}`))
+	req = httptest.NewRequest(http.MethodPost, "http://localhost/todo", strings.NewReader(`{"args":[],"page":{"title":"x"},"seq":2}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Kitwork-Call", "add")
 	rec = httptest.NewRecorder()
@@ -71,11 +71,11 @@ func TestACallNamesItsJobInTheURL(t *testing.T) {
 
 func TestTheViewReadsThePagesOwnURL(t *testing.T) {
 	tn := urlViewSite(t)
-	req := httptest.NewRequest(http.MethodPost, "http://localhost/board?tab=2&kitwork-call=look", strings.NewReader(`{"args":[],"vars":{"seen":"","tab":""},"seq":1}`))
+	req := httptest.NewRequest(http.MethodPost, "http://localhost/board?tab=2&kitwork-call=look", strings.NewReader(`{"args":[],"page":{"seen":"","tab":""},"seq":1}`))
 	rec := httptest.NewRecorder()
 	tn.Serve(rec, req)
 	var answer struct {
-		Patch map[string]any `json:"patch"`
+		Patch map[string]any `json:"page"`
 	}
 	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &answer) != nil {
 		t.Fatalf("look: %d %q", rec.Code, rec.Body.String())

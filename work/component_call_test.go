@@ -112,7 +112,7 @@ func TestComponentJobRunsOnTheInstanceThePageDraws(t *testing.T) {
 	tn := cartSite(t)
 	// the browser sends owner and shippingFee among the vars: they are no vars, and inputs never come from it
 	r := postCall(tn, "/cart", "shop-cart.checkout",
-		`{"args":[],"vars":{},"seq":5,"at":"`+placesOf(t, tn, "/cart")[0]+`","scope":{"items":[{"id":1,"name":"a"},{"id":2,"name":"b"}],"done":false,"receipt":"","owner":"mallory","shippingFee":0}}`)
+		`{"args":[],"page":{},"seq":5,"at":"`+placesOf(t, tn, "/cart")[0]+`","`+placesOf(t, tn, "/cart")[0]+`":{"items":[{"id":1,"name":"a"},{"id":2,"name":"b"}],"done":false,"receipt":"","owner":"mallory","shippingFee":0}}`)
 	if r.Code != http.StatusOK {
 		t.Fatalf("checkout: %d %.600s", r.Code, r.Body.String())
 	}
@@ -120,9 +120,7 @@ func TestComponentJobRunsOnTheInstanceThePageDraws(t *testing.T) {
 	if answer["seq"] != float64(5) {
 		t.Errorf("seq %v, want the call's 5", answer["seq"])
 	}
-	components, _ := answer["components"].(map[string]any)
-	mine, _ := components[placesOf(t, tn, "/cart")[0]].(map[string]any)
-	patch, _ := mine["patch"].(map[string]any)
+	patch := instanceOf(answer, placesOf(t, tn, "/cart")[0])
 	if patch["receipt"] != "an:20000:2" {
 		t.Errorf("receipt %v, want an:20000:2 (inputs where the call stands, items as sent)", patch["receipt"])
 	}
@@ -132,7 +130,7 @@ func TestComponentJobRunsOnTheInstanceThePageDraws(t *testing.T) {
 	if _, has := patch["shippingFee"]; has {
 		t.Errorf("shippingFee did not change: %v", patch)
 	}
-	if _, has := answer["patch"]; has {
+	if _, has := answer[pagePlace]; has {
 		t.Errorf("the page's data did not change: %.300s", r.Body.String())
 	}
 	if strings.Contains(r.Body.String(), "<") {
@@ -171,11 +169,11 @@ func TestComponentJobOnlyWhereThePageDrawsIt(t *testing.T) {
 // A job of a component runs under the guard of the page that draws it: a guard that refuses refuses the job.
 func TestComponentJobRunsUnderThePagesGuard(t *testing.T) {
 	tn := cartSite(t)
-	r := postCall(tn, "/locked", "shop-cart.checkout", `{"at":"c1","scope":{"items":[]}}`)
+	r := postCall(tn, "/locked", "shop-cart.checkout", `{"at":"c1","c1":{"items":[]}}`)
 	if r.Code != http.StatusForbidden {
 		t.Fatalf("locked checkout: %d %.300s, want 403", r.Code, r.Body.String())
 	}
-	if strings.Contains(r.Body.String(), "components") {
+	if strings.Contains(r.Body.String(), "items") {
 		t.Errorf("a refused job changes nothing: %.300s", r.Body.String())
 	}
 }
@@ -208,16 +206,15 @@ func TestComponentJobOnAPageWithJobsOfItsOwn(t *testing.T) {
 	if strings.Contains(body, `"program"`) {
 		t.Errorf("a page holding a component has no program yet\n%.3000s", body)
 	}
-	page := componentAnswer(t, postCall(tn, "/shop", "save", `{"args":[],"vars":{"note":"giao trước 9 giờ","saved":""},"seq":1}`).Body.String())
-	if patch, _ := page["patch"].(map[string]any); patch["saved"] != "giao trước 9 giờ" {
+	page := componentAnswer(t, postCall(tn, "/shop", "save", `{"args":[],"page":{"note":"giao trước 9 giờ","saved":""},"seq":1}`).Body.String())
+	if instanceOf(page, pagePlace)["saved"] != "giao trước 9 giờ" {
 		t.Errorf("the page's job: %v", page)
 	}
-	cart := componentAnswer(t, postCall(tn, "/shop", "shop-cart.checkout", `{"args":[],"vars":{"note":"x","saved":""},"seq":2,"at":"`+at+`","scope":{"items":[{"id":1}],"done":false,"receipt":""}}`).Body.String())
-	mine, _ := cart["components"].(map[string]any)[at].(map[string]any)
-	if patch, _ := mine["patch"].(map[string]any); patch["receipt"] != "an:15000:1" {
+	cart := componentAnswer(t, postCall(tn, "/shop", "shop-cart.checkout", `{"args":[],"page":{"note":"x","saved":""},"seq":2,"at":"`+at+`","`+at+`":{"items":[{"id":1}],"done":false,"receipt":""}}`).Body.String())
+	if instanceOf(cart, at)["receipt"] != "an:15000:1" {
 		t.Errorf("the cart's job: %v", cart)
 	}
-	if _, has := cart["patch"]; has {
+	if _, has := cart[pagePlace]; has {
 		t.Errorf("the cart's job changed nothing of the page: %v", cart)
 	}
 }
@@ -282,47 +279,45 @@ func TestComponentJobAnswersThePagesRevisions(t *testing.T) {
 	}
 	call := func(revs map[string]string, job string) (map[string]any, string) {
 		held, _ := json.Marshal(revs)
-		r := postCall(tn, "/shop", job, `{"args":["trà"],"vars":{"note":""},"seq":1,"revs":`+string(held)+`,"at":"`+placesOf(t, tn, "/shop")[0]+`","scope":{"items":[{"id":1,"name":"trà"}]}}`)
+		r := postCall(tn, "/shop", job, `{"args":["trà"],"page":{"note":""},"seq":1,"bridge":{"revs":{"page":`+string(held)+`}},"at":"`+placesOf(t, tn, "/shop")[0]+`","`+placesOf(t, tn, "/shop")[0]+`":{"items":[{"id":1,"name":"trà"}]}}`)
 		if r.Code != http.StatusOK {
 			t.Fatalf("%s: %d %s", job, r.Code, r.Body.String())
 		}
 		answer := componentAnswer(t, r.Body.String())
-		if got, ok := answer["revs"].(map[string]any); ok {
-			for k, v := range got {
-				revs[k], _ = v.(string)
-			}
+		for k, v := range revsOf(answer, pagePlace) {
+			revs[k], _ = v.(string)
 		}
 		return answer, r.Body.String()
 	}
 
 	answer, body := call(tabA, "shop-cart.checkout")
-	if patch, _ := answer["patch"].(map[string]any); patch["count"] != float64(1) {
+	if instanceOf(answer, pagePlace)["count"] != float64(1) {
 		t.Errorf("the checkout changed the page's count: %s", body)
 	}
-	revs, _ := answer["revs"].(map[string]any)
+	revs := revsOf(answer, pagePlace)
 	if revs["count"] == nil || revs["count"] == block.Bridge.Revs["page"]["count"] {
 		t.Errorf("the tab that called should get the new revision of count: %s", body)
 	}
 	if _, has := revs["note"]; has {
 		t.Errorf("a var has no revision: %s", body)
 	}
-	if components, _ := answer["components"].(map[string]any); components[placesOf(t, tn, "/shop")[0]] == nil {
+	if instanceOf(answer, placesOf(t, tn, "/shop")[0]) == nil {
 		t.Errorf("the cart's own data comes as before: %s", body)
 	}
-	if stamp, _ := answer["stamp"].(float64); block.Bridge.Stamp <= 0 || stamp <= block.Bridge.Stamp {
+	if stamp, _ := bridgeOf(answer)["stamp"].(float64); block.Bridge.Stamp <= 0 || stamp <= block.Bridge.Stamp {
 		t.Errorf("the answer should carry the moment the page's data was read, after the page's own (%.0f): %s", block.Bridge.Stamp, body)
 	}
 	call(tabA, "shop-cart.checkout") // two orders now
 
 	// tab A holds the count as it is: an add changes nothing of the page, and nothing of it comes
 	answer, body = call(tabA, "shop-cart.add")
-	if answer["patch"] != nil || answer["revs"] != nil {
+	if answer[pagePlace] != nil || revsOf(answer, pagePlace) != nil {
 		t.Errorf("a tab up to date gets nothing of the page from a job that changed none of it: %s", body)
 	}
 
 	// tab B was drawn before both orders: its add brings the count whole, and its revision
 	answer, body = call(tabB, "shop-cart.add")
-	if patch, _ := answer["patch"].(map[string]any); patch["count"] != float64(2) {
+	if instanceOf(answer, pagePlace)["count"] != float64(2) {
 		t.Errorf("a tab drawn before the orders should get the count whole (2): %s", body)
 	}
 	if tabB["count"] != tabA["count"] {
@@ -337,12 +332,12 @@ func TestComponentJobAnswersThePagesRevisions(t *testing.T) {
 // Live check taken out), this test went red: the answer carried user whole and its revision.
 func TestComponentJobOnAPageDrawnWholeSendsNoPageData(t *testing.T) {
 	tn := cartSite(t)
-	r := postCall(tn, "/cart", "shop-cart.checkout", `{"args":[],"vars":{},"seq":1,"revs":{},"at":"`+placesOf(t, tn, "/cart")[0]+`","scope":{"items":[]}}`)
+	r := postCall(tn, "/cart", "shop-cart.checkout", `{"args":[],"page":{},"seq":1,"bridge":{"revs":{"page":{}}},"at":"`+placesOf(t, tn, "/cart")[0]+`","`+placesOf(t, tn, "/cart")[0]+`":{"items":[]}}`)
 	answer := componentAnswer(t, r.Body.String())
-	if answer["patch"] != nil || answer["revs"] != nil || answer["lists"] != nil || answer["stamp"] != nil {
+	if answer[pagePlace] != nil || revsOf(answer, pagePlace) != nil || bridgeOf(answer)["stamp"] != nil {
 		t.Errorf("a page drawn whole gets nothing of its data: %s", r.Body.String())
 	}
-	if components, _ := answer["components"].(map[string]any); components[placesOf(t, tn, "/cart")[0]] == nil {
+	if instanceOf(answer, placesOf(t, tn, "/cart")[0]) == nil {
 		t.Errorf("the cart's own data comes as before: %s", r.Body.String())
 	}
 }
@@ -411,10 +406,9 @@ func TestComponentRunsAsThePageIsDrawn(t *testing.T) {
 		t.Errorf("who looks is the request's: want Lan\n%.3000s", seen)
 	}
 
-	r := postCall(tn, "/shelf", "shop-cart.checkout", `{"args":[],"vars":{},"seq":1,"at":"`+placesOf(t, tn, "/shelf")[0]+`","scope":{"items":[{"id":1}]}}`)
+	r := postCall(tn, "/shelf", "shop-cart.checkout", `{"args":[],"page":{},"seq":1,"at":"`+placesOf(t, tn, "/shelf")[0]+`","`+placesOf(t, tn, "/shelf")[0]+`":{"items":[{"id":1}]}}`)
 	answer := componentAnswer(t, r.Body.String())
-	mine, _ := answer["components"].(map[string]any)[placesOf(t, tn, "/shelf")[0]].(map[string]any)
-	if patch, _ := mine["patch"].(map[string]any); patch["placed"] != float64(1) {
+	if instanceOf(answer, placesOf(t, tn, "/shelf")[0])["placed"] != float64(1) {
 		t.Errorf("the checkout should answer the new count of its cart: %s", r.Body.String())
 	}
 	if body := serveGet(tn, "/shelf", nil).Body.String(); strings.Count(body, `>1 đơn</p>`) != 2 {
@@ -465,7 +459,7 @@ func TestComponentJobUnderAFalseIfIsNotFound(t *testing.T) {
 	}
 	call := func(cookie string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, "http://localhost/admin?"+ViewCallParameter+"=admin-tools.wipe",
-			strings.NewReader(`{"args":[],"vars":{"note":""},"seq":1,"at":"`+at+`","scope":{"done":false}}`))
+			strings.NewReader(`{"args":[],"page":{"note":""},"seq":1,"at":"`+at+`","`+at+`":{"done":false}}`))
 		req.Header.Set("Content-Type", "application/json")
 		if cookie != "" {
 			req.Header.Set("Cookie", cookie)
@@ -481,8 +475,7 @@ func TestComponentJobUnderAFalseIfIsNotFound(t *testing.T) {
 	if r.Code != http.StatusOK {
 		t.Fatalf("an admin's wipe: %d %s", r.Code, r.Body.String())
 	}
-	mine, _ := componentAnswer(t, r.Body.String())["components"].(map[string]any)[at].(map[string]any)
-	if patch, _ := mine["patch"].(map[string]any); patch["done"] != true {
+	if instanceOf(componentAnswer(t, r.Body.String()), at)["done"] != true {
 		t.Errorf("an admin's wipe runs: %s", r.Body.String())
 	}
 }

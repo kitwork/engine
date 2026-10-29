@@ -66,7 +66,7 @@ func postCall(tn *Tenant, path, job, body string) *httptest.ResponseRecorder {
 // var the job set, nothing of the data it did not touch, never the page.
 func TestRouterViewJobRunsThroughTheBridge(t *testing.T) {
 	tn := viewBindSite(t)
-	r := postCall(tn, "/todo", "add", `{"args":[],"vars":{"title":"buy eggs"},"seq":3}`)
+	r := postCall(tn, "/todo", "add", callBody{Seq: 3, Args: []any{}, Page: vars("title", "buy eggs")}.String())
 	if r.Code != http.StatusOK {
 		t.Fatalf("add: %d %.600s", r.Code, r.Body.String())
 	}
@@ -77,13 +77,13 @@ func TestRouterViewJobRunsThroughTheBridge(t *testing.T) {
 	if answer["seq"] != float64(3) {
 		t.Errorf("add: seq %v, want the call's 3", answer["seq"])
 	}
-	if patch, _ := answer["patch"].(map[string]any); len(patch) != 1 || patch["title"] != "" {
-		t.Errorf("add: patch %v, want only title \"\"", answer["patch"])
+	if page := instanceOf(answer, pagePlace); len(page) != 1 || page["title"] != "" {
+		t.Errorf("add: the page's changes %v, want only title \"\"", page)
 	}
 	if _, has := answer["html"]; has {
 		t.Errorf("add answered the page: %.300s", r.Body.String())
 	}
-	if _, has := answer["lists"]; has {
+	if strings.Contains(r.Body.String(), "#") {
 		t.Errorf("add changed no list: %.300s", r.Body.String())
 	}
 }

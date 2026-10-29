@@ -23,7 +23,10 @@ import (
 // the page's own URL.
 //
 //	POST /todo?kitwork-call=remove
-//	{ "args": [3], "vars": { "title": "" }, "seq": 4, "revs": { "todos": "3f1a…", "left": "9c0e…" } }
+//	{ "seq": 4, "args": [3], "page": { "title": "" }, "bridge": { "revs": { "page": { "todos": "3f1a…", "left": "9c0e…" } } } }
+//
+// The body is by instance (29/10/2026, docs/KITWORK_BRIDGE.md mục 3): the vars each instance holds stand under
+// its place, the page's under "page" (the root instance), and the bridge's own bookkeeping apart.
 //
 // The job's name is in the URL, taken out of it before anything reads it (takeViewCall): the guards and the
 // view's function read the page's own URL.
@@ -31,15 +34,16 @@ import (
 // The folder's guards and the origin check run as for any POST of the folder. Then the view's function runs
 // with the vars the browser sent (context.viewVar, written by the compiler, compiler/router_view.go), the job
 // runs on what it bound, the vars are read back (__state), and the function runs again with them. The answer
-// is the data the job changed, never the page: what differs between the two runs (view_patch.go), which the
-// page, running in the kernel, paints (jit/hydrate/call.js):
+// is the data the job changed, never the page: what differs between the two runs (view_patch.go), by instance,
+// each name set straight into it and a keyed list's rows as name#key, which the page, running in the kernel,
+// paints (jit/hydrate/call.js):
 //
-//	{ "seq": 4, "patch": { "left": 1 }, "lists": { "todos": { "key": "id", "remove": [3] } }, "revs": { … }, "stamp": 1793174400123456 }
+//	{ "seq": 4, "page": { "left": 1, "todos#3": null }, "bridge": { "revs": { "page": { … } }, "stamp": 1793174400123456 } }
 //
-// revs are the page's revision of each name of its data (view_patch.go): a page that held another value than
-// the one the job ran on (another tab changed the data) gets that name whole, so no page is left half new.
-// stamp is the moment the data of the answer was read (nextViewStamp): a tab takes no data, from an answer or
-// from another tab, read before the data it holds.
+// bridge.revs are the page's revision of each name of its data (view_patch.go): a page that held another value
+// than the one the job ran on (another tab changed the data) gets that name whole, so no page is left half new.
+// bridge.stamp is the moment the data of the answer was read (nextViewStamp): a tab takes no data, from an answer
+// or from another tab, read before the data it holds.
 //
 // A job that sends the page away (context.redirect) answers { seq, redirect }; one that fails answers
 // { seq, error: { code, message } } with that code. A job's return value is dropped.
@@ -196,44 +200,50 @@ func readViewCall(r *http.Request, name string, refresh bool) (*viewCall, error)
 	if len(body) > viewCallLimit {
 		return nil, fmt.Errorf("lời gọi quá %d byte", viewCallLimit)
 	}
+	// by instance (docs/KITWORK_BRIDGE.md mục 3): the vars each instance holds under its place, the page's under
+	// "page", the bridge's own bookkeeping apart
 	var sent struct {
-		Args  []any             `json:"args"`
-		Vars  map[string]any    `json:"vars"`
-		Seq   float64           `json:"seq"`
-		At    string            `json:"at"`
-		Scope map[string]any    `json:"scope"`
-		Revs  map[string]string `json:"revs"`
-		Marks string            `json:"marks"`
-		// ScopeRevs are the revisions of the instance's data the tab holds (component_call.go)
-		ScopeRevs map[string]string `json:"scopeRevs"`
+		Args   []any   `json:"args"`
+		Seq    float64 `json:"seq"`
+		At     string  `json:"at"`
+		Bridge struct {
+			Revs  map[string]map[string]string `json:"revs"`
+			Marks string                       `json:"marks"`
+		} `json:"bridge"`
 	}
+	var places map[string]any
 	if len(bytes.TrimSpace(body)) > 0 {
-		if err := json.Unmarshal(body, &sent); err != nil {
-			return nil, fmt.Errorf("lời gọi không phải JSON { args, vars, seq }")
+		if json.Unmarshal(body, &sent) != nil || json.Unmarshal(body, &places) != nil {
+			return nil, fmt.Errorf("lời gọi không phải JSON { seq, args, page, … }")
 		}
 	}
-	call := &viewCall{name: name, vars: map[string]value.Value{}, seq: sent.Seq, revs: sent.Revs, refresh: refresh, marks: sent.Marks}
+	call := &viewCall{name: name, vars: map[string]value.Value{}, seq: sent.Seq, revs: sent.Bridge.Revs[pagePlace], refresh: refresh, marks: sent.Bridge.Marks}
 	for _, arg := range sent.Args {
 		call.args = append(call.args, value.New(arg))
 	}
-	for key, v := range sent.Vars {
-		if visibleName(key) {
-			call.vars[key] = value.New(v)
-		}
-	}
+	instanceVars(places, pagePlace, call.vars)
 	if strings.Contains(name, ".") {
 		// a job of a component: the place of its instance on the page, and the instance's vars
 		if !componentPlace(sent.At) {
 			return nil, fmt.Errorf("việc %s của component cần chỗ gọi của instance (at)", name)
 		}
-		call.at, call.scope, call.scopeRevs = sent.At, map[string]value.Value{}, sent.ScopeRevs
-		for key, v := range sent.Scope {
-			if visibleName(key) {
-				call.scope[key] = value.New(v)
-			}
-		}
+		call.at, call.scope, call.scopeRevs = sent.At, map[string]value.Value{}, sent.Bridge.Revs[sent.At]
+		instanceVars(places, sent.At, call.scope)
 	}
 	return call, nil
+}
+
+// pagePlace is the place of the page among the instances of the bridge (ui/page_block.go): the root one.
+const pagePlace = "page"
+
+// instanceVars reads the vars an instance holds, as a call sent them under its place, into vars.
+func instanceVars(places map[string]any, place string, vars map[string]value.Value) {
+	held, _ := places[place].(map[string]any)
+	for key, v := range held {
+		if visibleName(key) {
+			vars[key] = value.New(v)
+		}
+	}
 }
 
 // componentPlace reports whether at can be the place a component is called from, as the page writes it
@@ -358,22 +368,21 @@ func (t *Tenant) serveViewCall(vm *runtime.VM, ctxObj *Context, reqRouter *Route
 		return
 	}
 	after := viewSnapshot(response.Data())
-	patch, lists := viewPatch(before, after, t.viewListKeys(node))
-	answer := map[string]any{"seq": call.seq, "stamp": stamp}
-	t.answerTickets(answer, reqRouter, leaf, call.marks)
+	changes := viewPatch(before, after, t.viewListKeys(node))
+	answer := map[string]any{"seq": call.seq}
+	bridge := map[string]any{"stamp": stamp}
+	t.answerTickets(bridge, reqRouter, leaf, call.marks)
 	if call.revs != nil {
-		if revs := staleRevs(call.revs, before, after, isVar, patch, lists); len(revs) > 0 {
-			answer["revs"] = revs
+		if revs := staleRevs(call.revs, before, after, isVar, changes); len(revs) > 0 {
+			bridge["revs"] = map[string]any{pagePlace: revs}
 		}
-		t.rowsSince(leaf, call.revs, patch, lists) // a list the tab held older comes by row, when kept (view_rows.go)
+		t.rowsSince(leaf, call.revs, changes) // a list the tab held older comes by row, when kept (view_rows.go)
 	}
 	t.keepViewRows(leaf, after)
-	if len(patch) > 0 {
-		answer["patch"] = patch
+	if len(changes) > 0 {
+		answer[pagePlace] = changes
 	}
-	if len(lists) > 0 {
-		answer["lists"] = lists
-	}
+	answer["bridge"] = bridge
 	// the tabs holding a ticket for the page ask for what changed (view_changes.go); a job that changes only the
 	// vars changed no data another tab shows, however its own page's differs (a search's results)
 	if !call.readOnly && viewDataChanged(before, after, isVar) {
@@ -485,31 +494,32 @@ func (t *Tenant) serveViewRefresh(vm *runtime.VM, reqRouter *Router, leaf *Folde
 			}
 		}
 	}
-	patch, revs := map[string]any{}, map[string]string{}
+	changes, revs := map[string]any{}, map[string]string{}
 	for name, v := range now {
 		if vars[name] {
 			continue
 		}
 		if rev := revOf(v); call.revs[name] != rev {
-			patch[name], revs[name] = v, rev
+			changes[name], revs[name] = v, rev
 		}
 	}
 	for name := range call.revs {
 		if _, kept := now[name]; !kept {
-			patch[name], revs[name] = nil, ""
+			changes[name], revs[name] = nil, ""
 		}
 	}
-	answer := map[string]any{"seq": call.seq, "stamp": reqRouter.viewStamp}
-	t.answerTickets(answer, reqRouter, leaf, call.marks)
-	lists := map[string]any{}
-	t.rowsSince(leaf, call.revs, patch, lists) // a list the tab holds at a kept revision comes by row (view_rows.go)
+	answer := map[string]any{"seq": call.seq}
+	bridge := map[string]any{"stamp": reqRouter.viewStamp}
+	t.answerTickets(bridge, reqRouter, leaf, call.marks)
+	t.rowsSince(leaf, call.revs, changes) // a list the tab holds at a kept revision comes by row (view_rows.go)
 	t.keepViewRows(leaf, now)
 	if len(revs) > 0 {
-		answer["patch"], answer["revs"] = patch, revs
+		bridge["revs"] = map[string]any{pagePlace: revs}
 	}
-	if len(lists) > 0 {
-		answer["lists"] = lists
+	if len(changes) > 0 {
+		answer[pagePlace] = changes
 	}
+	answer["bridge"] = bridge
 	answerViewCall(reqRouter, answer)
 }
 
