@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/jit/fonts"
 	"github.com/kitwork/engine/jit/hydrate"
 	"github.com/kitwork/engine/jit/icons"
@@ -39,9 +40,21 @@ import (
 //	router.view((context) => context.title("Việc cần làm").bind({ todos, add }));
 //
 // It is the folder's GET; a POST naming a job (?kitwork-call=…) runs the same function again, then the job.
+// The compiler gives it a second argument the author never writes, { __readOnly: ["search"] }: the jobs that
+// change nothing but the page's vars (compiler/view_read_only.go), whose calls wait for no lock.
 func (f *FolderRouter) View(args ...value.Value) *FolderMethod {
 	m := f.declare("router.view", "GET", args...)
 	m.view = true
+	if len(args) > 1 && args[1].IsMap() {
+		if list, ok := args[1].Map()[compiler.ViewReadOnlyName]; ok && list.IsArray() {
+			m.readOnly = map[string]bool{}
+			for _, name := range list.Array() {
+				if name.IsString() {
+					m.readOnly[name.Text()] = true
+				}
+			}
+		}
+	}
 	return m
 }
 

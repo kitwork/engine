@@ -228,11 +228,15 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 				finalize()
 				return
 			}
+			call.readOnly = get.readOnly[call.name]
 			reqRouter.call = call
 			method = get
 			// one call of a page's jobs at a time, from the run before the job to the run after it: a job
-			// writes on what the one before it wrote, never on what both read (view_call.go)
-			defer t.lockViewCalls(leaf)()
+			// writes on what the one before it wrote, never on what both read (view_call.go). A refresh and a
+			// job that changes nothing but the page's vars write nothing a job writes on, and wait for none.
+			if !refreshing && !call.readOnly {
+				defer t.lockViewCalls(leaf)()
+			}
 		}
 	}
 

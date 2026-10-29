@@ -53,6 +53,7 @@ type FolderMethod struct {
 	method     string
 	handle     *value.Lambda
 	view       bool            // declared by router.view: the page's jobs are called through it (view_call.go)
+	readOnly   map[string]bool // its jobs that change nothing but the page's vars: their calls wait for no lock
 	folder     *FolderRouter   // the folder whose router file declared it
 	declaredBy string          // the call that declared it: router.get, router.proxy…
 	declaredAt int             // its line in the router file, 0 when not known (declared outside the boot run)

@@ -51,8 +51,10 @@ import (
 // The page's function runs before its job and the job writes on what it read: two calls that both read before
 // either wrote would keep one write of the two (twenty adds at once kept two rows). One call at a time per
 // page, from the run before the job to the run after it, the guards and the answer included; drawing the page
-// waits for nothing. A page's jobs are the page's to order; writes of two pages to the same data are the
-// store's (an atomic statement), not this lock's.
+// waits for nothing, nor does a refresh, nor a job that changes nothing but the page's vars (the compiler's
+// word, compiler/view_read_only.go, 29/10/2026): they write nothing a job writes on, and a search typed while
+// another person's tick is out goes at once. A page's jobs are the page's to order; writes of two pages to the
+// same data are the store's (an atomic statement), not this lock's.
 func (t *Tenant) lockViewCalls(leaf *FolderRouter) func() {
 	lock, _ := t.viewCalls.LoadOrStore(viewPageKey(leaf), &sync.Mutex{})
 	mu := lock.(*sync.Mutex)
@@ -65,9 +67,10 @@ var lastViewStamp atomic.Int64
 
 // nextViewStamp is the moment the data of a page of router.view is read, in microseconds, taken before the run
 // that reads it: never twice the same in the process, never smaller than one given before (across a restart,
-// the clock's word). A call's runs hold the page's lock, so of two answers of one page the one with the greater
-// stamp read its data after the other: the tabs of a browser tell each other the data an answer brought, and
-// a tab takes it only when its stamp is greater than the one of the data it holds (call.js), however late a
+// the clock's word). A job that writes takes its stamp after its write, under the page's lock; every run takes
+// its own before it reads, locked or not: so of two answers of one page the one with the greater stamp read its
+// data after the other's job wrote. The tabs of a browser tell each other the data an answer brought, and a
+// tab takes it only when its stamp is greater than the one of the data it holds (call.js), however late a
 // message or an answer arrives.
 func nextViewStamp() int64 {
 	for {
@@ -172,6 +175,9 @@ type viewCall struct {
 	refresh bool
 	// marks are the keys the page holds tickets for, made lately, "" when it holds none (view_changes.go)
 	marks string
+	// readOnly: the job changes nothing but the page's vars (FolderMethod.readOnly): its call holds no lock and
+	// tells no tab
+	readOnly bool
 }
 
 // readViewCall reads the call of a POST whose URL named a job (name) or asked for what changed (refresh); an
@@ -354,8 +360,10 @@ func (t *Tenant) serveViewCall(vm *runtime.VM, ctxObj *Context, reqRouter *Route
 	if len(lists) > 0 {
 		answer["lists"] = lists
 	}
-	if viewDataChanged(before, after, isVar) {
-		t.tellViewChanged(leaf, stamp) // the tabs holding a ticket for the page ask for what changed (view_changes.go)
+	// the tabs holding a ticket for the page ask for what changed (view_changes.go); a job that changes only the
+	// vars changed no data another tab shows, however its own page's differs (a search's results)
+	if !call.readOnly && viewDataChanged(before, after, isVar) {
+		t.tellViewChanged(leaf, stamp)
 	}
 	answerViewCall(reqRouter, answer)
 }

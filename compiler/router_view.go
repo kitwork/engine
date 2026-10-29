@@ -14,16 +14,23 @@ const ViewStateName = "__state"
 //
 // and the object it binds gains __state, () => ({ title }), read after the job: the vars the job changed go
 // back to the page. The function's first parameter is the context it reads them off; a function without one
-// has no state of the page. Nothing else of the file changes.
+// has no state of the page. router.view is given the jobs that change nothing but the vars, read as the author
+// wrote them (view_read_only.go): router.view(fn, { __readOnly: ["search"] }). Nothing else of the file changes.
 func rewriteRouterViews(prog *Program) {
 	for _, statement := range prog.Statements {
 		line, ok := statement.(*ExpressionStatement)
 		if !ok {
 			continue
 		}
-		if fn := routerViewFunction(line.Expression); fn != nil {
-			rewriteViewFunction(fn)
+		call := routerViewCall(line.Expression)
+		if call == nil {
+			continue
 		}
+		fn, _ := call.Arguments[0].(*FunctionLiteral)
+		if names := readOnlyJobs(fn); len(names) > 0 {
+			call.Arguments = append(call.Arguments, readOnlyArgument(call.Token, names))
+		}
+		rewriteViewFunction(fn)
 	}
 }
 
@@ -75,6 +82,17 @@ func componentDefineFunction(e Expression) *FunctionLiteral {
 // routerViewFunction is the function of router.view(fn) at the head of a line, the rules chained after it
 // (.guard(…), .limit(…)) or not; nil for any other line.
 func routerViewFunction(e Expression) *FunctionLiteral {
+	call := routerViewCall(e)
+	if call == nil {
+		return nil
+	}
+	fn, _ := call.Arguments[0].(*FunctionLiteral)
+	return fn
+}
+
+// routerViewCall is the call router.view(fn) at the head of a line, written with one argument, a function; nil
+// for any other line.
+func routerViewCall(e Expression) *MethodCallExpression {
 	for {
 		switch node := e.(type) {
 		case *ChainExpression:
@@ -84,8 +102,10 @@ func routerViewFunction(e Expression) *FunctionLiteral {
 				if node.Method == nil || node.Method.Value != "view" || len(node.Arguments) != 1 {
 					return nil
 				}
-				fn, _ := node.Arguments[0].(*FunctionLiteral)
-				return fn
+				if _, ok := node.Arguments[0].(*FunctionLiteral); !ok {
+					return nil
+				}
+				return node
 			}
 			e = node.Object
 		default:
