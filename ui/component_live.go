@@ -264,6 +264,35 @@ func (c *compiler) liveSiteCall(n *Node, cx ctx, site *callSite) error {
 	return nil
 }
 
+// liveInput refuses an input of a component of the site that reads live state: a var of the page, or the state
+// of a component around it that the browser runs (29/10/2026, KITWORK_COMPONENTS.md mục 5). An input is a value
+// the server reads as it draws the page, never sent by the browser, so the instance would show the var's first
+// value and never follow it, while a job of the instance, drawn again with the vars the tab sends, would see
+// another. A component that talks with the page on goes through an alias. Data, the page's or a component's
+// computed on the server, is an input; Kitwork's own components follow their inputs in the kernel, as before.
+func (c *compiler) liveInput(n *Node, o outsideExpr, scope *frame, def *componentDef) error {
+	if def.kitwork != nil {
+		return nil
+	}
+	switch o.word {
+	case "for", "key", "if", "show":
+		return nil
+	}
+	for _, name := range usedNames(o.e.ir) {
+		d := scope.declaring(name)
+		switch {
+		case d == nil:
+		case d == c.page && c.given.vars[name]:
+			return errAttr(n, o.attr, "đầu vào %s của <%s> đọc %s, var của trang: đầu vào là giá trị server đọc lúc vẽ trang, không theo %s khi nó đổi ở trình duyệt (KITWORK_COMPONENTS.md mục 5). Để %s giữ trạng thái đó bằng var của nó, trang đọc qua alias (<%s as=\"$…\">); đầu vào chỉ nhận dữ liệu, như const của trang",
+				o.attr.Name, def.name, name, name, def.name, def.name)
+		case d.component != nil && d.client && (d.component.kitwork != nil || d.component.vars[name]):
+			return errAttr(n, o.attr, "đầu vào %s của <%s> đọc %s, trạng thái sống của %s: đầu vào là giá trị server đọc lúc vẽ trang, không theo %s khi nó đổi ở trình duyệt (KITWORK_COMPONENTS.md mục 5). Hai component nói chuyện qua alias (as=\"$…\")",
+				o.attr.Name, def.name, name, d.component.name, name)
+		}
+	}
+	return nil
+}
+
 // missingInputs tells an input the component requires that its call does not pass.
 func (c *compiler) missingInputs(n *Node, def *componentDef, passed map[string]bool) error {
 	if !def.bound {

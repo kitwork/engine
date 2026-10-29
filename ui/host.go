@@ -387,6 +387,9 @@ func (c *compiler) componentCall(n *Node, cx ctx) (op, error) {
 				return nil, outsideError(c, n, o, def, name)
 			}
 		}
+		if err := c.liveInput(n, o, callScope(o, site, cx.scope), def); err != nil {
+			return nil, err
+		}
 	}
 	// live for and if on a host: the kernel keeps a for's row and a component's instance in one place
 	// for now, so neither repeats nor removes a host by live state yet

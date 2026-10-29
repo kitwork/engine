@@ -265,3 +265,39 @@ component.define("admin-tools", (context) => {
 		t.Errorf("under a true if the tools are the instance at c1: %+v", tools)
 	}
 }
+
+// An input of a component of the site is a value the server reads as it draws the page (29/10/2026,
+// KITWORK_COMPONENTS.md mục 5): one that reads a var of the page, or the state of a live component around it,
+// is an error that points to the alias. Data is an input: a const of the page, on a page that holds vars.
+func TestAnInputThatReadsLiveStateIsAnError(t *testing.T) {
+	route := `import * as router from "kitwork/router";
+router.view((context) => {
+  var query = "";
+  const user = "an";
+  const find = () => { query = query.trim(); };
+  return context.bind({ query, user, find });
+});
+`
+	if _, err := compileLiveCart(t, liveCartFiles(liveCartLogic, route, liveCartContent)); err != nil {
+		t.Errorf("a const of a page that holds vars, as an input: %v", err)
+	}
+	fromVar := strings.Replace(liveCartContent, `owner="{{ user }}"`, `owner="{{ query + '!' }}"`, 1)
+	_, err := compileLiveCart(t, liveCartFiles(liveCartLogic, route, fromVar))
+	if err == nil || !strings.Contains(err.Error(), "cart/content.ui:1:") || !strings.Contains(err.Error(), "đầu vào owner của <shop-cart> đọc query, var của trang") ||
+		!strings.Contains(err.Error(), "alias") {
+		t.Errorf("an input that reads a var of the page: %v", err)
+	}
+
+	// the state of a live component around: shop-cart's var done, read by the input of a component inside it
+	logic := liveCartLogic + `
+component.define("name-tag", (context) => {
+  const { name } = context.attributes();
+  return context.bind({ name });
+});
+`
+	inside := strings.Replace(liveCartContent, `<text>{{ label }}</text>`, `<name-tag name="{{ done }}"><text>{{ name }}</text></name-tag>`, 1)
+	_, err = compileLiveCart(t, liveCartFiles(logic, liveCartRoute, inside))
+	if err == nil || !strings.Contains(err.Error(), "đầu vào name của <name-tag> đọc done, trạng thái sống của shop-cart") {
+		t.Errorf("an input that reads the var of a live component around: %v", err)
+	}
+}
