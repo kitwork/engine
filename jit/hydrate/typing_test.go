@@ -29,7 +29,7 @@ var found = el("p", { "data-kitwork-mark": "2" });
 var box = el("input", { "type": "checkbox", "data-kitwork-mark": "3" });
 main.appendChild(input); main.appendChild(clear); main.appendChild(found); main.appendChild(box);
 var block = el("script", { "type": "application/json", "data-kitwork-page": "" });
-block.textContent = JSON.stringify({ state: { query: "", found: 0 }, jobs: ["search", "clear", "flip"], vars: ["query"], program: "s1" });
+block.textContent = JSON.stringify({ page: { query: "", found: 0 }, jobs: { page: ["search", "clear", "flip"] }, vars: { page: ["query"] }, bridge: { program: "s1" } });
 main.appendChild(block);
 document.body.appendChild(main);
 

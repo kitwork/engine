@@ -161,10 +161,10 @@ func CallAsset() *Asset {
 }
 
 // callsJobs reports whether a page calls jobs through the bridge: it runs in the kernel as router.view's
-// page, with jobs or vars, and carries its data in data-kitwork-page (ui/page_live.go), or it holds a
-// component of the site whose jobs go through the bridge, data-kitwork-components (ui/component_live.go).
+// page, with jobs or vars, or it holds a component of the site whose jobs go through the bridge, and either way
+// carries the page's data block, data-kitwork-page (ui/page_block.go).
 func callsJobs(html string) bool {
-	return strings.Contains(html, "data-kitwork-page") || strings.Contains(html, "data-kitwork-components")
+	return strings.Contains(html, "data-kitwork-page")
 }
 
 // wrapComponent gives a component a scope of its own. A component file is written as a plain script

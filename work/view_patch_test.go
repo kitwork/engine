@@ -162,11 +162,15 @@ func TestStalePageGetsWhatItMissed(t *testing.T) {
 		t.Fatalf("no data block:\n%.2000s", page)
 	}
 	var block struct {
-		Revs map[string]string `json:"revs"`
+		Bridge struct {
+			Revs map[string]map[string]string `json:"revs"`
+		} `json:"bridge"`
+		Revs map[string]string `json:"-"`
 	}
 	if err := json.Unmarshal([]byte(m[1]), &block); err != nil {
 		t.Fatal(err)
 	}
+	block.Revs = block.Bridge.Revs["page"]
 	if block.Revs["todos"] == "" || block.Revs["left"] == "" {
 		t.Fatalf("the page should carry the revision of each name of its data: %v", block.Revs)
 	}
@@ -269,9 +273,15 @@ func TestRefreshAnswersWhatChangedSinceTheRevisions(t *testing.T) {
 	page := serveGet(tn, "/todo", nil).Body.String()
 	m := regexp.MustCompile(`data-kitwork-page>(.*?)</script>`).FindStringSubmatch(page)
 	var block struct {
-		Revs map[string]string `json:"revs"`
+		Bridge struct {
+			Revs map[string]map[string]string `json:"revs"`
+		} `json:"bridge"`
+		Revs map[string]string `json:"-"`
 	}
-	if m == nil || json.Unmarshal([]byte(m[1]), &block) != nil || block.Revs["todos"] == "" {
+	if m != nil && json.Unmarshal([]byte(m[1]), &block) == nil {
+		block.Revs = block.Bridge.Revs["page"]
+	}
+	if m == nil || block.Revs["todos"] == "" {
 		t.Fatalf("no revisions in the page:\n%.2000s", page)
 	}
 	old, _ := json.Marshal(block.Revs)

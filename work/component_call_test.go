@@ -64,8 +64,8 @@ func TestComponentWithJobsIsDrawnForTheBridge(t *testing.T) {
 	for _, part := range []string{
 		`data-kitwork-component="shop-cart"`, `data-kitwork-at="` + placesOf(t, tn, "/cart")[0] + `"`, `data-kitwork-scope="done: false; items: []; receipt: &#39;&#39;; shippingFee: 20000"`,
 		`data-kitwork-event="click: checkout()"`, `data-kitwork-event="click: add(&#39;cà phê&#39;)"`,
-		`<!--kitwork-for-start id=s1-->`, `<script type="application/json" data-kitwork-components>`,
-		`"jobs":["add","checkout"]`, `"vars":["done","items","receipt"]`, `/_kitwork/kernel.`, `/_kitwork/call.`,
+		`<!--kitwork-for-start id=s1-->`, `<script type="application/json" data-kitwork-page>`,
+		`"jobs":{"shop-cart":["add","checkout"]}`, `"vars":{"shop-cart":["done","items","receipt"]}`, `/_kitwork/kernel.`, `/_kitwork/call.`,
 	} {
 		if !strings.Contains(body, part) {
 			t.Errorf("/cart lacks %q\n%.3000s", part, body)
@@ -200,7 +200,7 @@ func TestComponentJobOnAPageWithJobsOfItsOwn(t *testing.T) {
 	}
 	body := serveGet(tn, "/shop", nil).Body.String()
 	at := placesOf(t, tn, "/shop")[0]
-	for _, part := range []string{`data-kitwork-component="shop-cart" data-kitwork-at="` + at + `"`, `data-kitwork-components>`, `data-kitwork-page>`, `data-kitwork-event="click: save()"`} {
+	for _, part := range []string{`data-kitwork-component="shop-cart" data-kitwork-at="` + at + `"`, `"components":{"` + at + `":"shop-cart"}`, `data-kitwork-page>`, `data-kitwork-event="click: save()"`} {
 		if !strings.Contains(body, part) {
 			t.Errorf("/shop lacks %q\n%.3000s", part, body)
 		}
@@ -268,14 +268,16 @@ func TestComponentJobAnswersThePagesRevisions(t *testing.T) {
 		t.Fatalf("no data block:\n%.2000s", page)
 	}
 	var block struct {
-		Revs  map[string]string `json:"revs"`
-		Stamp float64           `json:"stamp"`
+		Bridge struct {
+			Revs  map[string]map[string]string `json:"revs"`
+			Stamp float64                      `json:"stamp"`
+		} `json:"bridge"`
 	}
-	if err := json.Unmarshal([]byte(m[1]), &block); err != nil || block.Revs["count"] == "" {
+	if err := json.Unmarshal([]byte(m[1]), &block); err != nil || block.Bridge.Revs["page"]["count"] == "" {
 		t.Fatalf("the page should carry the revision of count: %v %s", err, m[1])
 	}
 	tabA, tabB := map[string]string{}, map[string]string{}
-	for k, v := range block.Revs {
+	for k, v := range block.Bridge.Revs["page"] {
 		tabA[k], tabB[k] = v, v
 	}
 	call := func(revs map[string]string, job string) (map[string]any, string) {
@@ -298,7 +300,7 @@ func TestComponentJobAnswersThePagesRevisions(t *testing.T) {
 		t.Errorf("the checkout changed the page's count: %s", body)
 	}
 	revs, _ := answer["revs"].(map[string]any)
-	if revs["count"] == nil || revs["count"] == block.Revs["count"] {
+	if revs["count"] == nil || revs["count"] == block.Bridge.Revs["page"]["count"] {
 		t.Errorf("the tab that called should get the new revision of count: %s", body)
 	}
 	if _, has := revs["note"]; has {
@@ -307,8 +309,8 @@ func TestComponentJobAnswersThePagesRevisions(t *testing.T) {
 	if components, _ := answer["components"].(map[string]any); components[placesOf(t, tn, "/shop")[0]] == nil {
 		t.Errorf("the cart's own data comes as before: %s", body)
 	}
-	if stamp, _ := answer["stamp"].(float64); block.Stamp <= 0 || stamp <= block.Stamp {
-		t.Errorf("the answer should carry the moment the page's data was read, after the page's own (%.0f): %s", block.Stamp, body)
+	if stamp, _ := answer["stamp"].(float64); block.Bridge.Stamp <= 0 || stamp <= block.Bridge.Stamp {
+		t.Errorf("the answer should carry the moment the page's data was read, after the page's own (%.0f): %s", block.Bridge.Stamp, body)
 	}
 	call(tabA, "shop-cart.checkout") // two orders now
 

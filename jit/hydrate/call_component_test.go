@@ -23,8 +23,8 @@ function cart(at) {
   return { host: host, count: count, done: done, button: button, notice: notice };
 }
 var one = cart("c1"), two = cart("c2");
-var block = el("script", { "type": "application/json", "data-kitwork-components": "" });
-block.textContent = JSON.stringify({ "shop-cart": { state: { items: [], done: false }, jobs: ["add", "checkout"], vars: ["done", "items"] } });
+var block = el("script", { "type": "application/json", "data-kitwork-page": "" });
+block.textContent = JSON.stringify({ components: { c1: "shop-cart", c2: "shop-cart" }, jobs: { "shop-cart": ["add", "checkout"] }, vars: { "shop-cart": ["done", "items"] }, bridge: { defaults: { "shop-cart": { items: [], done: false } } } });
 document.body.appendChild(block);
 
 var out = [], sent = [], refuse = false;

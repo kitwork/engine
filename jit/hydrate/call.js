@@ -1,8 +1,9 @@
 // call.js — the browser side of router.view's bridge (28/10/2026, docs/KITWORK_BRIDGE.md).
 //
-// A page whose view binds a job or a var runs in the browser as one component. The server writes the page's
-// data once, as JSON (<script type="application/json" data-kitwork-page>, ui/page_live.go); this file puts
-// it in the page's state, and each job there as a function the markup calls by name: remove(todo.id).
+// A page whose view binds a job or a var runs in the browser as one component, the instance "page". The server
+// writes the page's data once, as JSON (<script type="application/json" data-kitwork-page>, ui/page_block.go),
+// each instance's data under its place, the page's under "page"; this file puts the page's in the page's state,
+// and each job there as a function the markup calls by name: remove(todo.id).
 //
 // Most such pages have a program (ui/page_program.go, /_kitwork/page.<hash>.js): each element whose values
 // follow the data carries one mark, data-kitwork-mark="n", and the program says what mark n writes, from which
@@ -26,8 +27,8 @@
 // made it (a box ticked) goes back to the data.
 //
 // A component of the site whose jobs go through the bridge (ui/component_live.go) is registered with the
-// kernel from <script type="application/json" data-kitwork-components>: its starting state, and each job a
-// function that calls shop-cart.checkout on the instance it runs in. That call names the place the instance
+// kernel from the same block: the values its source writes out (bridge.defaults), and each job a function that
+// calls shop-cart.checkout on the instance it runs in. That call names the place the instance
 // is called from (data-kitwork-at on its host) and carries the instance's vars in scope, and the revisions of
 // its data the tab holds in scopeRevs, as the page's in revs (the block brings them by place); its answer holds
 // the data of that instance the job changed, under the same place, written into the instance, and the new
@@ -144,36 +145,45 @@
     return fn;
   }
 
-  // the site components the page holds that the browser runs, registered with the kernel
+  // the page's data block (ui/page_block.go): one, for the page and every component of the site it holds that the
+  // browser runs, each instance's data under its place
+  function block() {
+    var el = document.querySelector("[data-kitwork-page]");
+    if (!el) return null;
+    try { return JSON.parse(el.textContent || "{}"); } catch (e) { return null; }
+  }
+
+  // the site components the page holds that the browser runs, registered with the kernel: each with the values
+  // its source writes out and its jobs; the revisions of each instance's data, by place
   function seedComponents() {
     scopeRevs = {};
-    var el = document.querySelector("[data-kitwork-components]");
-    if (!el) return;
-    var data;
-    try { data = JSON.parse(el.textContent || "{}"); } catch (e) { return; }
-    Object.keys(data).forEach(function (component) {
-      var c = data[component] || {}, def = {}, state = c.state || {};
-      Object.keys(c.revs || {}).forEach(function (at) { scopeRevs[at] = c.revs[at]; });
+    var data = block();
+    if (!data) return;
+    var bridge = data.bridge || {}, defaults = bridge.defaults || {}, jobs = data.jobs || {}, vars = data.vars || {};
+    Object.keys(data.components || {}).forEach(function (at) {
+      if (bridge.revs && bridge.revs[at]) scopeRevs[at] = bridge.revs[at];
+    });
+    Object.keys(defaults).forEach(function (component) {
+      var def = {}, state = defaults[component] || {};
       Object.keys(state).forEach(function (k) { def[k] = state[k]; });
-      (c.jobs || []).forEach(function (name) { def[name] = componentJob(component, name, c.vars || []); });
+      (jobs[component] || []).forEach(function (name) { def[name] = componentJob(component, name, vars[component] || []); });
       kitwork.component(component, def);
     });
   }
 
-  // the page's data and jobs, from what the server wrote with the page, and its program when it has one
+  // the page's data and jobs, the instance "page" of the block, and its program when it has one
   function seed() {
-    var el = document.querySelector("[data-kitwork-page]");
+    var data = block();
     page = null;
     view = null;
-    if (!el) return;
-    var data;
-    try { data = JSON.parse(el.textContent || "{}"); } catch (e) { return; }
-    page = { jobs: data.jobs || [], vars: data.vars || [], program: data.program || "", tickets: data.tickets || [] };
+    if (!data || !data.page) return;
+    var bridge = data.bridge || {};
+    page = { jobs: (data.jobs || {}).page || [], vars: (data.vars || {}).page || [], program: bridge.program || "", tickets: bridge.tickets || [] };
     ticketsAt = Date.now();
-    revs = data.revs || {};
-    stamp = data.stamp || 0;
+    revs = (bridge.revs || {}).page || {};
+    stamp = bridge.stamp || 0;
     var state = {};
-    Object.keys(data.state || {}).forEach(function (k) { state[k] = data.state[k]; });
+    Object.keys(data.page).forEach(function (k) { state[k] = data.page[k]; });
     page.jobs.forEach(function (name) { state[name] = job(name); });
     var program = page.program && kitwork.pages && kitwork.pages[page.program];
     if (program) {

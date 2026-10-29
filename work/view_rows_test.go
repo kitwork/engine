@@ -51,12 +51,14 @@ func pageRevs(t *testing.T, body string) map[string]string {
 	start := strings.Index(body, "data-kitwork-page>")
 	end := strings.Index(body[start:], "</script>")
 	var block struct {
-		Revs map[string]string `json:"revs"`
+		Bridge struct {
+			Revs map[string]map[string]string `json:"revs"`
+		} `json:"bridge"`
 	}
 	if start < 0 || end < 0 || json.Unmarshal([]byte(body[start+len("data-kitwork-page>"):start+end]), &block) != nil {
 		t.Fatalf("no data block:\n%.1500s", body)
 	}
-	return block.Revs
+	return block.Bridge.Revs["page"]
 }
 
 // A refresh runs the page with the vars the tab holds, as a job does (28/10/2026): a search's results, which

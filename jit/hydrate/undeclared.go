@@ -296,8 +296,8 @@ func innermost(stack []*boundary) *boundary {
 }
 
 // pageDataNames are the names a page that runs in the kernel declares in its page scope (28/10/2026,
-// ui/page_live.go): the data and the jobs of its <script type="application/json" data-kitwork-page>, which
-// call.js puts there. A page with none declares nothing yet.
+// ui/page_block.go): the data and the jobs of the instance "page" in its <script type="application/json"
+// data-kitwork-page>, which call.js puts there. A page with none declares nothing yet.
 func pageDataNames(html string) map[string]bool {
 	names := map[string]bool{}
 	const open = "data-kitwork-page>"
@@ -311,16 +311,16 @@ func pageDataNames(html string) map[string]bool {
 		return names
 	}
 	var data struct {
-		State map[string]json.RawMessage `json:"state"`
-		Jobs  []string                   `json:"jobs"`
+		Page map[string]json.RawMessage `json:"page"`
+		Jobs map[string][]string        `json:"jobs"`
 	}
 	if json.Unmarshal([]byte(body[:end]), &data) != nil {
 		return names
 	}
-	for name := range data.State {
+	for name := range data.Page {
 		names[name] = true
 	}
-	for _, name := range data.Jobs {
+	for _, name := range data.Jobs["page"] {
 		names[name] = true
 	}
 	return names

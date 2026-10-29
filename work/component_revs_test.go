@@ -23,14 +23,16 @@ func TestAnInstanceGetsWhatItsTabHoldsOlder(t *testing.T) {
 		postCall(tn, "/pick", "word-picker.add", `{"args":["`+word+`"],"vars":{},"seq":1,"at":"`+placesOf(t, tn, "/pick")[0]+`","scope":{"query":""}}`)
 	}
 	page := serveGet(tn, "/pick", nil).Body.String()
-	m := regexp.MustCompile(`data-kitwork-components>(.*?)</script>`).FindStringSubmatch(page)
-	var block map[string]struct {
-		Revs map[string]map[string]string `json:"revs"`
+	m := regexp.MustCompile(`data-kitwork-page>(.*?)</script>`).FindStringSubmatch(page)
+	var block struct {
+		Bridge struct {
+			Revs map[string]map[string]string `json:"revs"`
+		} `json:"bridge"`
 	}
 	if m == nil || json.Unmarshal([]byte(m[1]), &block) != nil {
-		t.Fatalf("the page should carry its components block:\n%.2000s", page)
+		t.Fatalf("the page should carry its data block:\n%.2000s", page)
 	}
-	drawn := block["word-picker"].Revs[placesOf(t, tn, "/pick")[0]]
+	drawn := block.Bridge.Revs[placesOf(t, tn, "/pick")[0]]
 	if drawn["found"] == "" || drawn["query"] != "" || drawn["search"] != "" {
 		t.Fatalf("the block should carry the revisions of the instance's consts, not of its vars nor jobs: %s", m[1])
 	}

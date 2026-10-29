@@ -16,7 +16,7 @@ import (
 // kernel, with the fake server and the wire.
 const callPage = drawnList + `
 var page = el("script", { "type": "application/json", "data-kitwork-page": "" });
-page.textContent = JSON.stringify({ state: { title: "", left: 1, todos: kitwork.scope.$.todos }, jobs: ["toggle", "remove"], vars: ["title"] });
+page.textContent = JSON.stringify({ page: { title: "", left: 1, todos: kitwork.scope.$.todos }, jobs: { page: ["toggle", "remove"] }, vars: { page: ["title"] } });
 document.body.appendChild(page);
 first.childNodes[0].setAttribute("data-kitwork-event", "change: toggle(todo.id, !todo.done)");
 first.childNodes[0].setAttribute("data-kitwork-bind", "checked: todo.done; disabled: toggle.pending");

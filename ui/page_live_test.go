@@ -116,22 +116,28 @@ func TestPageWithJobsRunsInTheKernel(t *testing.T) {
 		t.Fatalf("the page should end its content with its data:\n%s", html)
 	}
 	var data struct {
-		State   map[string]any `json:"state"`
-		Jobs    []string       `json:"jobs"`
-		Vars    []string       `json:"vars"`
-		Program string         `json:"program"`
+		Page   map[string]any      `json:"page"`
+		Jobs   map[string][]string `json:"jobs"`
+		Vars   map[string][]string `json:"vars"`
+		Bridge struct {
+			Program string                       `json:"program"`
+			Keys    map[string]map[string]string `json:"keys"`
+		} `json:"bridge"`
 	}
 	if err := json.Unmarshal([]byte(m[1]), &data); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(data.Jobs, ",") != "add,remove,toggle" || strings.Join(data.Vars, ",") != "title" {
+	if strings.Join(data.Jobs["page"], ",") != "add,remove,toggle" || strings.Join(data.Vars["page"], ",") != "title" {
 		t.Errorf("jobs %v, vars %v", data.Jobs, data.Vars)
 	}
-	if rows, _ := data.State["todos"].([]any); len(rows) != 2 || data.State["left"] != float64(1) || data.State["title"] != "" {
-		t.Errorf("state = %v", data.State)
+	if rows, _ := data.Page["todos"].([]any); len(rows) != 2 || data.Page["left"] != float64(1) || data.Page["title"] != "" {
+		t.Errorf("the instance page = %v", data.Page)
 	}
-	if _, has := data.State["add"]; has {
-		t.Errorf("a job is no data: %v", data.State)
+	if _, has := data.Page["add"]; has {
+		t.Errorf("a job is no data: %v", data.Page)
+	}
+	if data.Bridge.Keys["page"]["todos"] != "id" {
+		t.Errorf("the block should name the key of each list the page draws by key: %v", data.Bridge.Keys)
 	}
 	if !strings.Contains(html, `</script></main>`) && !strings.Contains(html, `</script></div>`) {
 		t.Errorf("the data should close the content:\n%s", html)
@@ -139,8 +145,8 @@ func TestPageWithJobsRunsInTheKernel(t *testing.T) {
 
 	// the program: registered under the id the page names, each mark with what it writes and reads
 	script := string(page.Script())
-	if data.Program == "" || !strings.Contains(script, `["`+data.Program+`"]=`) {
-		t.Fatalf("the program should register under the page's id %q:\n%s", data.Program, script)
+	if data.Bridge.Program == "" || !strings.Contains(script, `["`+data.Bridge.Program+`"]=`) {
+		t.Fatalf("the program should register under the page's id %q:\n%s", data.Bridge.Program, script)
 	}
 	body := script[strings.Index(script, "]=")+2 : strings.Index(script, ";if(k.pageReady")]
 	var program pageProgram

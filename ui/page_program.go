@@ -136,7 +136,7 @@ func pageReads(ir any, page *frame) []string {
 }
 
 // build writes the program's file and its id: the file registers the program under its id, which the page's
-// data block names (writeState), so a page Drive comes back to finds its program without the file running
+// data block names (page_block.go), so a page Drive comes back to finds its program without the file running
 // again.
 func (p *pageProgram) build() (script []byte, id string) {
 	data, err := json.Marshal(p)

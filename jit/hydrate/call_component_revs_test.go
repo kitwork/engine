@@ -32,7 +32,7 @@ const componentRevsAssertions = `
 `
 
 func componentRevsScript(callJS string) string {
-	page := strings.Replace(componentPage, `vars: ["done", "items"] } });`, `vars: ["done", "items"], revs: { c1: { total: "t0" }, c2: { total: "u0" } } } });`, 1)
+	page := strings.Replace(componentPage, `bridge: { defaults: { "shop-cart": { items: [], done: false } } } });`, `bridge: { defaults: { "shop-cart": { items: [], done: false } }, revs: { c1: { total: "t0" }, c2: { total: "u0" } } } });`, 1)
 	return strings.Replace(page, "__CALL_JS__", callJS, 1) + componentRevsAssertions
 }
 

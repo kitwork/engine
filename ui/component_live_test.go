@@ -65,8 +65,9 @@ func compileLiveCart(t *testing.T, files map[string]string) (*Page, error) {
 
 // The cart runs in the browser: its host names the component and its place, carries the one input its look
 // reads (shippingFee, as the call passes it; owner stays on the server), what is written inside reads its names
-// live, its list is drawn as the kernel adopts it, and the page ends its content with the component, its
-// starting state as the source writes it, its jobs and its vars. A component whose function answers no bind
+// live, its list is drawn as the kernel adopts it, and the page ends its content with its data block, which holds
+// the component's jobs and vars and its starting state as the source writes it (page_block.go): drawn without its
+// function run, the instance brings no data of its own. A component whose function answers no bind
 // (cartLogic) is drawn as before: no host the kernel looks for.
 func TestComponentWithJobsRunsInTheBrowser(t *testing.T) {
 	page, err := compileLiveCart(t, liveCartFiles(liveCartLogic, liveCartRoute, liveCartContent))
@@ -84,7 +85,7 @@ func TestComponentWithJobsRunsInTheBrowser(t *testing.T) {
 		`<!--kitwork-for-start id=s1-->`, `data-kitwork-for="line of items; key: line.id"`,
 		`data-kitwork-event="click: add(&#39;trà&#39;)"`, `data-kitwork-event="click: checkout()"`,
 		`data-kitwork-bind="disabled: checkout.pending || items.length == 0"`, `data-kitwork-bind="show: done"`,
-		`<script type="application/json" data-kitwork-components>{"shop-cart":{"jobs":["add","checkout"],"state":{"done":false,"items":[],"label":"Giỏ hàng","shippingFee":15000},"vars":["done","items"]}}</script></main>`)
+		`<script type="application/json" data-kitwork-page>{"bridge":{"defaults":{"shop-cart":{"done":false,"items":[],"label":"Giỏ hàng","shippingFee":15000}}},"jobs":{"shop-cart":["add","checkout"]},"vars":{"shop-cart":["done","items"]}}</script></main>`)
 	mustNotContain(t, html, "owner", "total")
 	instances := page.Instances(Request{Path: "/cart", Scope: map[string]any{"user": "an"}})
 	cart, ok := instances[at[0]]
@@ -184,7 +185,7 @@ component.define("shop-badge", (context) => {
 	}
 	html := page.Render(Request{Path: "/cart", Scope: map[string]any{"user": "an"}})
 	mustContain(t, html, "<p>Mới </p>")
-	mustNotContain(t, html, "data-kitwork-component=\"shop-badge", "data-kitwork-components")
+	mustNotContain(t, html, "data-kitwork-component=\"shop-badge", "data-kitwork-page")
 }
 
 // A call with nothing that changes per request (no input, no if, no show) is still an instance: its host is

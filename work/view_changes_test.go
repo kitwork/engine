@@ -54,12 +54,14 @@ func pageTickets(t *testing.T, body string) []string {
 	t.Helper()
 	m := regexp.MustCompile(`data-kitwork-page>(.*?)</script>`).FindStringSubmatch(body)
 	var block struct {
-		Tickets []string `json:"tickets"`
+		Bridge struct {
+			Tickets []string `json:"tickets"`
+		} `json:"bridge"`
 	}
 	if m == nil || json.Unmarshal([]byte(m[1]), &block) != nil {
 		t.Fatalf("no data block:\n%.2000s", body)
 	}
-	return block.Tickets
+	return block.Bridge.Tickets
 }
 
 // openChanges opens a channel on a running server: its name, and each frame it is told after.

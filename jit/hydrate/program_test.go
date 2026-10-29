@@ -61,7 +61,7 @@ var left = el("p", { "data-kitwork-mark": "8" });
 left.textContent = "Còn " + N + " việc chưa xong.";
 main.appendChild(left);
 var block = el("script", { "type": "application/json", "data-kitwork-page": "" });
-block.textContent = JSON.stringify({ state: { title: "", todos: todos, left: N }, jobs: ["add", "toggle", "remove"], vars: ["title"], program: "p1" });
+block.textContent = JSON.stringify({ page: { title: "", todos: todos, left: N }, jobs: { page: ["add", "toggle", "remove"] }, vars: { page: ["title"] }, bridge: { program: "p1" } });
 main.appendChild(block);
 document.body.appendChild(main);
 
@@ -210,7 +210,7 @@ func TestProgramRowsFormAndErrors(t *testing.T) {
 // A page's revisions (work/view_patch.go): seeded from its data block, sent with each call, replaced by those
 // an answer brings; a name an answer sends whole replaces the page's value.
 func TestProgramSendsAndKeepsRevisions(t *testing.T) {
-	page := strings.Replace(programPage, `program: "p1" });`, `program: "p1", revs: { todos: "r0", left: "l0" } });`, 1)
+	page := strings.Replace(programPage, `bridge: { program: "p1" } });`, `bridge: { program: "p1", revs: { page: { todos: "r0", left: "l0" } } } });`, 1)
 	if page == programPage {
 		t.Fatal("the data block of the test page moved: update this test")
 	}
@@ -260,7 +260,7 @@ global.fetch = function (url, options) {
 `
 
 func keptAcrossTabsScript(callJS, assertions string) string {
-	page := strings.Replace(programPage, `program: "p1" });`, `program: "p1", revs: { todos: "r0", left: "l0" }, stamp: 100 });`, 1)
+	page := strings.Replace(programPage, `bridge: { program: "p1" } });`, `bridge: { program: "p1", revs: { page: { todos: "r0", left: "l0" } }, stamp: 100 } });`, 1)
 	return strings.Replace(page, "__CALL_JS__", keptAcrossTabsPage+callJS, 1) + assertions
 }
 
@@ -468,7 +468,7 @@ const listenAssertions = `
   if (global.__held[global.__held.length - 1].url !== "/_kitwork/changes?connection=c2") throw new Error("the tab should hand its tickets to the new channel");
   // Drive brings another page: the channel stays and holds that page's tickets
   document.dispatchEvent({ type: "kitwork:before-swap" });
-  block.textContent = JSON.stringify({ state: { title: "", todos: [], left: 0 }, jobs: ["add", "toggle", "remove"], vars: ["title"], program: "p1", revs: { todos: "r9", left: "l9" }, stamp: 900, tickets: ["t9"] });
+  block.textContent = JSON.stringify({ page: { title: "", todos: [], left: 0 }, jobs: { page: ["add", "toggle", "remove"] }, vars: { page: ["title"] }, bridge: { program: "p1", revs: { page: { todos: "r9", left: "l9" } }, stamp: 900, tickets: ["t9"] } });
   document.dispatchEvent({ type: "kitwork:load" });
   await tick(); await tick();
   if (global.__sources.length !== 2 || again.closed) throw new Error("the tab should keep its channel across the pages it moves to, opened " + global.__sources.length);
@@ -478,7 +478,7 @@ const listenAssertions = `
 `
 
 func listenScript(callJS string) string {
-	page := strings.Replace(programPage, `program: "p1" });`, `program: "p1", revs: { todos: "r0", left: "l0" }, stamp: 100, tickets: ["t1", "t2"] });`, 1)
+	page := strings.Replace(programPage, `bridge: { program: "p1" } });`, `bridge: { program: "p1", revs: { page: { todos: "r0", left: "l0" } }, stamp: 100, tickets: ["t1", "t2"] } });`, 1)
 	return strings.Replace(page, "__CALL_JS__", keptAcrossTabsPage+listenerPrefix+callJS, 1) + listenAssertions
 }
 

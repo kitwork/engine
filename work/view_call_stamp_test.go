@@ -21,13 +21,15 @@ func TestAnswersOfAPageAreStampedInTheOrderTheirDataWasRead(t *testing.T) {
 	page := serveGet(tn, "/todo", nil).Body.String()
 	m := regexp.MustCompile(`data-kitwork-page>(.*?)</script>`).FindStringSubmatch(page)
 	var block struct {
-		Revs  map[string]string `json:"revs"`
-		Stamp float64           `json:"stamp"`
+		Bridge struct {
+			Revs  map[string]map[string]string `json:"revs"`
+			Stamp float64                      `json:"stamp"`
+		} `json:"bridge"`
 	}
-	if m == nil || json.Unmarshal([]byte(m[1]), &block) != nil || block.Stamp <= 0 || len(block.Revs) == 0 {
+	if m == nil || json.Unmarshal([]byte(m[1]), &block) != nil || block.Bridge.Stamp <= 0 || len(block.Bridge.Revs["page"]) == 0 {
 		t.Fatalf("the page's data block should carry its stamp with its revisions:\n%.2000s", page)
 	}
-	revs, _ := json.Marshal(block.Revs)
+	revs, _ := json.Marshal(block.Bridge.Revs["page"])
 
 	const n = 20
 	type answer struct {
@@ -55,7 +57,7 @@ func TestAnswersOfAPageAreStampedInTheOrderTheirDataWasRead(t *testing.T) {
 	close(start)
 	wg.Wait()
 	sort.Slice(answers, func(i, j int) bool { return answers[i].stamp < answers[j].stamp })
-	last := block.Stamp
+	last := block.Bridge.Stamp
 	for i, a := range answers {
 		if a.stamp <= last {
 			t.Fatalf("answer %d: its stamp %.0f should come after %.0f: %.300s", i, a.stamp, last, a.body)

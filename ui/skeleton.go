@@ -85,14 +85,15 @@ func writeSkeleton(b *strings.Builder, o op) {
 			writeAttr(b, "data-kitwork-for", forText(o.forEach))
 		}
 		b.WriteByte('>')
-		if o.pageState != nil {
-			// a page that runs in the kernel: the head links the bridge for it (page_live.go, jit/js PageAssets),
+		if o.pageState != nil || o.components != nil {
+			// the page's data block with every name and no value (page_block.go): the head links the bridge for a
+			// page that runs in the kernel or holds a component of the site the browser runs (jit/js PageAssets),
 			// and the names of its page scope are declared for the check of what the page reads
-			o.pageState.writeNames(b)
-		}
-		if o.components != nil {
-			// the components of the site the browser runs: the head links the bridge for them too
-			(*o.components).write(b, nil, nil)
+			var components *liveComponents
+			if o.components != nil {
+				components = *o.components
+			}
+			writePageBlock(b, o.pageState, components, nil, nil, nil, 0, nil)
 		}
 		if o.void {
 			return

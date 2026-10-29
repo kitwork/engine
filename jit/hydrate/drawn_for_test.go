@@ -142,7 +142,7 @@ func TestPageDataDeclaresThePageScope(t *testing.T) {
 		`<p data-kitwork-bind="show: todos.length === 0; disabled: add.pending">x</p>` +
 		`<li data-kitwork-for="todo of todos; key: todo.id"><b data-kitwork-bind="text: todo.title"></b></li>` +
 		`<i data-kitwork-bind="text: lefft"></i>` +
-		`<script type="application/json" data-kitwork-page>{"jobs":["add"],"state":{"left":null,"todos":null},"vars":[]}</script>` +
+		`<script type="application/json" data-kitwork-page>{"jobs":{"page":["add"]},"page":{"left":null,"todos":null},"vars":{"page":[]}}</script>` +
 		`</main></body></html>`
 	got := strings.Join(undeclaredWarnings(doc), "\n")
 	for _, name := range []string{`"todos"`, `"add"`, `"todo"`, `"left"`} {

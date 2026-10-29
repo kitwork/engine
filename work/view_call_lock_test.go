@@ -46,7 +46,7 @@ func TestCallsOfOnePageAtTheSameTimeLoseNothing(t *testing.T) {
 				ID    float64 `json:"id"`
 				Title string  `json:"title"`
 			} `json:"todos"`
-		} `json:"state"`
+		} `json:"page"`
 	}
 	if err := json.Unmarshal([]byte(m[1]), &block); err != nil {
 		t.Fatal(err)
