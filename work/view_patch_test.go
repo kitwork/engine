@@ -40,7 +40,11 @@ router.view((context) => {
     list.set(todos.filter((todo) => todo.id !== id));
   };
   const leave = () => context.redirect("/login");
-  return context.bind({ title, todos, left, add, toggle, remove, leave });
+  const addTwo = () => {
+    list.set(todos.concat([{ id: todos.length + 1, title: "the first of two", done: false },
+      { id: todos.length + 2, title: "the second of two", done: false }]));
+  };
+  return context.bind({ title, todos, left, add, toggle, remove, leave, addTwo });
 });
 `,
 	}), "localhost")
@@ -104,6 +108,34 @@ func TestJobAnswersTheDataItChanged(t *testing.T) {
 	answer, body = callAnswer(t, tn, "leave", callBody{Seq: 6, Args: []any{}, Page: vars()}.String())
 	if answer["redirect"] != "/login" || answer["seq"] != float64(6) || answer[pagePlace] != nil {
 		t.Errorf("leave: %s", body)
+	}
+}
+
+// Two rows one job adds reach the browser in the list's order (29/10/2026): it puts each new row at the end in the
+// order it reads them, and JSON writes an object by key, todos#10 before todos#9.
+func TestNewRowsComeInTheListsOrder(t *testing.T) {
+	tn := patchTodoSite(t)
+	for i := 1; i <= 8; i++ {
+		callAnswer(t, tn, "add", callBody{Seq: float64(i), Args: []any{}, Page: vars("title", "a row long enough to be sent by row")}.String())
+	}
+	answer, body := callAnswer(t, tn, "addTwo", callBody{Seq: 9, Args: []any{}, Page: vars("title", "")}.String())
+	if rows := rowsIn(instanceOf(answer, pagePlace), "todos"); len(rows) != 2 {
+		t.Fatalf("addTwo should bring the two rows it added, by row: %s", body)
+	}
+	if nine, ten := strings.Index(body, `"todos#9"`), strings.Index(body, `"todos#10"`); nine < 0 || ten < nine {
+		t.Errorf("todos#9 should come before todos#10, as the list has them: %s", body)
+	}
+
+	// keys that are text, and a row gone: the rows gone first, the rows set as the list has them
+	row := func(id string) map[string]any {
+		return map[string]any{"id": id, "title": "a fairly long title for row"}
+	}
+	before := map[string]any{"l": []any{row("m"), row("n"), row("o"), row("p")}}
+	after := map[string]any{"l": []any{row("m"), row("o"), row("p"), row("z"), row("b"), row("a")}}
+	b, err := json.Marshal(viewPatch(before, after, map[string]string{"l": "id"}))
+	want := `{"l#n":null,"l#z":{"id":"z","title":"a fairly long title for row"},"l#b":{"id":"b","title":"a fairly long title for row"},"l#a":{"id":"a","title":"a fairly long title for row"}}`
+	if err != nil || string(b) != want {
+		t.Errorf("changes: %s %v, want %s", b, err, want)
 	}
 }
 

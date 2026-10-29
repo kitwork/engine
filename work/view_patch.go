@@ -3,6 +3,7 @@ package work
 import (
 	"bytes"
 	"encoding/json"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -103,12 +104,69 @@ func viewSnapshot(data value.Value) map[string]any {
 	return out
 }
 
+// instanceChanges are one instance's changes as an answer writes them: its names first, by name, then each list's
+// rows, those gone first, then those set in the order the list has them now. The browser puts each new row at the
+// end in the order it reads them (call.js applyRows); written by key, as JSON writes an object, two rows added by one
+// job stood in the browser as todos#10, todos#9, under the revision of the list as the server has it (29/10/2026).
+type instanceChanges map[string]any
+
+// rowChange is a row of a keyed list in an instance's changes (name#key): the row as it is now, nil when it is gone,
+// and where it stands in the list now, -1 when gone. It writes as the row.
+type rowChange struct {
+	at  int
+	row any
+}
+
+func (r rowChange) MarshalJSON() ([]byte, error) { return json.Marshal(r.row) }
+
+func (c instanceChanges) MarshalJSON() ([]byte, error) {
+	keys := make([]string, 0, len(c))
+	for k := range c {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		a, aIsRow := c[keys[i]].(rowChange)
+		b, bIsRow := c[keys[j]].(rowChange)
+		if aIsRow != bIsRow {
+			return bIsRow
+		}
+		if aIsRow {
+			listA, _, _ := strings.Cut(keys[i], "#")
+			listB, _, _ := strings.Cut(keys[j], "#")
+			if listA != listB {
+				return listA < listB
+			}
+			if a.at != b.at {
+				return a.at < b.at
+			}
+		}
+		return keys[i] < keys[j]
+	})
+	var out bytes.Buffer
+	out.WriteByte('{')
+	for i, k := range keys {
+		name, _ := json.Marshal(k)
+		v, err := json.Marshal(c[k])
+		if err != nil {
+			return nil, err
+		}
+		if i > 0 {
+			out.WriteByte(',')
+		}
+		out.Write(name)
+		out.WriteByte(':')
+		out.Write(v)
+	}
+	out.WriteByte('}')
+	return out.Bytes(), nil
+}
+
 // viewPatch is what changed from before to after in one instance, as the wire carries it (docs/KITWORK_BRIDGE.md
 // mục 3): each name whose value is new, whole (null for a name the instance no longer has), and a list drawn by key
 // as its rows, name#key, each the row as it is now or null for one gone (listPatch). keys are the key of each list
 // the instance draws by key, as a path into a row ("id", "author.id").
-func viewPatch(before, after map[string]any, keys map[string]string) map[string]any {
-	changes := map[string]any{}
+func viewPatch(before, after map[string]any, keys map[string]string) instanceChanges {
+	changes := instanceChanges{}
 	for name, now := range after {
 		was, had := before[name]
 		if had && sameValue(was, now) {
@@ -132,8 +190,8 @@ func viewPatch(before, after map[string]any, keys map[string]string) map[string]
 	return changes
 }
 
-// listPatch is a keyed list's change by row, name#key: each row set (new, or changed: whole) and each row gone
-// (null); the browser keeps the rows it has in their order, puts each new one at the end and takes out each one
+// listPatch is a keyed list's change by row, name#key, each a rowChange: each row set (new, or changed: whole) and
+// each row gone (null); the browser keeps the rows it has in their order, puts each new one at the end and takes out each one
 // gone. False when either list is not one (a row with no key, two rows with one key), when the rows that stay
 // changed their order (sorted again: the list goes whole), or when the whole list is shorter.
 func listPatch(name string, was, now any, key string) (map[string]any, bool) {
@@ -160,7 +218,7 @@ func listPatch(name string, was, now any, key string) (map[string]any, bool) {
 		if _, stays := newRows[k]; stays {
 			kept[k] = true
 		} else {
-			rows[name+"#"+k] = nil
+			rows[name+"#"+k] = rowChange{at: -1}
 		}
 	}
 	expected := make([]string, 0, len(newKeys))
@@ -172,9 +230,9 @@ func listPatch(name string, was, now any, key string) (map[string]any, bool) {
 	for i, k := range newKeys {
 		if old, had := oldRows[k]; !had {
 			expected = append(expected, k)
-			rows[name+"#"+k] = after[i]
+			rows[name+"#"+k] = rowChange{at: i, row: after[i]}
 		} else if !sameValue(old, after[i]) {
-			rows[name+"#"+k] = after[i]
+			rows[name+"#"+k] = rowChange{at: i, row: after[i]}
 		}
 	}
 	if !sameKeys(expected, newKeys) {

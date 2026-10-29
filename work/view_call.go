@@ -494,7 +494,7 @@ func (t *Tenant) serveViewRefresh(vm *runtime.VM, reqRouter *Router, leaf *Folde
 			}
 		}
 	}
-	changes, revs := map[string]any{}, map[string]string{}
+	changes, revs := instanceChanges{}, map[string]string{}
 	for name, v := range now {
 		if vars[name] {
 			continue
