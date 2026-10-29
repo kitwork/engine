@@ -237,7 +237,7 @@ func TestRichtextRefusalsAtTheirPlace(t *testing.T) {
 	// a component's host holds what is written inside it, and a richtext holds nothing written
 	refused(map[string]string{"/site/content.ui": `<content><site-post /></content>`, "/site/site-post.ui": `<richtext value="{{ body }}" />`,
 		"/site/site-post.work": `import { component } from "kitwork"; component.define("site-post", () => { var body = ""; });`},
-		"site-post.ui:1:1: gốc của site-post.ui là <richtext>, mà richtext không có nội dung con, và phần tử của nó do Kitwork quyết")
+		"site-post.ui:1:1: site-post.ui là giao diện của component site-post (logic ở site-post.work): gốc của nó là thẻ của chính component, <site-post …>…</site-post>, bố cục của box viết trên đó, không phải <richtext>; mỗi lần gọi <site-post /> dựng một instance (KITWORK_COMPONENTS.md mục 4)")
 	// CONTROL: a layout's root is no host, so a layout piece may be a richtext (the post it reads is the call's)
 	html := mustCompile(t, map[string]string{"/site/content.ui": `<content><site-post body="{{ '<p>x</p>' }}" /></content>`,
 		"/site/site-post.ui": `<richtext value="{{ body }}" />`})

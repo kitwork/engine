@@ -130,11 +130,9 @@ func (c *compiler) componentCall(n *Node, cx ctx) (op, error) {
 		return nil, err
 	}
 	c.called[def.name] = def // its names, read outside its host, are told (strayNames)
-	if def.root != nil {
-		if err := c.checkComponentRoot(def); err != nil {
-			return nil, err
-		}
-	}
+	// the call of a layout piece whose root this is: its words go on this instance, and nothing inside takes them
+	outer := cx.outer
+	cx.outer = nil
 	// a component with a rule for what is inside it (the terminal): its own words are read here and
 	// leave the host, which then goes on as the host of a component without a UI
 	var term *terminalSpec
@@ -271,6 +269,7 @@ func (c *compiler) componentCall(n *Node, cx ctx) (op, error) {
 	}
 	var extra []Attr // static show on a call of a component with a UI: merged into the root
 	var asAttr, forAttr *Attr
+	asNode := n // where the as was written: the call of the piece, when it comes from there
 	var outside []outsideExpr
 	for i := range n.Attrs {
 		a := &n.Attrs[i]
@@ -345,7 +344,7 @@ func (c *compiler) componentCall(n *Node, cx ctx) (op, error) {
 		case def.hasUI():
 			name := camel(a.Name)
 			if chain != "" || !c.takesInput(def, name) {
-				return nil, c.notAnInput(n, a, def)
+				return nil, c.notAnInput(n, a, def, def.rootTag(), path.Base(def.what(c.site)), true)
 			}
 			in, err := c.inputValue(n, a, site)
 			if err != nil {
@@ -376,6 +375,25 @@ func (c *compiler) componentCall(n *Node, cx ctx) (op, error) {
 			}
 			outside = append(outside, inputExprs(a, in)...)
 		}
+	}
+	if outer != nil {
+		// a piece's call, read and checked where it stands (layout.go): its as names this instance, its show
+		// and placement go on it
+		if outer.as != nil {
+			if asAttr != nil {
+				return nil, errAttr(n, asAttr, "as viết cả ở đây và ở chỗ gọi %s:%d:%d: một instance một tên; bỏ một trong hai",
+					outer.call.File, outer.as.Line, outer.as.Column)
+			}
+			asAttr, asNode = outer.as, outer.call
+		}
+		if outer.show != nil {
+			if site.showExpr != nil {
+				return nil, errAttr(n, attrNamed(n, "show"), "show viết cả ở đây và ở chỗ gọi %s:%d:%d; bỏ một trong hai",
+					outer.call.File, outer.call.Line, outer.call.Column)
+			}
+		}
+		site.classes = append(site.classes, outer.classes...)
+		site.places = append(site.places, outer.places...)
 	}
 	// what the call reads is read where it stands, never the component's own names
 	for _, o := range outside {
@@ -417,6 +435,9 @@ func (c *compiler) componentCall(n *Node, cx ctx) (op, error) {
 			site.showBind = "show: " + site.showExpr.source
 		}
 	}
+	if outer != nil && outer.show != nil {
+		site.showExpr, site.showBind = outer.show, outer.showBind
+	}
 
 	// as names one instance: page-wide, unique, never once per row
 	if asAttr != nil {
@@ -424,7 +445,7 @@ func (c *compiler) componentCall(n *Node, cx ctx) (op, error) {
 		if forAttr != nil {
 			return nil, errAttr(n, asAttr, "as không đặt trên thẻ có for: mỗi hàng là một instance, mà alias chỉ trỏ một")
 		}
-		if err := c.registerAlias(n, asAttr, alias, cx, def); err != nil {
+		if err := c.registerAlias(asNode, asAttr, alias, cx, def); err != nil {
 			return nil, err
 		}
 		site.alias = alias
@@ -458,6 +479,11 @@ func (c *compiler) componentCall(n *Node, cx ctx) (op, error) {
 	inside.scope = inner
 	inside.terminal = nil // a component's code is its own, never a command of a terminal around it
 	inside.tabs = nil     // nor is its button a tab of a tabs around it
+	if def.kitwork == nil && cx.aliases != nil {
+		// an as written in what a component of the site holds is its instance's own, unseen by the page
+		// (KITWORK_COMPONENTS.md mục 6): two instances each have theirs
+		inside.aliases = &aliasFrame{owner: def.name, set: map[string]string{}, parent: cx.aliases}
+	}
 
 	// nor is it a notice of a toast around it, nor a part of a carousel around it
 	inside.toast, inside.toastRow = nil, false
@@ -531,7 +557,11 @@ func (c *compiler) componentCall(n *Node, cx ctx) (op, error) {
 		// the parameter the kernel seeds the instance with, before its init (data-kitwork-scope)
 		site.inputs = append(site.inputs, term.inputs()...)
 	}
-	return c.dispatch(&host, info, inside, site)
+	made, err := c.dispatch(&host, info, inside, site)
+	if o, ok := made.(*elemOp); ok && err == nil && inside.aliases != cx.aliases {
+		o.aliases = inside.aliases.starts // its own aliases read as they start, in the instance's names
+	}
+	return made, err
 }
 
 // outsideExpr is one expression a call reads where it stands.
@@ -564,7 +594,7 @@ func inputExprs(a *Attr, in *interpolation) []outsideExpr {
 // outsideError explains that a word of the call read a name of the component it calls.
 func outsideError(c *compiler, n *Node, o outsideExpr, def *componentDef, name string) error {
 	where := "đặt nó lên phần con"
-	if def.hasUI() {
+	if def.hasUI() || def.ui != "" {
 		where = "đặt nó trong " + path.Base(def.what(c.site))
 	}
 	switch o.word {
@@ -615,17 +645,17 @@ func (c *compiler) takesInput(def *componentDef, name string) bool {
 	return c.uiReads(def, map[string]bool{})[name]
 }
 
-// notAnInput explains an attribute at the call of a component with a UI that is none of the call's
-// words and no input.
-func (c *compiler) notAnInput(n *Node, a *Attr, def *componentDef) error {
-	file := path.Base(def.what(c.site))
+// notAnInput explains an attribute at the call of a component with a UI, or of a layout piece whose root is a
+// component (layout.go), that is none of the call's words and no input: rootTag is the element the look is built
+// on, file the file it is in, declares whether the component's own names are inputs at this call.
+func (c *compiler) notAnInput(n *Node, a *Attr, def *componentDef, rootTag, file string, declares bool) error {
 	words := "as, if, show, for, span, place và dữ liệu nó đọc"
 	base := a.Name[strings.LastIndex(a.Name, ":")+1:]
 	// a side or a corner named with start or end is told its name of today, as on any element
 	if message := c.renamedSide(n, a, strings.TrimSuffix(strings.TrimSuffix(a.Name, base), ":"), base); message != "" {
 		return errAttr(n, a, "%s", message)
 	}
-	known := isEvent(a.Name) || presentation(base, def.rootTag()) || tagWord(def.rootTag(), base) || base == "align"
+	known := isEvent(a.Name) || presentation(base, rootTag) || tagWord(rootTag, base) || base == "align"
 	if known {
 		// a typo in the value is that error first (question 1): background="papr" is told of its colour
 		if err := c.readValue(n, a); err != nil {
@@ -635,10 +665,12 @@ func (c *compiler) notAnInput(n *Node, a *Attr, def *componentDef) error {
 	switch {
 	case isEvent(a.Name):
 		return errAttr(n, a, "sự kiện %s đặt trong %s: hành vi của %s nằm ở đó; chỗ gọi nhận %s", a.Name, file, def.name, words)
-	case presentation(base, def.rootTag()) || base == "align":
+	case presentation(base, rootTag) || base == "align":
 		return errAttr(n, a, "trình bày của %s nằm trong %s; chỗ gọi nhận %s", def.name, file, words)
 	case known:
-		return errAttr(n, a, "%s là thuộc tính của <%s>, gốc của %s: viết nó trong %s; chỗ gọi nhận %s", a.Name, def.rootTag(), def.name, file, words)
+		return errAttr(n, a, "%s là thuộc tính của <%s>, gốc của %s: viết nó trong %s; chỗ gọi nhận %s", a.Name, rootTag, def.name, file, words)
+	case !declares:
+		return errAttr(n, a, "%s không đọc %s (đầu vào của %s viết trên gốc của file); chỗ gọi nhận %s", file, camel(a.Name), def.name, words)
 	}
 	return errAttr(n, a, "%s không khai và %s không đọc %s; chỗ gọi nhận %s", def.name, file, camel(a.Name), words)
 }
@@ -720,27 +752,6 @@ func (c *compiler) kitworkUI(n *Node, cx ctx, def *componentDef) (op, error) {
 		return c.progressbar(n, cx)
 	}
 	return nil, errAt(n, "%s là component của Kitwork mà engine chưa dựng được", def.name)
-}
-
-// forbiddenHost is why a tag cannot be the root of a component's .ui (the host), "" when it can.
-func forbiddenHost(tag string) string {
-	switch tag {
-	case "page":
-		return "page là khung của trang"
-	case "content":
-		return "content là nội dung của route"
-	case "popover", "option", "empty":
-		return tag + " là một phần của thẻ chứa nó, không đứng riêng"
-	case "fragment":
-		return "fragment không dựng phần tử nào"
-	case "input", "image", "icon", "select", "textarea", "richtext":
-		return tag + " không có nội dung con, và phần tử của nó do Kitwork quyết"
-	case "code", "quote":
-		return tag + " chỉ chứa chữ"
-	case "accordion", "accordions", "breadcrumb", "reader":
-		return tag + " là phần tử của Kitwork, tự là instance"
-	}
-	return ""
 }
 
 // registerAlias records an as where it is written: page-wide in view.ui, a region file or the content,

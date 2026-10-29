@@ -127,10 +127,12 @@ router.get((context) => context.view({ user: "an" }));
 			t.Errorf("%s: want an error at %q saying %q, got %v", c.name, c.at, c.says, err)
 		}
 	}
-	withUI := liveCartFiles(liveCartLogic, liveCartRoute, `<content><shop-cart owner="{{ user }}" /></content>`)
+	// its look in shop-cart.ui as of 18/10/2026, the file's root the host: the root is the component's tag now
+	withUI := liveCartFiles(liveCartLogic, liveCartRoute, `<content><shop-cart /></content>`)
 	withUI["/site/shop-cart.ui"] = `<box><text>{{ label }}</text></box>`
-	if _, err := compileLiveCart(t, withUI); err == nil || !strings.Contains(err.Error(), "chỉ nhận giao diện viết bên trong thẻ") {
-		t.Errorf("a look in shop-cart.ui: %v", err)
+	if _, err := compileLiveCart(t, withUI); err == nil || !strings.Contains(err.Error(), "shop-cart.ui:1:1: shop-cart.ui là giao diện của component shop-cart") ||
+		!strings.Contains(err.Error(), "gốc của nó là thẻ của chính component, <shop-cart …>…</shop-cart>") {
+		t.Errorf("a look in shop-cart.ui whose root is a box: %v", err)
 	}
 }
 
@@ -299,5 +301,62 @@ component.define("name-tag", (context) => {
 	_, err = compileLiveCart(t, liveCartFiles(logic, liveCartRoute, inside))
 	if err == nil || !strings.Contains(err.Error(), "đầu vào name của <name-tag> đọc done, trạng thái sống của shop-cart") {
 		t.Errorf("an input that reads the var of a live component around: %v", err)
+	}
+}
+
+// A component's look used again (28/10/2026, KITWORK_COMPONENTS.md mục 4): a layout piece whose root is the
+// component's tag, called by that tag, empty. Each call builds one instance, as the same markup written in place
+// does: the call's as, show and span go on it, what the call passes in is what the file reads, and the file
+// passes it on to the component on its root. Each instance has its place and its inputs.
+func TestAComponentsLookUsedAgain(t *testing.T) {
+	look := `<shop-cart owner="{{ user }}" shipping-fee="{{ fee }}" gap="2"><text>{{ label }}</text><button click="checkout()">Đặt</button></shop-cart>`
+	files := liveCartFiles(liveCartLogic, liveCartRoute, `<content><shop-cart as="$cart" fee="{{ 20000 }}" /><shop-cart fee="{{ 30000 }}" show="user != ''" span="2" /></content>`)
+	files["/site/shop-cart.ui"] = look
+	page, err := compileLiveCart(t, files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := page.Render(Request{Path: "/cart", Scope: map[string]any{"user": "an"}})
+	// the first is what the same markup written in place draws
+	inPlace, err := compileLiveCart(t, liveCartFiles(liveCartLogic, liveCartRoute,
+		`<content><shop-cart as="$cart" owner="{{ user }}" shipping-fee="{{ 20000 }}" gap="2"><text>{{ label }}</text><button click="checkout()">Đặt</button></shop-cart></content>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := inPlace.Render(Request{Path: "/cart", Scope: map[string]any{"user": "an"}})
+	first = first[strings.Index(first, `<div class="flex-column gap-2"`):strings.Index(first, `<script`)]
+	mustContain(t, html, first,
+		`<div class="flex-column gap-2 span-2" data-kitwork-component="shop-cart" data-kitwork-at="c2" data-kitwork-scope="shippingFee: 30000">`)
+	instances := page.Instances(Request{Path: "/cart", Scope: map[string]any{"user": "an"}})
+	if one, two := instances["c1"], instances["c2"]; one.Inputs["owner"] != "an" || one.Inputs["shippingFee"] != float64(20000) ||
+		two.Inputs["shippingFee"] != float64(30000) || len(instances) != 2 {
+		t.Errorf("an instance for each call, with what it passes in: %+v", instances)
+	}
+	mustContain(t, page.Render(Request{Path: "/cart", Scope: map[string]any{"user": ""}}), `<div class="flex-column gap-2 span-2" data-kitwork-component="shop-cart" data-kitwork-at="c2" data-kitwork-scope="shippingFee: 30000" hidden>`)
+
+	route := `import * as router from "kitwork/router";
+router.view((context) => {
+  var query = "";
+  const user = "an";
+  const find = () => { query = query.trim(); };
+  return context.bind({ query, user, find });
+});
+`
+	for _, c := range []struct{ name, route, content, at, says string }{
+		{"a var of the page passed in", route, `<content><shop-cart fee="{{ query }}" /></content>`, "cart/content.ui:1:21: ", "đầu vào fee của <shop-cart> đọc query, var của trang"},
+		{"a name of the component read at the call", liveCartRoute, `<content><shop-cart fee="{{ items.length }}" /></content>`, "cart/content.ui:1:21: ", "giá trị của fee đọc ở chỗ gọi, bên ngoài <shop-cart>; items là của shop-cart"},
+		{"a word of the look at the call", liveCartRoute, `<content><shop-cart fee="{{ 1 }}" padding="2" /></content>`, "cart/content.ui:1:35: ", "trình bày của shop-cart nằm trong shop-cart.ui"},
+		{"source on a tag with content", liveCartRoute, `<content><shop-cart source="./shop-cart"><text>x</text></shop-cart></content>`, "cart/content.ui:1:21: ", "source chọn mảnh layout cho thẻ rỗng"},
+	} {
+		files := liveCartFiles(liveCartLogic, c.route, c.content)
+		files["/site/shop-cart.ui"] = look
+		if _, err := compileLiveCart(t, files); err == nil || !strings.HasPrefix(err.Error(), c.at) || !strings.Contains(err.Error(), c.says) {
+			t.Errorf("%s: want an error at %q saying %q, got %v", c.name, c.at, c.says, err)
+		}
+	}
+	// without a look, the tag written empty is told to write one
+	if _, err := compileLiveCart(t, liveCartFiles(liveCartLogic, liveCartRoute, `<content><shop-cart owner="{{ user }}" /></content>`)); err == nil ||
+		!strings.Contains(err.Error(), "shop-cart chưa có giao diện: viết nội dung bên trong thẻ (<shop-cart>…</shop-cart>), hay một file shop-cart.ui") {
+		t.Errorf("an empty tag of a component without a look: %v", err)
 	}
 }

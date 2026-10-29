@@ -47,12 +47,11 @@ func TestTagThatNamesNothingIsAnError(t *testing.T) {
 	mustNotContain(t, html, "<progressbar")
 }
 
-// A component with a .ui is called by its tag, empty, and the file's one root is the host: the two are
-// one element — the root's look and behaviour, the call's placement — never a wrapper. Until 18/10/2026
-// the call wrote the root's tag with component=, and another tag was an error; the tag is now the
-// component's own, so there is no host tag left to get wrong, and the tag itself never reaches the page.
+// A component's look used again is a layout piece whose root is the component's tag (28/10/2026), called by
+// that tag, empty: the call and the root are one element — the root's look and behaviour, the call's
+// placement — never a wrapper, and the tag itself never reaches the page.
 func TestComponentRootTagRule(t *testing.T) {
-	ui := `<box click-outside="close()" padding="2"><text>giỏ</text><card place="below-right"><text>x</text></card></box>`
+	ui := `<shop-cart click-outside="close()" padding="2"><text>giỏ</text><card place="below-right"><text>x</text></card></shop-cart>`
 	// one element, the file's root with what it derives from its children (relative, for the panel
 	// placed below it) and the call's span
 	html := mustCompile(t, map[string]string{
@@ -66,38 +65,26 @@ func TestComponentRootTagRule(t *testing.T) {
 	}
 }
 
-// The root of a component's .ui is the host: if and for belong to the call, no component is written on
-// it (component= there is the removed attribute's error, as anywhere; a component's tag as the root is
-// told to go inside a box: tags_test.go), as is written at the call, and a region is the page's, not a
-// component's.
+// The root of a component's look is the component's tag written with content (28/10/2026): the call puts its
+// for on the instance, so the root carries none; component= there is the removed attribute's error; a file
+// named after a component whose root is anything else is the form of 18/10/2026, told to write the root; the
+// tag written empty as its own file's root calls itself. The root's own as and if are its call's, in the file.
 func TestComponentRootCarriesNoCallWords(t *testing.T) {
 	content := `<content><shop-cart /></content>`
 	for _, c := range []struct{ ui, needle, says string }{
-		{`<box if="ready"><text>x</text></box>`, "if=", "gốc của shop-cart.ui không mang if: có nó hay không, lặp mấy lần là việc của chỗ gọi (<shop-cart if=\"…\" />)"},
-		{`<box for="x of xs"><text>x</text></box>`, "for=", "gốc của shop-cart.ui không mang for"},
-		{`<box component="dropdown"><text>x</text></box>`, "component=", "component= đã bỏ: component là một thẻ, viết <dropdown>…</dropdown>"},
-		{`<box as="$x"><text>x</text></box>`, "as=", "as đặt ở chỗ gọi (<shop-cart as=\"…\" />)"},
+		{`<shop-cart for="x of xs"><text>x</text></shop-cart>`, "for=", "gốc của shop-cart.ui không mang for: lặp mấy lần là việc của chỗ gọi (<shop-cart for=\"…\" />)"},
+		{`<shop-cart component="dropdown"><text>x</text></shop-cart>`, "component=", "component= đã bỏ: component là một thẻ, viết <dropdown>…</dropdown>"},
+		{`<box><text>x</text></box>`, "<box", "shop-cart.ui là giao diện của component shop-cart (logic ở shop-cart.work): gốc của nó là thẻ của chính component, <shop-cart …>…</shop-cart>, bố cục của box viết trên đó, không phải <box>"},
+		{`<header><text>x</text></header>`, "<header", "không phải <header>"},
+		{`<dropdown><button click="toggle()">x</button></dropdown>`, "<dropdown", "không phải <dropdown>"},
+		{`<shop-cart />`, "<shop-cart", "<shop-cart /> rỗng là gốc của chính shop-cart.ui: gọi vòng"},
 	} {
 		mustFail(t, map[string]string{"/site/content.ui": content, "/site/shop-cart.ui": c.ui, "/site/shop-cart.work": cartLogic},
 			where("shop-cart.ui", c.ui, c.needle), c.says)
 	}
-	banner := map[string]string{"/site/content.ui": `<content><site-banner /></content>`,
-		"/site/site-banner.work": `import { component } from "kitwork"; component.define("site-banner", () => { var open = false; });`,
-		"/site/site-promo.ui":    `<box><text>x</text></box>`,
-		"/site/shop-cart.work":   cartLogic}
-	for _, c := range []struct{ ui, says string }{
-		{`<header><text>x</text></header>`, "gốc của site-banner.ui là vùng <header>"},
-		{`<image value="/a.png" alt="" />`, "gốc của site-banner.ui là <image>, mà image không có nội dung con"},
-		// the root is the host, so a tag of Kitwork, never a tag of nothing nor a piece of the site the
-		// call's words would miss
-		{`<promo />`, "gốc của site-banner.ui là <promo>, không phải thẻ của Kitwork: gốc của component là một thẻ như box, card, list"},
-		{`<site-promo />`, "gốc của site-banner.ui là <site-promo>, không phải thẻ của Kitwork: gốc của component là một thẻ như box, card, list; bọc <site-promo /> trong thẻ đó"},
-		// a component's tag is an element of its own: one element, one component
-		{`<shop-cart />`, "gốc của site-banner.ui là <shop-cart>: gốc là phần tử của chính site-banner, mà một phần tử một component; bọc <shop-cart> trong một <box>"},
-	} {
-		banner["/site/site-banner.ui"] = c.ui
-		mustFail(t, banner, "site-banner.ui:1:1: ", c.says)
-	}
+	// control: as and if written on the root are the root's, the file's own call of the component
+	mustContain(t, mustCompile(t, map[string]string{"/site/content.ui": content,
+		"/site/shop-cart.ui": `<shop-cart as="$cart" if="true"><text>giỏ</text></shop-cart>`, "/site/shop-cart.work": cartLogic}), "<p>giỏ</p>")
 }
 
 // Kitwork's component that brings its own UI (progressbar) is called by its tag, empty, with its own
@@ -126,23 +113,22 @@ func TestKitworkComponentsWithTheirOwnUI(t *testing.T) {
 	mustContain(t, html, `<div class="flex-column toast toast-bottom-right" data-kitwork-component="toast: $toast" role="region" aria-label="Thông báo (F8)" tabindex="-1"`)
 }
 
-// A call of a component with a UI takes the call's words and inputs only: inputs are names the
-// component declares or its .ui reads, everything else is the file's (its look, its behaviour), and
-// the content of the call is no slot.
+// A call of a component's look takes the call's words and inputs only: inputs are names its file reads (the
+// file passes them on to the component on its root, 28/10/2026), everything else is the file's (its look, its
+// behaviour).
 func TestComponentWithUITakesCallWordsAndInputs(t *testing.T) {
 	files := func(content string) map[string]string {
 		return map[string]string{
 			"/site/content.ui":      content,
-			"/site/shop-offer.ui":   `<card><text>{{ product.name }}{{ label ?? '' }}</text></card>`,
+			"/site/shop-offer.ui":   `<shop-offer><card><text>{{ product.name }}{{ label ?? '' }}</text></card></shop-offer>`,
 			"/site/shop-offer.work": `import { component } from "kitwork"; component.define("shop-offer", () => { var open = false; });`,
 		}
 	}
 	for _, c := range []struct{ content, needle, says string }{
-		{`<content><shop-offer><text>x</text></shop-offer></content>`, "<shop-offer", "<shop-offer> có giao diện (shop-offer.ui) nên thẻ gọi để rỗng: nội dung con không phải slot"},
 		{`<content><shop-offer padding="2" /></content>`, "padding=", "trình bày của shop-offer nằm trong shop-offer.ui; chỗ gọi nhận as, if, show, for, span, place và dữ liệu nó đọc"},
 		{`<content><shop-offer hover:shadow="medium" /></content>`, "hover:shadow=", "trình bày của shop-offer nằm trong shop-offer.ui"},
 		{`<content><shop-offer click="go()" /></content>`, "click=", "sự kiện click đặt trong shop-offer.ui"},
-		{`<content><shop-offer price="{{ 1 }}" /></content>`, "price=", "shop-offer không khai và shop-offer.ui không đọc price"},
+		{`<content><shop-offer price="{{ 1 }}" /></content>`, "price=", "shop-offer.ui không đọc price (đầu vào của shop-offer viết trên gốc của file)"},
 		{`<content><shop-offer large:show="open" /></content>`, "large:show=", `bản đầu chưa cho tiền tố đi cùng biểu thức; large:show chỉ nhận "true" hoặc "false"`},
 	} {
 		mustFail(t, files(c.content), where("content.ui", c.content, c.needle), c.says)
@@ -155,7 +141,7 @@ func TestComponentWithUITakesCallWordsAndInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := page.Render(Request{Path: "/", Scope: map[string]any{"featured": map[string]any{"name": "Bạc xỉu"}}})
-	mustContain(t, html, "<p>Bạc xỉu mới</p>", `<div class="grid place-anchor"><div class="card flex-column medium:span-2 place-top-right">`)
+	mustContain(t, html, "<p>Bạc xỉu mới</p>", `<div class="grid place-anchor"><div class="flex-column medium:span-2 place-top-right"><div class="card flex-column">`)
 }
 
 // A component without a UI builds on a box (a button for appearance): the attributes written on its tag
@@ -217,7 +203,7 @@ router.get((context) => {
 		"/site/content.ui": `<content><dropdown><text>{{ user.name }}</text><button click="toggle()">x</button></dropdown><shop-cart /></content>`,
 		"/site/router.work": `import * as router from "kitwork/router";
 router.get((ctx) => ctx.view({ user: { name: "Quốc" }, total: () => 1 }));`,
-		"/site/shop-cart.ui":   `<box><text>{{ total() }}</text></box>`,
+		"/site/shop-cart.ui":   `<shop-cart><text>{{ total() }}</text></shop-cart>`,
 		"/site/shop-cart.work": cartLogic,
 	})
 	mustContain(t, html, `data-kitwork-event="click: toggle()"`)
@@ -228,7 +214,7 @@ router.get((ctx) => ctx.view({ user: { name: "Quốc" }, total: () => 1 }));`,
 // content, the instance's own inside a component's .ui. An alias read where nothing sets it is an
 // error where it is read.
 func TestAliasRules(t *testing.T) {
-	cart := map[string]string{"/site/shop-cart.ui": `<box><text>giỏ</text></box>`, "/site/shop-cart.work": cartLogic}
+	cart := map[string]string{"/site/shop-cart.ui": `<shop-cart><text>giỏ</text></shop-cart>`, "/site/shop-cart.work": cartLogic}
 	files := func(content string, more map[string]string) map[string]string {
 		out := map[string]string{"/site/content.ui": content}
 		for k, v := range cart {
@@ -271,7 +257,7 @@ func TestAliasRules(t *testing.T) {
 	}
 
 	// an alias inside an instance's .ui is its own: two carts each have one, and the page cannot read it
-	inner := `<box><dropdown as="$lines"><text>x</text></dropdown></box>`
+	inner := `<shop-cart><dropdown as="$lines"><text>x</text></dropdown></shop-cart>`
 	two := `<content><shop-cart as="$one" /><shop-cart as="$two" /></content>`
 	mustCompile(t, map[string]string{"/site/content.ui": two, "/site/shop-cart.ui": inner, "/site/shop-cart.work": cartLogic})
 	reads := `<content><shop-cart as="$one" /><button click="$lines.toggle()">x</button></content>`
@@ -291,7 +277,7 @@ func TestAliasRules(t *testing.T) {
 		"/site/view.ui":      `<view><header /><content /></view>`,
 		"/site/header.ui":    `<header><shop-cart as="$cart" /></header>`,
 		"/site/content.ui":   siteOnly,
-		"/site/shop-cart.ui": `<box><text>giỏ</text></box>`, "/site/shop-cart.work": cartLogic,
+		"/site/shop-cart.ui": `<shop-cart><text>giỏ</text></shop-cart>`, "/site/shop-cart.work": cartLogic,
 	}, where("content.ui", siteOnly, "<button"), "$cart là alias của shop-cart, mà shop-cart chưa chạy ở trình duyệt")
 }
 
@@ -323,28 +309,11 @@ func TestRegionRules(t *testing.T) {
 		`data-kitwork-bind="aria-expanded: open"`)
 }
 
-// The root of a component's .ui is its host, so it is a tag that holds what the author writes: never the
-// page, the route's content (a region), a part of another element, an element with no content or only
-// words, or a Kitwork element that is its own instance. Until 18/10/2026 these were the tags component=
-// could not sit on; component= is gone, and on the page's root, the route's content or the head of an
-// accordion it is the removed attribute's error like anywhere else, while a component's tag as the head
-// of an accordion is no head (the head becomes its <summary>).
+// component= is gone (18/10/2026): on the page's root, the route's content or the head of an accordion it is
+// the removed attribute's error like anywhere else, while a component's tag as the head of an accordion is no
+// head (the head becomes its <summary>). The root of a component's look is the component's tag, a box
+// (28/10/2026), so the tags the root of a component's .ui could not be until then are no longer a question.
 func TestForbiddenHosts(t *testing.T) {
-	logic := `import { component } from "kitwork"; component.define("site-menu", () => { var open = false; });`
-	for _, c := range []struct{ root, says string }{
-		{`<view><text>x</text></view>`, "gốc của site-menu.ui là <view>: <view> là khung của trang, chỉ là gốc của view.ui"},
-		{`<content><text>x</text></content>`, "gốc của site-menu.ui là vùng <content>"},
-		{`<empty><text>x</text></empty>`, "gốc của site-menu.ui là <empty>, mà empty là một phần của thẻ chứa nó, không đứng riêng"},
-		{`<popover><text>x</text></popover>`, "gốc của site-menu.ui là <popover>, mà popover là một phần của thẻ chứa nó"},
-		{`<fragment><text>x</text></fragment>`, "gốc của site-menu.ui là <fragment>, mà fragment không dựng phần tử nào"},
-		{`<icon value="x" alt="" />`, "gốc của site-menu.ui là <icon>, mà icon không có nội dung con"},
-		{`<code>x</code>`, "gốc của site-menu.ui là <code>, mà code chỉ chứa chữ"},
-		{`<accordion><box><text>Q</text></box><text>A</text></accordion>`, "gốc của site-menu.ui là <accordion>, mà accordion là phần tử của Kitwork, tự là instance"},
-		{`<reader />`, "gốc của site-menu.ui là <reader>, mà reader là phần tử của Kitwork, tự là instance"},
-	} {
-		mustFail(t, map[string]string{"/site/content.ui": `<content><site-menu /></content>`, "/site/site-menu.ui": c.root, "/site/site-menu.work": logic},
-			"site-menu.ui:1:1: ", c.says)
-	}
 	page := `<view component="site-menu"><content /></view>`
 	mustFail(t, map[string]string{"/site/view.ui": page, "/site/content.ui": `<content><text>x</text></content>`}, "view.ui:1:7: ",
 		"component= đã bỏ: component là một thẻ, viết <site-menu>…</site-menu> bên trong <view>")
@@ -377,16 +346,16 @@ func TestRemovedComponentValueNamesTheTag(t *testing.T) {
 	}
 }
 
-// A component is looked up from the folder of the file that writes it, never from the route: what
-// header.ui writes means the same on every page. A page takes one source per name, each call told at
-// its tag.
+// A component's look is looked up from the folder of the file that writes it, never from the route: what
+// header.ui writes means the same on every page. A page takes one look per name found by name, each call
+// told at its tag.
 func TestLookupFromTheWritingFolder(t *testing.T) {
 	logic := `import { component } from "kitwork"; component.define("mini-cart", () => { var open = false; });`
 	files := map[string]string{
 		"/site/view.ui":               `<view><header /><content /></view>`,
 		"/site/header.ui":             `<header><mini-cart /></header>`,
-		"/site/mini-cart.ui":          `<box><text>giỏ của site</text></box>`,
-		"/site/shop/mini-cart.ui":     `<box><text>giỏ của shop</text></box>`,
+		"/site/mini-cart.ui":          `<mini-cart><text>giỏ của site</text></mini-cart>`,
+		"/site/shop/mini-cart.ui":     `<mini-cart><text>giỏ của shop</text></mini-cart>`,
 		"/site/shop/content.ui":       `<content><text>Cửa hàng</text></content>`,
 		"/site/content.ui":            `<content><text>x</text></content>`,
 		"/.components/mini-cart.work": logic,
@@ -401,23 +370,23 @@ func TestLookupFromTheWritingFolder(t *testing.T) {
 	files["/site/shop/content.ui"] = `<content><mini-cart /></content>`
 	_, err := memorySite("", files).Compile("/site/shop")
 	if err == nil || !strings.HasPrefix(err.Error(), "shop/content.ui:1:10: ") ||
-		!strings.Contains(err.Error(), "component mini-cart trên trang này đến từ hai nguồn: mini-cart.ui + ../.components/mini-cart.work (header.ui:1:9) và shop/mini-cart.ui + ../.components/mini-cart.work") {
+		!strings.Contains(err.Error(), "component mini-cart trên trang này có hai giao diện tìm theo tên: mini-cart.ui (header.ui:1:9) và shop/mini-cart.ui") {
 		t.Errorf("two sources for one name on a page: %v", err)
 	}
 	// control: a page with only the branch's call takes the branch's look
 	html = renderAt(t, memorySite("", map[string]string{
 		"/site/shop/content.ui":       `<content><mini-cart /></content>`,
-		"/site/shop/mini-cart.ui":     `<box><text>giỏ của shop</text></box>`,
-		"/site/mini-cart.ui":          `<box><text>giỏ của site</text></box>`,
+		"/site/shop/mini-cart.ui":     `<mini-cart><text>giỏ của shop</text></mini-cart>`,
+		"/site/mini-cart.ui":          `<mini-cart><text>giỏ của site</text></mini-cart>`,
 		"/.components/mini-cart.work": logic,
 	}), "shop", "/shop", nil)
 	mustContain(t, html, "giỏ của shop")
 }
 
-// Whether a component has a look is fixed where it is defined: a branch .ui may restyle a component of
-// the site that has one, never give one to a component without a UI. One of Kitwork's is never restyled
-// by a file of the site: since 18/10/2026 a branch file under its name is an error at that file, as one
-// at the site root is (tags_test.go), since its tag is always Kitwork's.
+// A branch may give a component of the site a look of its own: a piece in the branch whose root is the
+// component's tag, nearer than the site's. One of Kitwork's is never restyled by a file of the site: since
+// 18/10/2026 a branch file under its name is an error at that file, as one at the site root is (tags_test.go),
+// since its tag is always Kitwork's.
 func TestBranchUIForAComponentWithoutUI(t *testing.T) {
 	files := map[string]string{
 		"/site/quan-ly/content.ui":  `<content><dropdown><button click="toggle()">x</button></dropdown></content>`,
@@ -428,36 +397,24 @@ func TestBranchUIForAComponentWithoutUI(t *testing.T) {
 		!strings.Contains(err.Error(), "dropdown.ui đặt tên trùng component <dropdown> của Kitwork: <dropdown> luôn là component của Kitwork nên file này không bao giờ được gọi") {
 		t.Errorf("a branch .ui named like one of Kitwork's components: %v", err)
 	}
-	// a site's own component without a UI: the message names the call that would break, at its tag
-	files = map[string]string{
-		"/site/quan-ly/content.ui":   `<content><site-menu><button click="toggle()">x</button></site-menu></content>`,
-		"/site/quan-ly/site-menu.ui": `<box><text>menu</text></box>`,
-		"/site/components.work":      `import { component } from "kitwork"; component.define("site-menu", () => { var open = false; });`,
-	}
-	_, err = memorySite("", files).Compile("/site/quan-ly")
-	if err == nil || !strings.HasPrefix(err.Error(), "quan-ly/site-menu.ui:1:1: ") ||
-		!strings.Contains(err.Error(), "site-menu là component không có giao diện (ở components.work)") ||
-		!strings.Contains(err.Error(), "chỗ gọi quan-ly/content.ui:1:10 sẽ hỏng") {
-		t.Errorf("a branch .ui for a site component without a UI: %v", err)
-	}
-	// control: a branch restyles a component that has a UI
+	// control: a branch gives a component its own look
 	html := renderAt(t, memorySite("", map[string]string{
 		"/site/quan-ly/content.ui":   `<content><shop-cart /></content>`,
-		"/site/quan-ly/shop-cart.ui": `<box><text>giỏ quản lý {{ note }}</text></box>`,
-		"/site/shop-cart.ui":         `<box><text>giỏ</text></box>`,
+		"/site/quan-ly/shop-cart.ui": `<shop-cart><text>giỏ quản lý {{ note }}</text></shop-cart>`,
+		"/site/shop-cart.ui":         `<shop-cart><text>giỏ</text></shop-cart>`,
 		"/site/shop-cart.work":       cartLogic,
 	}), "quan-ly", "/quan-ly", nil)
 	mustContain(t, html, "<p>giỏ quản lý chưa có</p>")
 }
 
-// A path, written source="…" on the tag, names one place for both halves: ./ and ../ from the file that
-// writes it, .components/ for the identity. It never leaves the site and ends in a name of the site,
-// with a dash. Kitwork's path form (kitwork/components/x) went with component= (18/10/2026): a component
-// of Kitwork is its tag, and that form is no path.
+// A path, written source="…" on the tag, names the file of a look: ./ and ../ from the file that writes it,
+// .components/ for the identity; the logic of the component its root is found by name (28/10/2026). It never
+// leaves the site and ends in a name of the site, with a dash. Kitwork's path form (kitwork/components/x) went
+// with component= (18/10/2026): a component of Kitwork is its tag, and that form is no path.
 func TestComponentPaths(t *testing.T) {
 	files := map[string]string{
-		"/site/shop-cart.ui":          `<box><text>{{ note }}</text></box>`,
-		"/.components/shop-cart.ui":   `<box><text>identity {{ note }}</text></box>`,
+		"/site/shop-cart.ui":          `<shop-cart><text>{{ note }}</text></shop-cart>`,
+		"/.components/shop-cart.ui":   `<shop-cart><text>identity {{ note }}</text></shop-cart>`,
 		"/.components/shop-cart.work": cartLogic,
 	}
 	at := func(content string) map[string]string {
@@ -469,13 +426,12 @@ func TestComponentPaths(t *testing.T) {
 	}
 	// by name: the site's look, the identity's logic
 	mustContain(t, mustCompile(t, at(`<content><shop-cart /></content>`)), "<p>chưa có</p>")
-	// .components/ pins both to the identity
+	// .components/ takes the identity's look
 	mustContain(t, mustCompile(t, at(`<content><shop-cart source=".components/shop-cart" /></content>`)), "<p>identity chưa có</p>")
-	// ./ pins both to the site root: the site's look and no logic there, so a layout piece there, where
-	// note is the page's
+	// ./ takes the look at the site root; its root is the component, whose note is its own, not the page's
 	html := renderAt(t, memorySite("", at(`<content><shop-cart source="./shop-cart" /></content>`)), ".", "/", map[string]any{"note": "của trang"})
-	mustContain(t, html, `<div class="flex-column"><p>của trang</p></div>`)
-	mustNotContain(t, html, "chưa có")
+	mustContain(t, html, `<div class="flex-column"><p>chưa có</p></div>`)
+	mustNotContain(t, html, "của trang")
 	for _, c := range []struct{ value, says string }{
 		{`../../shop-cart`, "đường dẫn ../../shop-cart ra ngoài site"},
 		{`shop/shop-cart`, `đường dẫn bắt đầu bằng ./ hoặc ../ (từ file đang viết) hoặc .components/ (của identity), không phải "shop/shop-cart"`},
@@ -582,18 +538,18 @@ func TestInputsSeedTheInstance(t *testing.T) {
 		}
 	}
 	// control: the site's cart takes its input on the server and carries no scope
-	html = mustCompile(t, map[string]string{"/site/content.ui": `<content><shop-cart note="{{ 'x' }}" /></content>`,
-		"/site/shop-cart.ui": `<box><text>{{ note }}</text></box>`, "/site/shop-cart.work": cartLogic})
+	html = mustCompile(t, map[string]string{"/site/content.ui": `<content><shop-cart text="{{ 'x' }}" /></content>`,
+		"/site/shop-cart.ui": `<shop-cart note="{{ text }}"><text>{{ note }}</text></shop-cart>`, "/site/shop-cart.work": cartLogic})
 	mustContain(t, html, "<p>x</p>")
 	mustNotContain(t, html, "data-kitwork-scope")
 }
 
 // A site component inside one the kernel runs: its own events are its own (its logic reaches the
-// browser later), not page events inside the Kitwork component, and its names win inside its .ui.
+// browser later), not page events inside the Kitwork component, and its names win inside its look.
 func TestSiteComponentInsideAKitworkComponent(t *testing.T) {
 	html := mustCompile(t, map[string]string{
 		"/site/content.ui":   `<content><dropdown><button click="toggle()">x</button><shop-cart /></dropdown></content>`,
-		"/site/shop-cart.ui": `<box click-outside="close()"><button click="toggle()">{{ note }}</button></box>`,
+		"/site/shop-cart.ui": `<shop-cart click-outside="close()"><button click="toggle()">{{ note }}</button></shop-cart>`,
 		"/site/shop-cart.work": `import { component } from "kitwork";
 component.define("shop-cart", () => {
   var open = false;

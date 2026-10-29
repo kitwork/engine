@@ -244,10 +244,6 @@ func (c *compiler) liveSiteCall(n *Node, cx ctx, site *callSite) error {
 	if !def.live() {
 		return nil
 	}
-	if def.root != nil {
-		return errAt(n, "%s có việc đi qua cầu nối, mà giao diện của nó là %s: lát này chỉ nhận giao diện viết bên trong thẻ (<%s>…</%s>)",
-			def.name, rel(c.site, def.ui), def.name, def.name)
-	}
 	if site.forEach != nil || cx.forAt != nil {
 		return errAt(n, "%s có việc đi qua cầu nối, mà chỗ gọi này lặp theo for: mỗi dòng một instance, và server tìm đúng instance đã bấm bằng dấu vân tay của nó, phần engine chưa có. Đặt <%s> ngoài for",
 			def.name, def.name)

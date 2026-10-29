@@ -178,16 +178,11 @@ func (c *compiler) callsComponent(n *Node) bool {
 	if kitworkComponents[n.Tag] != nil {
 		return true
 	}
-	if _, known := catalog[n.Tag]; known || !siteName(n.Tag) {
-		return false
+	if _, known := catalog[n.Tag]; known || !siteName(n.Tag) || len(n.SignificantChildren()) == 0 {
+		return false // an empty tag of the site is a layout piece: what it holds is in its file
 	}
-	var def *componentDef
-	if a := attrNamed(n, "source"); a.Name == "source" {
-		def, _ = c.layoutSource(n, a)
-	} else {
-		def, _ = c.layoutNamed(n, n.Tag)
-	}
-	return def != nil && def.instance()
+	def, _ := c.siteLogic(n, n.Tag)
+	return def != nil
 }
 
 // componentAttribute is a component attribute the author wrote on n, with or without a prefix
@@ -202,8 +197,8 @@ func componentAttribute(n *Node) *Attr {
 }
 
 // rootOf is the tag an element as written builds, as a parent's rule for its children reads it: its own
-// for a tag of Kitwork, the box or button one of Kitwork's components builds, the root of the file for
-// a piece of the site (a layout, a component with a .ui), the box a component without a .ui builds.
+// for a tag of Kitwork, the box or button one of Kitwork's components builds, the box a component of the
+// site written with content builds, and for an empty tag of the site, what the root of its file builds.
 // file names the piece, for a message ("" for a tag of Kitwork). A tag that names nothing is its own:
 // layoutCall says what is wrong with it.
 func (c *compiler) rootOf(n *Node) (root, file string) {
@@ -213,19 +208,26 @@ func (c *compiler) rootOf(n *Node) (root, file string) {
 	if _, known := catalog[n.Tag]; known || !siteName(n.Tag) {
 		return n.Tag, ""
 	}
+	if len(n.SignificantChildren()) > 0 {
+		if def, _ := c.siteLogic(n, n.Tag); def != nil {
+			return def.hostTag(), def.name + " (" + def.logicPlace(c.site) + ")"
+		}
+		return n.Tag, ""
+	}
 	var def *componentDef
 	if a := attrNamed(n, "source"); a.Name == "source" {
 		def, _ = c.layoutSource(n, a)
 	} else {
 		def, _ = c.layoutNamed(n, n.Tag)
 	}
-	switch {
-	case def == nil:
+	if def == nil || def.root == nil {
 		return n.Tag, ""
-	case def.root != nil:
-		return def.root.Tag, rel(c.site, def.ui)
 	}
-	return def.hostTag(), def.name + " (" + def.logicPlace(c.site) + ")"
+	if root := def.root; kitworkComponents[root.Tag] != nil || c.callsComponent(root) {
+		tag, _ := c.rootOf(root) // a piece whose root is a component: the element that component builds
+		return tag, rel(c.site, def.ui)
+	}
+	return def.root.Tag, rel(c.site, def.ui)
 }
 
 // writingDir is the folder of the file that writes n: where the names it writes are looked up from.
@@ -241,8 +243,8 @@ func (s *Site) identityDir() string {
 	return filepath.Join(filepath.Dir(filepath.Clean(s.Root)), ".components")
 }
 
-// resolveComponent finds what the value of n's component attribute names. It may be a layout piece:
-// the call reports that (componentCall), since only the call knows how it was written.
+// resolveComponent finds the component n's component attribute names: one of Kitwork's, or one of the
+// site's, by its logic.
 func (c *compiler) resolveComponent(n *Node, a *Attr) (*componentDef, error) {
 	value, err := pieceValue(n, a, a.Name)
 	if err != nil {
@@ -253,12 +255,8 @@ func (c *compiler) resolveComponent(n *Node, a *Attr) (*componentDef, error) {
 		return nil, err
 	}
 	if def == nil {
-		if strings.Contains(value, "/") {
-			return nil, errAttr(n, a, "không tìm thấy component %s ở %s: không có %s.ui hay component.define(\"%s\", …) ở đó",
-				path.Base(value), value, path.Base(value), path.Base(value))
-		}
-		return nil, errAttr(n, a, "không tìm thấy component %s: không có %s.ui (từ thư mục của %s lên gốc site, rồi .components/), không có component.define(\"%s\", …) (gốc site: components.work hoặc %s.work, rồi .components/%s.work), và Kitwork không có component tên này",
-			value, value, path.Base(n.File), value, value, value)
+		return nil, errAttr(n, a, "không tìm thấy component %s: không có component.define(\"%s\", …) (gốc site: components.work hoặc %s.work, rồi .components/%s.work), và Kitwork không có component tên này",
+			value, value, value, value)
 	}
 	// one name, one source on a page: the browser and Drive know a component by its name. A layout piece
 	// is built into the page on the server and never named on the wire, so its tag calls do not come
@@ -287,34 +285,16 @@ func pieceValue(n *Node, a *Attr, word string) (string, error) {
 	return value, nil
 }
 
-// resolve finds what a name or a path written in n means from the folder of the file that writes n:
-// a component (logic, with or without a .ui), a layout piece (a .ui and no logic), or nil when nothing
-// has that name. The .ui of either is parsed; what its root may be is the call's to check.
+// resolve finds the component a name written in n names: one of Kitwork's, the logic of one of the site, or
+// nil when no component has that name (a layout piece, found by layoutNamed, or nothing).
 func (c *compiler) resolve(n *Node, a *Attr, value string) (*componentDef, error) {
-	dir := c.writingDir(n)
-	key := dir + "\x00" + value
+	key := "component\x00" + value
 	if def, ok := c.components[key]; ok {
 		return def, nil
 	}
-	var def *componentDef
-	var err error
-	if strings.Contains(value, "/") {
-		def, err = c.componentAtPath(n, a, dir, value)
-	} else {
-		def, err = c.componentNamed(n, a, dir, value)
-	}
+	def, err := c.componentNamed(n, a, value)
 	if err != nil || def == nil {
 		return nil, err
-	}
-	if def.ui != "" {
-		c.files[def.ui] = true
-		nodes, err := c.site.parseFile(def.ui)
-		if err != nil {
-			return nil, err
-		}
-		if def.root, err = singleRoot(nodes, rel(c.site, def.ui)); err != nil {
-			return nil, err
-		}
 	}
 	if def.logic != "" {
 		c.files[def.logic] = true
@@ -329,46 +309,8 @@ type componentSource struct {
 	at     string
 }
 
-// checkComponentRoot checks the root of a component's .ui: it is the host, so it carries neither
-// the call's words (if, for: whether and how often there is a host is the call's) nor a component
-// of its own (one element, one instance), and it is not a region (a region is the page's).
-func (c *compiler) checkComponentRoot(def *componentDef) error {
-	root := def.root
-	for i := range root.Attrs {
-		a := &root.Attrs[i]
-		switch a.Name {
-		case "if", "for":
-			return errAttr(root, a, "gốc của %s không mang %s: có nó hay không, lặp mấy lần là việc của chỗ gọi (<%s %s=\"…\" />)",
-				path.Base(root.File), a.Name, def.name, a.Name)
-		case "component":
-			return componentWritten(root, a)
-		case "as":
-			return errAttr(root, a, "as đặt ở chỗ gọi (<%s as=\"…\" />), không trên gốc của %s", def.name, path.Base(root.File))
-		}
-	}
-	if kitworkComponents[root.Tag] != nil || c.callsComponent(root) {
-		return errAt(root, "gốc của %s là <%s>: gốc là phần tử của chính %s, mà một phần tử một component; bọc <%s> trong một <box>",
-			path.Base(root.File), root.Tag, def.name, root.Tag)
-	}
-	if err := frameOrPageRoot(root, path.Base(root.File)); err != nil {
-		return err
-	}
-	if _, ok := catalog[root.Tag]; !ok {
-		return errAt(root, "gốc của %s là <%s>, không phải thẻ của Kitwork: gốc của component là một thẻ như box, card, list; bọc <%s /> trong thẻ đó",
-			path.Base(root.File), root.Tag, root.Tag)
-	}
-	if info, ok := catalog[root.Tag]; ok && info.region {
-		return errAt(root, "gốc của %s là vùng <%s>: vùng là của trang (<%s /> lấy %s.ui); component có giao diện dựng trên một thẻ như box, card, list",
-			path.Base(root.File), root.Tag, root.Tag, root.Tag)
-	}
-	if reason := forbiddenHost(root.Tag); reason != "" {
-		return errAt(root, "gốc của %s là <%s>, mà %s", path.Base(root.File), root.Tag, reason)
-	}
-	return nil
-}
-
-// componentNamed finds a component by its name from the folder dir.
-func (c *compiler) componentNamed(n *Node, a *Attr, dir, name string) (*componentDef, error) {
+// componentNamed finds a component by its name.
+func (c *compiler) componentNamed(n *Node, a *Attr, name string) (*componentDef, error) {
 	if !componentName(name) {
 		return nil, errAttr(n, a, "tên component viết thường, các từ nối bằng gạch ngang (product-card), không phải %q", name)
 	}
@@ -398,56 +340,25 @@ func (c *compiler) componentNamed(n *Node, a *Attr, dir, name string) (*componen
 	if !siteName(name) {
 		return nil, nil // a name without a dash is Kitwork's, and Kitwork has none of it: the caller says so
 	}
-
-	// a .ui nearer than the site root: a branch's own look
-	branch := ""
-	for _, folder := range s.upward(dir) {
-		if folder == root || !strings.HasPrefix(folder, root+string(filepath.Separator)) {
-			break
-		}
-		if candidate := filepath.Join(folder, name+".ui"); s.exists(candidate) {
-			branch = candidate
-			if err := strayLogic(s, candidate, name); err != nil {
-				return nil, err
-			}
-			break
-		}
-	}
-
-	def := &componentDef{name: name}
+	// the site's: its logic alone (28/10/2026). Its look is what is written inside its tag, or a layout piece
+	// whose root is its tag, found as any layout is (layout.go, componentPiece)
 	logicFile, names, err := s.componentLogic(name, filepath.Join(root, "components.work"), filepath.Join(root, name+".work"),
 		filepath.Join(s.identityDir(), name+".work"))
-	if err != nil {
-		return nil, err
+	if err != nil || logicFile == "" {
+		return nil, err // nothing has this name: the caller says so in its own words
 	}
-	tierUI := ""
-	for _, candidate := range []string{filepath.Join(root, name+".ui"), filepath.Join(s.identityDir(), name+".ui")} {
-		if s.exists(candidate) {
-			tierUI = candidate
-			break
-		}
-	}
-	switch {
-	case logicFile != "":
-		// a site or identity .ui pairs with site or identity logic
-		def.logic, def.ui = logicFile, tierUI
-		def.take(names)
-	case tierUI != "":
-		def.ui = tierUI
-	}
-	if branch != "" {
-		if def.instance() && def.ui == "" {
-			// whether a component has a look is fixed where it is defined, not by a branch
-			return nil, &Error{File: rel(s, branch), Line: 1, Column: 1, Message: fmt.Sprintf(
-				"%s là component không có giao diện (ở %s): nội dung bên trong thẻ là giao diện của nó, nên %s ở nhánh không cho nó giao diện; chỗ gọi %s:%d:%d sẽ hỏng. Đặt tên khác cho file này",
-				name, rel(s, def.logic), filepath.Base(branch), n.File, a.Line, a.Column)}
-		}
-		def.ui = branch
-	}
-	if def.ui == "" && !def.instance() {
-		return nil, nil // nothing has this name: the caller says so in its own words
-	}
+	def := &componentDef{name: name, logic: logicFile}
+	def.take(names)
 	return def, nil
+}
+
+// siteLogic is the component of the site a tag names from where n is written: its logic, nil when the name
+// has none (a layout piece, or nothing).
+func (c *compiler) siteLogic(n *Node, name string) (*componentDef, error) {
+	if !siteName(name) {
+		return nil, nil
+	}
+	return c.resolve(n, &Attr{Name: "component", Value: name, Line: n.Line, Column: n.Column}, name)
 }
 
 // reservedComponentName refuses a name that is a tag: the core vocabulary, a region or a Kitwork
@@ -462,66 +373,6 @@ func reservedComponentName(n *Node, a *Attr, name string) error {
 		return errAttr(n, a, "%s là thẻ lõi của Kitwork, không phải component: viết <%s …>", name, name)
 	}
 	return nil
-}
-
-// componentAtPath finds the component a path names: one place for both halves.
-func (c *compiler) componentAtPath(n *Node, a *Attr, dir, value string) (*componentDef, error) {
-	s := c.site
-	root := filepath.Clean(s.Root)
-	segments := strings.Split(value, "/")
-	name := segments[len(segments)-1]
-	if !componentName(name) {
-		return nil, errAttr(n, a, "đường dẫn component kết thúc bằng tên component (viết thường, nối bằng gạch ngang), không phải %q", name)
-	}
-	if err := reservedComponentName(n, a, name); err != nil {
-		return nil, err
-	}
-	if !siteName(name) {
-		return nil, errAttr(n, a, "đường dẫn kết thúc bằng tên của site, có gạch ngang (product-card), không phải %q: tên không gạch ngang là của Kitwork", name)
-	}
-	def := &componentDef{name: name}
-	switch {
-	case strings.HasPrefix(value, ".components/") && len(segments) == 2:
-		identity := s.identityDir()
-		logicFile, names, err := s.componentLogic(name, filepath.Join(identity, name+".work"))
-		if err != nil {
-			return nil, err
-		}
-		def.logic = logicFile
-		def.take(names)
-		if candidate := filepath.Join(identity, name+".ui"); s.exists(candidate) {
-			def.ui = candidate
-		}
-	case segments[0] == "." || segments[0] == "..":
-		for _, segment := range segments[:len(segments)-1] {
-			if segment != "." && segment != ".." && !componentName(segment) {
-				return nil, errAttr(n, a, "đường dẫn component chỉ có tên thư mục viết thường, . và .., không có %q", segment)
-			}
-		}
-		target := filepath.Clean(filepath.Join(dir, filepath.FromSlash(value)))
-		folder := filepath.Dir(target)
-		if folder != root && !strings.HasPrefix(folder, root+string(filepath.Separator)) {
-			return nil, errAttr(n, a, "đường dẫn %s ra ngoài site; component của identity viết .components/%s", value, name)
-		}
-		if candidate := target + ".ui"; s.exists(candidate) {
-			def.ui = candidate
-		}
-		if folder == root {
-			// logic is defined at the site root only: a path to the root takes the root's logic
-			logicFile, names, err := s.componentLogic(name, filepath.Join(root, "components.work"), filepath.Join(root, name+".work"))
-			if err != nil {
-				return nil, err
-			}
-			def.logic = logicFile
-			def.take(names)
-		}
-	default:
-		return nil, errAttr(n, a, "đường dẫn bắt đầu bằng ./ hoặc ../ (từ file đang viết) hoặc .components/ (của identity), không phải %q", value)
-	}
-	if def.ui == "" && def.logic == "" {
-		return nil, nil // nothing at that place: the caller says so in its own words
-	}
-	return def, nil
 }
 
 // componentLogic finds the logic of the component <name> in the first of files that defines it: a
@@ -745,19 +596,33 @@ func (c *compiler) uiReads(def *componentDef, visiting map[string]bool) map[stri
 		}
 		if _, known := catalog[n.Tag]; !known && siteName(n.Tag) {
 			// a piece of the site it calls: what a layout reads comes from here, except what the call
-			// passes; what a component reads, minus what it declares
+			// passes; what a component written in place reads, minus what it declares
+			if logic, _ := c.siteLogic(n, n.Tag); logic != nil && len(n.SignificantChildren()) > 0 {
+				outer := out
+				out = map[string]bool{}
+				for i := range n.Attrs {
+					for _, e := range attrExpressions(n, &n.Attrs[i]) {
+						for _, name := range usedNames(e.ir) {
+							outer[name] = true
+						}
+					}
+				}
+				for _, ch := range n.Children {
+					walk(ch)
+				}
+				for name := range out {
+					if _, declared := logic.state[name]; !declared {
+						outer[name] = true
+					}
+				}
+				out = outer
+				return
+			}
 			var nested *componentDef
 			if a := attrNamed(n, "source"); a.Name == "source" {
 				nested, _ = c.layoutSource(n, a)
 			} else {
 				nested, _ = c.layoutNamed(n, n.Tag)
-			}
-			if nested != nil && nested.instance() {
-				for name := range c.uiReads(nested, visiting) {
-					if _, declared := nested.state[name]; !declared {
-						out[name] = true
-					}
-				}
 			}
 			if nested != nil && nested.layout() {
 				passed := map[string]bool{}

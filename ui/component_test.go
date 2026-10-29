@@ -28,7 +28,8 @@ component.define("shop-cart", () => {
 });
 `
 
-const cartUI = `<box><text>{{ items.length }} món · {{ note }} · {{ shipping.fee }}</text><text show="open">mở</text><text>Tạm tính {{ money(total()) }}</text><text>{{ user }}</text></box>`
+// cartUI is the cart's look used again (28/10/2026): a layout piece whose root is the component's tag.
+const cartUI = `<shop-cart><text>{{ items.length }} món · {{ note }} · {{ shipping.fee }}</text><text show="open">mở</text><text>Tạm tính {{ money(total()) }}</text><text>{{ user }}</text></shop-cart>`
 
 // where is "file:line:col: " of the first needle in a source, columns counted in runes like the parser.
 func where(file, source, needle string) string {
@@ -111,7 +112,7 @@ func TestComponentNamesCoverThePage(t *testing.T) {
 func TestComponentCallIfAndShowReadWhereTheCallStands(t *testing.T) {
 	files := map[string]string{
 		"/site/content.ui":     `<content><shop-cart show="visible" /><shop-cart if="!visible" /></content>`,
-		"/site/shop-cart.ui":   `<box><text>giỏ</text></box>`,
+		"/site/shop-cart.ui":   `<shop-cart><text>giỏ</text></shop-cart>`,
 		"/site/shop-cart.work": cartLogic,
 	}
 	html := renderAt(t, memorySite("", files), ".", "/", map[string]any{"visible": true})
@@ -132,19 +133,19 @@ func TestComponentCallIfAndShowReadWhereTheCallStands(t *testing.T) {
 		{`<content><shop-cart if="items.length" /></content>`, `if=`, "if đọc ở chỗ gọi, bên ngoài <shop-cart>: có <shop-cart> hay không, lặp mấy lần quyết trước khi nó có; items là của shop-cart"},
 		{`<content><shop-cart for="x of items" /></content>`, `for=`, "for đọc ở chỗ gọi, bên ngoài <shop-cart>"},
 		{`<content><shop-cart for="x of xs; key: note" /></content>`, `for=`, "key đọc ở chỗ gọi, bên ngoài <shop-cart>"},
-		{`<content><shop-cart note="{{ open }}" /></content>`, `note=`, "giá trị của note đọc ở chỗ gọi, bên ngoài <shop-cart>; open là của shop-cart"},
+		{`<content><shop-cart text="{{ open }}" /></content>`, `text=`, "giá trị của text đọc ở chỗ gọi, bên ngoài <shop-cart>; open là của shop-cart"},
 	} {
-		mustFail(t, map[string]string{"/site/content.ui": c.source, "/site/shop-cart.ui": `<box><text>{{ note }}</text></box>`, "/site/shop-cart.work": cartLogic},
+		mustFail(t, map[string]string{"/site/content.ui": c.source, "/site/shop-cart.ui": `<shop-cart note="{{ text }}"><text>{{ note }}</text></shop-cart>`, "/site/shop-cart.work": cartLogic},
 			where("content.ui", c.source, c.needle), c.says)
 	}
 }
 
 // An input is read where the call stands and is what the component starts from, over its own
-// starting value.
+// starting value. A piece passes on what its call passes in: the file writes it on its root.
 func TestComponentDataAtTheCallWins(t *testing.T) {
 	files := map[string]string{
-		"/site/content.ui":     `<content><shop-cart note="{{ greeting }}" /></content>`,
-		"/site/shop-cart.ui":   `<box><text>{{ note }}</text></box>`,
+		"/site/content.ui":     `<content><shop-cart text="{{ greeting }}" /></content>`,
+		"/site/shop-cart.ui":   `<shop-cart note="{{ text }}"><text>{{ note }}</text></shop-cart>`,
 		"/site/shop-cart.work": cartLogic,
 	}
 	html := renderAt(t, memorySite("", files), ".", "/", map[string]any{"greeting": "chào"})
@@ -200,7 +201,7 @@ func TestLayoutPiecesAndInstanceErrors(t *testing.T) {
 func TestComponentLookupOrder(t *testing.T) {
 	files := map[string]string{
 		"/site/content.ui":            `<content><shop-cart /></content>`,
-		"/site/shop-cart.ui":          `<box><text>{{ note }}</text></box>`,
+		"/site/shop-cart.ui":          `<shop-cart><text>{{ note }}</text></shop-cart>`,
 		"/site/components.work":       `import { component } from "kitwork"; component.define("site-menu", () => { var note = "menu"; });`,
 		"/.components/shop-cart.work": cartLogic,
 	}

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -20,10 +21,16 @@ import (
 //
 // A layout piece is found from the folder of the file that writes the call: that folder, its parents
 // up to the site root, then .components/ of the identity. (Regions are layouts too, found from the
-// route's folder: compile.go.) A name with logic is a component, called by its tag the same way
-// (host.go), so a layout that gains a .work keeps its calls. A piece of the site has a dash in its
-// name (product-card), and a name without one is Kitwork's: a core tag, a region, a Kitwork element
-// or component is always that tag, so a .ui file named like one is an error.
+// route's folder: compile.go.) A piece of the site has a dash in its name (product-card), and a name
+// without one is Kitwork's: a core tag, a region, a Kitwork element or component is always that tag, so
+// a .ui file named like one is an error.
+//
+// A component is one form (28/10/2026, KITWORK_COMPONENTS.md mục 4): its tag written with content builds a
+// box, and the content is its look (<shop-cart>…</shop-cart>, host.go). Its look used again is a layout piece
+// whose root is its tag (shop-cart.ui: <shop-cart flex="column">…</shop-cart>), called empty like any piece,
+// <shop-cart as="$cart" />: each call builds one instance, the call's as, if, show, for, span and place go on
+// it, and what the call passes in is what the file reads (componentPiece). A piece that gains logic gets its
+// component's tag as its root; its calls do not change.
 
 // layoutCall compiles an element whose tag is outside the vocabulary: a piece of the site, a layout or
 // a component. A tag that names nothing is an error.
@@ -44,9 +51,20 @@ func (c *compiler) layoutCall(n *Node, cx ctx) (op, error) {
 	if !siteName(name) {
 		return nil, c.withoutADash(n)
 	}
-	var def *componentDef
-	var err error
 	source := attrNamed(n, "source")
+	logic, err := c.siteLogic(n, name)
+	if err != nil {
+		return nil, err
+	}
+	if logic != nil && len(n.SignificantChildren()) > 0 {
+		// a component written in place: the tag builds a box and what is inside is its look (host.go)
+		if source.Name == "source" {
+			return nil, errAttr(n, source, "source chọn mảnh layout cho thẻ rỗng (<%s source=\"…\" />); <%s>…</%s> có nội dung là component viết tại chỗ, nội dung là giao diện của nó",
+				name, name, name)
+		}
+		return c.componentCall(asHost(n, logic.hostTag(), name), cx)
+	}
+	var def *componentDef
 	if source.Name == "source" {
 		def, err = c.layoutSource(n, source)
 	} else {
@@ -56,26 +74,46 @@ func (c *compiler) layoutCall(n *Node, cx ctx) (op, error) {
 		return nil, err
 	}
 	if def == nil {
+		if logic != nil {
+			return nil, errAt(n, "%s chưa có giao diện: viết nội dung bên trong thẻ (<%s>…</%s>), hay một file %s.ui có gốc là <%s …>…</%s> rồi gọi <%s />",
+				name, name, name, name, name, name, name)
+		}
 		if n.written != "" {
 			return nil, c.unknownWritten(n)
 		}
 		return nil, errAt(n, "không biết thẻ <%s>: không có layout %s.ui (từ thư mục của %s lên gốc site, rồi .components/), và không có component tên này",
 			name, name, filepath.Base(n.File))
 	}
-	if def.instance() {
-		// a component of the site: its host goes on as a call of it (host.go), found by the source when
-		// one is written
-		return c.componentCall(asHost(n, def.hostTag(), name), cx)
-	}
-	if err := c.checkLayoutRoot(n, def, cx.pageChild); err != nil {
-		return nil, err
-	}
 	if len(n.SignificantChildren()) > 0 {
 		return nil, errAt(n, "%s là layout nên thẻ gọi để rỗng: nội dung con không phải slot; nội dung nằm trong %s", name, rel(c.site, def.ui))
+	}
+	// the component the root of the file is, nil for a layout: then the call builds one instance of it
+	piece, err := c.componentPiece(n, def, logic)
+	if err != nil {
+		return nil, err
+	}
+	if piece == nil {
+		if err := c.checkLayoutRoot(n, def, cx.pageChild); err != nil {
+			return nil, err
+		}
+	} else if source.Name != "source" && piece.kitwork == nil {
+		// a component's look found by its name: one on a page, as one logic is (resolveComponent); a call
+		// that wants another writes it with source
+		key, file := "look\x00"+piece.name, rel(c.site, def.ui)
+		if first, ok := c.sources[key]; ok && first.source != file {
+			return nil, errAt(n, "component %s trên trang này có hai giao diện tìm theo tên: %s (%s) và %s; một tên một giao diện trong một trang, muốn giao diện khác thì viết source=\"…\"",
+				piece.name, first.source, first.at, file)
+		} else if !ok {
+			c.sources[key] = componentSource{source: file, at: fmt.Sprintf("%s:%d:%d", n.File, n.Line, n.Column)}
+		}
 	}
 
 	site := &callSite{def: def}
 	rootTag := def.root.Tag
+	if piece != nil {
+		rootTag, _ = c.rootOf(def.root) // the box (or Kitwork's host) the component builds
+	}
+	var asAttr *Attr
 	var extra []Attr // static show: on the root, like any class of the call's placement
 	var forAttr *Attr
 	var outside []outsideExpr
@@ -95,6 +133,8 @@ func (c *compiler) layoutCall(n *Node, cx ctx) (op, error) {
 		}
 		switch {
 		case base == "source":
+		case base == "as" && piece != nil:
+			asAttr = a // names the instance the root builds (componentCall)
 		case base == "as":
 			// names nothing, so it does nothing, and the page renders as written; its value is still read,
 			// so a mistyped alias is an error, not a word that vanishes
@@ -141,6 +181,9 @@ func (c *compiler) layoutCall(n *Node, cx ctx) (op, error) {
 			if base == "place" && len(made) > 0 {
 				site.places = append(site.places, c.placeWidth(chain)) // the root floats there (contrast.go)
 			}
+		case piece != nil && !(chain == "" && reads[camel(a.Name)]):
+			// the call of a component's look: its look and behaviour are the file's
+			return nil, c.notAnInput(n, a, &componentDef{name: piece.name}, rootTag, rel(c.site, def.ui), false)
 		case isEvent(a.Name):
 			return nil, errAttr(n, a, "sự kiện %s đặt trong %s: %s là layout, hành vi nằm trong file của nó; chỗ gọi nhận %s", a.Name, rel(c.site, def.ui), name, layoutWords)
 		case chain == "" && reads[camel(a.Name)]:
@@ -168,15 +211,31 @@ func (c *compiler) layoutCall(n *Node, cx ctx) (op, error) {
 		}
 	}
 
-	// what the call reads is read where it stands, once a row of its own for (callScope)
+	// what the call reads is read where it stands, once a row of its own for (callScope): never the names of
+	// the component a piece's root is
 	for _, o := range outside {
 		if err := c.checkNames(n, o.attr, o.e, callScope(o, site, cx.scope), cx.aliases); err != nil {
 			return nil, err
 		}
+		if piece == nil {
+			continue
+		}
+		for _, used := range usedNames(o.e.ir) {
+			if _, own := piece.state[used]; own {
+				shown := *piece
+				shown.ui = def.ui
+				return nil, outsideError(c, asHost(n, "box", name), o, &shown, used)
+			}
+		}
 	}
 	// inside a component the browser runs, the call's for and if are the server's alone (the kernel
-	// repeats and removes nothing by live state yet); its show the kernel keeps up to date
-	if err := c.liveCall(n, cx, site, def, forAttr); err != nil {
+	// repeats and removes nothing by live state yet); its show the kernel keeps up to date. A piece whose
+	// root is a component is that component's call: neither repeats nor removes it by live state
+	called := def
+	if piece != nil {
+		called = piece
+	}
+	if err := c.liveCall(n, cx, site, called, forAttr); err != nil {
 		return nil, err
 	}
 	if site.showExpr != nil {
@@ -189,8 +248,23 @@ func (c *compiler) layoutCall(n *Node, cx ctx) (op, error) {
 		}
 	}
 	// an input is a value the server reads once: a layout has no instance in the browser to keep a live
-	// value up to date, so an input read from live state would be printed once and never follow it
+	// value up to date, so an input read from live state would be printed once and never follow it. What a
+	// piece whose root is a component is passed goes on into that component, read as it is drawn: data, never
+	// a var of the page (liveInput)
+	if piece != nil {
+		for _, o := range outside {
+			if err := c.liveInput(n, o, callScope(o, site, cx.scope), piece); err != nil {
+				return nil, err
+			}
+		}
+		if asAttr != nil && forAttr != nil {
+			return nil, errAttr(n, asAttr, "as không đặt trên thẻ có for: mỗi hàng là một instance, mà alias chỉ trỏ một")
+		}
+	}
 	for i, b := range site.bindings {
+		if piece != nil {
+			break
+		}
 		_, client, err := cx.scope.interpolationOnClient(n, b.in)
 		if err != nil {
 			return nil, err
@@ -217,7 +291,55 @@ func (c *compiler) layoutCall(n *Node, cx ctx) (op, error) {
 	if forAttr != nil {
 		rootCtx.forAt = &forSite{node: n, attr: forAttr}
 	}
-	return c.element(&root, rootCtx, site)
+	if piece == nil {
+		return c.element(&root, rootCtx, site)
+	}
+	// a piece whose root is a component: the root is that component's call, with this call's as, show and
+	// placement on it; this call's for, if and what it passes in hold around it, in no element of their own
+	rootCtx.outer = &outerCall{call: n, as: asAttr, show: site.showExpr, showBind: site.showBind, classes: site.classes, places: site.places}
+	made, err := c.element(&root, rootCtx, nil)
+	if err != nil || site.forEach == nil && site.ifExpr == nil && len(site.bindings) == 0 {
+		return made, err
+	}
+	return &elemOp{fragment: true, children: []op{made}, forEach: site.forEach, callerIf: site.ifExpr, bindings: site.bindings}, nil
+}
+
+// componentPiece is the component the root of a layout piece is (28/10/2026, KITWORK_COMPONENTS.md mục 4): a tag
+// of the site with logic written with content, or one of Kitwork's components; nil for a piece whose root is an
+// element, a layout. A call of such a piece builds one instance. A piece named after a component of the site
+// (logic, the call's own name) is that component's look, so its root is that component's tag: the form of
+// 18/10/2026, the file's root itself as the host, is an error that writes the root.
+func (c *compiler) componentPiece(call *Node, def, logic *componentDef) (*componentDef, error) {
+	root := def.root
+	file := rel(c.site, def.ui)
+	for i := range root.Attrs {
+		if a := &root.Attrs[i]; a.Name == "for" && (kitworkComponents[root.Tag] != nil || siteName(root.Tag)) {
+			return nil, errAttr(root, a, "gốc của %s không mang for: lặp mấy lần là việc của chỗ gọi (<%s for=\"…\" />)", path.Base(file), def.name)
+		}
+	}
+	var piece *componentDef
+	if kit := kitworkComponents[root.Tag]; kit != nil {
+		piece = &componentDef{name: root.Tag, kitwork: kit, state: kit.state}
+	} else if _, known := catalog[root.Tag]; !known && siteName(root.Tag) {
+		found, err := c.siteLogic(root, root.Tag)
+		if err != nil {
+			return nil, err
+		}
+		if found != nil && len(root.SignificantChildren()) == 0 {
+			if root.Tag == path.Base(strings.TrimSuffix(file, ".ui")) {
+				return nil, errAt(root, "<%s /> rỗng là gốc của chính %s: gọi vòng. Gốc của %s viết có nội dung, <%s …>…</%s>, nội dung là giao diện",
+					root.Tag, file, file, root.Tag, root.Tag)
+			}
+			return nil, errAt(root, "gốc của %s là <%s /> rỗng: gốc của một mảnh là thẻ của component viết có nội dung (<%s …>…</%s>)",
+				file, root.Tag, root.Tag, root.Tag)
+		}
+		piece = found
+	}
+	if logic != nil && (piece == nil || piece.name != logic.name) {
+		return nil, errAt(root, "%s là giao diện của component %s (logic ở %s): gốc của nó là thẻ của chính component, <%s …>…</%s>, bố cục của box viết trên đó, không phải <%s>; mỗi lần gọi <%s /> dựng một instance (KITWORK_COMPONENTS.md mục 4)",
+			file, logic.name, logic.logicPlace(c.site), logic.name, logic.name, root.Tag, logic.name)
+	}
+	return piece, nil
 }
 
 // unknownWritten is the error of a tag written with capitals that names nothing once read lowercase
@@ -225,7 +347,11 @@ func (c *compiler) layoutCall(n *Node, cx ctx) (op, error) {
 // (product-card) and a layout or a component has that name, how to call it.
 func (c *compiler) unknownWritten(n *Node) error {
 	if dashed := dashedTag(n.written); dashed != n.Tag && siteName(dashed) {
-		if def, err := c.layoutNamed(n, dashed); err == nil && def != nil {
+		def, err := c.siteLogic(n, dashed)
+		if err == nil && def == nil {
+			def, err = c.layoutNamed(n, dashed)
+		}
+		if err == nil && def != nil {
 			what := "layout " + rel(c.site, def.ui)
 			if def.instance() {
 				what = "component " + dashed + " (" + def.logicPlace(c.site) + ")"
@@ -303,30 +429,18 @@ func (c *compiler) dashesWrong(n *Node) error {
 // layoutWords are the words a layout call takes, for a message.
 const layoutWords = "if, show, for, span, place, source và dữ liệu file đọc"
 
-// layoutNamed finds what a name of the site (with a dash) names from the folder of the file that
-// writes it. A name the site or the identity defines logic for is that component. Otherwise the
-// nearest <name>.ui is a layout piece; with neither, nil.
+// layoutNamed finds the layout piece a name of the site (with a dash) names from the folder of the file
+// that writes it: the nearest <name>.ui, nil when there is none. Whether its root is a component is the
+// call's to see (componentPiece).
 func (c *compiler) layoutNamed(n *Node, name string) (*componentDef, error) {
 	if !siteName(name) {
 		return nil, nil
 	}
-	s := c.site
-	root := filepath.Clean(s.Root)
-	probe := &Attr{Name: "component", Value: name, Line: n.Line, Column: n.Column}
-	logic, _, err := s.componentLogic(name, filepath.Join(root, "components.work"), filepath.Join(root, name+".work"),
-		filepath.Join(s.identityDir(), name+".work"))
-	if err != nil {
-		return nil, err
-	}
-	if logic != "" {
-		return c.resolve(n, probe, name) // the component, with its .ui if it has one
-	}
-	dir := c.writingDir(n)
-	file := c.nearestUI(dir, name)
+	file := c.nearestUI(c.writingDir(n), name)
 	if file == "" {
 		return nil, nil
 	}
-	if err := strayLogic(s, file, name); err != nil {
+	if err := strayLogic(c.site, file, name); err != nil {
 		return nil, err
 	}
 	return c.layoutFile(name, file)
@@ -341,7 +455,10 @@ func (c *compiler) layoutSource(n *Node, a *Attr) (*componentDef, error) {
 	}
 	var def *componentDef
 	if strings.Contains(value, "/") {
-		def, err = c.resolve(n, a, value)
+		var file string
+		if file, err = c.piecePath(n, a, value); err == nil && file != "" {
+			def, err = c.layoutFile(path.Base(value), file)
+		}
 	} else if siteName(value) {
 		def, err = c.layoutNamed(n, value)
 	} else {
@@ -354,6 +471,47 @@ func (c *compiler) layoutSource(n *Node, a *Attr) (*componentDef, error) {
 		return nil, errAttr(n, a, "không tìm thấy %s (source=\"%s\")", filepath.Base(value), value)
 	}
 	return def, nil
+}
+
+// piecePath is the .ui file a source path names: ./x or ../x from the writing file, inside the site, or
+// .components/x of the identity; "" when there is none.
+func (c *compiler) piecePath(n *Node, a *Attr, value string) (string, error) {
+	s := c.site
+	root := filepath.Clean(s.Root)
+	segments := strings.Split(value, "/")
+	name := segments[len(segments)-1]
+	if !componentName(name) {
+		return "", errAttr(n, a, "đường dẫn component kết thúc bằng tên component (viết thường, nối bằng gạch ngang), không phải %q", name)
+	}
+	if err := reservedComponentName(n, a, name); err != nil {
+		return "", err
+	}
+	if !siteName(name) {
+		return "", errAttr(n, a, "đường dẫn kết thúc bằng tên của site, có gạch ngang (product-card), không phải %q: tên không gạch ngang là của Kitwork", name)
+	}
+	switch {
+	case strings.HasPrefix(value, ".components/") && len(segments) == 2:
+		if candidate := filepath.Join(s.identityDir(), name+".ui"); s.exists(candidate) {
+			return candidate, nil
+		}
+		return "", nil
+	case segments[0] == "." || segments[0] == "..":
+		for _, segment := range segments[:len(segments)-1] {
+			if segment != "." && segment != ".." && !componentName(segment) {
+				return "", errAttr(n, a, "đường dẫn chỉ có tên thư mục viết thường, . và .., không có %q", segment)
+			}
+		}
+		target := filepath.Clean(filepath.Join(c.writingDir(n), filepath.FromSlash(value)))
+		folder := filepath.Dir(target)
+		if folder != root && !strings.HasPrefix(folder, root+string(filepath.Separator)) {
+			return "", errAttr(n, a, "đường dẫn %s ra ngoài site; mảnh của identity viết .components/%s", value, name)
+		}
+		if candidate := target + ".ui"; s.exists(candidate) {
+			return candidate, nil
+		}
+		return "", nil
+	}
+	return "", errAttr(n, a, "đường dẫn bắt đầu bằng ./ hoặc ../ (từ file đang viết) hoặc .components/ (của identity), không phải %q", value)
 }
 
 // layoutFile is the layout piece of one .ui file, parsed once per page.

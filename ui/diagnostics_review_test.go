@@ -133,7 +133,7 @@ func TestReviewBareInputAtACallNeedsAValue(t *testing.T) {
 	layout := func(call string) map[string]string {
 		return map[string]string{"/site/content.ui": `<content>` + call + `</content>`, "/site/product-card.ui": `<card><text>{{ open }}</text><text if="selected">s</text></card>`}
 	}
-	cart := map[string]string{"/site/content.ui": `<content><shop-cart open /></content>`, "/site/shop-cart.ui": `<box><text>{{ open }}</text></box>`,
+	cart := map[string]string{"/site/content.ui": `<content><shop-cart open /></content>`, "/site/shop-cart.ui": `<shop-cart><text>{{ open }}</text></shop-cart>`,
 		"/site/shop-cart.work": `import { component } from "kitwork"; component.define("shop-cart", () => { var open = false; });`}
 	for _, c := range []struct {
 		files    map[string]string
@@ -184,7 +184,7 @@ func TestReviewCallsReadTheirWordsFirst(t *testing.T) {
 		return map[string]string{"/site/view.ui": `<view>` + call + `<content /></view>`, "/site/header.ui": `<header><text>H</text></header>`, "/site/content.ui": text}
 	}
 	cart := func(call string) map[string]string {
-		return map[string]string{"/site/content.ui": `<content>` + call + `</content>`, "/site/shop-cart.ui": `<box><text>{{ count }}</text></box>`,
+		return map[string]string{"/site/content.ui": `<content>` + call + `</content>`, "/site/shop-cart.ui": `<shop-cart><text>{{ count }}</text></shop-cart>`,
 			"/site/shop-cart.work": `import { component } from "kitwork"; component.define("shop-cart", () => { var count = 0; });`}
 	}
 	promo := func(call string) map[string]string {

@@ -154,7 +154,7 @@ func TestTabsInAComponentsOwnUIPaintTheFirstTab(t *testing.T) {
 	for name, files := range map[string]map[string]string{
 		"content.ui": {"/site/content.ui": `<content>` + window + `</content>`},
 		"layout":     {"/site/content.ui": `<content><files-window /></content>`, "/.components/files-window.ui": "<box>" + window + "</box>"},
-		"component": {"/site/content.ui": `<content><code-window /></content>`, "/.components/code-window.ui": "<box>" + window + "</box>",
+		"component": {"/site/content.ui": `<content><code-window /></content>`, "/.components/code-window.ui": "<code-window>" + window + "</code-window>",
 			"/.components/code-window.work": `import { component } from "kitwork"; component.define("code-window", () => { var note = 1; });`},
 	} {
 		s := memorySite("", files)
@@ -348,7 +348,7 @@ func TestTabsInAComponentUsedTwiceWireEachInstance(t *testing.T) {
 	for _, persist := range []string{"", ` persist="true"`} {
 		s := memorySite("", map[string]string{
 			"/site/content.ui":              page,
-			"/.components/code-window.ui":   "<box>" + strings.Replace(window, "PERSIST", persist, 1) + "</box>",
+			"/.components/code-window.ui":   "<code-window>" + strings.Replace(window, "PERSIST", persist, 1) + "</code-window>",
 			"/.components/code-window.work": `import { component } from "kitwork"; component.define("code-window", () => { var note = 1; });`,
 		})
 		s.Reload = true

@@ -622,7 +622,7 @@ func TestCountdownTimeLeftIsNeverRepeated(t *testing.T) {
 func TestCountdownStartedInEveryInstanceOfAComponent(t *testing.T) {
 	const never = `countdown không bao giờ chạy: không có ready="play()", không nút nào gọi play() hay toggle(); viết ready="play()" để chạy khi trang mở`
 	panel := func(button string) string {
-		return `<box><countdown as="$tea" duration="5m" finish="$toast.info('Hết giờ')">` + countdownClock + `</countdown>` + button + `</box>`
+		return `<tea-panel><countdown as="$tea" duration="5m" finish="$toast.info('Hết giờ')">` + countdownClock + `</countdown>` + button + `</tea-panel>`
 	}
 	for _, calls := range []string{`<tea-panel />`, `<tea-panel /><tea-panel />`} {
 		html, warned := countdownFiles(t, map[string]string{

@@ -59,10 +59,10 @@ func TestLayoutReadsTheContextOfItsCall(t *testing.T) {
 	}
 	mustNotContain(t, called, "account-button", "data-kitwork-scope")
 
-	// inside a component's .ui the layout reads the component's names: note is shop-cart's, not the page's
+	// inside a component's look the layout reads the component's names: note is shop-cart's, not the page's
 	html := renderAt(t, memorySite("", map[string]string{
 		"/site/content.ui":     `<content><shop-cart /></content>`,
-		"/site/shop-cart.ui":   `<box><cart-note /></box>`,
+		"/site/shop-cart.ui":   `<shop-cart><cart-note /></shop-cart>`,
 		"/site/cart-note.ui":   `<text>{{ note }}</text>`,
 		"/site/shop-cart.work": cartLogic,
 	}), ".", "/", map[string]any{"note": "của trang"})
@@ -154,14 +154,14 @@ func TestLayoutWrittenAsAComponent(t *testing.T) {
 	mustContain(t, html, "<h3>Bạc xỉu</h3>")
 }
 
-// A layout that gains logic is a component called by the same tag (18/10/2026): its calls stay as
-// they are, and its own names now cover the page's — open here is the component's false, not the
-// page's true. CONTROL: without the .work the same call is the layout, reading the page's open. Logic
+// A layout that gains logic takes its component's tag as its root (28/10/2026): its calls stay as they
+// are, each builds one instance, and its own names now cover the page's — open here is the component's
+// false, not the page's true. CONTROL: without the .work, the layout as it was reads the page's open. Logic
 // beside a branch's .ui is read by nothing, which is an error, not a layout that silently stays one.
 func TestLayoutThatGainsLogic(t *testing.T) {
 	files := map[string]string{
 		"/site/content.ui":        `<content><grid><product-card for="product of products" /></grid></content>`,
-		"/site/product-card.ui":   `<card><text>{{ product.name }}</text><text show="open">mở</text></card>`,
+		"/site/product-card.ui":   `<product-card><text>{{ product.name }}</text><text show="open">mở</text></product-card>`,
 		"/site/product-card.work": `import { component } from "kitwork"; component.define("product-card", () => { var open = false; });`,
 	}
 	scope := map[string]any{"products": products(), "open": true}
@@ -172,6 +172,7 @@ func TestLayoutThatGainsLogic(t *testing.T) {
 	}
 	// CONTROL
 	delete(files, "/site/product-card.work")
+	files["/site/product-card.ui"] = `<card><text>{{ product.name }}</text><text show="open">mở</text></card>`
 	html = renderAt(t, memorySite("", files), ".", "/", scope)
 	if got := strings.Count(html, `<p>mở</p>`); got != 2 {
 		t.Errorf("the layout reads the page's open, true: want two lines shown, got %d:\n%s", got, html)
@@ -235,13 +236,13 @@ func TestLayoutNamedLikeATag(t *testing.T) {
 }
 
 // The root of a layout piece takes the call's for, if, show, span and place: it is an element of
-// Kitwork that takes them, and it does not repeat itself. A component's tag is no such root (the call
-// would put its words on the component), and component= on the root is the removed attribute.
+// Kitwork that takes them, and it does not repeat itself; component= on the root is the removed attribute.
+// A component's tag as the root (28/10/2026) is a component's look used again: the call builds one instance
+// of it, with its words on it (component_live_test.go, TestAComponentsLookUsedAgain).
 func TestLayoutRoot(t *testing.T) {
 	for _, c := range []struct{ ui, needle, says string }{
 		{`<card for="x of xs"><text>x</text></card>`, "for=", `gốc của shop-promo.ui không mang for: lặp mấy lần là việc của chỗ gọi (<shop-promo for="…" />)`},
 		{`<box component="dropdown"><button click="toggle()">x</button></box>`, "component=", `component= đã bỏ: component là một thẻ, viết <dropdown>…</dropdown>`},
-		{`<dropdown><button click="toggle()">x</button></dropdown>`, "<dropdown", `gốc của shop-promo.ui là <dropdown>, một component: chỗ gọi <shop-promo /> đặt for, if, show, span, place lên chính gốc này, nên gốc không là một component; bọc <dropdown> trong một <box>`},
 		{`<view><content /></view>`, "<view", "gốc của shop-promo.ui là <view>: <view> là khung của trang, chỉ là gốc của view.ui"},
 		{`<navbar><link value="/">x</link></navbar>`, "<navbar", "gốc của shop-promo.ui là vùng <navbar>: vùng gọi bằng thẻ của nó"},
 		{`<fragment if="x"><text>x</text></fragment>`, "<fragment", "gốc của shop-promo.ui là <fragment>, không dựng phần tử nào"},
@@ -297,7 +298,7 @@ func TestLayoutSource(t *testing.T) {
 			"/site/product-card-small.ui": `<box><text>{{ product.name }}</text></box>`,
 			"/site/shop/card-compact.ui":  `<box><text>gọn {{ product.name }}</text></box>`,
 			"/site/shop/compact.ui":       `<box><text>gọn</text></box>`, // there, but named without a dash
-			"/site/shop-cart.ui":          `<box><text>giỏ {{ note }}</text></box>`,
+			"/site/shop-cart.ui":          `<shop-cart><text>giỏ {{ note }}</text></shop-cart>`,
 			"/site/shop-cart.work":        cartLogic,
 		}
 	}

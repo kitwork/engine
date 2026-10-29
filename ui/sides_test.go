@@ -185,7 +185,7 @@ func TestStartAndEndAtACallAreTheRenamedSide(t *testing.T) {
 		return map[string]string{
 			"/site/content.ui":      "<content>" + call + "</content>",
 			"/site/product-card.ui": "<card><text>card</text></card>",
-			"/site/shop-cart.ui":    "<box><text>giỏ</text></box>",
+			"/site/shop-cart.ui":    "<shop-cart><text>giỏ</text></shop-cart>",
 			"/site/shop-cart.work":  "import { component } from \"kitwork\";\n\ncomponent.define(\"shop-cart\", () => {\n  var open = false;\n});\n",
 		}
 	}

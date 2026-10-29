@@ -58,7 +58,7 @@ const partsCartLogic = `import { component } from "kitwork"; component.define("s
 func partsSite(content string) map[string]string {
 	return map[string]string{
 		"/site/content.ui":     content,
-		"/site/shop-cart.ui":   `<box><text>giỏ</text></box>`,
+		"/site/shop-cart.ui":   `<shop-cart><text>giỏ</text></shop-cart>`,
 		"/site/shop-cart.work": partsCartLogic,
 		"/site/shop-promo.ui":  `<card><text>khuyến mãi</text></card>`,
 	}
@@ -221,7 +221,7 @@ func TestPartsRowsThatStayErrors(t *testing.T) {
 		{"host.go:340", cart(`<content><shop-cart background="paper" /></content>`), "content.ui:1:21: ", "trình bày của shop-cart nằm trong shop-cart.ui"},
 		{"layout.go:127", cart(`<content><shop-promo click="open()" /></content>`), "content.ui:1:22: ", "sự kiện click đặt trong shop-promo.ui: shop-promo là layout"},
 		{"layout.go:136", cart(`<content><shop-promo background="paper" /></content>`), "content.ui:1:22: ", "trình bày của shop-promo nằm trong shop-promo.ui"},
-		{"host.go:63", cart(`<content><shop-cart><text>x</text></shop-cart></content>`), "content.ui:1:10: ", "<shop-cart> có giao diện (shop-cart.ui) nên thẻ gọi để rỗng: nội dung con không phải slot"},
+		{"layout.go componentPiece", cart(`<content><shop-cart /></content>`, "/site/shop-cart.ui", `<box><text>x</text></box>`), "shop-cart.ui:1:1: ", "shop-cart.ui là giao diện của component shop-cart"},
 		{"layout.go:59", cart(`<content><shop-promo><text>x</text></shop-promo></content>`), "content.ui:1:10: ", "shop-promo là layout nên thẻ gọi để rỗng: nội dung con không phải slot"},
 		{"resolve.go:129", cart(`x <content />`), "content.ui:1:1: ", "chữ nằm ngoài thẻ gốc của file"},
 		{"layout.go:313", cart(`<content><shop-promo /></content>`, "/site/shop/content.ui", `<content><badge-new /></content>`, "/site/shop/badge-new.ui", `<card><text>x</text></card>`, "/site/shop/badge-new.work", `export default {}`),

@@ -131,9 +131,10 @@ func TestSiteFileNamedLikeAKitworkComponent(t *testing.T) {
 	})
 }
 
-// A site component is called by its tag, as a layout is: without a .ui it builds on a box and what is
-// written inside is its UI, reading its names first (open is the cart's false, not missing); with a .ui
-// the call is empty and the file's root is the element. source names the file, here under another tag.
+// A site component is called by its tag, as a layout is: written with content it builds on a box and what is
+// written inside is its UI, reading its names first (open is the cart's false, not missing); its look used
+// again is a piece whose root is its tag, called empty (28/10/2026). source names the file, here under another
+// tag.
 // CONTROL: layoutCall compiling a name with logic as a layout turned the first case red (open read as
 // the page's, nothing); the source dropped from the host, the last (run 18/10/2026).
 func TestSiteComponentByItsTag(t *testing.T) {
@@ -148,38 +149,37 @@ func TestSiteComponentByItsTag(t *testing.T) {
 		html := mustCompile(t, map[string]string{
 			"/site/content.ui":     `<content><shop-cart as="$cart" /></content>`,
 			"/site/shop-cart.work": shopCartLogic,
-			"/site/shop-cart.ui":   `<card padding="2"><text>{{ open }}</text></card>`,
+			"/site/shop-cart.ui":   `<shop-cart padding="2"><text>{{ open }}</text></shop-cart>`,
 		})
-		mustContain(t, html, `<main class="flex-column"><div class="card flex-column padding-2"><p>false</p></div></main>`)
+		mustContain(t, html, `<main class="flex-column"><div class="flex-column padding-2"><p>false</p></div></main>`)
 	})
 	t.Run("by its source", func(t *testing.T) {
 		html := mustCompile(t, map[string]string{
 			"/site/content.ui":     `<content><my-cart source="./shop-cart" /></content>`,
 			"/site/shop-cart.work": shopCartLogic,
-			"/site/shop-cart.ui":   `<card padding="2"><text>{{ open }}</text></card>`,
+			"/site/shop-cart.ui":   `<shop-cart padding="2"><text>{{ open }}</text></shop-cart>`,
 		})
-		mustContain(t, html, `<main class="flex-column"><div class="card flex-column padding-2"><p>false</p></div></main>`)
+		mustContain(t, html, `<main class="flex-column"><div class="flex-column padding-2"><p>false</p></div></main>`)
 	})
 }
 
-// The root of a layout's file takes the call's words (for, if, show, span, place), and the root of a
-// component's .ui is that component's own element: neither is a component's tag (one element, one
-// component), and each is told to wrap it in a box.
-// CONTROL: the component-tag case of checkLayoutRoot or of checkComponentRoot taken out turned its case
-// red (run 18/10/2026).
+// A layout piece whose root is a component's tag is that component's look used again (28/10/2026): the call
+// builds one instance of it, one of Kitwork's too. The look of a component of the site, named after it, has
+// that component's tag as its root, never another's.
 func TestComponentTagIsNoRoot(t *testing.T) {
 	t.Run("of a layout", func(t *testing.T) {
-		mustFailExactly(t, map[string]string{
+		html := mustCompile(t, map[string]string{
 			"/site/content.ui":   `<content><promo-box /></content>`,
 			"/site/promo-box.ui": `<tabs><button click="select('a')">A</button></tabs>`,
-		}, "promo-box.ui:1:1: gốc của promo-box.ui là <tabs>, một component: chỗ gọi <promo-box /> đặt for, if, show, span, place lên chính gốc này, nên gốc không là một component; bọc <tabs> trong một <box>")
+		})
+		mustContain(t, html, `data-kitwork-component="tabs"`)
 	})
 	t.Run("of a component", func(t *testing.T) {
 		mustFailExactly(t, map[string]string{
 			"/site/content.ui":     `<content><shop-cart /></content>`,
 			"/site/shop-cart.work": shopCartLogic,
 			"/site/shop-cart.ui":   `<dropdown><button click="toggle()">A</button></dropdown>`,
-		}, "shop-cart.ui:1:1: gốc của shop-cart.ui là <dropdown>: gốc là phần tử của chính shop-cart, mà một phần tử một component; bọc <dropdown> trong một <box>")
+		}, "shop-cart.ui:1:1: shop-cart.ui là giao diện của component shop-cart (logic ở shop-cart.work): gốc của nó là thẻ của chính component, <shop-cart …>…</shop-cart>, bố cục của box viết trên đó, không phải <dropdown>; mỗi lần gọi <shop-cart /> dựng một instance (KITWORK_COMPONENTS.md mục 4)")
 	})
 }
 
@@ -194,13 +194,14 @@ const orderRowLogic = "import { component } from \"kitwork\";\n\ncomponent.defin
 // and fifth cases red (the error a component of 18/10 brought back); itemHoldsNoItem not asked, the
 // fourth (run 18/10/2026).
 func TestParentReadsTheRootOfAPiece(t *testing.T) {
-	t.Run("a component whose root is an item, in a list", func(t *testing.T) {
+	t.Run("a component's look, in the item of a list", func(t *testing.T) {
+		// a component builds a box (28/10/2026): in a list, its call stands in an item
 		html := mustCompile(t, map[string]string{
-			"/site/content.ui":     `<content><list><order-row for="o of [1, 2]" /></list></content>`,
+			"/site/content.ui":     `<content><list><item for="o of [1, 2]"><order-row /></item></list></content>`,
 			"/site/order-row.work": orderRowLogic,
-			"/site/order-row.ui":   `<item><text>{{ open }}</text></item>`,
+			"/site/order-row.ui":   `<order-row><text>{{ open }}</text></order-row>`,
 		})
-		mustContain(t, html, `<ul class="flex-column" role="list"><li class="flex-column"><p>false</p></li><li class="flex-column"><p>false</p></li></ul>`)
+		mustContain(t, html, `<ul class="flex-column" role="list"><li class="flex-column"><div class="flex-column"><p>false</p></div></li><li class="flex-column"><div class="flex-column"><p>false</p></div></li></ul>`)
 	})
 	t.Run("a layout whose root is an item, in a list", func(t *testing.T) {
 		html := mustCompile(t, map[string]string{
@@ -261,7 +262,7 @@ func TestMessagesNameTheTagWritten(t *testing.T) {
 	t.Run("a call by its source", func(t *testing.T) {
 		source := `<content><my-row source="./order-row" /></content>`
 		mustFailExactly(t, map[string]string{"/site/content.ui": source, "/site/order-row.work": orderRowLogic},
-			where("content.ui", source, `<my-row`)+"<my-row> không có giao diện: nội dung bên trong thẻ là giao diện của nó (<my-row>…</my-row>)")
+			where("content.ui", source, `source=`)+`không tìm thấy order-row (source="./order-row")`)
 	})
 	t.Run("the colour a contrast fix moves", func(t *testing.T) {
 		source := `<content><dropdown background="navy/50"><text color="white">Trà</text></dropdown></content>`

@@ -299,9 +299,9 @@ func TestContrastAtTheCallSite(t *testing.T) {
 	contrastPasses(t, nil, layout)
 
 	component := content(`<content><section background="ink"><shop-cart /></section></content>`)
-	component["/site/shop-cart.ui"] = `<box><text color="ink-30">Giỏ</text></box>`
+	component["/site/shop-cart.ui"] = `<shop-cart><text color="ink-30">Giỏ</text></shop-cart>`
 	component["/site/shop-cart.work"] = cartLogic
-	if got := contrastCompile(t, nil, component); !strings.HasPrefix(got, `shop-cart.ui:1:12: color="ink-30" trên nền ink chỉ 2.36:1`) {
+	if got := contrastCompile(t, nil, component); !strings.HasPrefix(got, `shop-cart.ui:1:18: color="ink-30" trên nền ink chỉ 2.36:1`) {
 		t.Errorf("a component inside an ink section: %q", got)
 	}
 	component["/site/content.ui"] = `<content><section><shop-cart /></section></content>`

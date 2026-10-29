@@ -103,6 +103,21 @@ type ctx struct {
 	// lazyAround is the nearest frame around that writes lazy: what floats out of it (a popover, a part
 	// placed below or above its parent) is cut at its edge, and a toast's fixed stack is placed by it
 	lazyAround *lazyHolder
+	// outer is the call of a layout piece whose root is the component compiled here (layout.go): the words it
+	// puts on the instance. Only that component takes it, never what is inside it
+	outer *outerCall
+}
+
+// outerCall is the call of a layout piece whose root is a component (28/10/2026, KITWORK_COMPONENTS.md mục 4,
+// layout.go componentPiece): the words the call puts on the instance it builds, read where the call stands, and
+// the call itself, where a message about them points.
+type outerCall struct {
+	call     *Node
+	as       *Attr
+	show     *expr
+	showBind string
+	classes  []string
+	places   []int
 }
 
 // lazyHolder is a frame that writes lazy, for the warning of what it holds that lazy breaks: its file,

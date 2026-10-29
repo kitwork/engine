@@ -51,7 +51,7 @@ func TestLazyOnScreenIsAWarning(t *testing.T) {
 			"/site/header.ui":             header,
 			"/site/content.ui":            content,
 			"/site/menu-band.ui":          `<box lazy="true"><text>menu</text></box>`,
-			"/site/shop-cart.ui":          `<box><box lazy="400px"><text>giỏ</text></box></box>`,
+			"/site/shop-cart.ui":          `<shop-cart><box lazy="400px"><text>giỏ</text></box></shop-cart>`,
 			"/.components/shop-cart.work": cartLogic,
 		}
 	}
@@ -75,7 +75,7 @@ func TestLazyOnScreenIsAWarning(t *testing.T) {
 		{"a layout piece in the pinned header", page(`<header pin="top"><menu-band /></header>`, plain),
 			"menu-band.ui:1:6", `(nằm trong khung ghim vào mép màn hình, pin ở header.ui:1:9)`},
 		{"a component's own .ui in the pinned header", page(`<header pin="top"><shop-cart /></header>`, plain),
-			"shop-cart.ui:1:11", `(nằm trong khung ghim vào mép màn hình, pin ở header.ui:1:9)`},
+			"shop-cart.ui:1:17", `(nằm trong khung ghim vào mép màn hình, pin ở header.ui:1:9)`},
 		{"inside an overlay", map[string]string{
 			"/site/view.ui":    `<view><content /><overlay /></view>`,
 			"/site/overlay.ui": `<overlay><box lazy="true"><text>thông báo</text></box></overlay>`,
@@ -156,7 +156,7 @@ func TestLazyAroundWhatFloatsIsAWarning(t *testing.T) {
 		"a layout piece": {"/site/content.ui": `<content><section lazy="true"><menu-band /></section></content>`,
 			"/site/menu-band.ui": `<box>` + dropdown + `</box>`},
 		"a component's own .ui": {"/site/content.ui": `<content><section lazy="true"><shop-cart /></section></content>`,
-			"/site/shop-cart.ui": `<box>` + dropdown + `</box>`, "/.components/shop-cart.work": cartLogic},
+			"/site/shop-cart.ui": `<shop-cart>` + dropdown + `</shop-cart>`, "/.components/shop-cart.work": cartLogic},
 	} {
 		t.Run(name, func(t *testing.T) {
 			compileWarns(t, files, "content.ui:1:19", `lazy="true": khung này giữ <popover> ở `)
