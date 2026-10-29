@@ -128,10 +128,6 @@ func TestComponentWithJobsRefusesWhatItCannotDraw(t *testing.T) {
 			liveCartFiles(liveCartLogic, `import * as router from "kitwork/router";
 router.view((context) => context.bind({ user: "an", shops: [1, 2] }));
 `, `<content><list><item for="shop of shops"><shop-cart owner="{{ user }}"><text>{{ label }}</text><button click="checkout()">Đặt</button></shop-cart></item></list></content>`)},
-		{"no router.view", "cart/content.ui:1:", "không vẽ bằng router.view",
-			liveCartFiles(liveCartLogic, `import * as router from "kitwork/router";
-router.get((context) => context.view({ user: "an" }));
-`, liveCartContent)},
 		{"a required input", "cart/content.ui:1:", "thiếu đầu vào owner",
 			liveCartFiles(liveCartLogic, liveCartRoute, strings.Replace(liveCartContent, `owner="{{ user }}" `, "", 1))},
 	}
@@ -139,6 +135,24 @@ router.get((context) => context.view({ user: "an" }));
 		_, err := compileLiveCart(t, c.files)
 		if err == nil || !strings.Contains(err.Error(), c.at) || !strings.Contains(err.Error(), c.says) {
 			t.Errorf("%s: want an error at %q saying %q, got %v", c.name, c.at, c.says, err)
+		}
+	}
+	// a page router.view does not draw holds it too (29/10/2026): router.get's, and one with no router.get
+	for _, route := range []string{`import * as router from "kitwork/router";
+router.get((context) => context.view({ user: "an" }));
+`, ""} {
+		files := liveCartFiles(liveCartLogic, route, liveCartContent)
+		if route == "" {
+			delete(files, "/site/cart/router.work")
+			files["/site/cart/content.ui"] = strings.Replace(liveCartContent, `owner="{{ user }}"`, `owner="{{ 'khách' }}"`, 1)
+		}
+		page, err := compileLiveCart(t, files)
+		if err != nil {
+			t.Errorf("a page router.view does not draw: %v", err)
+			continue
+		}
+		if at := placesIn(page.Render(Request{Path: "/cart", Scope: map[string]any{"user": "an"}})); len(at) != 1 {
+			t.Errorf("a page router.view does not draw holds the cart at its place: %v", at)
 		}
 	}
 	// its look in shop-cart.ui as of 18/10/2026, the file's root the host: the root is the component's tag now

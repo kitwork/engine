@@ -288,6 +288,18 @@ func (t *Tenant) componentProgram(logic string) (*compiler.Bytecode, error) {
 	return bc, nil
 }
 
+// answerNoPage answers a job of a component on a page whose router.get answered no page this time: the
+// redirect it chose, as a guard's is answered (view_call.go), or a not-found, since no instance is drawn.
+func (t *Tenant) answerNoPage(reqRouter *Router) {
+	response := reqRouter.response
+	if response.Kind() == "redirect" {
+		answerViewCall(reqRouter, map[string]any{"seq": reqRouter.call.seq, "redirect": response.Data().Text()})
+		return
+	}
+	component, _, _ := strings.Cut(reqRouter.call.name, ".")
+	answerViewCallError(reqRouter, http.StatusNotFound, fmt.Sprintf("trang này không trả lời bằng context.view(…) nên không vẽ %s ở chỗ %s", component, reqRouter.call.at))
+}
+
 // relativeToSite names a file of the site for a message.
 func (t *Tenant) relativeToSite(file string) string {
 	base := strings.TrimRight(strings.ReplaceAll(t.resolve(), "\\", "/"), "/") + "/"
@@ -323,7 +335,9 @@ func (t *Tenant) viewPage(node *RouteNode) *ui.Page {
 }
 
 // serveComponentCall runs a job of a component the page draws (reqRouter.call names it component.job, at its
-// place), after the view's function answered context.bind({ … }) on vm.
+// place), after the page's function answered on vm: router.view's context.bind({ … }), or router.get's
+// context.view({ … }) (29/10/2026). handler is nil for a content.ui with no router.get: a page with no data,
+// drawn again as it is.
 func (t *Tenant) serveComponentCall(vm *runtime.VM, ctxObj *Context, reqRouter *Router, node *RouteNode, leaf *FolderRouter, handler *value.Lambda) {
 	call := reqRouter.call
 	response := reqRouter.response
@@ -409,12 +423,14 @@ func (t *Tenant) serveComponentCall(vm *runtime.VM, ctxObj *Context, reqRouter *
 	}
 	stamp := nextViewStamp() // before the run that reads the page's data, under the page's lock (view_call.go)
 	reqRouter.reads = map[string]bool{}
-	if res := t.execTree(vm, leaf, handler, ctxObj); res.K == value.Invalid || response.Kind() != "render" {
-		if res.K == value.Invalid {
-			t.recordRuntimeFailure(reqRouter, leaf.bytecode, "view", res)
+	if handler != nil {
+		if res := t.execTree(vm, leaf, handler, ctxObj); res.K == value.Invalid || response.Kind() != "render" {
+			if res.K == value.Invalid {
+				t.recordRuntimeFailure(reqRouter, leaf.bytecode, "view", res)
+			}
+			answerViewCallError(reqRouter, http.StatusInternalServerError, "trang không vẽ lại được sau việc "+call.name)
+			return
 		}
-		answerViewCallError(reqRouter, http.StatusInternalServerError, "trang không vẽ lại được sau việc "+call.name)
-		return
 	}
 	after := response.Data()
 	answer := map[string]any{"seq": call.seq}

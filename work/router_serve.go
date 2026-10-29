@@ -221,7 +221,37 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 	}
 	// a job of router.view's page, called through the bridge: a POST to the page's URL naming it (view_call.go)
 	if method == nil && ui && r.Method == http.MethodPost && (calling || refreshing) {
-		if get := leaf.methods[http.MethodGet]; get != nil && get.view {
+		get := leaf.methods[http.MethodGet]
+		if calling && (get == nil || !get.view) && (get != nil || t.folderHasUIPage(match.Node)) {
+			// a job of a component on a page router.view does not draw (29/10/2026): one router.get answers with
+			// context.view({ … }), or a content.ui with no router.get (component_call.go)
+			call, err := readViewCall(r, callName, false)
+			if err != nil {
+				answerViewCallError(reqRouter, http.StatusBadRequest, err.Error())
+				finalize()
+				return
+			}
+			component, job, ok := strings.Cut(call.name, ".")
+			if !ok {
+				answerViewCallError(reqRouter, http.StatusNotFound, fmt.Sprintf("trang này không vẽ bằng router.view nên không có việc %s; việc của một component viết tên component, dấu chấm và tên việc", call.name))
+				finalize()
+				return
+			}
+			call.readOnly = t.viewPage(match.Node).ReadOnlyJob(component, job)
+			reqRouter.call = call
+			if !call.readOnly {
+				defer t.lockViewCalls(leaf)()
+			}
+			if get == nil {
+				// a page with no data: drawn again as it is, past the folders' guards again after the job
+				reqRouter.callChain = match.Chain
+				t.serveComponentCall(vm, ctxObj, reqRouter, match.Node, leaf, nil)
+				finalize()
+				return
+			}
+			method = get
+		}
+		if get != nil && get.view {
 			call, err := readViewCall(r, callName, refreshing)
 			if err != nil {
 				answerViewCallError(reqRouter, http.StatusBadRequest, err.Error())
@@ -363,6 +393,9 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 				// router.view's page called a job through the bridge (view_call.go)
 				reqRouter.callChain, reqRouter.callGuards = match.Chain, method.guards
 				t.serveViewCall(vm, ctxObj, reqRouter, match.Node, leaf, method.handle)
+			} else if uiRoute(match.Node) && reqRouter.call != nil && !method.view {
+				// a job of a component on a page router.get answers, which answered no page this time
+				t.answerNoPage(reqRouter)
 			} else if uiRoute(match.Node) && reqRouter.response.Kind() == "render" {
 				// router.work: the handler answered with context.view({ … }): the folder's .ui page
 				t.serveUIAnswer(vm, ctxObj, reqRouter, match.Node, method.handle)

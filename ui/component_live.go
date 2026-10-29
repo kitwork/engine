@@ -249,10 +249,6 @@ func (c *compiler) liveSiteCall(n *Node, cx ctx, site *callSite) error {
 		return errAt(n, "%s có việc đi qua cầu nối, mà chỗ gọi này lặp theo for: mỗi dòng một instance, và server tìm đúng instance đã bấm bằng dấu vân tay của nó, phần engine chưa có. Đặt <%s> ngoài for",
 			def.name, def.name)
 	}
-	if !c.given.view {
-		return errAt(n, "%s có việc đi qua cầu nối, cầu nối của router.view: trang này không vẽ bằng router.view((context) => context.bind({ … })) nên việc của %s không có chỗ để gọi",
-			def.name, def.name)
-	}
 	site.at = c.callPlace(n, cx)
 	if c.out.components == nil {
 		c.out.components = &liveComponents{defs: map[string]*componentDef{}}
