@@ -17,7 +17,7 @@ import (
 const drawnList = `
 var kitwork = window.kitwork;
 var ul = el("ul");
-var start = document.createComment("kitwork-for:start id=s1");
+var start = document.createComment("kitwork-for-start id=s1");
 var template = el("li", { "data-kitwork-for": "todo of todos; key: todo.id", "data-kitwork-template": "", "hidden": "" });
 template.appendChild(el("input", { "type": "checkbox", "data-kitwork-bind": "checked: todo.done" }));
 template.appendChild(el("span", { "data-kitwork-bind": "text: todo.title" }));
@@ -31,7 +31,7 @@ function drawn(id, title, done) {
   li.appendChild(span);
   return li;
 }
-var end = document.createComment("kitwork-for:end");
+var end = document.createComment("kitwork-for-end");
 ul.appendChild(start);
 ul.appendChild(template);
 var first = drawn(1, "Mua sữa", false), second = drawn(2, "Gửi thư", true);
@@ -163,14 +163,14 @@ var kitwork = window.kitwork;
 kitwork.component("box", { open: true });
 var host = el("div", { "data-kitwork-component": "box" });
 var ul = el("ul");
-var start = document.createComment("kitwork-for:start id=s1");
+var start = document.createComment("kitwork-for-start id=s1");
 var template = el("li", { "data-kitwork-for": "todo of todos; key: todo.id", "data-kitwork-template": "", "hidden": "" });
 template.appendChild(el("span", { "data-kitwork-bind": "text: todo.title + (open ? ' *' : '')" }));
 var row = el("li", { "data-kitwork-item": "s1", "data-kitwork-key": "1" });
 var span = el("span", { "data-kitwork-bind": "text: todo.title + (open ? ' *' : '')" });
 span.textContent = "Mua sữa *";
 row.appendChild(span);
-ul.appendChild(start); ul.appendChild(template); ul.appendChild(row); ul.appendChild(document.createComment("kitwork-for:end"));
+ul.appendChild(start); ul.appendChild(template); ul.appendChild(row); ul.appendChild(document.createComment("kitwork-for-end"));
 host.appendChild(ul);
 document.body.appendChild(host);
 kitwork.scope.$.todos = [{ id: 1, title: "Mua sữa" }];

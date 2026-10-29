@@ -42,7 +42,7 @@ main.appendChild(notice);
 var empty = el("p", { "data-kitwork-mark": "4", "hidden": "" });
 main.appendChild(empty);
 var ul = el("ul");
-ul.appendChild(document.createComment("kitwork-for:start id=s1"));
+ul.appendChild(document.createComment("kitwork-for-start id=s1"));
 function row(attrs, todo) {
   var li = el("li", attrs);
   var box = el("input", { "type": "checkbox", "data-kitwork-mark": "5" });
@@ -55,7 +55,7 @@ function row(attrs, todo) {
 }
 ul.appendChild(row({ "data-kitwork-template": "0", "hidden": "" }, null));
 todos.forEach(function (todo) { ul.appendChild(row({ "data-kitwork-item": "s1", "data-kitwork-key": String(todo.id) }, todo)); });
-ul.appendChild(document.createComment("kitwork-for:end"));
+ul.appendChild(document.createComment("kitwork-for-end"));
 main.appendChild(ul);
 var left = el("p", { "data-kitwork-mark": "8" });
 left.textContent = "Còn " + N + " việc chưa xong.";

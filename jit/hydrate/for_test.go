@@ -44,9 +44,9 @@ var r = rows();
 if (r.length !== 2) throw new Error("initial: expected 2 rows, got " + r.length);
 // The wire shape of ideaship-final §7: a start marker naming the list, rows carrying that id, an end marker.
 var start = ul.childNodes[0], end = ul.childNodes[ul.childNodes.length - 1];
-if (start.nodeType !== 8 || !/^kitwork-for:start id=\S+$/.test(start._text)) throw new Error("the list should begin with <!--kitwork-for:start id=…-->, got " + start._text);
-if (end.nodeType !== 8 || end._text !== "kitwork-for:end") throw new Error("the list should end with <!--kitwork-for:end-->, got " + end._text);
-var listId = start._text.slice("kitwork-for:start id=".length);
+if (start.nodeType !== 8 || !/^kitwork-for-start id=\S+$/.test(start._text)) throw new Error("the list should begin with <!--kitwork-for-start id=…-->, got " + start._text);
+if (end.nodeType !== 8 || end._text !== "kitwork-for-end") throw new Error("the list should end with <!--kitwork-for-end-->, got " + end._text);
+var listId = start._text.slice("kitwork-for-start id=".length);
 if (r[0].getAttribute("data-kitwork-item") !== listId) throw new Error("each row should carry the list id in data-kitwork-item, got " + r[0].getAttribute("data-kitwork-item"));
 // The row overlay: index, count, first/last, even/odd — beside the authored item/index names.
 function overlayOf(row) { return row.querySelectorAll("[data-kitwork-bind]")[2].textContent; }

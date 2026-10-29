@@ -93,8 +93,8 @@ func TestPageWithJobsRunsInTheKernel(t *testing.T) {
 
 	// the page has a program (page_program.go): marks, no expression on the elements
 	for _, want := range []string{
-		`<!--kitwork-for:start id=s1-->`, `data-kitwork-template="0"`,
-		`data-kitwork-item="s1" data-kitwork-key="45"`, `data-kitwork-item="s1" data-kitwork-key="46"`, `<!--kitwork-for:end-->`,
+		`<!--kitwork-for-start id=s1-->`, `data-kitwork-template="0"`,
+		`data-kitwork-item="s1" data-kitwork-key="45"`, `data-kitwork-item="s1" data-kitwork-key="46"`, `<!--kitwork-for-end-->`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("the page should hold %q:\n%s", want, html)
@@ -229,7 +229,7 @@ router.view((context) => context.bind({ title: "", todos: [], left: 0, add: 0, t
 		t.Fatal("a router.view with no job and no var should not run in the kernel")
 	}
 	html := page.Render(Request{Path: "/todo", Scope: liveTodoScope()})
-	for _, gone := range []string{"data-kitwork-page", "kitwork-for:start", "data-kitwork-template", "checked: todo.done"} {
+	for _, gone := range []string{"data-kitwork-page", "kitwork-for-start", "data-kitwork-template", "checked: todo.done"} {
 		if strings.Contains(html, gone) {
 			t.Errorf("a printed page should not hold %q:\n%s", gone, html)
 		}
@@ -256,7 +256,7 @@ func TestPageListInsideAComponentRunsInTheKernel(t *testing.T) {
 	}
 	html := page.Render(Request{Path: "/todo", Scope: liveTodoScope()})
 	for _, want := range []string{
-		`data-kitwork-component="dropdown"`, `<!--kitwork-for:start id=s1-->`, `data-kitwork-template`,
+		`data-kitwork-component="dropdown"`, `<!--kitwork-for-start id=s1-->`, `data-kitwork-template`,
 		`data-kitwork-item="s1" data-kitwork-key="45"`, `data-kitwork-item="s1" data-kitwork-key="46"`,
 		`show: todos.length === 0`, `click: remove(todo.id)`, `text: todo.title`,
 	} {

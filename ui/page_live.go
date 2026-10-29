@@ -236,7 +236,7 @@ func (o *elemOp) renderLive(r *run, scope map[string]any) {
 			restore(scope, index, oldIndex, hadIndex)
 		}
 	}()
-	r.b.WriteString("<!--kitwork-for:start id=" + id + "-->")
+	r.b.WriteString("<!--kitwork-for-start id=" + id + "-->")
 	scope[item] = nil
 	if index != "" {
 		scope[index] = float64(0)
@@ -263,5 +263,5 @@ func (o *elemOp) renderLive(r *run, scope map[string]any) {
 		o.renderOne(r, scope)
 	}
 	r.mark, r.markHidden = "", false
-	r.b.WriteString("<!--kitwork-for:end-->")
+	r.b.WriteString("<!--kitwork-for-end-->")
 }

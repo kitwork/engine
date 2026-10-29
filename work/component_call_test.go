@@ -64,7 +64,7 @@ func TestComponentWithJobsIsDrawnForTheBridge(t *testing.T) {
 	for _, part := range []string{
 		`data-kitwork-component="shop-cart"`, `data-kitwork-at="` + placesOf(t, tn, "/cart")[0] + `"`, `data-kitwork-scope="done: false; items: []; receipt: &#39;&#39;; shippingFee: 20000"`,
 		`data-kitwork-event="click: checkout()"`, `data-kitwork-event="click: add(&#39;cà phê&#39;)"`,
-		`<!--kitwork-for:start id=s1-->`, `<script type="application/json" data-kitwork-components>`,
+		`<!--kitwork-for-start id=s1-->`, `<script type="application/json" data-kitwork-components>`,
 		`"jobs":["add","checkout"]`, `"vars":["done","items","receipt"]`, `/_kitwork/kernel.`, `/_kitwork/call.`,
 	} {
 		if !strings.Contains(body, part) {

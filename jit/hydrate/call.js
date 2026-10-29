@@ -560,8 +560,8 @@
       var template = document.querySelector('[data-kitwork-template="' + i + '"]');
       if (!template) return;
       var start = template.previousSibling, close = template.nextSibling;
-      while (close && !(close.nodeType === 8 && close.nodeValue === "kitwork-for:end")) close = close.nextSibling;
-      var opened = start && start.nodeType === 8 && /^kitwork-for:start id=(\S+)$/.exec(start.nodeValue);
+      while (close && !(close.nodeType === 8 && close.nodeValue === "kitwork-for-end")) close = close.nextSibling;
+      var opened = start && start.nodeType === 8 && /^kitwork-for-start id=(\S+)$/.exec(start.nodeValue);
       if (!opened || !close) return;
       template.parentNode.removeChild(template);
       template.removeAttribute("data-kitwork-template");

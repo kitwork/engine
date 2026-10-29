@@ -1135,8 +1135,8 @@
   // marker pair already, its template hidden right after the start marker (data-kitwork-template) and its
   // rows after that, each with the list's id and its key:
   //
-  //   <!--kitwork-for:start id=s1--><li data-kitwork-for="todo of todos; key: todo.id" data-kitwork-template hidden>…</li>
-  //   <li data-kitwork-item="s1" data-kitwork-key="45">…</li>…<!--kitwork-for:end-->
+  //   <!--kitwork-for-start id=s1--><li data-kitwork-for="todo of todos; key: todo.id" data-kitwork-template hidden>…</li>
+  //   <li data-kitwork-item="s1" data-kitwork-key="45">…</li>…<!--kitwork-for-end-->
   //
   // Those markers are kept and the rows adopted by key: the first pass moves and rebuilds nothing the
   // server drew, so a row keeps its focus and what was typed in it from the first paint on.
@@ -1154,9 +1154,9 @@
         template.removeAttribute("data-kitwork-template");
         template.removeAttribute("hidden");
         var start = el.previousSibling;
-        var opened = start && start.nodeType === 8 && /^kitwork-for:start id=(\S+)$/.exec(start.nodeValue);
+        var opened = start && start.nodeType === 8 && /^kitwork-for-start id=(\S+)$/.exec(start.nodeValue);
         var close = el.nextSibling;
-        while (close && !(close.nodeType === 8 && close.nodeValue === "kitwork-for:end")) close = close.nextSibling;
+        while (close && !(close.nodeType === 8 && close.nodeValue === "kitwork-for-end")) close = close.nextSibling;
         if (opened && close) {
           parent.removeChild(el);
           forRegistry.push({ id: opened[1], anchor: start, end: close, template: template, spec: spec, keyIR: spec.keyIR });
@@ -1166,8 +1166,8 @@
       // The list's place in the document is the marker pair of ideaship-final §7 — the same shape
       // a server-rendered list arrives in — and every row carries the list's id in data-kitwork-item.
       var id = "f" + (++forSerial);
-      var anchor = document.createComment("kitwork-for:start id=" + id);
-      var end = document.createComment("kitwork-for:end");
+      var anchor = document.createComment("kitwork-for-start id=" + id);
+      var end = document.createComment("kitwork-for-end");
       parent.insertBefore(anchor, el);
       parent.insertBefore(end, el);
       parent.removeChild(el);
