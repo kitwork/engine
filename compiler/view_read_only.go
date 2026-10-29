@@ -8,6 +8,11 @@ import "strings"
 // is out goes at once. The author never writes it.
 const ViewReadOnlyName = "__readOnly"
 
+// ReadOnlyJobs is readOnlyJobs for a component's function, as the page reads the component's logic
+// (ui/component.go): the jobs of a component.define(…) that change nothing but the instance's vars, whose calls
+// wait for no other call of the page (work/router_serve.go). The page knows them before the lock is taken.
+func ReadOnlyJobs(fn *FunctionLiteral) []string { return readOnlyJobs(fn) }
+
 // readOnlyJobs are the jobs of the view's function, by the names it binds, whose source writes nothing but the
 // page's vars and its own names: each assignment's target is a var of the page or a name the job declares, a
 // member of one of them, and the job calls nothing but a method of a value its caller sent (text.trim()), or of

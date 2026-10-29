@@ -41,6 +41,8 @@ type logicNames struct {
 	vars     map[string]bool
 	inputs   map[string]any
 	required map[string]bool
+	// readOnly are the jobs that change nothing but the instance's vars (logic.ReadOnlyJobs)
+	readOnly map[string]bool
 	// problem is the first name of the bind the bridge cannot carry (a var bound under another name, a spread):
 	// an error once the component is live
 	problem *logicProblem
@@ -64,6 +66,7 @@ func (d *componentDef) take(names *logicNames) {
 	}
 	d.state, d.bound = names.state, names.bound
 	d.jobs, d.vars, d.inputs, d.required = names.jobs, names.vars, names.inputs, names.required
+	d.readOnly = names.readOnly
 }
 
 // live reports whether the component is the site's and its bind holds a job or a var: the browser runs it,
@@ -314,6 +317,19 @@ func (l *liveComponents) write(b *strings.Builder) {
 	b.WriteString(`<script type="application/json" data-kitwork-components>`)
 	b.Write(data) // json.Marshal writes <, > and & as <…: nothing here closes the script
 	b.WriteString(`</script>`)
+}
+
+// ReadOnlyJob reports whether a job of a component the page holds, whose jobs go through the bridge, changes
+// nothing but the instance's vars (29/10/2026, logic.ReadOnlyJobs, read off the component's logic as the page
+// was compiled): its call waits for no other call of the page (work/router_serve.go), which has to know before
+// the page's function runs. A name's logic is the site's one file (Site.componentLogic). False for a component
+// the page does not hold, and on no page.
+func (p *Page) ReadOnlyJob(component, job string) bool {
+	if p == nil || p.components == nil {
+		return false
+	}
+	def := p.components.defs[component]
+	return def != nil && def.readOnly[job]
 }
 
 // Instance is one call of a component the browser runs, as one render of the page draws it: its name, the

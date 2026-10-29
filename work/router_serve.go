@@ -228,7 +228,12 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 				finalize()
 				return
 			}
-			call.readOnly = get.readOnly[call.name]
+			if component, job, ok := strings.Cut(call.name, "."); ok {
+				// a job of a component the page holds: the page, compiled, read its logic (ui.Page.ReadOnlyJob)
+				call.readOnly = t.viewPage(match.Node).ReadOnlyJob(component, job)
+			} else {
+				call.readOnly = get.readOnly[call.name]
+			}
 			reqRouter.call = call
 			method = get
 			// one call of a page's jobs at a time, from the run before the job to the run after it: a job

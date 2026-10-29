@@ -57,6 +57,8 @@ type componentDef struct {
 	vars     map[string]bool
 	inputs   map[string]any
 	required map[string]bool
+	// readOnly are its jobs that change nothing but the instance's vars (Page.ReadOnlyJob)
+	readOnly map[string]bool
 	// kitwork is one of Kitwork's own components (appearance, dropdown, toast, progressbar, terminal)
 	kitwork *kitworkComponent
 }
@@ -569,6 +571,12 @@ func componentNames(source, name string) (*logicNames, bool, error) {
 			continue
 		}
 		if names, ok := boundNames(fn); ok {
+			names.readOnly = map[string]bool{}
+			for _, job := range logic.ReadOnlyJobs(fn) {
+				if names.jobs[job] {
+					names.readOnly[job] = true
+				}
+			}
 			return names, true, nil
 		}
 		return &logicNames{state: declaredNames(fn.Body.Statements)}, true, nil
