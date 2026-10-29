@@ -200,7 +200,7 @@ func (t *Tenant) callComponent(reqRouter *Router, ctxObj *Context, file *compone
 		return nil, http.StatusNotFound, fmt.Sprintf("%s không có component.define(%q, …)", t.relativeToSite(logic), name)
 	}
 	context := &componentContext{Context: ctxObj, attributes: value.New(inputs), vars: vars}
-	if out := vm.ExecuteLambda(fn, []value.Value{value.New(context)}); out.K == value.Invalid {
+	if out := runOnItsOwn(vm, fn, []value.Value{value.New(context)}); out.K == value.Invalid {
 		t.recordRuntimeFailure(reqRouter, bc, "component", out)
 		status, message := http.StatusInternalServerError, out.Text()
 		if failure, ok := out.Failure(); ok {
@@ -212,6 +212,15 @@ func (t *Tenant) callComponent(reqRouter *Router, ctxObj *Context, file *compone
 		return nil, http.StatusInternalServerError, fmt.Sprintf("hàm của %s không trả context.bind({ … })", name)
 	}
 	return &componentRun{vm: vm, bytecode: bc, bound: context.bound}, 0, ""
+}
+
+// runOnItsOwn runs a function of components.work with a budget of its own, the app's MaxEnergy: each run of a
+// component's function, each job. One VM serves every run of the request (componentFile): the draw's, the pass
+// that finds the instance, the job, the pass after it (29/10/2026); their budgets added up, a call failed where the
+// draw of the same page had not.
+func runOnItsOwn(vm *runtime.VM, fn *value.Lambda, args []value.Value) value.Value {
+	vm.Energy = 0
+	return vm.ExecuteLambda(fn, args)
 }
 
 // componentRenderer runs, for one request, the function of each component of the site the page draws whose
@@ -317,27 +326,28 @@ func (t *Tenant) relativeToSite(file string) string {
 }
 
 // viewInstances draws the folder's page from the data the view's function bound and gives each component on it
-// whose jobs go through the bridge, by its place; nil when the page cannot be had.
+// whose jobs go through the bridge, by its place; nil when the page cannot be had, and the failure of the draw when
+// a component it runs fails, as the page's draw would.
 //
 // The pass runs the components the page draws, as the page's draw does (29/10/2026): an input the server reads
 // where the call stands may be a value a component around it computes (who looks, from a cookie), and a pass that
 // ran none read that value as its source writes it, not as the person was shown it.
-func (t *Tenant) viewInstances(vm *runtime.VM, reqRouter *Router, node *RouteNode, handler *value.Lambda, data value.Value) map[string]ui.Instance {
+func (t *Tenant) viewInstances(vm *runtime.VM, reqRouter *Router, node *RouteNode, handler *value.Lambda, data value.Value) (map[string]ui.Instance, error) {
 	page := t.viewPage(node)
 	if page == nil {
-		return nil
+		return nil, nil
 	}
 	scope, _, err := viewData(vm, handler, data)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	r := reqRouter.request
 	components := newComponentRenderer(t, reqRouter)
 	instances := page.Instances(ui.Request{Path: r.URL.Path, Origin: requestOrigin(r), Scope: scope, Method: r.Method, Component: components.run})
-	if components.failed() != nil {
-		return nil
+	if err := components.failed(); err != nil {
+		return nil, err
 	}
-	return instances
+	return instances, nil
 }
 
 // viewPage is the folder's compiled .ui page, nil when it cannot be had.
@@ -379,7 +389,14 @@ func (t *Tenant) serveComponentCall(vm *runtime.VM, ctxObj *Context, reqRouter *
 			}
 		}
 	}
-	instance, found := t.viewInstances(vm, reqRouter, node, handler, data)[call.at]
+	// a component of the page that fails fails the call, as it fails the page's draw: the page is not drawn, the
+	// instance is not looked for
+	instances, err := t.viewInstances(vm, reqRouter, node, handler, data)
+	if err != nil {
+		answerViewCallError(reqRouter, http.StatusInternalServerError, "trang không vẽ được: "+err.Error())
+		return
+	}
+	instance, found := instances[call.at]
 	if !found || instance.Name != component {
 		answerViewCallError(reqRouter, http.StatusNotFound, fmt.Sprintf("trang này không vẽ %s ở chỗ %s", component, call.at))
 		return
@@ -403,7 +420,7 @@ func (t *Tenant) serveComponentCall(vm *runtime.VM, ctxObj *Context, reqRouter *
 	}
 	mineBefore := viewSnapshot(run.bound)
 	clearViewAnswer(reqRouter)
-	if out := run.vm.ExecuteLambda(job, call.args); out.K == value.Invalid {
+	if out := runOnItsOwn(run.vm, job, call.args); out.K == value.Invalid {
 		t.recordRuntimeFailure(reqRouter, run.bytecode, "component", out)
 		status, message := http.StatusInternalServerError, out.Text()
 		if failure, ok := out.Failure(); ok {
@@ -477,8 +494,14 @@ func (t *Tenant) serveComponentCall(vm *runtime.VM, ctxObj *Context, reqRouter *
 		}
 	}
 	// the instance again, its inputs read where it stands on the page as it is now; a page that no longer
-	// draws it there has nothing of it to change
-	if now, ok := t.viewInstances(vm, reqRouter, node, handler, after)[call.at]; ok && now.Name == component {
+	// draws it there has nothing of it to change. A component of the page that fails now fails the answer, as the
+	// view's function failing after a job does (view_call.go): the page the job left cannot be drawn
+	instances, err = t.viewInstances(vm, reqRouter, node, handler, after)
+	if err != nil {
+		answerViewCallError(reqRouter, http.StatusInternalServerError, "trang không vẽ lại được sau việc "+call.name+": "+err.Error())
+		return
+	}
+	if now, ok := instances[call.at]; ok && now.Name == component {
 		again, status, message := t.runComponent(reqRouter, ctxObj, now.Logic, component, now.Inputs, vars)
 		if again == nil {
 			answerViewCallError(reqRouter, status, message)

@@ -98,3 +98,104 @@ func TestAComponentJobLoadsItsFileOnce(t *testing.T) {
 		t.Fatalf("each call should load components.work once: the count went from %v to %v", first, second)
 	}
 }
+
+// A call has the budget the draw has (29/10/2026): one VM serves every run of components.work for the request, the
+// pass that finds the instance, the run before the job, the job, the pass after it, the run after; each runs with
+// the app's MaxEnergy of its own. The page draws four boxes that each count to 2000; with the least budget the
+// page draws with, a job of one box answers.
+//
+// CONTROL (by hand, 29/10/2026): with runOnItsOwn leaving the energy as it was, the call ran out of energy (red).
+func TestAComponentCallHasTheBudgetTheDrawHas(t *testing.T) {
+	logic := "import * as component from \"kitwork/component\";\n" +
+		"const sum = (n) => {\n  let total = 0;\n  for (let i = 0; i < n; i++) {\n    total = total + i;\n  }\n  return total;\n};\n" +
+		"component.define(\"busy-box\", (context) => {\n" +
+		"  const { label } = context.attributes();\n" +
+		"  const total = sum(2000);\n" +
+		"  var picked = \"\";\n" +
+		"  const pick = () => { picked = label; };\n" +
+		"  return context.bind({ total, picked, pick });\n" +
+		"});\n"
+	box := func(label string) string {
+		return `<busy-box label="` + label + `"><text>{{ picked }}</text><button click="pick()">` + label + `</button></busy-box>`
+	}
+	tn := NewTenant(writeSite(t, map[string]string{
+		"router.work":      `import * as router from "kitwork/router";`,
+		"view.ui":          "<view><content /></view>",
+		"components.work":  logic,
+		"busy/content.ui":  "<content>" + box("a") + box("b") + box("c") + box("d") + "</content>",
+		"busy/router.work": "import * as router from \"kitwork/router\";\nrouter.view((context) => context.bind({ busy: true }));\n",
+	}), "localhost")
+	if err := tn.Run(); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	places := placesOf(t, tn, "/busy")
+	if len(places) != 4 {
+		t.Fatalf("the page should draw four boxes: %v", places)
+	}
+	// the least budget the page draws with
+	low, high := uint64(1000), uint64(50_000_000)
+	for low+1 < high {
+		tn.MaxEnergy = (low + high) / 2
+		if serveGet(tn, "/busy", nil).Code == http.StatusOK {
+			high = tn.MaxEnergy
+		} else {
+			low = tn.MaxEnergy
+		}
+	}
+	tn.MaxEnergy = high + high/4
+	r := postCall(tn, "/busy", "busy-box.pick", callBody{Seq: 1, Args: []any{}, Page: vars(), At: places[1], Mine: vars("picked", "")}.String())
+	if r.Code != http.StatusOK || instanceOf(componentAnswer(t, r.Body.String()), places[1])["picked"] != "b" {
+		t.Fatalf("with the budget the page draws with (%d), the job of box b should answer: %d %.600s", tn.MaxEnergy, r.Code, r.Body.String())
+	}
+}
+
+// A component of the page that fails fails a call of the page as it fails its draw (29/10/2026), with its own
+// message: before the job, not a "this page does not draw it" (404); after it, not an answer that leaves out the
+// instance's changes. The box fails for the visitor "boom"; the cart's checkout breaks the box for every run after.
+//
+// CONTROL (by hand, 29/10/2026): with viewInstances giving no error, the first call answered 404 and the second 200
+// with no receipt (red).
+func TestAComponentThatFailsFailsTheCall(t *testing.T) {
+	logic := "import * as component from \"kitwork/component\";\nimport { datastore } from \"kitwork/storage\";\n" +
+		"const broken = datastore(\"boxes\").segment(\"broken\");\n" +
+		"component.define(\"guest-box\", (context) => {\n" +
+		"  const who = context.cookie(\"visitor\") ?? \"khách\";\n" +
+		"  if (who === \"boom\") {\n    fail(\"hộp hỏng với boom\");\n  }\n" +
+		"  if (broken.get() === true) {\n    fail(\"hộp hỏng sau việc\");\n  }\n" +
+		"  return context.bind({ who });\n" +
+		"});\n" +
+		"component.define(\"guest-cart\", (context) => {\n" +
+		"  const { owner } = context.attributes();\n" +
+		"  var receipt = \"\";\n" +
+		"  const checkout = () => { receipt = \"cho \" + owner; };\n" +
+		"  const breakIt = () => { broken.set(true); };\n" +
+		"  return context.bind({ receipt, checkout, breakIt });\n" +
+		"});\n"
+	tn := NewTenant(writeSite(t, map[string]string{
+		"router.work":     `import * as router from "kitwork/router";`,
+		"view.ui":         "<view><content /></view>",
+		"components.work": logic,
+		"guest/content.ui": `<content><guest-box><text>{{ who }}</text>` +
+			`<guest-cart owner="{{ who }}"><text>{{ receipt }}</text><button click="checkout()">Đặt</button><button click="breakIt()">Hỏng</button></guest-cart></guest-box></content>`,
+		"guest/router.work": "import * as router from \"kitwork/router\";\nrouter.view((context) => context.bind({ guest: true }));\n",
+	}), "localhost")
+	if err := tn.Run(); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	at := placesOf(t, tn, "/guest")[0]
+	call := func(job, visitor string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "http://localhost/guest?"+ViewCallParameter+"=guest-cart."+job,
+			strings.NewReader(callBody{Seq: 1, Args: []any{}, Page: vars(), At: at, Mine: vars("receipt", "")}.String()))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Cookie", "visitor="+visitor)
+		rec := httptest.NewRecorder()
+		tn.Serve(rec, req)
+		return rec
+	}
+	if r := call("checkout", "boom"); r.Code != http.StatusInternalServerError || !strings.Contains(r.Body.String(), "hộp hỏng với boom") {
+		t.Errorf("a box that fails before the job should fail the call with its message: %d %s", r.Code, r.Body.String())
+	}
+	if r := call("breakIt", "Lan"); r.Code != http.StatusInternalServerError || !strings.Contains(r.Body.String(), "hộp hỏng sau việc") {
+		t.Errorf("a box that fails after the job should fail the answer with its message: %d %s", r.Code, r.Body.String())
+	}
+}
