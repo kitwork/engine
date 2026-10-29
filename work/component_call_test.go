@@ -62,7 +62,7 @@ func TestComponentWithJobsIsDrawnForTheBridge(t *testing.T) {
 		t.Fatalf("/cart: %d\n%.1500s", r.Code, body)
 	}
 	for _, part := range []string{
-		`data-kitwork-component="shop-cart"`, `data-kitwork-at="c1"`, `data-kitwork-scope="done: false; items: []; receipt: &#39;&#39;; shippingFee: 20000"`,
+		`data-kitwork-component="shop-cart"`, `data-kitwork-at="` + placesOf(t, tn, "/cart")[0] + `"`, `data-kitwork-scope="done: false; items: []; receipt: &#39;&#39;; shippingFee: 20000"`,
 		`data-kitwork-event="click: checkout()"`, `data-kitwork-event="click: add(&#39;cà phê&#39;)"`,
 		`<!--kitwork-for:start id=s1-->`, `<script type="application/json" data-kitwork-components>`,
 		`"jobs":["add","checkout"]`, `"vars":["done","items","receipt"]`, `/_kitwork/kernel.`, `/_kitwork/call.`,
@@ -77,6 +77,21 @@ func TestComponentWithJobsIsDrawnForTheBridge(t *testing.T) {
 }
 
 // componentAnswer reads a call's JSON answer.
+// placesOf are the places of the components the browser runs on the page path draws (data-kitwork-at), in the
+// order the page draws them: fixed by the source (ui callPlace), read here as a tab reads them.
+func placesOf(t *testing.T, tn *Tenant, path string) []string {
+	t.Helper()
+	body := serveGet(tn, path, nil).Body.String()
+	var out []string
+	for _, part := range strings.Split(body, `data-kitwork-at="`)[1:] {
+		out = append(out, part[:strings.Index(part, `"`)])
+	}
+	if len(out) == 0 {
+		t.Fatalf("no component the browser runs on %s: %.300s", path, body)
+	}
+	return out
+}
+
 func componentAnswer(t *testing.T, body string) map[string]any {
 	t.Helper()
 	var answer map[string]any
@@ -97,7 +112,7 @@ func TestComponentJobRunsOnTheInstanceThePageDraws(t *testing.T) {
 	tn := cartSite(t)
 	// the browser sends owner and shippingFee among the vars: they are no vars, and inputs never come from it
 	r := postCall(tn, "/cart", "shop-cart.checkout",
-		`{"args":[],"vars":{},"seq":5,"at":"c1","scope":{"items":[{"id":1,"name":"a"},{"id":2,"name":"b"}],"done":false,"receipt":"","owner":"mallory","shippingFee":0}}`)
+		`{"args":[],"vars":{},"seq":5,"at":"`+placesOf(t, tn, "/cart")[0]+`","scope":{"items":[{"id":1,"name":"a"},{"id":2,"name":"b"}],"done":false,"receipt":"","owner":"mallory","shippingFee":0}}`)
 	if r.Code != http.StatusOK {
 		t.Fatalf("checkout: %d %.600s", r.Code, r.Body.String())
 	}
@@ -106,7 +121,7 @@ func TestComponentJobRunsOnTheInstanceThePageDraws(t *testing.T) {
 		t.Errorf("seq %v, want the call's 5", answer["seq"])
 	}
 	components, _ := answer["components"].(map[string]any)
-	mine, _ := components["c1"].(map[string]any)
+	mine, _ := components[placesOf(t, tn, "/cart")[0]].(map[string]any)
 	patch, _ := mine["patch"].(map[string]any)
 	if patch["receipt"] != "an:20000:2" {
 		t.Errorf("receipt %v, want an:20000:2 (inputs where the call stands, items as sent)", patch["receipt"])
@@ -140,8 +155,8 @@ func TestComponentJobOnlyWhereThePageDrawsIt(t *testing.T) {
 	}{
 		{"/cart", "shop-cart.checkout", `{"at":"c9"}`, "không vẽ shop-cart ở chỗ c9", http.StatusNotFound},
 		{"/cart", "other-cart.checkout", `{"at":"c1"}`, "không vẽ other-cart ở chỗ c1", http.StatusNotFound},
-		{"/cart", "shop-cart.save", `{"at":"c1"}`, "shop-cart không có việc save", http.StatusNotFound},
-		{"/cart", "shop-cart.items", `{"at":"c1"}`, "shop-cart không có việc items", http.StatusNotFound},
+		{"/cart", "shop-cart.save", `{"at":"` + placesOf(t, tn, "/cart")[0] + `"}`, "shop-cart không có việc save", http.StatusNotFound},
+		{"/cart", "shop-cart.items", `{"at":"` + placesOf(t, tn, "/cart")[0] + `"}`, "shop-cart không có việc items", http.StatusNotFound},
 		{"/plain", "shop-cart.checkout", `{"at":"c1"}`, "không vẽ shop-cart ở chỗ c1", http.StatusNotFound},
 		{"/cart", "shop-cart.checkout", `{}`, "cần chỗ gọi", http.StatusBadRequest},
 		{"/cart", "shop-cart.checkout", `{"at":"../c1"}`, "cần chỗ gọi", http.StatusBadRequest},
@@ -184,7 +199,8 @@ func TestComponentJobOnAPageWithJobsOfItsOwn(t *testing.T) {
 		t.Fatalf("run: %v", err)
 	}
 	body := serveGet(tn, "/shop", nil).Body.String()
-	for _, part := range []string{`data-kitwork-component="shop-cart" data-kitwork-at="c1"`, `data-kitwork-components>`, `data-kitwork-page>`, `data-kitwork-event="click: save()"`} {
+	at := placesOf(t, tn, "/shop")[0]
+	for _, part := range []string{`data-kitwork-component="shop-cart" data-kitwork-at="` + at + `"`, `data-kitwork-components>`, `data-kitwork-page>`, `data-kitwork-event="click: save()"`} {
 		if !strings.Contains(body, part) {
 			t.Errorf("/shop lacks %q\n%.3000s", part, body)
 		}
@@ -196,8 +212,8 @@ func TestComponentJobOnAPageWithJobsOfItsOwn(t *testing.T) {
 	if patch, _ := page["patch"].(map[string]any); patch["saved"] != "giao trước 9 giờ" {
 		t.Errorf("the page's job: %v", page)
 	}
-	cart := componentAnswer(t, postCall(tn, "/shop", "shop-cart.checkout", `{"args":[],"vars":{"note":"x","saved":""},"seq":2,"at":"c1","scope":{"items":[{"id":1}],"done":false,"receipt":""}}`).Body.String())
-	mine, _ := cart["components"].(map[string]any)["c1"].(map[string]any)
+	cart := componentAnswer(t, postCall(tn, "/shop", "shop-cart.checkout", `{"args":[],"vars":{"note":"x","saved":""},"seq":2,"at":"`+at+`","scope":{"items":[{"id":1}],"done":false,"receipt":""}}`).Body.String())
+	mine, _ := cart["components"].(map[string]any)[at].(map[string]any)
 	if patch, _ := mine["patch"].(map[string]any); patch["receipt"] != "an:15000:1" {
 		t.Errorf("the cart's job: %v", cart)
 	}
@@ -264,7 +280,7 @@ func TestComponentJobAnswersThePagesRevisions(t *testing.T) {
 	}
 	call := func(revs map[string]string, job string) (map[string]any, string) {
 		held, _ := json.Marshal(revs)
-		r := postCall(tn, "/shop", job, `{"args":["trà"],"vars":{"note":""},"seq":1,"revs":`+string(held)+`,"at":"c1","scope":{"items":[{"id":1,"name":"trà"}]}}`)
+		r := postCall(tn, "/shop", job, `{"args":["trà"],"vars":{"note":""},"seq":1,"revs":`+string(held)+`,"at":"`+placesOf(t, tn, "/shop")[0]+`","scope":{"items":[{"id":1,"name":"trà"}]}}`)
 		if r.Code != http.StatusOK {
 			t.Fatalf("%s: %d %s", job, r.Code, r.Body.String())
 		}
@@ -288,7 +304,7 @@ func TestComponentJobAnswersThePagesRevisions(t *testing.T) {
 	if _, has := revs["note"]; has {
 		t.Errorf("a var has no revision: %s", body)
 	}
-	if components, _ := answer["components"].(map[string]any); components["c1"] == nil {
+	if components, _ := answer["components"].(map[string]any); components[placesOf(t, tn, "/shop")[0]] == nil {
 		t.Errorf("the cart's own data comes as before: %s", body)
 	}
 	if stamp, _ := answer["stamp"].(float64); block.Stamp <= 0 || stamp <= block.Stamp {
@@ -319,12 +335,12 @@ func TestComponentJobAnswersThePagesRevisions(t *testing.T) {
 // Live check taken out), this test went red: the answer carried user whole and its revision.
 func TestComponentJobOnAPageDrawnWholeSendsNoPageData(t *testing.T) {
 	tn := cartSite(t)
-	r := postCall(tn, "/cart", "shop-cart.checkout", `{"args":[],"vars":{},"seq":1,"revs":{},"at":"c1","scope":{"items":[]}}`)
+	r := postCall(tn, "/cart", "shop-cart.checkout", `{"args":[],"vars":{},"seq":1,"revs":{},"at":"`+placesOf(t, tn, "/cart")[0]+`","scope":{"items":[]}}`)
 	answer := componentAnswer(t, r.Body.String())
 	if answer["patch"] != nil || answer["revs"] != nil || answer["lists"] != nil || answer["stamp"] != nil {
 		t.Errorf("a page drawn whole gets nothing of its data: %s", r.Body.String())
 	}
-	if components, _ := answer["components"].(map[string]any); components["c1"] == nil {
+	if components, _ := answer["components"].(map[string]any); components[placesOf(t, tn, "/cart")[0]] == nil {
 		t.Errorf("the cart's own data comes as before: %s", r.Body.String())
 	}
 }
@@ -381,8 +397,8 @@ func TestComponentRunsAsThePageIsDrawn(t *testing.T) {
 	tn := shelfSite(t)
 	body := serveGet(tn, "/shelf", nil).Body.String()
 	for _, part := range []string{
-		`data-kitwork-at="c1" data-kitwork-scope="items: []; label: &#39;Giỏ của an&#39;; placed: 0; visitor: &#39;khách&#39;"`,
-		`data-kitwork-at="c2" data-kitwork-scope="items: []; label: &#39;Giỏ của bình&#39;; placed: 0; visitor: &#39;khách&#39;"`,
+		`data-kitwork-at="` + placesOf(t, tn, "/shelf")[0] + `" data-kitwork-scope="items: []; label: &#39;Giỏ của an&#39;; placed: 0; visitor: &#39;khách&#39;"`,
+		`data-kitwork-at="` + placesOf(t, tn, "/shelf")[1] + `" data-kitwork-scope="items: []; label: &#39;Giỏ của bình&#39;; placed: 0; visitor: &#39;khách&#39;"`,
 		`>Giỏ của an</p>`, `>Giỏ của bình</p>`, `>0 đơn</p>`, `>khách</p>`,
 	} {
 		if !strings.Contains(body, part) {
@@ -393,9 +409,9 @@ func TestComponentRunsAsThePageIsDrawn(t *testing.T) {
 		t.Errorf("who looks is the request's: want Lan\n%.3000s", seen)
 	}
 
-	r := postCall(tn, "/shelf", "shop-cart.checkout", `{"args":[],"vars":{},"seq":1,"at":"c1","scope":{"items":[{"id":1}]}}`)
+	r := postCall(tn, "/shelf", "shop-cart.checkout", `{"args":[],"vars":{},"seq":1,"at":"`+placesOf(t, tn, "/shelf")[0]+`","scope":{"items":[{"id":1}]}}`)
 	answer := componentAnswer(t, r.Body.String())
-	mine, _ := answer["components"].(map[string]any)["c1"].(map[string]any)
+	mine, _ := answer["components"].(map[string]any)[placesOf(t, tn, "/shelf")[0]].(map[string]any)
 	if patch, _ := mine["patch"].(map[string]any); patch["placed"] != float64(1) {
 		t.Errorf("the checkout should answer the new count of its cart: %s", r.Body.String())
 	}
@@ -441,12 +457,13 @@ func TestComponentJobUnderAFalseIfIsNotFound(t *testing.T) {
 	if err := tn.Run(); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if body := serveGet(tn, "/admin", nil).Body.String(); !strings.Contains(body, `data-kitwork-at="c1"`) {
+	at := placesOf(t, tn, "/admin")[0]
+	if body := serveGet(tn, "/admin", nil).Body.String(); !strings.Contains(body, `data-kitwork-at="`+at+`"`) {
 		t.Fatalf("the page draws the tools hidden for the browser:\n%.2000s", body)
 	}
 	call := func(cookie string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, "http://localhost/admin?"+ViewCallParameter+"=admin-tools.wipe",
-			strings.NewReader(`{"args":[],"vars":{"note":""},"seq":1,"at":"c1","scope":{"done":false}}`))
+			strings.NewReader(`{"args":[],"vars":{"note":""},"seq":1,"at":"`+at+`","scope":{"done":false}}`))
 		req.Header.Set("Content-Type", "application/json")
 		if cookie != "" {
 			req.Header.Set("Cookie", cookie)
@@ -455,14 +472,14 @@ func TestComponentJobUnderAFalseIfIsNotFound(t *testing.T) {
 		tn.Serve(rec, req)
 		return rec
 	}
-	if r := call(""); r.Code != http.StatusNotFound || !strings.Contains(r.Body.String(), "không vẽ admin-tools ở chỗ c1") {
+	if r := call(""); r.Code != http.StatusNotFound || !strings.Contains(r.Body.String(), "không vẽ admin-tools ở chỗ "+at) {
 		t.Errorf("a visitor's wipe: %d %s, want 404", r.Code, r.Body.String())
 	}
 	r := call("role=admin")
 	if r.Code != http.StatusOK {
 		t.Fatalf("an admin's wipe: %d %s", r.Code, r.Body.String())
 	}
-	mine, _ := componentAnswer(t, r.Body.String())["components"].(map[string]any)["c1"].(map[string]any)
+	mine, _ := componentAnswer(t, r.Body.String())["components"].(map[string]any)[at].(map[string]any)
 	if patch, _ := mine["patch"].(map[string]any); patch["done"] != true {
 		t.Errorf("an admin's wipe runs: %s", r.Body.String())
 	}

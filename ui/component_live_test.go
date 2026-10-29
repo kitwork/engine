@@ -47,6 +47,16 @@ func liveCartFiles(logic, route, content string) map[string]string {
 	}
 }
 
+// placesIn are the places the components the browser runs on a drawn page are called from (data-kitwork-at), in
+// the order the page draws them.
+func placesIn(html string) []string {
+	var out []string
+	for _, part := range strings.Split(html, `data-kitwork-at="`)[1:] {
+		out = append(out, part[:strings.Index(part, `"`)])
+	}
+	return out
+}
+
 func compileLiveCart(t *testing.T, files map[string]string) (*Page, error) {
 	t.Helper()
 	s := givenSite(files)
@@ -64,8 +74,12 @@ func TestComponentWithJobsRunsInTheBrowser(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := page.Render(Request{Path: "/cart", Scope: map[string]any{"user": "an"}})
+	at := placesIn(html)
+	if len(at) != 1 {
+		t.Fatalf("one place on the page: %v", at)
+	}
 	mustContain(t, html,
-		`data-kitwork-component="shop-cart" data-kitwork-at="c1" data-kitwork-scope="shippingFee: 20000"`,
+		`data-kitwork-component="shop-cart" data-kitwork-at="`+at[0]+`" data-kitwork-scope="shippingFee: 20000"`,
 		`<p data-kitwork-bind="text: label">Giỏ hàng</p>`,
 		`<!--kitwork-for:start id=s1-->`, `data-kitwork-for="line of items; key: line.id"`,
 		`data-kitwork-event="click: add(&#39;trà&#39;)"`, `data-kitwork-event="click: checkout()"`,
@@ -73,9 +87,9 @@ func TestComponentWithJobsRunsInTheBrowser(t *testing.T) {
 		`<script type="application/json" data-kitwork-components>{"shop-cart":{"jobs":["add","checkout"],"state":{"done":false,"items":[],"label":"Giỏ hàng","shippingFee":15000},"vars":["done","items"]}}</script></main>`)
 	mustNotContain(t, html, "owner", "total")
 	instances := page.Instances(Request{Path: "/cart", Scope: map[string]any{"user": "an"}})
-	cart, ok := instances["c1"]
+	cart, ok := instances[at[0]]
 	if !ok || cart.Name != "shop-cart" || cart.Inputs["owner"] != "an" || cart.Inputs["shippingFee"] != float64(20000) || !strings.HasSuffix(cart.Logic, "components.work") {
-		t.Errorf("the instance at c1, as the page draws it: %+v", instances)
+		t.Errorf("the instance at %s, as the page draws it: %+v", at[0], instances)
 	}
 }
 
@@ -179,7 +193,8 @@ component.define("shop-cart", (context) => {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cart, ok := page.Instances(Request{Path: "/cart", Scope: map[string]any{"user": "an"}})["c1"]; !ok || cart.Name != "shop-cart" {
+	at := placesIn(page.Render(Request{Path: "/cart", Scope: map[string]any{"user": "an"}}))
+	if cart, ok := page.Instances(Request{Path: "/cart", Scope: map[string]any{"user": "an"}})[at[0]]; !ok || cart.Name != "shop-cart" {
 		t.Errorf("a call with nothing that changes is still an instance: %+v", cart)
 	}
 }
@@ -222,7 +237,7 @@ component.define("shop-badge", (context) => {
 	}
 	html := page.Render(Request{Path: "/cart", Scope: map[string]any{"user": "an"}, Component: run})
 	mustContain(t, html,
-		`data-kitwork-at="c1" data-kitwork-scope="done: false; items: []; label: &#39;Giỏ của an&#39;; shippingFee: 20000; total: 4"`,
+		`data-kitwork-at="`+placesIn(html)[0]+`" data-kitwork-scope="done: false; items: []; label: &#39;Giỏ của an&#39;; shippingFee: 20000; total: 4"`,
 		`>Giỏ của an</p>`, `>4 điểm</p>`, `<p>2 đơn</p>`)
 	mustNotContain(t, html, `data-kitwork-component="shop-badge`, "a job is no data")
 	if len(calls) != 2 || calls[0].Name != "shop-cart" || calls[0].Inputs["owner"] != "an" || calls[0].Inputs["shippingFee"] != float64(20000) ||
@@ -256,15 +271,17 @@ component.define("admin-tools", (context) => {
 		t.Fatal(err)
 	}
 	visitor := map[string]any{"note": "", "isAdmin": false}
-	if html := page.Render(Request{Path: "/cart", Scope: visitor}); !strings.Contains(html, `data-kitwork-at="c1"`) {
+	html := page.Render(Request{Path: "/cart", Scope: visitor})
+	at := placesIn(html)
+	if len(at) != 1 {
 		t.Fatalf("the page still draws the tools, hidden, for the browser to show them without a reload:\n%s", html)
 	}
 	if instances := page.Instances(Request{Path: "/cart", Scope: visitor}); len(instances) != 0 {
 		t.Errorf("under a false if the tools are no instance: %+v", instances)
 	}
 	admin := map[string]any{"note": "", "isAdmin": true}
-	if tools, ok := page.Instances(Request{Path: "/cart", Scope: admin})["c1"]; !ok || tools.Name != "admin-tools" {
-		t.Errorf("under a true if the tools are the instance at c1: %+v", tools)
+	if tools, ok := page.Instances(Request{Path: "/cart", Scope: admin})[at[0]]; !ok || tools.Name != "admin-tools" {
+		t.Errorf("under a true if the tools are the instance at %s: %+v", at[0], tools)
 	}
 }
 
@@ -325,14 +342,20 @@ func TestAComponentsLookUsedAgain(t *testing.T) {
 	}
 	first := inPlace.Render(Request{Path: "/cart", Scope: map[string]any{"user": "an"}})
 	first = first[strings.Index(first, `<div class="flex-column gap-2"`):strings.Index(first, `<script`)]
+	at := placesIn(html)
+	if len(at) != 2 || at[0] == at[1] {
+		t.Fatalf("a place for each call: %v", at)
+	}
+	// the place in place is the tag's in content.ui, the look's the root's in shop-cart.ui with the call
+	first = strings.Replace(first, placesIn(first)[0], at[0], 1)
 	mustContain(t, html, first,
-		`<div class="flex-column gap-2 span-2" data-kitwork-component="shop-cart" data-kitwork-at="c2" data-kitwork-scope="shippingFee: 30000">`)
+		`<div class="flex-column gap-2 span-2" data-kitwork-component="shop-cart" data-kitwork-at="`+at[1]+`" data-kitwork-scope="shippingFee: 30000">`)
 	instances := page.Instances(Request{Path: "/cart", Scope: map[string]any{"user": "an"}})
-	if one, two := instances["c1"], instances["c2"]; one.Inputs["owner"] != "an" || one.Inputs["shippingFee"] != float64(20000) ||
+	if one, two := instances[at[0]], instances[at[1]]; one.Inputs["owner"] != "an" || one.Inputs["shippingFee"] != float64(20000) ||
 		two.Inputs["shippingFee"] != float64(30000) || len(instances) != 2 {
 		t.Errorf("an instance for each call, with what it passes in: %+v", instances)
 	}
-	mustContain(t, page.Render(Request{Path: "/cart", Scope: map[string]any{"user": ""}}), `<div class="flex-column gap-2 span-2" data-kitwork-component="shop-cart" data-kitwork-at="c2" data-kitwork-scope="shippingFee: 30000" hidden>`)
+	mustContain(t, page.Render(Request{Path: "/cart", Scope: map[string]any{"user": ""}}), `<div class="flex-column gap-2 span-2" data-kitwork-component="shop-cart" data-kitwork-at="`+at[1]+`" data-kitwork-scope="shippingFee: 30000" hidden>`)
 
 	route := `import * as router from "kitwork/router";
 router.view((context) => {
@@ -358,5 +381,45 @@ router.view((context) => {
 	if _, err := compileLiveCart(t, liveCartFiles(liveCartLogic, liveCartRoute, `<content><shop-cart owner="{{ user }}" /></content>`)); err == nil ||
 		!strings.Contains(err.Error(), "shop-cart chưa có giao diện: viết nội dung bên trong thẻ (<shop-cart>…</shop-cart>), hay một file shop-cart.ui") {
 		t.Errorf("an empty tag of a component without a look: %v", err)
+	}
+}
+
+// A call of a component the browser runs has one place wherever it is drawn (29/10/2026): its tag in its file,
+// with the calls of layout pieces that led there, hashed. The cart of an overlay Drive keeps across pages is
+// at the same place on a page whose content holds another cart before it and on one that holds none, so a job
+// called from it after the page changed finds it. The place says nothing of the source.
+// CONTROL: the place counted on the page (as until 29/10/2026) put the overlay's cart second on /a, first on /b.
+func TestACallHasOnePlaceOnEveryPage(t *testing.T) {
+	files := map[string]string{
+		"/site/components.work": liveCartLogic + `
+component.define("mini-cart", (context) => {
+  var opened = false;
+  const toggle = () => { opened = !opened; };
+  return context.bind({ opened, toggle });
+});
+`,
+		"/site/view.ui":       `<view><content /><overlay /></view>`,
+		"/site/overlay.ui":    `<overlay><mini-cart><button click="toggle()">Giỏ</button></mini-cart></overlay>`,
+		"/site/a/router.work": liveCartRoute,
+		"/site/a/content.ui":  liveCartContent,
+		"/site/b/router.work": liveCartRoute,
+		"/site/b/content.ui":  `<content><text>{{ user }}</text></content>`,
+	}
+	s := givenSite(files)
+	draw := func(route string) []string {
+		page, err := s.Compile(filepath.Join(s.Root, route))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return placesIn(page.Render(Request{Path: "/" + route, Scope: map[string]any{"user": "an"}}))
+	}
+	a, b := draw("a"), draw("b")
+	if len(a) != 2 || len(b) != 1 || a[1] != b[0] || a[0] == a[1] {
+		t.Errorf("the overlay's cart at one place on both pages: /a %v, /b %v", a, b)
+	}
+	for _, at := range append(a, b...) {
+		if !strings.HasPrefix(at, "c") || strings.ContainsAny(at, "./:") {
+			t.Errorf("a place is a name, not where the source stands: %q", at)
+		}
 	}
 }

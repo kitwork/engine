@@ -188,11 +188,12 @@ func pickerSite(t *testing.T) *Tenant {
 // add was.
 func TestAReadOnlyJobOfAComponentWaitsForNoOtherCall(t *testing.T) {
 	tn := pickerSite(t)
-	if r := serveGet(tn, "/pick", nil); r.Code != http.StatusOK || !strings.Contains(r.Body.String(), `data-kitwork-at="c1"`) {
+	at := placesOf(t, tn, "/pick")[0]
+	if r := serveGet(tn, "/pick", nil); r.Code != http.StatusOK || !strings.Contains(r.Body.String(), `data-kitwork-at="`+at+`"`) {
 		t.Fatalf("/pick should draw the picker for the bridge: %d %.1500s", r.Code, r.Body.String())
 	}
 	for _, word := range []string{"apple", "apricot", "banana"} {
-		if r := postCall(tn, "/pick", "word-picker.add", `{"args":["`+word+`"],"vars":{},"seq":1,"at":"c1","scope":{"query":""}}`); r.Code != http.StatusOK {
+		if r := postCall(tn, "/pick", "word-picker.add", `{"args":["`+word+`"],"vars":{},"seq":1,"at":"`+at+`","scope":{"query":""}}`); r.Code != http.StatusOK {
 			t.Fatalf("add %s: %d %s", word, r.Code, r.Body.String())
 		}
 	}
@@ -201,7 +202,7 @@ func TestAReadOnlyJobOfAComponentWaitsForNoOtherCall(t *testing.T) {
 	lock.Lock() // a call that writes is out
 
 	search := answered(func() *httptest.ResponseRecorder {
-		return postCall(tn, "/pick", "word-picker.search", `{"args":[" ap "],"vars":{},"seq":2,"at":"c1","scope":{"query":""}}`)
+		return postCall(tn, "/pick", "word-picker.search", `{"args":[" ap "],"vars":{},"seq":2,"at":"`+at+`","scope":{"query":""}}`)
 	})
 	select {
 	case r := <-search:
@@ -210,7 +211,7 @@ func TestAReadOnlyJobOfAComponentWaitsForNoOtherCall(t *testing.T) {
 				Patch map[string]any `json:"patch"`
 			} `json:"components"`
 		}
-		if json.Unmarshal(r.Body.Bytes(), &answer) != nil || answer.Components["c1"].Patch["query"] != "ap" || answer.Components["c1"].Patch["found"] != float64(2) {
+		if json.Unmarshal(r.Body.Bytes(), &answer) != nil || answer.Components[at].Patch["query"] != "ap" || answer.Components[at].Patch["found"] != float64(2) {
 			t.Fatalf("the search should answer what it finds: %d %s", r.Code, r.Body.String())
 		}
 	case <-time.After(3 * time.Second):
@@ -219,7 +220,7 @@ func TestAReadOnlyJobOfAComponentWaitsForNoOtherCall(t *testing.T) {
 	}
 
 	add := answered(func() *httptest.ResponseRecorder {
-		return postCall(tn, "/pick", "word-picker.add", `{"args":["cherry"],"vars":{},"seq":3,"at":"c1","scope":{"query":""}}`)
+		return postCall(tn, "/pick", "word-picker.add", `{"args":["cherry"],"vars":{},"seq":3,"at":"`+at+`","scope":{"query":""}}`)
 	})
 	select {
 	case r := <-add:

@@ -288,6 +288,7 @@ func (c *compiler) layoutCall(n *Node, cx ctx) (op, error) {
 	rootCtx := cx
 	rootCtx.file = root.File
 	rootCtx.scope = inner
+	rootCtx.calls = append(append([]string(nil), cx.calls...), fmt.Sprintf("%s:%d:%d", n.File, n.Line, n.Column))
 	if forAttr != nil {
 		rootCtx.forAt = &forSite{node: n, attr: forAttr}
 	}

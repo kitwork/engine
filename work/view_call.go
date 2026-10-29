@@ -236,18 +236,27 @@ func readViewCall(r *http.Request, name string, refresh bool) (*viewCall, error)
 	return call, nil
 }
 
-// componentPlace reports whether at can be the place a component is called from, as the page writes it: c and a
-// number.
+// componentPlace reports whether at can be the place a component is called from, as the page writes it
+// (ui callPlace): c, a hash in digits and lowercase letters, and a dash and a number when two hash the same.
 func componentPlace(at string) bool {
-	if len(at) < 2 || len(at) > 12 || at[0] != 'c' {
+	if len(at) < 2 || len(at) > 16 || at[0] != 'c' {
 		return false
 	}
-	for _, r := range at[1:] {
-		if r < '0' || r > '9' {
+	hash, suffix, two := strings.Cut(at[1:], "-")
+	for _, r := range hash {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'z') {
 			return false
 		}
 	}
-	return true
+	if two {
+		for _, r := range suffix {
+			if r < '0' || r > '9' {
+				return false
+			}
+		}
+		return suffix != "" && hash != ""
+	}
+	return hash != ""
 }
 
 // jobName reports whether name can be a job's: a name the page reads, letters, digits, _ and $, at most 64; or

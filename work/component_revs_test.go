@@ -20,7 +20,7 @@ import (
 func TestAnInstanceGetsWhatItsTabHoldsOlder(t *testing.T) {
 	tn := pickerSite(t)
 	for _, word := range []string{"apple", "apricot", "banana"} {
-		postCall(tn, "/pick", "word-picker.add", `{"args":["`+word+`"],"vars":{},"seq":1,"at":"c1","scope":{"query":""}}`)
+		postCall(tn, "/pick", "word-picker.add", `{"args":["`+word+`"],"vars":{},"seq":1,"at":"`+placesOf(t, tn, "/pick")[0]+`","scope":{"query":""}}`)
 	}
 	page := serveGet(tn, "/pick", nil).Body.String()
 	m := regexp.MustCompile(`data-kitwork-components>(.*?)</script>`).FindStringSubmatch(page)
@@ -30,20 +30,20 @@ func TestAnInstanceGetsWhatItsTabHoldsOlder(t *testing.T) {
 	if m == nil || json.Unmarshal([]byte(m[1]), &block) != nil {
 		t.Fatalf("the page should carry its components block:\n%.2000s", page)
 	}
-	drawn := block["word-picker"].Revs["c1"]
+	drawn := block["word-picker"].Revs[placesOf(t, tn, "/pick")[0]]
 	if drawn["found"] == "" || drawn["query"] != "" || drawn["search"] != "" {
 		t.Fatalf("the block should carry the revisions of the instance's consts, not of its vars nor jobs: %s", m[1])
 	}
 
 	call := func(query string, revs map[string]string) (map[string]any, string) {
 		held, _ := json.Marshal(revs)
-		r := postCall(tn, "/pick", "word-picker.search", `{"args":["`+query+`"],"vars":{},"seq":2,"at":"c1","scope":{"query":"`+query+`"},"scopeRevs":`+string(held)+`}`)
+		r := postCall(tn, "/pick", "word-picker.search", `{"args":["`+query+`"],"vars":{},"seq":2,"at":"`+placesOf(t, tn, "/pick")[0]+`","scope":{"query":"`+query+`"},"scopeRevs":`+string(held)+`}`)
 		if r.Code != http.StatusOK {
 			t.Fatalf("search: %d %s", r.Code, r.Body.String())
 		}
 		answer := componentAnswer(t, r.Body.String())
 		components, _ := answer["components"].(map[string]any)
-		mine, _ := components["c1"].(map[string]any)
+		mine, _ := components[placesOf(t, tn, "/pick")[0]].(map[string]any)
 		return mine, r.Body.String()
 	}
 

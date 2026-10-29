@@ -106,6 +106,9 @@ type ctx struct {
 	// outer is the call of a layout piece whose root is the component compiled here (layout.go): the words it
 	// puts on the instance. Only that component takes it, never what is inside it
 	outer *outerCall
+	// calls are the calls of layout pieces that led here, outermost first ("header.ui:3:5"): with the place of
+	// a component's tag in its file, the place it is called from (component_live.go, callPlace)
+	calls []string
 }
 
 // outerCall is the call of a layout piece whose root is a component (28/10/2026, KITWORK_COMPONENTS.md mục 4,
@@ -246,8 +249,11 @@ type compiler struct {
 	routeDir string
 	content  *Node
 	seq      map[string]int
-	depth    int
-	files    map[string]bool
+	// places are the places components the browser runs are called from on this page, each with the key it was
+	// hashed from (component_live.go, callPlace)
+	places map[string]string
+	depth  int
+	files  map[string]bool
 	// layout is the view.ui the route uses (site-relative), written on <body> as data-kitwork-layout:
 	// a link to a page with another view.ui is not a content swap but a whole new page (Drive)
 	layout string

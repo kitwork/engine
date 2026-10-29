@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"sort"
 	"strconv"
 	"strings"
@@ -252,7 +253,7 @@ func (c *compiler) liveSiteCall(n *Node, cx ctx, site *callSite) error {
 		return errAt(n, "%s có việc đi qua cầu nối, cầu nối của router.view: trang này không vẽ bằng router.view((context) => context.bind({ … })) nên việc của %s không có chỗ để gọi",
 			def.name, def.name)
 	}
-	site.at = "c" + strconv.Itoa(c.next("component-call"))
+	site.at = c.callPlace(n, cx)
 	if c.out.components == nil {
 		c.out.components = &liveComponents{defs: map[string]*componentDef{}}
 	}
@@ -287,6 +288,29 @@ func (c *compiler) liveInput(n *Node, o outsideExpr, scope *frame, def *componen
 		}
 	}
 	return nil
+}
+
+// callPlace is the place a component the browser runs is called from (KITWORK_COMPONENTS.md mục 8): its tag in
+// its file, with the calls of layout pieces that led there, fixed as the page is built. So the same call has the
+// same place on every page that draws it, and a header Drive keeps across pages calls its jobs at the place the
+// next page draws it (29/10/2026: a count of the calls on the page put a footer's cart at c2 on one page and at
+// c1 on the next). The browser holds it as data-kitwork-at, hashed: where the source stands never reaches it.
+// Two calls the hash cannot tell apart on one page take the second a suffix.
+func (c *compiler) callPlace(n *Node, cx ctx) string {
+	key := strings.Join(append(append([]string(nil), cx.calls...), fmt.Sprintf("%s:%d:%d", n.File, n.Line, n.Column)), " ")
+	h := fnv.New32a()
+	h.Write([]byte(key))
+	place := "c" + strconv.FormatUint(uint64(h.Sum32()), 36)
+	if c.places == nil {
+		c.places = map[string]string{}
+	}
+	for at, i := place, 2; ; i++ {
+		if first, taken := c.places[at]; !taken || first == key {
+			c.places[at] = key
+			return at
+		}
+		at = place + "-" + strconv.Itoa(i)
+	}
 }
 
 // missingInputs tells an input the component requires that its call does not pass.
