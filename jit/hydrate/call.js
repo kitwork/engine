@@ -19,7 +19,8 @@
 // were made: the next leaves when the one before has answered, so an answer never lands on a page newer
 // than the one it was computed from. A call made as a field is typed in waits for a pause in the typing, and
 // the next keystroke's call to the same job takes its place: a word typed in a search is one call, not one a
-// letter. While a call waits or is out, job.pending is true, read in a row of a
+// letter; it takes the place, too, of one typed before that still waits for the call out. While a call waits
+// or is out, job.pending is true, read in a row of a
 // list for the call made from that row; job.error is the failed call's { code, message }, null once a call
 // of the job is made again. A call that fails changes nothing, and what the person did to the element that
 // made it (a box ticked) goes back to the data.
@@ -213,12 +214,19 @@
     queue.push(call);
     pump();
   }
-  // a call waiting for a pause in the typing goes, and those made before it, in order
+  // a call waiting for a pause in the typing goes, and those made before it, in order. It takes the place of a
+  // call typed in the same field, to the same job, that waits in the queue for the call out (a slow search):
+  // what was typed last stands for what was typed before, and is the one that goes next.
   function release(call) {
     var at = typed.indexOf(call);
     if (at < 0) return;
     typed.splice(0, at + 1).forEach(function (waiting) {
       clearTimeout(waiting.timer);
+      queue = queue.filter(function (queued) {
+        if (!queued.typed || !sameField(queued, waiting)) return true;
+        mark(queued, false, null);
+        return false;
+      });
       queue.push(waiting);
     });
     pump();

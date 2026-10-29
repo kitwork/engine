@@ -180,3 +180,44 @@ func TestEventOfADeferredHandlerIsCaught(t *testing.T) {
 		t.Fatalf("a deferred handler that sees its event should be caught; got err=%v\n%s", err, out)
 	}
 }
+
+// A slow search (29/10/2026): the first call is out, and the person types on, pausing each time. Each pause
+// sends a call to the queue behind the one out; the last typed takes the place of the one waiting there, so
+// when the first is answered, only the last goes, with what is typed then.
+const slowSearchAssertions = `
+(async function () {
+  var view = kitwork.page.view();
+  input.value = "m"; fire("input", input);
+  await wait(260);
+  if (jobs() !== "search") throw new Error("the first pause should send its call, sent " + jobs());
+  input.value = "mu"; fire("input", input);
+  await wait(260);
+  input.value = "mua"; fire("input", input);
+  await wait(260);
+  if (jobs() !== "search") throw new Error("calls typed while one is out should wait for it, sent " + jobs());
+  if (view.state.search.pending !== true) throw new Error("search.pending should be true while a call waits");
+  await deliver();
+  await deliver();
+  if (jobs() !== "search,search") throw new Error("the last typed should take the place of the one waiting before it: one call after the slow one, sent " + jobs());
+  if (sent[1].vars.query !== "mua") throw new Error("the call that goes should carry what is typed last, sent " + JSON.stringify(sent[1].vars));
+  if (view.state.search.pending !== false) throw new Error("search.pending should end with the last answer: the call replaced ends with it");
+  if (found.textContent !== "3") throw new Error("the last answer should be painted, got " + found.textContent);
+  console.log("typing on while a slow search is out sends only the last typed after it");
+})().catch(function (e) { console.error(e && e.stack || e); process.exit(1); });
+`
+
+func TestTypingOnWhileASearchIsOutSendsOnlyTheLast(t *testing.T) {
+	runNodeDOMScript(t, "slow_search.test.js", searchTypedScript(callJS, slowSearchAssertions))
+}
+
+// The control: a call typed that leaves the one before it in the queue sends both after the slow one.
+func TestTypingOnThatKeepsEveryCallIsCaught(t *testing.T) {
+	keep := "      queue = queue.filter(function (queued) {\n        if (!queued.typed || !sameField(queued, waiting)) return true;"
+	if !strings.Contains(callJS, keep) {
+		t.Fatal("release of call.js moved: update this control")
+	}
+	out, err := runNodeDOMWith(t, composedRuntime(), searchTypedScript(strings.Replace(callJS, keep, "      queue = queue.filter(function (queued) {\n        if (true) return true;", 1), slowSearchAssertions))
+	if err == nil || !strings.Contains(out, "take the place of the one waiting before it") {
+		t.Fatalf("a call typed that keeps the one before it should be caught; got err=%v\n%s", err, out)
+	}
+}
