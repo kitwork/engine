@@ -28,10 +28,13 @@
 // A component of the site whose jobs go through the bridge (ui/component_live.go) is registered with the
 // kernel from <script type="application/json" data-kitwork-components>: its starting state, and each job a
 // function that calls shop-cart.checkout on the instance it runs in. That call names the place the instance
-// is called from (data-kitwork-at on its host) and carries the instance's vars in scope; its answer holds
-// the data of that instance the job changed, under the same place, written into the instance:
+// is called from (data-kitwork-at on its host) and carries the instance's vars in scope, and the revisions of
+// its data the tab holds in scopeRevs, as the page's in revs (the block brings them by place); its answer holds
+// the data of that instance the job changed, under the same place, written into the instance, and the new
+// revisions; a name the tab held at another revision than the job ran on comes whole (a search's results, read
+// through the query the field set here):
 //
-//   { "seq": 5, "components": { "c1": { "patch": { "items": [], "done": true } } } }
+//   { "seq": 5, "components": { "c1": { "patch": { "items": [], "done": true }, "revs": { "total": "9c0e…" } } } }
 (function () {
   "use strict";
   var kitwork = window.kitwork;
@@ -49,6 +52,7 @@
   var track = {};    // job → { pending, error, rows: { row → { pending, error } } }
   var current = null; // the element whose binding or event the program runs now
   var revs = {};      // the revision of each name of the page's data it holds, sent with each call
+  var scopeRevs = {}; // the same of each instance of a site component, by place: sent with a call of its jobs
   var stamp = 0;      // the moment the server read the data the page holds: no data read before it is taken
   var told = 0;       // the newest stamp the server told while the page listens, not asked about yet
 
@@ -142,12 +146,14 @@
 
   // the site components the page holds that the browser runs, registered with the kernel
   function seedComponents() {
+    scopeRevs = {};
     var el = document.querySelector("[data-kitwork-components]");
     if (!el) return;
     var data;
     try { data = JSON.parse(el.textContent || "{}"); } catch (e) { return; }
     Object.keys(data).forEach(function (component) {
       var c = data[component] || {}, def = {}, state = c.state || {};
+      Object.keys(c.revs || {}).forEach(function (at) { scopeRevs[at] = c.revs[at]; });
       Object.keys(state).forEach(function (k) { def[k] = state[k]; });
       (c.jobs || []).forEach(function (name) { def[name] = componentJob(component, name, c.vars || []); });
       kitwork.component(component, def);
@@ -264,6 +270,7 @@
       call.vars.forEach(function (k) { own[k] = instance[k]; });
       body.at = call.at;
       body.scope = own;
+      if (scopeRevs[call.at]) body.scopeRevs = scopeRevs[call.at];
     }
     send(call, body).then(function (answer) {
       settle(call, answer);
@@ -345,6 +352,13 @@
     Object.keys(lists).forEach(function (k) { put(k, applyList(get(k), lists[k])); });
     var mine = call.at && answer.components ? answer.components[call.at] : null, instance = mine ? instanceOf(call.host) : null;
     if (instance) Object.keys(mine.patch || {}).forEach(function (k) { instance[k] = mine.patch[k]; });
+    if (mine && mine.revs) {
+      var kept = scopeRevs[call.at] || (scopeRevs[call.at] = {});
+      Object.keys(mine.revs).forEach(function (k) {
+        if (mine.revs[k]) kept[k] = mine.revs[k];
+        else delete kept[k];
+      });
+    }
     if (!call.refresh) mark(call, false, null);
     tell(held);
     paint();

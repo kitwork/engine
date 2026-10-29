@@ -178,6 +178,9 @@ type viewCall struct {
 	// readOnly: the job changes nothing but the page's vars (FolderMethod.readOnly): its call holds no lock and
 	// tells no tab
 	readOnly bool
+	// scopeRevs are the revisions of the data of the instance a component's job is called on, as the tab holds
+	// them (the components block, then the answers); nil when it sent none
+	scopeRevs map[string]string
 }
 
 // readViewCall reads the call of a POST whose URL named a job (name) or asked for what changed (refresh); an
@@ -201,6 +204,8 @@ func readViewCall(r *http.Request, name string, refresh bool) (*viewCall, error)
 		Scope map[string]any    `json:"scope"`
 		Revs  map[string]string `json:"revs"`
 		Marks string            `json:"marks"`
+		// ScopeRevs are the revisions of the instance's data the tab holds (component_call.go)
+		ScopeRevs map[string]string `json:"scopeRevs"`
 	}
 	if len(bytes.TrimSpace(body)) > 0 {
 		if err := json.Unmarshal(body, &sent); err != nil {
@@ -221,7 +226,7 @@ func readViewCall(r *http.Request, name string, refresh bool) (*viewCall, error)
 		if !componentPlace(sent.At) {
 			return nil, fmt.Errorf("việc %s của component cần chỗ gọi của instance (at)", name)
 		}
-		call.at, call.scope = sent.At, map[string]value.Value{}
+		call.at, call.scope, call.scopeRevs = sent.At, map[string]value.Value{}, sent.ScopeRevs
 		for key, v := range sent.Scope {
 			if visibleName(key) {
 				call.scope[key] = value.New(v)

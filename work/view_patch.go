@@ -2,12 +2,11 @@ package work
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"strconv"
 	"strings"
 
+	"github.com/kitwork/engine/ui"
 	"github.com/kitwork/engine/value"
 )
 
@@ -29,15 +28,9 @@ import (
 // and a patch made for the run before would leave it half new: the count of one list, the rows of another.
 // Such a page gets that name's value whole, and every page gets the new revision of what changed.
 
-// revOf is the revision of a value read back from JSON.
-func revOf(v any) string {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return ""
-	}
-	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:])[:12]
-}
+// revOf is the revision of a value read back from JSON: ui.Revision, which the page writes an instance's data
+// with as it draws it, so the two agree.
+func revOf(v any) string { return ui.Revision(v) }
 
 // viewRevs are the revisions of a run's data, by name.
 func viewRevs(snapshot map[string]any) map[string]string {

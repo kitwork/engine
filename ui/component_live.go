@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -287,8 +289,41 @@ type liveComponents struct {
 	defs map[string]*componentDef
 }
 
-// write writes each component's starting state (the values its source writes out), its jobs and its vars.
-func (l *liveComponents) write(b *strings.Builder) {
+// Revision is the revision of a value of a page's data, or of an instance's (28/10/2026, work/view_patch.go):
+// a hash of it as JSON. "" for one JSON cannot write.
+func Revision(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])[:12]
+}
+
+// keepRevisions notes, as the host of an instance the browser runs is drawn, the revision of each name of its
+// data the tab holds (29/10/2026): its consts and inputs, not its vars, which are the tab's, nor its jobs. The
+// components block carries them by place; a call of one of its jobs sends them back, and a name the tab holds at
+// another revision than the run before the job comes whole (work/component_call.go), as a page's does.
+func (o *elemOp) keepRevisions(r *run, own map[string]any) {
+	def := o.instanceOf
+	revs := map[string]string{}
+	for name, v := range own {
+		if _, bound := def.state[name]; !bound || def.jobs[name] || def.vars[name] {
+			continue
+		}
+		if rev := Revision(v); rev != "" {
+			revs[name] = rev
+		}
+	}
+	if r.instanceRevs == nil {
+		r.instanceRevs, r.places = map[string]map[string]string{}, map[string]string{}
+	}
+	r.instanceRevs[o.at], r.places[o.at] = revs, def.name
+}
+
+// write writes each component's starting state (the values its source writes out), its jobs and its vars, and
+// the revisions of the data of each instance of it the page drew, by place (keepRevisions).
+func (l *liveComponents) write(b *strings.Builder, instances map[string]map[string]string, places map[string]string) {
 	if l == nil || len(l.defs) == 0 {
 		return
 	}
@@ -308,7 +343,17 @@ func (l *liveComponents) write(b *strings.Builder) {
 		}
 		sort.Strings(jobs)
 		sort.Strings(vars)
-		out[name] = map[string]any{"state": state, "jobs": jobs, "vars": vars}
+		component := map[string]any{"state": state, "jobs": jobs, "vars": vars}
+		revs := map[string]any{}
+		for at, of := range places {
+			if held, ok := instances[at]; ok && of == name {
+				revs[at] = held
+			}
+		}
+		if len(revs) > 0 {
+			component["revs"] = revs
+		}
+		out[name] = component
 	}
 	data, err := json.Marshal(out)
 	if err != nil {

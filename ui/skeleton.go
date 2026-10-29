@@ -92,7 +92,7 @@ func writeSkeleton(b *strings.Builder, o op) {
 		}
 		if o.components != nil {
 			// the components of the site the browser runs: the head links the bridge for them too
-			(*o.components).write(b)
+			(*o.components).write(b, nil, nil)
 		}
 		if o.void {
 			return

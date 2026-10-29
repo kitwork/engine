@@ -23,10 +23,12 @@ import (
 //	});
 //
 // and its job is called as a job of the page is, a POST to the page's URL, named by the component and the job,
-// with the place the instance is called from (data-kitwork-at, ui/component_live.go) and the instance's vars:
+// with the place the instance is called from (data-kitwork-at, ui/component_live.go), the instance's vars and the
+// revisions of its data the tab holds (scopeRevs, 29/10/2026: the components block brings them, the answers
+// renew them):
 //
 //	POST /cart?kitwork-call=shop-cart.checkout
-//	{ "args": [], "vars": { …the page's }, "seq": 5, "revs": { …the page's }, "at": "c1", "scope": { "items": [ … ] } }
+//	{ "args": [], "vars": { …the page's }, "seq": 5, "revs": { …the page's }, "at": "c1", "scope": { "items": [ … ] }, "scopeRevs": { "total": "3f1a…" } }
 //
 // The folder's guards and the origin check run as for any POST of it, then the view's function. The server
 // draws the page from what it bound to find the instance at that place, the component it is and the inputs
@@ -35,9 +37,11 @@ import (
 // component's function runs with those inputs and the instance's vars, the job runs on what it bound, the vars
 // are read back (__state), the view's function and the component's run again, and the answer is what changed:
 // the page's data as for a job of the page (with its revisions, on a page that holds its data in the browser),
-// and the instance's under its place.
+// and the instance's under its place, with its revisions the same way: a name the tab held at another revision
+// than the run before the job comes whole (a search's results, read through the query its field set in the
+// browser, which the run before the job already read).
 //
-//	{ "seq": 5, "patch": { "count": 2 }, "revs": { "count": "9c0e…" }, "components": { "c1": { "patch": { "items": [], "done": true } } } }
+//	{ "seq": 5, "patch": { "count": 2 }, "revs": { "count": "9c0e…" }, "components": { "c1": { "patch": { "items": [], "done": true }, "revs": { "total": "77b2…" } } } }
 
 // componentModule is "kitwork/component" (KITWORK_ENGINE.md mục 6): define, which only the loader of a
 // component's job reads (componentDefines); anywhere else it says where a component is defined.
@@ -384,13 +388,16 @@ func (t *Tenant) serveComponentCall(vm *runtime.VM, ctxObj *Context, reqRouter *
 	}
 	// the instance's vars after the job: what it holds, but for what the job changed
 	vars := make(map[string]value.Value, len(call.scope))
+	isVar := map[string]bool{}
 	for key, v := range call.scope {
 		vars[key] = v
+		isVar[key] = true
 	}
 	if state != nil {
 		if after := run.vm.ExecuteLambda(state, nil); after.IsMap() {
 			for key, v := range after.Map() {
 				vars[key] = v
+				isVar[key] = true
 			}
 		}
 	}
@@ -444,8 +451,22 @@ func (t *Tenant) serveComponentCall(vm *runtime.VM, ctxObj *Context, reqRouter *
 			answerViewCallError(reqRouter, status, message)
 			return
 		}
-		if mine, _ := viewPatch(mineBefore, viewSnapshot(again.bound), nil); len(mine) > 0 {
-			answer["components"] = map[string]any{call.at: map[string]any{"patch": mine}}
+		mineAfter := viewSnapshot(again.bound)
+		mine, _ := viewPatch(mineBefore, mineAfter, nil)
+		changed := map[string]any{}
+		if call.scopeRevs != nil {
+			// the instance's data as the tab holds it (29/10/2026), as a page's (view_patch.go staleRevs): a name it
+			// held at another revision than the run before the job comes whole, a search's results read through
+			// the query the field set in the browser among them; every name that changed brings its new revision
+			if revs := staleRevs(call.scopeRevs, mineBefore, mineAfter, isVar, mine, map[string]any{}); len(revs) > 0 {
+				changed["revs"] = revs
+			}
+		}
+		if len(mine) > 0 {
+			changed["patch"] = mine
+		}
+		if len(changed) > 0 {
+			answer["components"] = map[string]any{call.at: changed}
 		}
 	}
 	answerViewCall(reqRouter, answer)

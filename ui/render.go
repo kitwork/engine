@@ -48,6 +48,10 @@ type run struct {
 	instances map[string]Instance
 	falseIfs  int
 	component func(Instance) map[string]any
+	// instanceRevs are the revisions of the data of each instance the browser runs, by place, and places the
+	// component each place draws: written in the components block (component_live.go keepRevisions)
+	instanceRevs map[string]map[string]string
+	places       map[string]string
 	// revs are the revisions of the page's data, written in its data block (Request.Revs)
 	revs map[string]string
 	// stamp is the moment the page's data was read, written with them (Request.Stamp)
@@ -299,6 +303,7 @@ func (o *elemOp) renderOne(r *run, scope map[string]any) {
 	switch {
 	case own != nil && o.at != "":
 		inputs = o.instancePairs(own)
+		o.keepRevisions(r, own)
 	case len(o.inputs) > 0:
 		inputs = o.inputPairs(scope, values)
 	}
@@ -479,7 +484,7 @@ func (o *elemOp) renderOne(r *run, scope map[string]any) {
 		o.pageState.writeState(&r.b, scope, r.revs, r.stamp, tickets)
 	}
 	if o.components != nil {
-		(*o.components).write(&r.b)
+		(*o.components).write(&r.b, r.instanceRevs, r.places)
 	}
 	r.b.WriteString("</")
 	r.b.WriteString(o.tag)
