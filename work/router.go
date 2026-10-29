@@ -66,6 +66,9 @@ type Router struct {
 	// after the job to pass again (view_call.go, guardsAgain)
 	callChain  []*RouteNode
 	callGuards []*value.Lambda
+	// componentFiles are the components.work files the request ran, by path: each is loaded once for the
+	// request, whatever runs a component of it (component_call.go, componentFile)
+	componentFiles map[string]*componentFile
 
 	// JIT stylesheet route: serve the tenant's site-wide JIT CSS (no JS handler, no VM).
 	// Set by .jit(); the path defaults to /jitcss.

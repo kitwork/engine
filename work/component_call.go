@@ -131,11 +131,28 @@ type componentRun struct {
 // runComponent runs components.work (logic) for one call and the function it defines for name, with the inputs
 // of the instance and its vars. A failure is answered as the call's error by the caller: status and message.
 func (t *Tenant) runComponent(reqRouter *Router, ctxObj *Context, logic, name string, inputs map[string]any, vars map[string]value.Value) (*componentRun, int, string) {
-	file, status, message := t.loadComponents(reqRouter, logic)
+	file, status, message := t.componentFile(reqRouter, logic)
 	if file == nil {
 		return nil, status, message
 	}
 	return t.callComponent(reqRouter, ctxObj, file, logic, name, inputs, vars)
+}
+
+// componentFile is components.work (logic) as the request ran it, loaded the first time the request needs it:
+// the draw of the page, the pass that finds an instance, a job's run of the instance, all share one.
+func (t *Tenant) componentFile(reqRouter *Router, logic string) (*componentFile, int, string) {
+	if file := reqRouter.componentFiles[logic]; file != nil {
+		return file, 0, ""
+	}
+	file, status, message := t.loadComponents(reqRouter, logic)
+	if file == nil {
+		return nil, status, message
+	}
+	if reqRouter.componentFiles == nil {
+		reqRouter.componentFiles = map[string]*componentFile{}
+	}
+	reqRouter.componentFiles[logic] = file
+	return file, 0, ""
 }
 
 // componentFile is components.work run for one request: the VM its functions run on, its program, and the
@@ -199,21 +216,19 @@ func (t *Tenant) callComponent(reqRouter *Router, ctxObj *Context, file *compone
 
 // componentRenderer runs, for one request, the function of each component of the site the page draws whose
 // logic answers a bind (ui.Request.Component, KITWORK_COMPONENTS.md mục 9): a const computed on the server is
-// right at the first paint. Each components.work is loaded once for the request; each call runs with the inputs
-// it passes where it stands and the request's context (the cookies, the session of who looks). The first failure
-// fails the request, as a failure of the view's function does.
+// right at the first paint. Each components.work is loaded once for the request (componentFile); each call runs
+// with the inputs it passes where it stands and the request's context (the cookies, the session of who looks). The
+// first failure fails the request, as a failure of the view's function does.
 type componentRenderer struct {
 	t          *Tenant
 	reqRouter  *Router
 	ctx        *Context
-	files      map[string]*componentFile
 	converters []*uiConverter
 	failure    error
 }
 
 func newComponentRenderer(t *Tenant, reqRouter *Router) *componentRenderer {
-	return &componentRenderer{t: t, reqRouter: reqRouter, ctx: &Context{request: &Request{router: reqRouter}},
-		files: map[string]*componentFile{}}
+	return &componentRenderer{t: t, reqRouter: reqRouter, ctx: &Context{request: &Request{router: reqRouter}}}
 }
 
 // run runs one call: the data of its bind as the page reads it, nil after a failure.
@@ -221,15 +236,10 @@ func (c *componentRenderer) run(call ui.Instance) map[string]any {
 	if c.failure != nil {
 		return nil
 	}
-	file := c.files[call.Logic]
+	file, _, message := c.t.componentFile(c.reqRouter, call.Logic)
 	if file == nil {
-		loaded, _, message := c.t.loadComponents(c.reqRouter, call.Logic)
-		if loaded == nil {
-			c.failure = uncaught(fmt.Sprintf("component %s: %s", call.Name, message))
-			return nil
-		}
-		file = loaded
-		c.files[call.Logic] = file
+		c.failure = uncaught(fmt.Sprintf("component %s: %s", call.Name, message))
+		return nil
 	}
 	run, _, message := c.t.callComponent(c.reqRouter, c.ctx, file, call.Logic, call.Name, call.Inputs, nil)
 	if run == nil {
@@ -308,6 +318,10 @@ func (t *Tenant) relativeToSite(file string) string {
 
 // viewInstances draws the folder's page from the data the view's function bound and gives each component on it
 // whose jobs go through the bridge, by its place; nil when the page cannot be had.
+//
+// The pass runs the components the page draws, as the page's draw does (29/10/2026): an input the server reads
+// where the call stands may be a value a component around it computes (who looks, from a cookie), and a pass that
+// ran none read that value as its source writes it, not as the person was shown it.
 func (t *Tenant) viewInstances(vm *runtime.VM, reqRouter *Router, node *RouteNode, handler *value.Lambda, data value.Value) map[string]ui.Instance {
 	page := t.viewPage(node)
 	if page == nil {
@@ -318,7 +332,12 @@ func (t *Tenant) viewInstances(vm *runtime.VM, reqRouter *Router, node *RouteNod
 		return nil
 	}
 	r := reqRouter.request
-	return page.Instances(ui.Request{Path: r.URL.Path, Origin: requestOrigin(r), Scope: scope, Method: r.Method})
+	components := newComponentRenderer(t, reqRouter)
+	instances := page.Instances(ui.Request{Path: r.URL.Path, Origin: requestOrigin(r), Scope: scope, Method: r.Method, Component: components.run})
+	if components.failed() != nil {
+		return nil
+	}
+	return instances
 }
 
 // viewPage is the folder's compiled .ui page, nil when it cannot be had.
