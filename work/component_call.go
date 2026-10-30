@@ -350,6 +350,20 @@ func (t *Tenant) viewInstances(vm *runtime.VM, reqRouter *Router, node *RouteNod
 	return instances, nil
 }
 
+// answerDrawFailure answers a call whose page cannot be drawn, a component of it having failed, as the page's draw
+// answers that failure (router.go writeFailure): while developing (AllowLocal) with the failure's text; in production
+// with what failed and the request id the log record carries, nothing of the failure's text. A component's failure
+// may quote what it read and never bound (a cookie, a value of storage), which reaches the browser only by a name on
+// its return line (docs/KITWORK_BRIDGE.md mục 3; 30/10/2026: the call answered the text the page's draw hides).
+func (t *Tenant) answerDrawFailure(reqRouter *Router, what string, err error) {
+	t.recordFailure(reqRouter, "component", err)
+	message := what + " (Request ID: " + reqRouter.requestID + ")"
+	if AllowLocal {
+		message = what + ": " + err.Error()
+	}
+	answerViewCallError(reqRouter, http.StatusInternalServerError, message)
+}
+
 // viewPage is the folder's compiled .ui page, nil when it cannot be had.
 func (t *Tenant) viewPage(node *RouteNode) *ui.Page {
 	plan := t.renderPlan()
@@ -393,7 +407,7 @@ func (t *Tenant) serveComponentCall(vm *runtime.VM, ctxObj *Context, reqRouter *
 	// instance is not looked for
 	instances, err := t.viewInstances(vm, reqRouter, node, handler, data)
 	if err != nil {
-		answerViewCallError(reqRouter, http.StatusInternalServerError, "trang không vẽ được: "+err.Error())
+		t.answerDrawFailure(reqRouter, "trang không vẽ được", err)
 		return
 	}
 	instance, found := instances[call.at]
@@ -498,7 +512,7 @@ func (t *Tenant) serveComponentCall(vm *runtime.VM, ctxObj *Context, reqRouter *
 	// view's function failing after a job does (view_call.go): the page the job left cannot be drawn
 	instances, err = t.viewInstances(vm, reqRouter, node, handler, after)
 	if err != nil {
-		answerViewCallError(reqRouter, http.StatusInternalServerError, "trang không vẽ lại được sau việc "+call.name+": "+err.Error())
+		t.answerDrawFailure(reqRouter, "trang không vẽ lại được sau việc "+call.name, err)
 		return
 	}
 	if now, ok := instances[call.at]; ok && now.Name == component {

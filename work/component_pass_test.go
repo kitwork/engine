@@ -149,19 +149,22 @@ func TestAComponentCallHasTheBudgetTheDrawHas(t *testing.T) {
 	}
 }
 
-// A component of the page that fails fails a call of the page as it fails its draw (29/10/2026), with its own
-// message: before the job, not a "this page does not draw it" (404); after it, not an answer that leaves out the
-// instance's changes. The box fails for the visitor "boom"; the cart's checkout breaks the box for every run after.
+// A component of the page that fails fails a call of the page as it fails its draw (29/10/2026): before the job, not
+// a "this page does not draw it" (404); after it, not an answer that leaves out the instance's changes. As the draw,
+// the answer carries the failure's text only while developing (30/10/2026): the box's message quotes the cookie it
+// read and never bound, which in production reaches the browser by no name on its return line. The box fails for the
+// visitor "boom"; the cart's breakIt breaks the box for every run after.
 //
 // CONTROL (by hand, 29/10/2026): with viewInstances giving no error, the first call answered 404 and the second 200
-// with no receipt (red).
+// with no receipt (red). CONTROL (by hand, 30/10/2026): with answerDrawFailure writing the failure's text whatever
+// AllowLocal, the production answers held the cookie (red).
 func TestAComponentThatFailsFailsTheCall(t *testing.T) {
 	logic := "import * as component from \"kitwork/component\";\nimport { datastore } from \"kitwork/storage\";\n" +
 		"const broken = datastore(\"boxes\").segment(\"broken\");\n" +
 		"component.define(\"guest-box\", (context) => {\n" +
 		"  const who = context.cookie(\"visitor\") ?? \"khách\";\n" +
-		"  if (who === \"boom\") {\n    fail(\"hộp hỏng với boom\");\n  }\n" +
-		"  if (broken.get() === true) {\n    fail(\"hộp hỏng sau việc\");\n  }\n" +
+		"  if (who === \"boom\") {\n    fail(\"hộp hỏng với \" + who);\n  }\n" +
+		"  if (broken.get() === true) {\n    fail(\"hộp hỏng sau việc, khách \" + who);\n  }\n" +
 		"  return context.bind({ who });\n" +
 		"});\n" +
 		"component.define(\"guest-cart\", (context) => {\n" +
@@ -192,10 +195,20 @@ func TestAComponentThatFailsFailsTheCall(t *testing.T) {
 		tn.Serve(rec, req)
 		return rec
 	}
-	if r := call("checkout", "boom"); r.Code != http.StatusInternalServerError || !strings.Contains(r.Body.String(), "hộp hỏng với boom") {
-		t.Errorf("a box that fails before the job should fail the call with its message: %d %s", r.Code, r.Body.String())
+	// in production: what failed and the request id, not the box's text
+	if r := call("checkout", "boom"); r.Code != http.StatusInternalServerError || strings.Contains(r.Body.String(), "boom") ||
+		!strings.Contains(r.Body.String(), "trang không vẽ được (Request ID: kw-") {
+		t.Errorf("a box that fails before the job should fail the call, without its text: %d %s", r.Code, r.Body.String())
 	}
-	if r := call("breakIt", "Lan"); r.Code != http.StatusInternalServerError || !strings.Contains(r.Body.String(), "hộp hỏng sau việc") {
-		t.Errorf("a box that fails after the job should fail the answer with its message: %d %s", r.Code, r.Body.String())
+	if r := call("breakIt", "Lan"); r.Code != http.StatusInternalServerError || strings.Contains(r.Body.String(), "Lan") ||
+		!strings.Contains(r.Body.String(), "trang không vẽ lại được sau việc guest-cart.breakIt (Request ID: kw-") {
+		t.Errorf("a box that fails after the job should fail the answer, without its text: %d %s", r.Code, r.Body.String())
+	}
+	// while developing: the box's text, to find the fault
+	saved := AllowLocal
+	AllowLocal = true
+	t.Cleanup(func() { AllowLocal = saved })
+	if r := call("checkout", "Lan"); r.Code != http.StatusInternalServerError || !strings.Contains(r.Body.String(), "hộp hỏng sau việc, khách Lan") {
+		t.Errorf("while developing, the answer should carry the box's text: %d %s", r.Code, r.Body.String())
 	}
 }
