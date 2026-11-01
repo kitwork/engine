@@ -376,6 +376,8 @@ type translator struct {
 	s         *statement.Statement
 	holes     []Expression
 	failed    bool
+	// matched is where the statement first writes matches, for an error of where it stands.
+	matched *Token
 }
 
 func (t *translator) fail(token Token, format string, arguments ...any) {
@@ -427,6 +429,13 @@ func (r *resolver) translateStatement(root *Identifier, handle *DatabaseImport, 
 	if t.table == nil {
 		t.fail(action.Method.Token, "câu cần một lambda có tham số là bảng: %s.%s((bảng) => …)", root.Value, action.Method.Value)
 		return
+	}
+	if t.matched != nil {
+		if positive, negative := t.s.Where.Matches(); len(positive)+len(negative) != countMatches(t.s.Where) {
+			t.fail(*t.matched, "matches dưới || hay dưới ! của nhiều điều kiện chưa có trong engine hôm nay: viết nó trong chuỗi && ngoài "+
+				"cùng (%s.matches(q) && …, !%s.matches(q) && …), hay tách thành hai câu", t.parameter, t.parameter)
+			return
+		}
 	}
 	if err := handle.Database.CheckNames(t.s); err != nil {
 		t.fail(action.Method.Token, "%v", err)
@@ -512,6 +521,21 @@ func (t *translator) lambda(link *MethodCallExpression) Expression {
 	return returned.ReturnValue
 }
 
+// countMatches counts every matches of a condition, wherever it stands.
+func countMatches(node *statement.Node) int {
+	if node == nil {
+		return 0
+	}
+	count := 0
+	if node.Op == statement.OpMatches {
+		count++
+	}
+	for _, argument := range node.Args {
+		count += countMatches(argument)
+	}
+	return count
+}
+
 // conjunction joins two conditions by &&; either may be nil.
 func conjunction(left, right *statement.Node) *statement.Node {
 	switch {
@@ -563,6 +587,15 @@ func (t *translator) condition(e Expression) *statement.Node {
 			t.fail(node.Token, "? : trên cột chưa có trong engine hôm nay (lát 2)")
 			return nil
 		}
+	case *MethodCallExpression:
+		switch {
+		case node.Method.Value == "matches" && t.mentions(node.Object):
+			return t.matches(node)
+		case node.Method.Value == "search" && t.mentions(node.Object):
+			t.fail(node.Method.Token, "search là phương thức của chuỗi JavaScript (nhận regex, trả vị trí): tìm toàn văn viết %s.matches(…)",
+				node.Object.String())
+			return nil
+		}
 	}
 	if t.failed || t.absent(e) {
 		return nil
@@ -582,6 +615,75 @@ func (t *translator) condition(e Expression) *statement.Node {
 	}
 	t.untranslatable(e)
 	return nil
+}
+
+// matches translates table.matches(text) or table.column.matches(text): full text over every .searchable() column of
+// the table, or over one (KITWORK_DATABASE.md mục 2). The text is the user's, read as words: a literal string or a
+// value from outside the lambda.
+func (t *translator) matches(node *MethodCallExpression) *statement.Node {
+	column := ""
+	switch object := node.Object.(type) {
+	case *Identifier:
+		if _, err := t.table.Column("matches"); err == nil {
+			t.fail(node.Method.Token, "bảng %s có cột tên matches, nên %s.matches là cột đó: tìm toàn văn viết trên một cột, %s.tên_cột.matches(…)",
+				t.table.Name, t.parameter, t.parameter)
+			return nil
+		}
+		if !t.table.Searchable() {
+			t.fail(node.Method.Token, "bảng %s không có cột .searchable(): matches tìm trên cột khai như title: text().searchable() trong .shared/schema/", t.table.Name)
+			return nil
+		}
+	case *MemberExpression:
+		name, ok := t.column(object)
+		if !ok {
+			if !t.failed {
+				t.untranslatable(node)
+			}
+			return nil
+		}
+		if declared, _ := t.table.Column(name); declared == nil || !declared.Search {
+			t.fail(node.Method.Token, "cột %s.%s không có .searchable(): matches tìm trên cột khai %s: text().searchable() trong .shared/schema/",
+				t.table.Name, name, name)
+			return nil
+		}
+		column = name
+	default:
+		t.untranslatable(node)
+		return nil
+	}
+	switch len(node.Arguments) {
+	case 1:
+	case 2:
+		t.fail(node.Method.Token, "matches(chữ, { … }) chưa có trong engine hôm nay: chế độ khớp khác \"mọi từ\" còn mở (KITWORK_DATABASE.md mục 7, câu 12)")
+		return nil
+	default:
+		t.fail(node.Method.Token, "matches nhận một chữ: %s.matches(q)", t.parameter)
+		return nil
+	}
+	argument := node.Arguments[0]
+	if t.mentions(argument) {
+		t.fail(expressionToken(argument), "matches nhận chữ người dùng gõ, không đọc bảng: tính trước câu, đặt vào một const")
+		return nil
+	}
+	var text *statement.Node
+	if literal, ok := argument.(*Literal); ok {
+		if literal.Value.K != value.String {
+			t.fail(literal.Token, "matches nhận một chuỗi: %s.matches(\"cà phê\")", t.parameter)
+			return nil
+		}
+		text = statement.Literal(literal.Value.Text())
+	} else {
+		if offender := t.impure(argument); offender != nil {
+			t.untranslatable(offender)
+			return nil
+		}
+		text = t.hole(argument)
+	}
+	if t.matched == nil {
+		token := node.Method.Token
+		t.matched = &token
+	}
+	return &statement.Node{Op: statement.OpMatches, Column: column, Args: []*statement.Node{text}}
 }
 
 // comparison translates column OP value, or value OP column (turned around).
@@ -618,7 +720,7 @@ func (t *translator) comparison(node *InfixExpression) *statement.Node {
 			if word, name, imported := t.lambdaWord(other); word != "" {
 				t.misplacedWord(word, name, imported)
 			} else {
-				t.fail(node.Token, "cả bảng chỉ so với null (LEFT JOIN, lát 5) hay search(chữ) (lát 2): so một cột, %s.cột %s giá trị", t.parameter, operator)
+				t.fail(node.Token, "cả bảng chỉ so với null (LEFT JOIN, lát 5): so một cột, %s.cột %s giá trị; tìm toàn văn viết %s.matches(chữ)", t.parameter, operator, t.parameter)
 			}
 		}
 		return nil
@@ -783,6 +885,8 @@ func (t *translator) lambdaWord(e Expression) (string, *Identifier, bool) {
 // stand on the right of === or !==, desc and asc in orderBy (KITWORK_DATABASE.md mục 2, "lỗi chỉ đường").
 func (t *translator) misplacedWord(word string, name *Identifier, imported bool) {
 	switch {
+	case word == "search":
+		t.fail(name.Token, "search(chữ) đổi thành %s.matches(chữ): matches là tìm toàn văn trên mọi cột .searchable(), %s.cột.matches(chữ) trên một cột", t.parameter, t.parameter)
 	case !imported:
 		t.fail(name.Token, "%s chưa import: import { %s } from \"kitwork/database\"", word, word)
 	case statement.LambdaWordsNotYet[word] != 0:

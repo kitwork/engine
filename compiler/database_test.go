@@ -148,7 +148,7 @@ func TestDatabaseStatementLowersToOneInvoke(t *testing.T) {
 	}
 	call := -1
 	for index := range tail {
-		if strings.HasPrefix(tail[index], `PUSH "{\"v\":1`) {
+		if strings.HasPrefix(tail[index], `PUSH "{\"v\":2`) {
 			call = index
 		}
 	}
@@ -183,9 +183,9 @@ const created = db.insert((orders) => ({ email, item, amount: 35000, day: today 
 		}
 	}
 	want := []string{
-		`{"v":1,"action":"list","table":"orders","where":{"op":"&&","args":[{"op":"===","args":[{"op":"column","column":"day"},{"op":"hole","hole":0}]},{"op":">","args":[{"op":"column","column":"amount"},{"op":"literal","value":5}]}]},"holes":[{"site":"` + at(source, "today &&") + `"}]}`,
-		`{"v":1,"action":"list","table":"orders","where":{"op":"===","args":[{"op":"column","column":"email"},{"op":"hole","hole":0}]},"order":[{"column":"amount","desc":true}],"limit":{"op":"literal","value":10},"holes":[{"site":"` + at(source, "email).") + `"}]}`,
-		`{"v":1,"action":"insert","table":"orders","values":[{"column":"email","value":{"op":"hole","hole":0}},{"column":"item","value":{"op":"hole","hole":1}},{"column":"amount","value":{"op":"literal","value":35000}},{"column":"day","value":{"op":"hole","hole":2}}],"holes":[{"site":"` + at(source, "email, item,") + `"},{"site":"` + at(source, "item, amount") + `"},{"site":"` + at(source, "today }") + `"}]}`,
+		`{"v":2,"action":"list","table":"orders","where":{"op":"&&","args":[{"op":"===","args":[{"op":"column","column":"day"},{"op":"hole","hole":0}]},{"op":">","args":[{"op":"column","column":"amount"},{"op":"literal","value":5}]}]},"holes":[{"site":"` + at(source, "today &&") + `"}]}`,
+		`{"v":2,"action":"list","table":"orders","where":{"op":"===","args":[{"op":"column","column":"email"},{"op":"hole","hole":0}]},"order":[{"column":"amount","desc":true}],"limit":{"op":"literal","value":10},"holes":[{"site":"` + at(source, "email).") + `"}]}`,
+		`{"v":2,"action":"insert","table":"orders","values":[{"column":"email","value":{"op":"hole","hole":0}},{"column":"item","value":{"op":"hole","hole":1}},{"column":"amount","value":{"op":"literal","value":35000}},{"column":"day","value":{"op":"hole","hole":2}}],"holes":[{"site":"` + at(source, "email, item,") + `"},{"site":"` + at(source, "item, amount") + `"},{"site":"` + at(source, "today }") + `"}]}`,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("templates:\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -260,9 +260,9 @@ func TestDatabaseGrammarErrors(t *testing.T) {
 		{`db.list((orders) => orders.email === (() => email)());`, "không dịch được"},
 		// a word of the lambda out of its place says where it goes (mục 2, "lỗi chỉ đường"), never "compute it
 		// before the statement"; the whole table compares with null (LEFT JOIN) or search
-		{`db.list((orders) => orders === search(email));`, "router.work:6:32: search(…) chưa có trong engine hôm nay (lát 2)"},
+		{`db.list((orders) => orders === search(email));`, "router.work:6:32: search(chữ) đổi thành orders.matches(chữ): matches là tìm toàn văn trên mọi cột .searchable(), orders.cột.matches(chữ) trên một cột"},
 		{`db.list((orders) => orders === null);`, "router.work:6:28: so cả bảng là LEFT JOIN, chưa có trong engine hôm nay (lát 5)"},
-		{`db.list((orders) => orders === email);`, "router.work:6:28: cả bảng chỉ so với null (LEFT JOIN, lát 5) hay search(chữ) (lát 2): so một cột, orders.cột === giá trị"},
+		{`db.list((orders) => orders === email);`, "router.work:6:28: cả bảng chỉ so với null (LEFT JOIN, lát 5): so một cột, orders.cột === giá trị; tìm toàn văn viết orders.matches(chữ)"},
 		{`db.list((orders) => desc(orders.amount));`, "router.work:6:21: desc(…) chỉ có trong orderBy: (orders) => desc(orders.amount)"},
 		{`db.list((orders) => one(ids));`, "router.work:6:21: one(…) chỉ đứng bên phải === hay !==: orders.id === one(ids)"},
 		{`db.list((orders) => like("%x%"));`, "router.work:6:21: like(…) chưa có trong engine hôm nay (lát 2)"},
@@ -639,8 +639,65 @@ func TestDatabaseFileCacheSeesSchemaEdits(t *testing.T) {
 // The template's format is part of the compiler's schema: a change of one without the other would give
 // an artifact the engine reads another way.
 func TestStatementVersionPairsWithSchema(t *testing.T) {
-	if statement.Version != 1 || CompilerSchemaVersion != 25 {
+	if statement.Version != 2 || CompilerSchemaVersion != 26 {
 		t.Fatalf("statement format %d with compiler schema %d: a change of the format bumps the schema (fingerprint.go) and this pair",
 			statement.Version, CompilerSchemaVersion)
+	}
+}
+
+const postsSchema = `import { table, id, text, boolean } from "kitwork/schema";
+import { connection } from "kitwork/database";
+
+const posts = table({ id: id(), title: text().searchable(), body: text().searchable(), author: text(), published: boolean() });
+const tags = table({ id: id(), name: text() });
+
+export const blog = connection().tables({ posts, tags });
+`
+
+// matches is full text (KITWORK_DATABASE.md mục 2): table.matches(text) over every .searchable() column,
+// table.column.matches(text) over one, the text a literal string or a value from outside the lambda; it stands in the
+// outermost && chain, alone or under one !, and each misuse the spec names is a compile error saying why.
+//
+// CONTROL: with condition not reading matches, "posts.matches(q) && …: không dịch được `posts.matches(q)`"; with the
+// placement left unchecked, "posts.matches(q) || …" compiled; with the column's .searchable() unchecked,
+// "posts.author.matches(q)" compiled.
+func TestDatabaseMatches(t *testing.T) {
+	files := map[string]string{".shared/schema/blog.work": postsSchema}
+	head := "import { blog } from \"app/.shared/schema/blog.work\";\nimport { search } from \"kitwork/database\";\nconst q = \"cà phê\";\n"
+	source := head + "const rows = blog.list((posts) => posts.matches(q) && !posts.title.matches(\"cũ\") && posts.published === true);\n"
+	bytecode, err := compileRoute(t, source, files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := templates(t, bytecode)
+	if len(found) != 1 {
+		t.Fatalf("%d templates, want one", len(found))
+	}
+	positive, negative := found[0].Where.Matches()
+	if len(positive) != 1 || positive[0].Column != "" || positive[0].Args[0].Op != statement.OpHole ||
+		len(negative) != 1 || negative[0].Column != "title" || negative[0].Args[0].Op != statement.OpLiteral {
+		t.Fatalf("template %s: want posts.matches(hole) and !posts.title.matches(\"cũ\")", statement.Encode(found[0]))
+	}
+	for _, test := range []struct{ line, want string }{
+		{`blog.list((posts) => posts.matches(q) || posts.published === true);`, "matches dưới || hay dưới ! của nhiều điều kiện chưa có trong engine hôm nay"},
+		{`blog.list((posts) => !(posts.matches(q) && posts.published === true));`, "matches dưới || hay dưới ! của nhiều điều kiện"},
+		{`blog.list((posts) => posts.author.matches(q));`, "cột posts.author không có .searchable(): matches tìm trên cột khai author: text().searchable()"},
+		{`blog.list((tags) => tags.matches(q));`, "bảng tags không có cột .searchable()"},
+		{`blog.list((posts) => posts.matches(q, { any: true }));`, "matches(chữ, { … }) chưa có trong engine hôm nay"},
+		{`blog.list((posts) => posts.matches(5));`, "matches nhận một chuỗi"},
+		{`blog.list((posts) => posts.matches(posts.author));`, "matches nhận chữ người dùng gõ, không đọc bảng"},
+		{`blog.list((posts) => posts.matches(q.trim()));`, "không dịch được `q.trim()`"},
+		{`blog.list((posts) => posts.title.search(q));`, "search là phương thức của chuỗi JavaScript (nhận regex, trả vị trí): tìm toàn văn viết posts.title.matches(…)"},
+		{`blog.list((posts) => posts === search(q));`, "search(chữ) đổi thành posts.matches(chữ)"},
+	} {
+		_, err := compileRoute(t, head+test.line+"\n", files)
+		if err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Errorf("%s\n  got  %v\n  want %s", test.line, err, test.want)
+		}
+	}
+	reserved := map[string]string{".shared/schema/blog.work": strings.Replace(postsSchema, "author: text()", "score: text()", 1)}
+	if _, err := compileRoute(t, head+"blog.list((posts) => posts.matches(q));\n", reserved); err == nil ||
+		!strings.Contains(err.Error(), "cột score: bảng có cột .searchable() không có cột tên score hay snippet") {
+		t.Errorf("a column score beside a .searchable() one: %v", err)
 	}
 }

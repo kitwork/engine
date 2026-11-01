@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestCompilerV25GoldenContract(t *testing.T) {
-	if CompilerSchemaVersion != 25 {
-		t.Fatalf("CompilerSchemaVersion = %d, want schema v25", CompilerSchemaVersion)
+func TestCompilerV26GoldenContract(t *testing.T) {
+	if CompilerSchemaVersion != 26 {
+		t.Fatalf("CompilerSchemaVersion = %d, want schema v26", CompilerSchemaVersion)
 	}
 	// Bytecode 3 (14/10/2026) moved the fingerprint and every checksum below with the version alone: each
 	// fixture's instructions, constants and debug table are those bytecode 2 wrote (none needs a wide
@@ -34,7 +34,9 @@ func TestCompilerV25GoldenContract(t *testing.T) {
 	// moved the fingerprint alone: no fixture is a router.work or a config.work. Schema 24 (25/10/2026, a guard
 	// draws no page) moved the fingerprint alone: no fixture is a router.work or a config.work. Schema 25 (25/10/2026,
 	// a guard answers four ways only) moved the fingerprint alone: no fixture is a router.work or a config.work.
-	const expectedFingerprint = "97201c004ddc3f8aa1a5852822d801df3c04cf656e280733cf4cf24248702218"
+	// Schema 26 (01/11/2026, matches in a database statement, its template version 2) moved the fingerprint alone: no
+	// fixture imports a database.
+	const expectedFingerprint = "af99e3dc58132ac4d0450d117ed4d135085e622fdede655d3fc614adae4bb8cb"
 	if got := Fingerprint(); got != expectedFingerprint {
 		t.Fatalf("compiler fingerprint = %q, want %q", got, expectedFingerprint)
 	}

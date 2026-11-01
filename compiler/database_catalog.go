@@ -266,6 +266,10 @@ func (reader *schemaReader) readTable(e Expression) *statement.Table {
 		reader.fail(token, "bảng không có id() chưa có trong engine hôm nay: thêm id: id()")
 		return nil
 	}
+	if message := statement.SearchReserved(table); message != "" {
+		reader.fail(token, message)
+		return nil
+	}
 	return table
 }
 

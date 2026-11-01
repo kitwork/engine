@@ -21,7 +21,7 @@ import (
 // Version is the template format. A template of another version was compiled by another engine: it is
 // refused, never guessed. A change of the format bumps it together with the compiler's schema (the
 // pairing test of the compiler holds the two together).
-const Version = 1
+const Version = 2
 
 // Method is the method a lowered statement invokes on its handle: LOAD db; PUSH template; holes…;
 // PUSH "#statement"; INVOKE 1+n. A source never spells # after a dot, so no program calls it by hand.
@@ -36,6 +36,10 @@ const (
 	OpHole    = "hole"    // a value computed outside the lambda, by its index
 	OpTruth   = "truth"   // a hole in the place of a condition: true or false by JavaScript's truthiness
 	OpOne     = "one"     // one(array) on the right of === or !==: IN / NOT IN
+	// OpMatches is full text (KITWORK_DATABASE.md mục 2): table.matches(text) over every .searchable() column
+	// (Column empty), table.column.matches(text) over one; its one argument a literal string or a hole. It stands
+	// only in the outermost && chain, alone or under one !. Added with Version 2.
+	OpMatches = "matches"
 	OpAnd     = "&&"
 	OpOr      = "||"
 	OpNot     = "!"
@@ -148,6 +152,9 @@ func Decode(text string) (*Statement, error) {
 }
 
 func (s *Statement) check() error {
+	if err := s.Where.checkMatches(true); err != nil {
+		return err
+	}
 	switch s.Action {
 	case ActionList, ActionFirst, ActionCount, ActionInsert:
 	default:
@@ -226,6 +233,11 @@ func (n *Node) checkCondition(holes int) error {
 			return err
 		}
 		return n.Args[0].checkCondition(holes)
+	case OpMatches:
+		if err := n.arity(1); err != nil {
+			return err
+		}
+		return n.Args[0].checkValue(holes, false)
 	case OpEqual, OpUnequal, OpLess, OpAtMost, OpMore, OpAtLeast:
 		if err := n.arity(2); err != nil {
 			return err
@@ -249,6 +261,70 @@ func (n *Node) checkCondition(holes int) error {
 		return right.checkValue(holes, true)
 	}
 	return fmt.Errorf("điều kiện %q", n.Op)
+}
+
+// checkMatches checks that matches stands only where the engine reads it: in the outermost && chain (top), alone or
+// under one !.
+func (n *Node) checkMatches(top bool) error {
+	if n == nil {
+		return nil
+	}
+	switch n.Op {
+	case OpMatches:
+		return nil
+	case OpAnd:
+		for _, argument := range n.Args {
+			if err := argument.checkMatches(top); err != nil {
+				return err
+			}
+		}
+		return nil
+	case OpNot:
+		if top && len(n.Args) == 1 && n.Args[0].Op == OpMatches {
+			return nil
+		}
+	}
+	for _, argument := range n.Args {
+		if argument.mentionsMatches() {
+			return fmt.Errorf("matches dưới %s", n.Op)
+		}
+	}
+	return nil
+}
+
+func (n *Node) mentionsMatches() bool {
+	if n == nil {
+		return false
+	}
+	if n.Op == OpMatches {
+		return true
+	}
+	for _, argument := range n.Args {
+		if argument.mentionsMatches() {
+			return true
+		}
+	}
+	return false
+}
+
+// Matches lists the matches of a condition: those it ranks by (positive) and those it only filters by (under !).
+func (n *Node) Matches() (positive, negative []*Node) {
+	var walk func(*Node)
+	walk = func(node *Node) {
+		switch {
+		case node == nil:
+		case node.Op == OpMatches:
+			positive = append(positive, node)
+		case node.Op == OpNot && len(node.Args) == 1 && node.Args[0].Op == OpMatches:
+			negative = append(negative, node.Args[0])
+		case node.Op == OpAnd:
+			for _, argument := range node.Args {
+				walk(argument)
+			}
+		}
+	}
+	walk(n)
+	return positive, negative
 }
 
 // checkValue checks a node in the place of a value: a literal, a hole, and null where null is allowed.
@@ -300,7 +376,7 @@ func (s *Statement) Columns() []string {
 		if n == nil {
 			return
 		}
-		if n.Op == OpColumn {
+		if n.Op == OpColumn || n.Op == OpMatches && n.Column != "" {
 			columns = append(columns, n.Column)
 		}
 		for _, argument := range n.Args {

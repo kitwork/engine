@@ -47,6 +47,9 @@ func (m *ManagedDatabase) run(prepared *preparedStatement, holes []value.Value) 
 		}
 		return table.Create(value.New(row))
 	}
+	if positive, negative := s.Where.Matches(); len(positive)+len(negative) > 0 {
+		return m.runMatches(prepared, binder, positive, negative)
+	}
 	predicate, truth, failure := binder.predicate(s.Where)
 	if failure.Failed() {
 		return failure

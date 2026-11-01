@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitwork/engine/database/fulltext"
 	"github.com/kitwork/engine/work"
 )
 
@@ -63,9 +64,9 @@ func waitForSearch(t *testing.T, client *sql.DB, query string) string {
 // giving every kind to the index's count, "… MATCH 'akko OR logitech': … Count supports implicit-AND text queries
 // only".
 func TestAppDatabasePortSearch(t *testing.T) {
-	previous := appDatabaseSearchWatch
-	appDatabaseSearchWatch = 50 * time.Millisecond
-	t.Cleanup(func() { appDatabaseSearchWatch = previous })
+	previous := fulltext.Watch
+	fulltext.Watch = 50 * time.Millisecond
+	t.Cleanup(func() { fulltext.Watch = previous })
 
 	host := filepath.Join(t.TempDir(), ".database")
 	file := filepath.Join(host, "shopping", "kitwork.db")
@@ -121,12 +122,9 @@ func TestAppDatabasePortSearch(t *testing.T) {
 
 	// A restart: the table has not moved, so its index is used as it is.
 	fixture, runtime = startSearchPort(t, host, declared)
-	entry := runtime.gateway.search.indexes[appDatabaseSearchKey("shopping", "public", "products")]
-	entry.mutex.RLock()
-	ready := entry.index != nil
-	entry.mutex.RUnlock()
-	if !ready || entry.built.Load() != 0 {
-		t.Fatalf("after a restart: index ready %v, %d rows built again, want the index used as it is", ready, entry.built.Load())
+	entry := fulltext.Shared().Lookup(file, "products")
+	if entry == nil || !entry.Ready() || entry.Built() != 0 {
+		t.Fatalf("after a restart: index %v, want the index used as it is (ready, no row built again)", entry)
 	}
 	client = fixture.connect(t, "kitdb", appDatabaseTestPassword, "shopping")
 	if got := appDatabaseRows(t, client, `SELECT name FROM products WHERE products MATCH 'highlands'`); got != "Cà phê sữa đá" {
@@ -191,9 +189,9 @@ func TestAppDatabaseSearchConfig(t *testing.T) {
 // to each table: posts "p3", notes "", want p3 and n2" (the first index took the change); with discover keeping an
 // index of other columns, "posts MATCH after the change = "p1; p2", want p1".
 func TestAppDatabasePortSearchesAnAppsTable(t *testing.T) {
-	previous := appDatabaseSearchWatch
-	appDatabaseSearchWatch = 50 * time.Millisecond
-	t.Cleanup(func() { appDatabaseSearchWatch = previous })
+	previous := fulltext.Watch
+	fulltext.Watch = 50 * time.Millisecond
+	t.Cleanup(func() { fulltext.Watch = previous })
 	root := t.TempDir()
 	host := filepath.Join(root, ".database")
 	writeAppDatabaseFile(t, filepath.Join(host, "shopping", "kitwork.db"), `CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT)`)

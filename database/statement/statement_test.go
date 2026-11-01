@@ -72,24 +72,50 @@ func TestStatementRoundTripDeterminismVersion(t *testing.T) {
 		t.Fatalf("%s escapes &&: a template reads as written", encoded)
 	}
 
-	other := strings.Replace(encoded, `{"v":1,`, `{"v":2,`, 1)
-	if _, err := Decode(other); err == nil || !strings.Contains(err.Error(), "dịch bằng engine khác (bản 2, engine này đọc bản 1): dịch lại") {
-		t.Fatalf("Decode of version 2: %v, want the error that says to compile again", err)
+	other := strings.Replace(encoded, `{"v":2,`, `{"v":1,`, 1)
+	if _, err := Decode(other); err == nil || !strings.Contains(err.Error(), "dịch bằng engine khác (bản 1, engine này đọc bản 2): dịch lại") {
+		t.Fatalf("Decode of version 1: %v, want the error that says to compile again", err)
 	}
-	lonely := `{"v":1,"action":"list","table":"orders","where":{"op":"&&","args":[{"op":"table"}]}}`
+	lonely := `{"v":2,"action":"list","table":"orders","where":{"op":"&&","args":[{"op":"table"}]}}`
 	if _, err := Decode(lonely); err == nil || !strings.Contains(err.Error(), "&& cần hai vế, có 1") || !strings.Contains(err.Error(), "dịch lại") {
 		t.Fatalf("Decode of && with one side: %v, want malformed", err)
 	}
 	for template, want := range map[string]string{
-		`{"v":1,"action":"list","table":"orders","where":{"op":"===","args":[{"op":"column","column":"day"},{"op":"hole","hole":0}]}}`: "hole ngoài danh sách 0 hole",
-		`{"v":1,"action":"drop","table":"orders"}`:                                                                           `hành động "drop"`,
-		`{"v":1,"action":"list","table":"orders","sql":"DROP TABLE orders"}`:                                                 "unknown field",
-		`{"v":1,"action":"insert","table":"orders"}`:                                                                         "insert không có dữ liệu",
-		`{"v":1,"action":"list","table":"orders","where":{"op":"<","args":[{"op":"column","column":"note"},{"op":"null"}]}}`: "null với <",
+		`{"v":2,"action":"list","table":"orders","where":{"op":"===","args":[{"op":"column","column":"day"},{"op":"hole","hole":0}]}}`: "hole ngoài danh sách 0 hole",
+		`{"v":2,"action":"drop","table":"orders"}`:                                                                                                                        `hành động "drop"`,
+		`{"v":2,"action":"list","table":"orders","sql":"DROP TABLE orders"}`:                                                                                              "unknown field",
+		`{"v":2,"action":"insert","table":"orders"}`:                                                                                                                      "insert không có dữ liệu",
+		`{"v":2,"action":"list","table":"orders","where":{"op":"<","args":[{"op":"column","column":"note"},{"op":"null"}]}}`:                                              "null với <",
+		`{"v":2,"action":"list","table":"orders","where":{"op":"||","args":[{"op":"table"},{"op":"matches","args":[{"op":"literal","value":"x"}]}]}}`:                     "matches dưới ||",
+		`{"v":2,"action":"list","table":"orders","where":{"op":"!","args":[{"op":"&&","args":[{"op":"table"},{"op":"matches","args":[{"op":"literal","value":"x"}]}]}]}}`: "matches dưới !",
+		`{"v":2,"action":"list","table":"orders","where":{"op":"matches","args":[{"op":"column","column":"item"}]}}`:                                                      `giá trị "column"`,
 	} {
 		if _, err := Decode(template); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("Decode(%s) = %v, want %q", template, err, want)
 		}
+	}
+}
+
+// matches stands in the outermost && chain, alone or under one !: Matches lists the ones that rank (positive) and the
+// ones that only filter (negative), and a table.column.matches names its column among the statement's.
+func TestMatchesInTheFormat(t *testing.T) {
+	text := func(value string) *Node { return &Node{Op: OpMatches, Args: []*Node{Literal(value)}} }
+	onItem := &Node{Op: OpMatches, Column: "item", Args: []*Node{HoleNode(0)}}
+	where := &Node{Op: OpAnd, Args: []*Node{
+		&Node{Op: OpAnd, Args: []*Node{text("cà phê"), &Node{Op: OpNot, Args: []*Node{text("đá")}}}},
+		&Node{Op: OpAnd, Args: []*Node{onItem, &Node{Op: OpUnequal, Args: []*Node{{Op: OpColumn, Column: "note"}, {Op: OpNull}}}}},
+	}}
+	s := &Statement{Version: Version, Action: ActionList, Table: "orders", Where: where, Holes: []Hole{{Site: "router.work:2:40"}}}
+	decoded, err := Decode(Encode(s))
+	if err != nil {
+		t.Fatal(err)
+	}
+	positive, negative := decoded.Where.Matches()
+	if len(positive) != 2 || len(negative) != 1 || positive[1].Column != "item" {
+		t.Fatalf("matches: %d positive (second on %q), %d negative; want 2, item, 1", len(positive), positive[1].Column, len(negative))
+	}
+	if got := strings.Join(decoded.Columns(), ","); got != "item,note" {
+		t.Fatalf("columns = %s, want item,note", got)
 	}
 }
 

@@ -70,6 +70,30 @@ func (t *Table) Column(name string) (*Column, error) {
 	return nil, fmt.Errorf("bảng %s không có cột %s; cột: %s", t.Name, name, strings.Join(t.columnNames(), ", "))
 }
 
+// Searchable reports a table with a .searchable() column: matches reads it.
+func (t *Table) Searchable() bool {
+	for _, column := range t.Columns {
+		if column.Search {
+			return true
+		}
+	}
+	return false
+}
+
+// SearchReserved is the error of a table with a .searchable() column and a column named score or snippet, the two
+// fields matches adds to its rows (KITWORK_DATABASE.md mục 1); "" otherwise.
+func SearchReserved(t *Table) string {
+	if !t.Searchable() {
+		return ""
+	}
+	for _, column := range t.Columns {
+		if column.Name == "score" || column.Name == "snippet" {
+			return fmt.Sprintf("cột %s: bảng có cột .searchable() không có cột tên score hay snippet, hai trường matches thêm vào dòng; đặt tên khác", column.Name)
+		}
+	}
+	return ""
+}
+
 // Required reports a column an insert must write: not nullable, no default, and not filled by the engine
 // (id(), .created(), .updated()).
 func (c *Column) Required() bool {

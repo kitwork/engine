@@ -749,13 +749,13 @@ func TestManagedDatabaseRuntimeValidationBeforeOpen(t *testing.T) {
 	tenant := shop.site("shop.example")
 	managed := goManaged(t, tenant, map[string]value.Value{"orders": goOrders(t)})
 	for template, want := range map[string]string{
-		`{"v":1,"action":"list","table":"orders","where":{"op":"===","args":[{"op":"column","column":"x"},{"op":"literal","value":1}]}}`:                                    "bảng orders không có cột x; cột: id, email, item, amount, note, day, createdAt",
-		`{"v":1,"action":"list","table":"orders","where":{"op":">","args":[{"op":"column","column":"amount"},{"op":"literal","value":"abc"}]}}`:                             "cột amount là decimal(12, 2): giá trị ở trong lambda không phải số hay chuỗi thập phân",
-		`{"v":1,"action":"list","table":"orders","where":{"op":"===","args":[{"op":"column","column":"day"},{"op":"hole","hole":0}]},"holes":[{"site":"router.work:3:1"}]}`: "câu database nhận 1 giá trị, có 0: dịch lại",
-		`{"v":1,"action":"list","table":"users"}`: "không có bảng users; bảng của database: orders",
+		`{"v":2,"action":"list","table":"orders","where":{"op":"===","args":[{"op":"column","column":"x"},{"op":"literal","value":1}]}}`:                                    "bảng orders không có cột x; cột: id, email, item, amount, note, day, createdAt",
+		`{"v":2,"action":"list","table":"orders","where":{"op":">","args":[{"op":"column","column":"amount"},{"op":"literal","value":"abc"}]}}`:                             "cột amount là decimal(12, 2): giá trị ở trong lambda không phải số hay chuỗi thập phân",
+		`{"v":2,"action":"list","table":"orders","where":{"op":"===","args":[{"op":"column","column":"day"},{"op":"hole","hole":0}]},"holes":[{"site":"router.work:3:1"}]}`: "câu database nhận 1 giá trị, có 0: dịch lại",
+		`{"v":2,"action":"list","table":"users"}`: "không có bảng users; bảng của database: orders",
 		// an insert the compiler did not see (a stale artifact, a forged template) meets the same rules
-		`{"v":1,"action":"insert","table":"orders","values":[{"column":"email","value":{"op":"literal","value":"a"}},{"column":"item","value":{"op":"literal","value":"b"}},{"column":"amount","value":{"op":"literal","value":1}},{"column":"day","value":{"op":"literal","value":"2026-10-22"}},{"column":"createdAt","value":{"op":"literal","value":"2026-10-22T00:00:00Z"}}]}`: "createdAt tự điền lúc ghi (timestamp().created() hay .updated()), không viết trong dữ liệu",
-		`{"v":1,"action":"insert","table":"orders","values":[{"column":"amount","value":{"op":"literal","value":1}},{"column":"day","value":{"op":"literal","value":"2026-10-22"}}]}`:                                                                                                                                                                                               "insert vào orders thiếu cột bắt buộc: email, item (cột được bỏ trống khai .nullable())",
+		`{"v":2,"action":"insert","table":"orders","values":[{"column":"email","value":{"op":"literal","value":"a"}},{"column":"item","value":{"op":"literal","value":"b"}},{"column":"amount","value":{"op":"literal","value":1}},{"column":"day","value":{"op":"literal","value":"2026-10-22"}},{"column":"createdAt","value":{"op":"literal","value":"2026-10-22T00:00:00Z"}}]}`: "createdAt tự điền lúc ghi (timestamp().created() hay .updated()), không viết trong dữ liệu",
+		`{"v":2,"action":"insert","table":"orders","values":[{"column":"amount","value":{"op":"literal","value":1}},{"column":"day","value":{"op":"literal","value":"2026-10-22"}}]}`:                                                                                                                                                                                               "insert vào orders thiếu cột bắt buộc: email, item (cột được bỏ trống khai .nullable())",
 	} {
 		code, message := failureOf(managed.OnInvoke(statement.Method, value.New(template)))
 		if code != value.InvalidArgumentCode || message != want {
@@ -856,7 +856,7 @@ func TestManagedDatabaseSQLiteParity(t *testing.T) {
 		{value.New("c"), value.New(9), value.New("2026-10-21"), value.NewNil()},
 		{value.New(injection), value.New(2), value.New("2026-10-22"), value.NewNil()},
 	}
-	insert := `{"v":1,"action":"insert","table":"items","values":[{"column":"name","value":{"op":"hole","hole":0}},{"column":"n","value":{"op":"hole","hole":1}},{"column":"day","value":{"op":"hole","hole":2}},{"column":"note","value":{"op":"hole","hole":3}}],"holes":[{"site":"a"},{"site":"b"},{"site":"c"},{"site":"d"}]}`
+	insert := `{"v":2,"action":"insert","table":"items","values":[{"column":"name","value":{"op":"hole","hole":0}},{"column":"n","value":{"op":"hole","hole":1}},{"column":"day","value":{"op":"hole","hole":2}},{"column":"note","value":{"op":"hole","hole":3}}],"holes":[{"site":"a"},{"site":"b"},{"site":"c"},{"site":"d"}]}`
 	for _, database := range []*ManagedDatabase{kitdb, sqlite} {
 		for _, row := range inserts {
 			if created := database.OnInvoke(statement.Method, append([]value.Value{value.New(insert)}, row...)...); created.Failed() {
@@ -870,18 +870,18 @@ func TestManagedDatabaseSQLiteParity(t *testing.T) {
 		// want is the rows' names in order, or the count
 		want string
 	}{
-		{`{"v":1,"action":"list","table":"items","where":{"op":"&&","args":[{"op":"===","args":[{"op":"column","column":"day"},{"op":"hole","hole":0}]},{"op":"||","args":[{"op":"<","args":[{"op":"column","column":"n"},{"op":"hole","hole":1}]},{"op":"!","args":[{"op":"===","args":[{"op":"column","column":"note"},{"op":"null"}]}]}]}]},"order":[{"column":"n","desc":true}],"holes":[{"site":"a"},{"site":"b"}]}`,
+		{`{"v":2,"action":"list","table":"items","where":{"op":"&&","args":[{"op":"===","args":[{"op":"column","column":"day"},{"op":"hole","hole":0}]},{"op":"||","args":[{"op":"<","args":[{"op":"column","column":"n"},{"op":"hole","hole":1}]},{"op":"!","args":[{"op":"===","args":[{"op":"column","column":"note"},{"op":"null"}]}]}]}]},"order":[{"column":"n","desc":true}],"holes":[{"site":"a"},{"site":"b"}]}`,
 			[]value.Value{value.New("2026-10-22"), value.New(2)}, "b, a"},
-		{`{"v":1,"action":"list","table":"items","where":{"op":"===","args":[{"op":"column","column":"name"},{"op":"hole","hole":0}]},"holes":[{"site":"a"}]}`,
+		{`{"v":2,"action":"list","table":"items","where":{"op":"===","args":[{"op":"column","column":"name"},{"op":"hole","hole":0}]},"holes":[{"site":"a"}]}`,
 			[]value.Value{value.New(injection)}, injection},
-		{`{"v":1,"action":"list","table":"items","where":{"op":"===","args":[{"op":"column","column":"n"},{"op":"one","args":[{"op":"hole","hole":0}]}]},"order":[{"column":"n"}],"holes":[{"site":"a"}]}`,
+		{`{"v":2,"action":"list","table":"items","where":{"op":"===","args":[{"op":"column","column":"n"},{"op":"one","args":[{"op":"hole","hole":0}]}]},"order":[{"column":"n"}],"holes":[{"site":"a"}]}`,
 			[]value.Value{value.New([]value.Value{value.New(1), value.New(9)})}, "a, c"},
-		{`{"v":1,"action":"count","table":"items","where":{"op":">=","args":[{"op":"column","column":"n"},{"op":"literal","value":2}]}}`, nil, "3"},
-		{`{"v":1,"action":"first","table":"items","where":{"op":"!==","args":[{"op":"column","column":"note"},{"op":"null"}]}}`, nil, "b"},
+		{`{"v":2,"action":"count","table":"items","where":{"op":">=","args":[{"op":"column","column":"n"},{"op":"literal","value":2}]}}`, nil, "3"},
+		{`{"v":2,"action":"first","table":"items","where":{"op":"!==","args":[{"op":"column","column":"note"},{"op":"null"}]}}`, nil, "b"},
 		// a null from outside matches no row, with === or !==
-		{`{"v":1,"action":"list","table":"items","where":{"op":"===","args":[{"op":"column","column":"note"},{"op":"hole","hole":0}]},"holes":[{"site":"a"}]}`,
+		{`{"v":2,"action":"list","table":"items","where":{"op":"===","args":[{"op":"column","column":"note"},{"op":"hole","hole":0}]},"holes":[{"site":"a"}]}`,
 			[]value.Value{value.NewNil()}, ""},
-		{`{"v":1,"action":"list","table":"items","where":{"op":"!==","args":[{"op":"column","column":"note"},{"op":"hole","hole":0}]},"holes":[{"site":"a"}]}`,
+		{`{"v":2,"action":"list","table":"items","where":{"op":"!==","args":[{"op":"column","column":"note"},{"op":"hole","hole":0}]},"holes":[{"site":"a"}]}`,
 			[]value.Value{value.NewNil()}, ""},
 	} {
 		results := make([]any, 0, 2)
@@ -1092,11 +1092,11 @@ func TestManagedDatabaseSchemaFile(t *testing.T) {
 	if !ok {
 		t.Fatal(`connection().schema("billing").tables({ invoices }) is not a database`)
 	}
-	insert := `{"v":1,"action":"insert","table":"invoices","values":[{"column":"name","value":{"op":"hole","hole":0}}],"holes":[{"site":"a"}]}`
+	insert := `{"v":2,"action":"insert","table":"invoices","values":[{"column":"name","value":{"op":"hole","hole":0}}],"holes":[{"site":"a"}]}`
 	if created := billing.OnInvoke(statement.Method, value.New(insert), value.New("first")); created.Failed() {
 		t.Fatalf("insert: %v", created)
 	}
-	listed := billing.OnInvoke(statement.Method, value.New(`{"v":1,"action":"list","table":"invoices"}`))
+	listed := billing.OnInvoke(statement.Method, value.New(`{"v":2,"action":"list","table":"invoices"}`))
 	if listed.Failed() || namesOf(listed.Interface()) != "first" {
 		t.Fatalf("billing.list: %v, want the row inserted", listed)
 	}
@@ -1105,7 +1105,7 @@ func TestManagedDatabaseSchemaFile(t *testing.T) {
 		t.Fatalf("the schema's file: %v", err)
 	}
 	public := goManaged(t, tenant, map[string]value.Value{"orders": goOrders(t)})
-	if code, message := failureOf(public.OnInvoke(statement.Method, value.New(`{"v":1,"action":"list","table":"invoices"}`))); code != value.InvalidArgumentCode || !strings.HasPrefix(message, "không có bảng invoices") {
+	if code, message := failureOf(public.OnInvoke(statement.Method, value.New(`{"v":2,"action":"list","table":"invoices"}`))); code != value.InvalidArgumentCode || !strings.HasPrefix(message, "không có bảng invoices") {
 		t.Errorf("public.list(invoices): %s %q", code, message)
 	}
 
@@ -1149,7 +1149,7 @@ func TestManagedDatabaseSQLiteDecimal(t *testing.T) {
 	declared := declareDbProxy(tenant, nil, "sqlite", value.New("decimal.db"), value.New(map[string]value.Value{"items": items()}))
 	sqlite := newManagedDatabase(declared.V.(*dbProxy))
 
-	insert := `{"v":1,"action":"insert","table":"items","values":[{"column":"name","value":{"op":"hole","hole":0}},{"column":"amount","value":{"op":"hole","hole":1}}],"holes":[{"site":"a"},{"site":"b"}]}`
+	insert := `{"v":2,"action":"insert","table":"items","values":[{"column":"name","value":{"op":"hole","hole":0}},{"column":"amount","value":{"op":"hole","hole":1}}],"holes":[{"site":"a"},{"site":"b"}]}`
 	rows := [][]value.Value{
 		{value.New("a"), value.New(5)},
 		{value.New("b"), value.New(35000)},
@@ -1170,12 +1170,12 @@ func TestManagedDatabaseSQLiteDecimal(t *testing.T) {
 		holes    []value.Value
 		want     string
 	}{
-		{`{"v":1,"action":"count","table":"items","where":{"op":">","args":[{"op":"column","column":"amount"},{"op":"literal","value":5}]}}`, nil, "4"},
-		{`{"v":1,"action":"list","table":"items","where":{"op":"===","args":[{"op":"column","column":"amount"},{"op":"hole","hole":0}]},"order":[{"column":"name"}],"holes":[{"site":"a"}]}`,
+		{`{"v":2,"action":"count","table":"items","where":{"op":">","args":[{"op":"column","column":"amount"},{"op":"literal","value":5}]}}`, nil, "4"},
+		{`{"v":2,"action":"list","table":"items","where":{"op":"===","args":[{"op":"column","column":"amount"},{"op":"hole","hole":0}]},"order":[{"column":"name"}],"holes":[{"site":"a"}]}`,
 			[]value.Value{value.New(35000)}, "b, d"},
-		{`{"v":1,"action":"list","table":"items","where":{"op":"===","args":[{"op":"column","column":"amount"},{"op":"one","args":[{"op":"hole","hole":0}]}]},"order":[{"column":"name"}],"holes":[{"site":"a"}]}`,
+		{`{"v":2,"action":"list","table":"items","where":{"op":"===","args":[{"op":"column","column":"amount"},{"op":"one","args":[{"op":"hole","hole":0}]}]},"order":[{"column":"name"}],"holes":[{"site":"a"}]}`,
 			[]value.Value{value.New([]value.Value{value.New(35000), value.New(4.5)})}, "b, d, e"},
-		{`{"v":1,"action":"list","table":"items","order":[{"column":"amount","desc":true},{"column":"name"}]}`, nil, "b, d, c, f, a, e"},
+		{`{"v":2,"action":"list","table":"items","order":[{"column":"amount","desc":true},{"column":"name"}]}`, nil, "b, d, c, f, a, e"},
 	} {
 		for index, database := range []*ManagedDatabase{kitdb, sqlite} {
 			result := database.OnInvoke(statement.Method, append([]value.Value{value.New(test.template)}, test.holes...)...)
@@ -1191,7 +1191,7 @@ func TestManagedDatabaseSQLiteDecimal(t *testing.T) {
 			}
 		}
 	}
-	read := sqlite.OnInvoke(statement.Method, value.New(`{"v":1,"action":"first","table":"items","where":{"op":"===","args":[{"op":"column","column":"name"},{"op":"literal","value":"c"}]}}`))
+	read := sqlite.OnInvoke(statement.Method, value.New(`{"v":2,"action":"first","table":"items","where":{"op":"===","args":[{"op":"column","column":"name"},{"op":"literal","value":"c"}]}}`))
 	if row, ok := read.Interface().(map[string]any); !ok || row["amount"] != 100.5 {
 		t.Errorf("amount of c reads %v, want 100.5", read)
 	}
@@ -1238,7 +1238,7 @@ func TestManagedDatabaseSQLiteDecimalTextIsRefused(t *testing.T) {
 	declared := declareDbProxy(tenant, nil, "sqlite", value.New(catalogDatabaseName("ledger")), value.New(map[string]value.Value{"items": items}))
 	declared.V.(*dbProxy).sqlitePath = path
 	ledger := newManagedDatabase(declared.V.(*dbProxy))
-	code, message := failureOf(ledger.OnInvoke(statement.Method, value.New(`{"v":1,"action":"list","table":"items"}`)))
+	code, message := failureOf(ledger.OnInvoke(statement.Method, value.New(`{"v":2,"action":"list","table":"items"}`)))
 	if code != value.DatabaseCode || !strings.Contains(message, "cột amount là decimal lưu dạng chữ (cách trước 29/10/2026)") {
 		t.Fatalf("a file of the old layout: %s %q", code, message)
 	}
@@ -1266,7 +1266,7 @@ func TestManagedDatabaseRecordsColumnKinds(t *testing.T) {
 		goColumn{name: "paid", builder: "boolean"},
 	)
 	database := goManaged(t, tenant, map[string]value.Value{"items": items})
-	if counted := database.OnInvoke(statement.Method, value.New(`{"v":1,"action":"count","table":"items"}`)); counted.Failed() {
+	if counted := database.OnInvoke(statement.Method, value.New(`{"v":2,"action":"count","table":"items"}`)); counted.Failed() {
 		t.Fatalf("count: %v", counted)
 	}
 	file, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(shop.root, "acme", ".database", "application", "kitwork.db"))+"?mode=ro")
@@ -1309,8 +1309,13 @@ func TestColumnKindsAddSearchWeight(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer file.Close()
-	if _, err := file.Exec(`CREATE TABLE kitwork_columns (table_name TEXT NOT NULL, column_name TEXT NOT NULL, kind TEXT NOT NULL, precision INTEGER NOT NULL, scale INTEGER NOT NULL, PRIMARY KEY (table_name, column_name))`); err != nil {
-		t.Fatal(err)
+	for _, statement := range []string{
+		`CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)`,
+		`CREATE TABLE kitwork_columns (table_name TEXT NOT NULL, column_name TEXT NOT NULL, kind TEXT NOT NULL, precision INTEGER NOT NULL, scale INTEGER NOT NULL, PRIMARY KEY (table_name, column_name))`,
+	} {
+		if _, err := file.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
 	}
 	columns := map[string]*ColumnSpec{"body": {kind: "text", searchable: true, searchWt: 1, seq: 1}, "id": {kind: "integer", seq: 0}}
 	if err := recordColumnKinds(file, "notes", columns); err != nil {
@@ -1321,5 +1326,73 @@ func TestColumnKindsAddSearchWeight(t *testing.T) {
 	}
 	if got, want := columnKindRows(t, file, "notes"), "body text 0 0 1, id integer 0 0 0"; got != want {
 		t.Fatalf("kitwork_columns of notes = %q, want %q", got, want)
+	}
+}
+
+// A table with a .searchable() column is tracked for its full-text index: an insert, a delete and a change of a
+// searchable column each move kitwork_search_revisions and name the rowid in kitwork_search_changes; a change of
+// another column moves nothing; a table that keeps no searchable column is tracked no more.
+//
+// CONTROL: with writeColumnKinds not calling writeSearchTracking, "tracking of notes: no such table:
+// kitwork_search_revisions"; with the update trigger on every column, "after the stock changed: revision 4, want 3".
+func TestColumnKindsTrackSearchableTables(t *testing.T) {
+	file, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "kitwork.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	file.SetMaxOpenConns(1)
+	if _, err := file.Exec(`CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT, stock INTEGER)`); err != nil {
+		t.Fatal(err)
+	}
+	columns := map[string]*ColumnSpec{"id": {kind: "integer", primary: true, seq: 0}, "body": {kind: "text", searchable: true, searchWt: 1, seq: 1},
+		"stock": {kind: "integer", seq: 2}}
+	if err := recordColumnKinds(file, "notes", columns); err != nil {
+		t.Fatal(err)
+	}
+	tracking := func() string {
+		var revision int
+		if err := file.QueryRow(`SELECT revision FROM kitwork_search_revisions WHERE table_name = 'notes'`).Scan(&revision); err != nil {
+			t.Fatalf("tracking of notes: %v", err)
+		}
+		rows, err := file.Query(`SELECT row_id, revision FROM kitwork_search_changes WHERE table_name = 'notes' ORDER BY row_id`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		changes := []string{}
+		for rows.Next() {
+			var row, at int
+			if err := rows.Scan(&row, &at); err != nil {
+				t.Fatal(err)
+			}
+			changes = append(changes, fmt.Sprintf("%d@%d", row, at))
+		}
+		return fmt.Sprintf("revision %d, changes %s", revision, strings.Join(changes, " "))
+	}
+	for _, step := range []struct{ statement, want string }{
+		{`INSERT INTO notes (id, body, stock) VALUES (1, 'Cà phê', 3), (2, 'Trà', 5)`, "revision 2, changes 1@1 2@2"},
+		{`UPDATE notes SET body = 'Cà phê sữa' WHERE id = 1`, "revision 3, changes 1@3 2@2"},
+		{`UPDATE notes SET stock = 9 WHERE id = 2`, "revision 3, changes 1@3 2@2"},
+		{`DELETE FROM notes WHERE id = 2`, "revision 4, changes 1@3 2@4"},
+		{`UPDATE notes SET id = 7 WHERE id = 1`, "revision 5, changes 1@5 2@4 7@5"},
+	} {
+		if _, err := file.Exec(step.statement); err != nil {
+			t.Fatal(err)
+		}
+		if got := tracking(); got != step.want {
+			t.Fatalf("after %s: %s, want %s", step.statement, got, step.want)
+		}
+	}
+	columns["body"].searchable = false
+	if err := recordColumnKinds(file, "notes", columns); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.Exec(`INSERT INTO notes (id, body) VALUES (3, 'Bánh mì')`); err != nil {
+		t.Fatal(err)
+	}
+	var left int
+	if err := file.QueryRow(`SELECT (SELECT count(*) FROM kitwork_search_revisions) + (SELECT count(*) FROM kitwork_search_changes)`).Scan(&left); err != nil || left != 0 {
+		t.Fatalf("a table no longer searchable leaves %d rows of tracking (%v), want 0", left, err)
 	}
 }

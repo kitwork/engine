@@ -314,7 +314,7 @@ func (g *appDatabaseGateway) OpenSession(ctx context.Context, startup pgwire.Sta
 	}
 	options := g.options
 	options.User = user
-	options.Search = appDatabaseSearchProvider{manager: g.search, database: target.name}
+	options.Search = appDatabaseSearchProvider{database: target.name, schemas: schemas}
 	options.Log = func(statement string, err error) { logAppDatabaseFailure(target.name, user, statement, err) }
 	session, err := gateway.Open(ctx, gateway.Target{Name: target.name, Schemas: schemas}, access, columns, options)
 	if err != nil {

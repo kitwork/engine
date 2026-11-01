@@ -80,7 +80,7 @@ import (
 // handle, LOAD db; PUSH "<template>"; holes…; PUSH "#statement"; INVOKE 1+n (database_translate.go), and
 // its query lambdas are no longer compiled. A cached artifact of schema 11 holds the lambda form, which
 // the handle refuses: the bump retires it. A program that imports no database compiles as before, byte for
-// byte. The template's format (database/statement.Version 1) pairs with this schema: a change of the
+// byte. The template's format (database/statement.Version 2) pairs with this schema: a change of the
 // format bumps both (TestStatementVersionPairsWithSchema). No opcode or operand changed.
 //
 // 13 (22/10/2026, KITWORK_DATABASE.md, the older spellings removed): an import of an older word of the
@@ -188,7 +188,7 @@ import (
 // any case, and res as the context's response. A cached artifact of schema 24 of a router.work whose guard answers so would run until the
 // engine refused it: the bump retires it. A program that writes none of them compiles as before, byte for byte. No
 // opcode or operand changed.
-const CompilerSchemaVersion uint16 = 25
+const CompilerSchemaVersion uint16 = 26
 
 var currentCompilerFingerprint = compilerFingerprintFor(CompilerSchemaVersion)
 
