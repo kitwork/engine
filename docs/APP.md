@@ -584,12 +584,19 @@ an all-sites deployment has a measured memory budget.
 
 ## Desktop
 
+The desktop shell (`native/cmd/kitwork-desktop`) reads the same manifest as the host:
+`application.work`, one `app.<name>(…)` call per line, the host env through
+`file.env("./.env")`. Without `--config` it looks beside its executable, and an app
+folder (`--app`) holds its own, by the engine's rule: `application.work`, or an old
+`app.kitwork.js` or `server.kitwork.js` standing alone; two of them stop the start, as
+they stop the engine. The examples below are lines of an `application.work`.
+
 ### Remote website preview on Windows
 
 The Windows reference shell supports an experimental remote website mode:
 
 ```javascript
-import { app } from "kitwork";
+import * as app from "kitwork/application";
 
 app.desktop({
   name: "Kitwork",
@@ -605,7 +612,7 @@ app.desktop({
 ```
 
 From `native/`, build `cmd/kitwork-desktop`, then launch the executable with
-`--config=examples/remote-desktop/app.kitwork.js`. This mode loads HTTPS directly
+`--config=examples/remote-desktop/application.work`. This mode loads HTTPS directly
 without a tenant runtime or native capability bridge. `native: true` (default)
 uses the OS titlebar. `native: false` removes the titlebar and gives the website
 the full client area; it does not inject HTML window buttons into a remote page.
@@ -613,7 +620,7 @@ Alt+F4 closes the app; Alt+Space opens the Windows system menu for moving,
 resizing, restoring and minimizing. The remote page receives no window-control
 bridge in either mode. Legacy `chrome: "html"` selects the same frameless mode.
 Do not combine `url` with `domain`, `start`, or `permissions`.
-Use explicit `--config`, or place `app.kitwork.js` beside the executable and
+Use explicit `--config`, or place `application.work` beside the executable and
 double-click it without arguments. URL string shorthand is not supported.
 This is a preview, not a release packaging path:
 Installer generation and signed release packaging remain future work.
@@ -635,7 +642,7 @@ restored window dimensions.
 explicit splash declaration the application navigates directly to the website,
 even if a splash file exists beside the manifest; no loading delay is added.
 When enabled with `splash: true` or `splash: 1.5`, the application requires
-`splash.html` beside the selected `app.kitwork.js`. A number is the minimum
+`splash.html` beside the selected manifest. A number is the minimum
 visible duration in seconds (fractional values supported, range 0..60).
 Use `splash: "./splash.html"` (or another relative `.html` path within that
 directory) to require a specific file. Missing explicit files fail clearly;
@@ -776,9 +783,8 @@ app.desktop({
   offline: true
 });
 
-// Compatibility shorthand; do not also set desktop.splash.
-app.desktop({ name: "Kitwork", url: "https://kitwork.io" })
-  .splash("./splash.html");
+// Shorthand, on a line of its own; do not also set desktop.splash.
+app.splash("./splash.html");
 ```
 
 Kitwork's own launch and offline screens are plain HTML too, frozen on 01/11/2026 from
@@ -903,7 +909,7 @@ offline documents are ordinary files you can customize and distribute:
 
 ```text
 Kitwork.exe
-app.kitwork.js
+application.work
 launch.html
 splash.html
 offline.html
@@ -949,7 +955,7 @@ than accumulating listeners. Keep `'self'` in an authored CSP for local assets.
 This is a connection fallback, not a service worker or an offline website cache.
 The current consumer remains Windows remote desktop preview only.
 
-For distribution, keep the executable, `app.kitwork.js`, local templates and their
+For distribution, keep the executable, `application.work`, local screens and their
 asset directory together. The executable discovers the adjacent manifest when
 started without flags, regardless of the current working directory. A Windows
 WebView2 Runtime installation remains required; this preview is not an installer.
@@ -1004,23 +1010,25 @@ launcher, taskbar, and window where supported by the target platform.
 ### One app for web and desktop
 
 ```javascript
-import { app, env } from "kitwork";
+import * as app from "kitwork/application";
+import * as file from "kitwork/file";
 
-app
-  .root("app")
-  .website({
-    hostname: "studio.kitwork.localhost",
-    allowLocal: true
-  })
-  .desktop({
-    name: "Kitwork Studio",
-    icon: "./assets/icon.png",
-    width: 1280,
-    height: 820,
-    native: false,
-    center: true
-  })
-  .run(env.PORT || 8080);
+const env = file.env("./.env");
+
+app.root("app");
+app.website({
+  hostname: "studio.kitwork.localhost",
+  allowLocal: env.ALLOW_LOCAL || false
+});
+app.desktop({
+  name: "Kitwork Studio",
+  icon: "./assets/icon.png",
+  width: 1280,
+  height: 820,
+  native: false,
+  center: true
+});
+app.run(env.PORT || 8080);
 ```
 
 The website host reads `website()` and `run()`. The desktop tool additionally

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,12 +57,12 @@ func TestApplicationWorkEvaluates(t *testing.T) {
 
 func TestFindManifestPrefersApplicationWork(t *testing.T) {
 	dir := writeFolder(t, map[string]string{"application.work": applicationWork})
-	got, err := findManifest(dir)
+	got, err := FindManifest(dir)
 	if err != nil {
-		t.Fatalf("findManifest: %v", err)
+		t.Fatalf("FindManifest: %v", err)
 	}
 	if filepath.Base(got) != "application.work" {
-		t.Errorf("findManifest = %s, want application.work", got)
+		t.Errorf("FindManifest = %s, want application.work", got)
 	}
 }
 
@@ -69,24 +70,24 @@ func TestFindManifestPrefersApplicationWork(t *testing.T) {
 func TestFindManifestRefusesTwoManifests(t *testing.T) {
 	for _, old := range []string{"app.kitwork.js", "server.kitwork.js"} {
 		dir := writeFolder(t, map[string]string{"application.work": applicationWork, old: "// old\n"})
-		_, err := findManifest(dir)
+		_, err := FindManifest(dir)
 		if err == nil || !strings.Contains(err.Error(), "application.work") || !strings.Contains(err.Error(), old) {
-			t.Errorf("findManifest with application.work and %s: err = %v, want an error naming both", old, err)
+			t.Errorf("FindManifest with application.work and %s: err = %v, want an error naming both", old, err)
 		}
 	}
 }
 
 func TestFindManifestStillReadsAnOldManifestAlone(t *testing.T) {
 	dir := writeFolder(t, map[string]string{"app.kitwork.js": "// old\n"})
-	got, err := findManifest(dir)
+	got, err := FindManifest(dir)
 	if err != nil || filepath.Base(got) != "app.kitwork.js" {
-		t.Fatalf("findManifest = %q, %v; want app.kitwork.js", got, err)
+		t.Fatalf("FindManifest = %q, %v; want app.kitwork.js", got, err)
 	}
 }
 
 func TestFindManifestNamesApplicationWorkWhenNothingIsThere(t *testing.T) {
-	_, err := findManifest(t.TempDir())
-	if err == nil || !strings.Contains(err.Error(), "application.work") {
+	_, err := FindManifest(t.TempDir())
+	if !errors.Is(err, ErrNoManifest) || !strings.Contains(err.Error(), "application.work") {
 		t.Fatalf("err = %v, want it to ask for application.work", err)
 	}
 }

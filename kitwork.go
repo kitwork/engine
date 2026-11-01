@@ -38,7 +38,7 @@ func Run(configFile ...string) (err error) {
 	if len(configFile) > 0 && configFile[0] != "" {
 		file = configFile[0]
 	} else {
-		found, findErr := findManifest(".")
+		found, findErr := FindManifest(".")
 		if findErr != nil {
 			return findErr
 		}
@@ -522,9 +522,13 @@ func bytecodeCacheDirectory(cfg *Config) string {
 // manifestNames are the manifests a folder may hold, the new one first. Only one may be there.
 var manifestNames = []string{"application.work", "app.kitwork.js", "server.kitwork.js"}
 
-// findManifest returns the one manifest in dir. application.work beside an old app.kitwork.js or
+// ErrNoManifest is FindManifest's answer for a folder holding none of manifestNames.
+var ErrNoManifest = errors.New("không tìm thấy manifest: cần application.work")
+
+// FindManifest returns the one manifest in dir. application.work beside an old app.kitwork.js or
 // server.kitwork.js stops the boot naming both: which one the author means is not the engine's guess.
-func findManifest(dir string) (string, error) {
+// The native shells find theirs by the same rule (kitwork-desktop beside its executable, an app folder).
+func FindManifest(dir string) (string, error) {
 	var found []string
 	for _, name := range manifestNames {
 		if info, err := os.Stat(filepath.Join(dir, name)); err == nil && !info.IsDir() {
@@ -533,7 +537,7 @@ func findManifest(dir string) (string, error) {
 	}
 	switch len(found) {
 	case 0:
-		return "", fmt.Errorf("không tìm thấy manifest: cần application.work")
+		return "", ErrNoManifest
 	case 1:
 		return filepath.Join(dir, found[0]), nil
 	}
@@ -551,7 +555,7 @@ func commandConfig(configFile ...string) (*Config, error) {
 	if len(configFile) > 0 && configFile[0] != "" {
 		file = configFile[0]
 	} else {
-		found, err := findManifest(".")
+		found, err := FindManifest(".")
 		if err != nil {
 			return nil, err
 		}
