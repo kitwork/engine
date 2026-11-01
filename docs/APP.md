@@ -635,7 +635,7 @@ restored window dimensions.
 explicit splash declaration the application navigates directly to the website,
 even if a splash file exists beside the manifest; no loading delay is added.
 When enabled with `splash: true` or `splash: 1.5`, the application requires
-`splash.kitwork.html` beside the selected `app.kitwork.js`. A number is the minimum
+`splash.html` beside the selected `app.kitwork.js`. A number is the minimum
 visible duration in seconds (fractional values supported, range 0..60).
 Use `splash: "./splash.html"` (or another relative `.html` path within that
 directory) to require a specific file. Missing explicit files fail clearly;
@@ -646,24 +646,24 @@ restarting the application, not rebuilding the executable. `splash: false` skips
 ```js
 app.desktop({ name: "Studio", splash: 1.5 });
 // Equivalent: splash: { duration: 1.5 }
-// Custom file and data:
+// Custom file:
 app.desktop({
   name: "Studio",
-  splash: { template: "./loading.kitwork.html", duration: 2, bind: { message: "Welcome" } }
+  splash: { template: "./loading.html", duration: 2 }
 });
 ```
 
 Omitting `duration` adds no intentional wait. Duration starts when the splash is
 shown, not when the process starts. `app.splash(1.5)` accepts the same shorthand.
-Plain `.html` files are passed to the WebView exactly as authored: no placeholder
-replacement, implicit theme changes, or injected CSS. Write a complete standalone
-HTML document with its own styles. A `.kitwork.html` filename selects Kitwork's
-normal template renderer instead; standard expressions such as `{{ title }}` and
-`{{ theme }}` use the application title and the system theme (`dark` or empty).
-Normal template blocks and escaped output work, and JIT CSS is generated from
-the rendered utility classes and inserted into the head automatically. There is
-no special title or CSS placeholder syntax. The included `.html` example is a
-pre-rendered, self-contained document; the `.kitwork.html` example is its source.
+An app's own screen is a plain `.html` file passed to the WebView exactly as
+authored: no placeholder replacement, implicit theme changes, or injected CSS. Write
+a complete standalone HTML document with its own styles. Since 01/11/2026 there is no
+`.kitwork.html` screen: the template engine that drew one went on 27/10/2026, so a
+`.kitwork.html` filename, or a screen left beside the manifest under its old name
+(`splash.kitwork.html`, `launch.kitwork.html`, `offline.kitwork.html`), is a startup
+error naming the `.html` to write. A `bind` written for a splash is an error too:
+there is nothing in a plain file for it to fill. The included `splash.html` example is
+a pre-rendered, self-contained document.
 Relative images, CSS and fonts now resolve against the splash file's directory,
 including nested templates (for example `screens/splash.html` with `./logo.svg`).
 The shell intercepts a private HTTPS `.invalid` origin in-process; it opens no
@@ -778,19 +778,17 @@ app.desktop({
 
 // Compatibility shorthand; do not also set desktop.splash.
 app.desktop({ name: "Kitwork", url: "https://kitwork.io" })
-  .splash("./splash.kitwork.html", {
-    heading: "Welcome",
-    message: "Getting things ready"
-  });
+  .splash("./splash.html");
 ```
 
-The template uses ordinary expressions such as `{{ title }}`, `{{ logo }}` and
-`{{ message }}`. Objects can omit `template` to use the default, or name a custom
-file; object form always renders it, even with a plain `.html` filename.
+Kitwork's own launch and offline screens are plain HTML too, frozen on 01/11/2026 from
+what the template engine drew, their CSS inline; the shell fills `title`, `theme` and
+each screen's words: `logo` and `message` on launch, `heading` and `message` on offline.
+Objects can omit `template` to use the default, or name a custom file, shown as written.
 `desktop.bind` defaults to an empty object and accepts JSON-compatible
 data only (including nested arrays/objects), capped at depth 32 and 10,000 values.
-Supplied bindings override the default `title`/`theme` keys without mutating the
-manifest data. It feeds only local launch/splash/offline templates, never a remote
+Supplied bindings override those fields without mutating the manifest data. They fill
+only Kitwork's own launch and offline screens, never an app's own file, a remote
 website or tenant VM. Keep secrets out of it. Defaults are merged first, shared
 data second; legacy per-screen `bind` overrides remain supported for compatibility.
 Offline's `retry`, `error`, and `status` always come last and are protected.
@@ -829,13 +827,13 @@ pending document with the connection screen; closing the window cancels the
 timer. Explicit cancellations do not display an error. This handles transport
 and loading failures, not successful HTTP responses containing a site's own
 404/500 page. It does not cache the remote website for offline use. The embedded
-error UI uses the system theme captured at startup, generated Tailwind utilities,
-and script-free CSP. Retry returns to `desktop.url`, not the failed deep link.
+error UI uses the system theme captured at startup, its CSS inline, and script-free
+CSP. Retry returns to `desktop.url`, not the failed deep link.
 
 ### HTML Launch Window
 
 `launch` is a separate, opt-in window with its own WebView2, displaying
-`launch.kitwork.html`. Its width and height are independent of the desktop window.
+`launch.html`. Its width and height are independent of the desktop window.
 It cannot appear until its own WebView is initialized; no extra native loading
 screen is shown before it.
 
@@ -850,7 +848,7 @@ app.desktop({
     width: 420,
     height: 240,
     rounded: 12,
-    template: "./launch.kitwork.html"
+    template: "./launch.html"
   },
   offline: true
 });
@@ -865,9 +863,10 @@ Windows controls the tint, blur and transparency (including accessibility and
 power-saving policies); `glass` does not force translucency when Windows disables it.
 `launch: {}` does the same; object fields override width, height, rounded and template.
 Omission or `launch: false` means no launch window, even if the file exists.
-An omitted `template` discovers the adjacent `launch.kitwork.html` or uses the
-embedded version. An explicit missing file is a startup error. Templates are
-rendered with shared data and JIT CSS; images, fonts and CSS use the confined
+An omitted `template` discovers the adjacent `launch.html` or uses the
+embedded version. An explicit missing file is a startup error. Kitwork's own launch
+screen is filled with shared data; an app's own `launch.html` is shown as written.
+Images, fonts and CSS use the confined
 private origin, without a network listener, scripts, native bridge or remote
 navigation. Popups and navigation to other URLs are blocked.
 
@@ -877,7 +876,7 @@ frameless launch is an independent temporary app window, so it remains visible
 while the desktop window is hidden. `rounded` is an integer radius from 0 to
 128 logical pixels, defaulting to 12. Set `rounded: 0` for square corners.
 The native window region clips both the host and WebView, including on Windows 10.
-Its default template receives `title`, `theme` and a starting message, overridden
+Its default screen receives `title`, `theme`, `logo` and a starting message, overridden
 by shared data. Compatibility `title`, `message`, and per-screen `bind` fields
 remain accepted, but new configurations should use `desktop.bind`.
 
@@ -898,16 +897,16 @@ supports the Windows remote desktop consumer only, not mobile or local tenants.
 
 ### Custom Offline Document
 
-The Windows remote preview automatically reads `offline.kitwork.html` next to
+The Windows remote preview automatically reads `offline.html` next to
 the manifest. If absent, it uses the embedded default. Both the loading and
 offline documents are ordinary files you can customize and distribute:
 
 ```text
 Kitwork.exe
 app.kitwork.js
-launch.kitwork.html
-splash.kitwork.html
-offline.kitwork.html
+launch.html
+splash.html
+offline.html
 assets/logo.svg
 ```
 
@@ -921,33 +920,23 @@ app.desktop({
   url: "https://kitwork.io",
   bind: { logo: "/assets/logo.svg" },
   offline: {
-    template: "./offline.kitwork.html"
+    template: "./offline.html"
   }
 });
 ```
 
-Templates receive `title`, `theme`, `heading` and `message` defaults. Shared `desktop.bind`
-can override these presentation fields. Three operational fields are reserved
-and cannot be overridden by bindings:
-
-- `retry`: private shell-owned retry address, usable as an anchor's `href`.
-- `error`: `network`, `tls` or `timeout`.
-- `status`: the numeric WebView2 error status (timeout uses `7`).
-
-```html
-<h1>{{ heading }}</h1>
-<p>{{ message }}</p>
-<a href="{{ retry }}">Try again</a>
-```
+Kitwork's own offline screen shows `title`, and a `heading` and `message` chosen by
+the failure (certificate, timeout or network). Shared `desktop.bind` can override
+these presentation fields; the retry address it links to cannot be overridden.
+An app's own `offline.html` is shown as written, the same for every failure: it
+cannot tell a certificate error from a lost connection.
 
 Retry only works while the shell is displaying an offline document; a remote
 website cannot invoke it. Clicking it cancels the private navigation and loads
 the configured desktop URL. Scripts and native bridge messages are unnecessary.
-If authoring raw `.html`, write
-`<a href="https://retry.kitwork.invalid/">Try again</a>` instead: raw HTML remains
-unchanged. String `.kitwork.html` paths and all `{ template, bind }` objects use
-normal escaped template rendering and JIT CSS. Templates are read at startup,
-then bound to each failure's status; restart after editing their source.
+In your own `offline.html`, write
+`<a href="https://retry.kitwork.invalid/">Try again</a>`. Documents are read at
+startup; restart after editing their source.
 
 `offline: true` or `offline: {}` uses adjacent/default discovery. `offline: false` or
 `app.offline(false)` disables the recovery document and its 30-second deadline,
