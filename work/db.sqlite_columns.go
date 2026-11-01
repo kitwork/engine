@@ -3,6 +3,7 @@ package work
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 )
 
 // kitwork_columns keeps, in each SQLite file the engine migrates, the kind each column of a table was declared with
@@ -10,9 +11,13 @@ import (
 // integer × 10^scale), so the PostgreSQL wire port gives 4.50 for 450 and a boolean as true or false. The rows of a
 // table are replaced by its declared columns each time the engine checks the table against its declaration
 // (ensureTable), in one transaction; the kinds are the engine's own (decimal, bool, datetime, date, json, kitid,
-// text, …).
+// text, …). search_weight is a .searchable() column's weight in the table's full-text index, 0 for any other column:
+// the database port builds the index of each table that has one and answers MATCH on it (app_database_search.go).
 
-const sqliteColumnsSchema = `CREATE TABLE IF NOT EXISTS kitwork_columns (table_name TEXT NOT NULL, column_name TEXT NOT NULL, kind TEXT NOT NULL, precision INTEGER NOT NULL, scale INTEGER NOT NULL, PRIMARY KEY (table_name, column_name))`
+const sqliteColumnsSchema = `CREATE TABLE IF NOT EXISTS kitwork_columns (table_name TEXT NOT NULL, column_name TEXT NOT NULL, kind TEXT NOT NULL, precision INTEGER NOT NULL, scale INTEGER NOT NULL, search_weight INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (table_name, column_name))`
+
+// sqliteColumnsSearch gives a kitwork_columns written before search_weight (31/10/2026) the column.
+const sqliteColumnsSearch = `ALTER TABLE kitwork_columns ADD COLUMN search_weight INTEGER NOT NULL DEFAULT 0`
 
 // recordColumnKinds writes the declared columns of table into kitwork_columns of db, replacing what it held for the
 // table, in one transaction.
@@ -46,17 +51,23 @@ func writeColumnKinds(writer columnKindsWriter, table string, columns map[string
 	if _, err := writer.Exec(sqliteColumnsSchema); err != nil {
 		return err
 	}
+	if _, err := writer.Exec(sqliteColumnsSearch); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return err
+	}
 	if _, err := writer.Exec(`DELETE FROM kitwork_columns WHERE table_name = ?`, table); err != nil {
 		return err
 	}
 	for _, name := range orderedColumns(columns) {
 		spec := columns[name]
-		precision, scale := 0, 0
+		precision, scale, weight := 0, 0, 0
 		if spec.kind == "decimal" {
 			precision, scale = spec.precision, spec.scale
 		}
-		if _, err := writer.Exec(`INSERT INTO kitwork_columns (table_name, column_name, kind, precision, scale) VALUES (?, ?, ?, ?, ?)`,
-			table, name, spec.kind, precision, scale); err != nil {
+		if spec.searchable {
+			weight = max(spec.searchWt, 1)
+		}
+		if _, err := writer.Exec(`INSERT INTO kitwork_columns (table_name, column_name, kind, precision, scale, search_weight) VALUES (?, ?, ?, ?, ?, ?)`,
+			table, name, spec.kind, precision, scale, weight); err != nil {
 			return err
 		}
 	}

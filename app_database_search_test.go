@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -177,5 +178,84 @@ func TestAppDatabaseSearchConfig(t *testing.T) {
 		if _, err := parseAppDatabaseConfig(base(refused.search)); err == nil || !strings.Contains(err.Error(), refused.message) {
 			t.Errorf("%v: %v, want %q", refused.search, err, refused.message)
 		}
+	}
+}
+
+// MATCH on a table of an app's database: its .searchable() columns, recorded with their weight in kitwork_columns,
+// make its index when a session opens the database, kept in the app's .database/application/kitwork.db.search; rows
+// the app adds to two tables of the file are found once the watch built both again; when the columns change the next
+// session builds the index from them; a table with none says to mark them .searchable().
+//
+// CONTROL: with OpenSession not calling discover, "SELECT count(*) FROM posts WHERE posts MATCH 'ca phe': pq: table
+// public.posts has no search index"; with the watch looking at the file once per index, "after the app added a row
+// to each table: posts "p3", notes "", want p3 and n2" (the first index took the change); with discover keeping an
+// index of other columns, "posts MATCH after the change = "p1; p2", want p1".
+func TestAppDatabasePortSearchesAnAppsTable(t *testing.T) {
+	previous := appDatabaseSearchWatch
+	appDatabaseSearchWatch = 50 * time.Millisecond
+	t.Cleanup(func() { appDatabaseSearchWatch = previous })
+	root := t.TempDir()
+	host := filepath.Join(root, ".database")
+	writeAppDatabaseFile(t, filepath.Join(host, "shopping", "kitwork.db"), `CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT)`)
+	site := filepath.Join(root, "apps", "acme", "shop.example")
+	if err := os.MkdirAll(site, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(site, "router.work"), []byte(`import * as router from "kitwork/router";`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(root, "apps", "acme", ".database", "application", "kitwork.db")
+	writeAppDatabaseFile(t, file,
+		`PRAGMA journal_mode=WAL`,
+		`CREATE TABLE posts (id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL, published INTEGER NOT NULL)`,
+		`INSERT INTO posts VALUES ('p1', 'Cà phê sữa đá', 'Pha phin buổi sáng', 1), ('p2', 'Trà đào', 'Một ly cà phê không đường', 0)`,
+		`CREATE TABLE tags (id TEXT PRIMARY KEY, name TEXT NOT NULL)`,
+		`CREATE TABLE notes (id TEXT PRIMARY KEY, body TEXT NOT NULL)`,
+		`INSERT INTO notes VALUES ('n1', 'Ghi chú đầu tiên')`,
+		`CREATE TABLE kitwork_columns (table_name TEXT NOT NULL, column_name TEXT NOT NULL, kind TEXT NOT NULL, precision INTEGER NOT NULL, scale INTEGER NOT NULL, search_weight INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (table_name, column_name))`,
+		`INSERT INTO kitwork_columns VALUES ('posts', 'id', 'kitid', 0, 0, 0), ('posts', 'title', 'text', 0, 0, 1), ('posts', 'body', 'text', 0, 0, 1), ('posts', 'published', 'bool', 0, 0, 0), ('tags', 'name', 'text', 0, 0, 0), ('notes', 'body', 'text', 0, 0, 1)`)
+
+	fixture, _ := startSearchPort(t, host, nil)
+	client := fixture.connect(t, "kitdb", appDatabaseTestPassword, "shop.example/application")
+	if got := waitForSearch(t, client, `SELECT count(*) FROM posts WHERE posts MATCH 'ca phe'`); got != "2" {
+		t.Fatalf("posts MATCH 'ca phe' counts %q, want 2 (p1 by its title, p2 by its body)", got)
+	}
+	if got := appDatabaseRows(t, client, `SELECT id FROM posts WHERE body MATCH 'ca phe' AND NOT published`); got != "p2" {
+		t.Fatalf("body MATCH = %q, want p2", got)
+	}
+	if err := appDatabaseQuery(client, `SELECT id FROM tags WHERE tags MATCH 'x'`); err == nil || !strings.Contains(err.Error(), "mark its columns .searchable() in the app's .shared/schema/") {
+		t.Fatalf("tags MATCH: %v, want mark its columns .searchable()", err)
+	}
+	if !fileExists(file + ".search") {
+		t.Fatalf("no %s.search beside the app's database", filepath.Base(file))
+	}
+	if got := waitForSearch(t, client, `SELECT id FROM notes WHERE notes MATCH 'ghi chu'`); got != "n1" {
+		t.Fatalf("notes MATCH = %q, want n1", got)
+	}
+
+	// The app adds a row to each table of the file: the watch builds both indexes again.
+	writeAppDatabaseFile(t, file, `INSERT INTO posts VALUES ('p3', 'Bánh mì', 'Nướng giòn', 1)`, `INSERT INTO notes VALUES ('n2', 'Bánh mì nóng')`)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		posts := appDatabaseRows(t, client, `SELECT id FROM posts WHERE posts MATCH 'banh mi'`)
+		notes := appDatabaseRows(t, client, `SELECT id FROM notes WHERE notes MATCH 'banh mi'`)
+		if posts == "p3" && notes == "n2" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("after the app added a row to each table: posts %q, notes %q, want p3 and n2", posts, notes)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	client.Close()
+
+	// The schema keeps only title searchable: the next session builds the index from title alone.
+	writeAppDatabaseFile(t, file, `UPDATE kitwork_columns SET search_weight = 0 WHERE table_name = 'posts' AND column_name = 'body'`)
+	client = fixture.connect(t, "kitdb", appDatabaseTestPassword, "shop.example/application")
+	if got := waitForSearch(t, client, `SELECT id FROM posts WHERE posts MATCH 'ca phe'`); got != "p1" {
+		t.Fatalf("posts MATCH after the change = %q, want p1", got)
+	}
+	if err := appDatabaseQuery(client, `SELECT id FROM posts WHERE body MATCH 'x'`); err == nil || !strings.Contains(err.Error(), "not in its search index (searchable: title)") {
+		t.Fatalf("body MATCH after the change: %v, want not in its search index (searchable: title)", err)
 	}
 }

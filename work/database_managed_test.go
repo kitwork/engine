@@ -797,7 +797,7 @@ func TestManagedDatabaseCatalogParity(t *testing.T) {
 	schema := `import { table, id, text, integer, float, decimal, boolean, date, json, timestamp } from "kitwork/schema";
 import { connection } from "kitwork/database";
 
-const users = table({ id: id(), email: text().unique(), name: text().search(), role: text().default("customer"), active: boolean().default(true), createdAt: timestamp().created(), updatedAt: timestamp().updated() });
+const users = table({ id: id(), email: text().unique(), name: text().searchable(), role: text().default("customer"), active: boolean().default(true), createdAt: timestamp().created(), updatedAt: timestamp().updated() });
 const orders = table({ id: id(), item: text(), quantity: integer(), weight: float().nullable(), amount: decimal(12, 2).index("day_amount"), note: text().nullable(), day: date().index().index("day_amount"), meta: json().nullable(), createdAt: timestamp().created() });
 
 export const db = connection().tables({ users, orders });
@@ -1048,6 +1048,14 @@ func TestSchemaModuleRefusesOlderSpellings(t *testing.T) {
 		message != "bảng users, cột email: .notNull() là cách viết cũ: cột bắt buộc là mặc định; cột được bỏ trống viết .nullable()" {
 		t.Errorf("text().notNull(): %s %q", code, message)
 	}
+	searched := schema.Table().Call("table", value.New(map[string]value.Value{
+		"id":    schema.Id().Call("id"),
+		"email": schema.Text().Call("text").Invoke("search"),
+	}))
+	if code, message := failureOf(declare(map[string]value.Value{"users": searched})); code != value.InvalidArgumentCode ||
+		message != "bảng users, cột email: .search() là cách viết cũ: viết .searchable(): search là phương thức của chuỗi JavaScript" {
+		t.Errorf("text().search(): %s %q", code, message)
+	}
 
 	users := goStruct(t, goColumn{name: "id", builder: "id"}, goColumn{name: "email", builder: "text"})
 	foreign := schema.Table().Call("table", value.New(map[string]value.Value{
@@ -1242,16 +1250,18 @@ func TestManagedDatabaseSQLiteDecimalTextIsRefused(t *testing.T) {
 
 // The app's SQLite file keeps the kind each column was declared with in kitwork_columns, written when the engine
 // first checks the table: what the file alone does not say (a decimal's scale, a boolean stored 0 or 1), which the
-// PostgreSQL wire port reads to give 4.50 for 450 and true for 1 (KITWORK_KITDB.md câu 13.5).
+// PostgreSQL wire port reads to give 4.50 for 450 and true for 1 (KITWORK_KITDB.md câu 13.5), and a .searchable()
+// column's weight, which the port builds the table's full-text index from.
 //
 // CONTROL: with ensureTable not calling recordColumnKinds, "kitwork_columns: SQL logic error: no such table:
-// kitwork_columns (1)".
+// kitwork_columns (1)"; with writeColumnKinds writing 0 for every weight, "… name text 0 0 0 …, want … name text 0 0
+// 1 …".
 func TestManagedDatabaseRecordsColumnKinds(t *testing.T) {
 	shop := newManagedApp(t, map[string]string{"shop.example/router.work": `import * as router from "kitwork/router";`})
 	tenant := shop.site("shop.example")
 	items := goStruct(t,
 		goColumn{name: "id", builder: "id"},
-		goColumn{name: "name", builder: "text"},
+		goColumn{name: "name", builder: "text", modifiers: []string{"searchable"}},
 		goColumn{name: "amount", builder: "decimal", arguments: []value.Value{value.New(12), value.New(2)}},
 		goColumn{name: "paid", builder: "boolean"},
 	)
@@ -1264,7 +1274,15 @@ func TestManagedDatabaseRecordsColumnKinds(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer file.Close()
-	rows, err := file.Query(`SELECT column_name, kind, precision, scale FROM kitwork_columns WHERE table_name = 'items' ORDER BY column_name`)
+	if got, want := columnKindRows(t, file, "items"), "amount decimal 12 2 0, id kitid 0 0 0, name text 0 0 1, paid bool 0 0 0"; got != want {
+		t.Fatalf("kitwork_columns of items = %q, want %q", got, want)
+	}
+}
+
+// columnKindRows is what kitwork_columns holds of table: name, kind, precision, scale and search weight of each column.
+func columnKindRows(t *testing.T, file *sql.DB, table string) string {
+	t.Helper()
+	rows, err := file.Query(`SELECT column_name, kind, precision, scale, search_weight FROM kitwork_columns WHERE table_name = ? ORDER BY column_name`, table)
 	if err != nil {
 		t.Fatalf("kitwork_columns: %v", err)
 	}
@@ -1272,13 +1290,36 @@ func TestManagedDatabaseRecordsColumnKinds(t *testing.T) {
 	var got []string
 	for rows.Next() {
 		var name, kind string
-		var precision, scale int
-		if err := rows.Scan(&name, &kind, &precision, &scale); err != nil {
+		var precision, scale, weight int
+		if err := rows.Scan(&name, &kind, &precision, &scale, &weight); err != nil {
 			t.Fatal(err)
 		}
-		got = append(got, fmt.Sprintf("%s %s %d %d", name, kind, precision, scale))
+		got = append(got, fmt.Sprintf("%s %s %d %d %d", name, kind, precision, scale, weight))
 	}
-	if want := "amount decimal 12 2, id kitid 0 0, name text 0 0, paid bool 0 0"; strings.Join(got, ", ") != want {
-		t.Fatalf("kitwork_columns of items = %q, want %q", strings.Join(got, ", "), want)
+	return strings.Join(got, ", ")
+}
+
+// A kitwork_columns written before search_weight gets the column the next time a table is recorded.
+//
+// CONTROL: without the ALTER of writeColumnKinds, "kitwork_columns of notes: table kitwork_columns has no column named
+// search_weight".
+func TestColumnKindsAddSearchWeight(t *testing.T) {
+	file, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "kitwork.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if _, err := file.Exec(`CREATE TABLE kitwork_columns (table_name TEXT NOT NULL, column_name TEXT NOT NULL, kind TEXT NOT NULL, precision INTEGER NOT NULL, scale INTEGER NOT NULL, PRIMARY KEY (table_name, column_name))`); err != nil {
+		t.Fatal(err)
+	}
+	columns := map[string]*ColumnSpec{"body": {kind: "text", searchable: true, searchWt: 1, seq: 1}, "id": {kind: "integer", seq: 0}}
+	if err := recordColumnKinds(file, "notes", columns); err != nil {
+		t.Fatalf("kitwork_columns of notes: %v", err)
+	}
+	if err := recordColumnKinds(file, "notes", columns); err != nil {
+		t.Fatalf("kitwork_columns of notes, again: %v", err)
+	}
+	if got, want := columnKindRows(t, file, "notes"), "body text 0 0 1, id integer 0 0 0"; got != want {
+		t.Fatalf("kitwork_columns of notes = %q, want %q", got, want)
 	}
 }

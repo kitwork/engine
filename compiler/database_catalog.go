@@ -357,7 +357,7 @@ func (reader *schemaReader) readColumn(name string, e Expression) (statement.Col
 		}
 		rule, known := statement.Modifiers[method]
 		if !known {
-			reader.fail(at, fmt.Sprintf("%s().%s không có; bổ nghĩa cột: nullable, unique, default, search, index, created, updated", word.imported, method))
+			reader.fail(at, fmt.Sprintf("%s().%s không có; bổ nghĩa cột: nullable, unique, default, searchable, index, created, updated", word.imported, method))
 			return column, false
 		}
 		if rule.OnlyTimestamp && !builder.Timestamp {
@@ -369,7 +369,11 @@ func (reader *schemaReader) readColumn(name string, e Expression) (statement.Col
 			column.Nullable = true
 		case "unique":
 			column.Unique = true
-		case "search":
+		case "searchable":
+			if len(modifier.Arguments) != 0 {
+				reader.fail(at, ".searchable() không nhận đối số")
+				return column, false
+			}
 			column.Search = true
 		case "default":
 			if len(modifier.Arguments) != 1 {

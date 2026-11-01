@@ -341,6 +341,8 @@ func TestDatabaseSchemaModuleRules(t *testing.T) {
 	}{
 		{"kitid", schema("id: kitid(), email: text()", exported), "kitid()", "kitid() là cách viết cũ: viết id()"},
 		{"notNull", schema("id: id(), email: text().notNull()", exported), "notNull", ".notNull() là cách viết cũ: cột bắt buộc là mặc định"},
+		{"search", schema("id: id(), email: text().search()", exported), "search", ".search() là cách viết cũ: viết .searchable(): search là phương thức của chuỗi JavaScript"},
+		{"searchable with a weight", schema("id: id(), email: text().searchable({ weight: 3 })", exported), "searchable", ".searchable() không nhận đối số"},
 		{"number", schema("id: id(), total: number()", exported), "number()", "number() không có"},
 		{"bigint", schema("id: id(), total: bigint()", exported), "bigint()", "bigint() chưa có trong engine hôm nay (lát 9)"},
 		{"computed", schema("id: id(), total: computed((orders) => 1)", exported), "computed(", "computed() chưa có trong engine hôm nay (lát 9)"},

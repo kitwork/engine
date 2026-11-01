@@ -44,13 +44,13 @@ type Modifier struct {
 
 // Modifiers are the column modifiers of the spec.
 var Modifiers = map[string]Modifier{
-	"nullable": {},
-	"unique":   {},
-	"default":  {},
-	"search":   {},
-	"index":    {},
-	"created":  {OnlyTimestamp: true},
-	"updated":  {OnlyTimestamp: true},
+	"nullable":   {},
+	"unique":     {},
+	"default":    {},
+	"searchable": {},
+	"index":      {},
+	"created":    {OnlyTimestamp: true},
+	"updated":    {OnlyTimestamp: true},
 }
 
 // LegacyBuilders are builders of the older spellings, with what the spec writes instead.
@@ -73,7 +73,7 @@ const NumberBuilder = "number() không có (KITWORK_DATABASE.md mục 1): viết
 // LegacyModifiers are modifiers of the older spellings, with what the spec writes instead.
 var LegacyModifiers = map[string]string{
 	"notNull":    "cột bắt buộc là mặc định; cột được bỏ trống viết .nullable()",
-	"searchable": "viết .search()",
+	"search":     "viết .searchable(): search là phương thức của chuỗi JavaScript",
 	"primaryKey": "viết id()",
 	"key":        "viết id()",
 	"defaultNow": "viết timestamp().created()",

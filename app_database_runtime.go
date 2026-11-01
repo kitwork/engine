@@ -316,7 +316,13 @@ func (g *appDatabaseGateway) OpenSession(ctx context.Context, startup pgwire.Sta
 	options.User = user
 	options.Search = appDatabaseSearchProvider{manager: g.search, database: target.name}
 	options.Log = func(statement string, err error) { logAppDatabaseFailure(target.name, user, statement, err) }
-	return gateway.Open(ctx, gateway.Target{Name: target.name, Schemas: schemas}, access, columns, options)
+	session, err := gateway.Open(ctx, gateway.Target{Name: target.name, Schemas: schemas}, access, columns, options)
+	if err != nil {
+		return nil, err
+	}
+	// The tables whose .searchable() columns ask for an index get one (app_database_search.go).
+	g.search.discover(target.name, schemas, columns)
+	return session, nil
 }
 
 // logAppDatabaseFailure prints a statement the port refused or could not run, with its error, as PostgreSQL logs a
@@ -402,8 +408,10 @@ func (access *appDatabaseAccess) Current(ctx context.Context) (bool, error) {
 type appDatabaseColumns map[string]appDatabaseColumn
 
 type appDatabaseColumn struct {
-	kind             string
-	precision, scale int
+	schema, table, column string // as the file writes them
+	kind                  string
+	precision, scale      int
+	weight                int // a .searchable() column's search weight, 0 for any other
 }
 
 func (columns appDatabaseColumns) Column(schema, table, column string) (string, int, int, bool) {
@@ -437,18 +445,25 @@ func readAppDatabaseColumnsOf(ctx context.Context, schema, path string, columns 
 	if err := file.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'kitwork_columns'`).Scan(&held); err != nil || held == 0 {
 		return err
 	}
-	rows, err := file.QueryContext(ctx, `SELECT table_name, column_name, kind, precision, scale FROM kitwork_columns`)
+	// search_weight came on 31/10/2026: a file written before has none, and no column of it is searchable.
+	weight := "0"
+	if err := file.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('kitwork_columns') WHERE name = 'search_weight'`).Scan(&held); err != nil {
+		return err
+	}
+	if held > 0 {
+		weight = "search_weight"
+	}
+	rows, err := file.QueryContext(ctx, `SELECT table_name, column_name, kind, precision, scale, `+weight+` FROM kitwork_columns`)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var table, column string
-		var found appDatabaseColumn
-		if err := rows.Scan(&table, &column, &found.kind, &found.precision, &found.scale); err != nil {
+		found := appDatabaseColumn{schema: schema}
+		if err := rows.Scan(&found.table, &found.column, &found.kind, &found.precision, &found.scale, &found.weight); err != nil {
 			return err
 		}
-		columns[strings.ToLower(schema+"."+table+"."+column)] = found
+		columns[strings.ToLower(schema+"."+found.table+"."+found.column)] = found
 	}
 	return rows.Err()
 }

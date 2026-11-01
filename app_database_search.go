@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,6 +29,11 @@ import (
 // then answers how far the build is. Every 30 seconds a file another connection changed is looked at again, and an
 // index whose table changed is built anew while the old one answers. One process owns a container: the kitdbsqlite
 // tool does not run on the same files while the host does.
+//
+// A table of an app's database needs no declaration in application.work: its .searchable() columns (kitwork/schema,
+// recorded with their weight in kitwork_columns, db.sqlite_columns.go in work) make its index, found when a session
+// opens the database and built the same way, in the app's .database/<name>/kitwork.db.search. When the columns change
+// the index is built again from them; what application.work declares for a table wins over its file.
 
 // appDatabaseSearchWatch is how often the files are looked at (a variable for the tests).
 var appDatabaseSearchWatch = 30 * time.Second
@@ -60,9 +66,10 @@ type appDatabaseSearchSignature struct {
 }
 
 type appDatabaseSearch struct {
-	cancel context.CancelFunc
-	done   sync.WaitGroup
-	queue  chan *appDatabaseSearchIndex
+	lifetime context.Context // the manager's: what discover opens and builds under
+	cancel   context.CancelFunc
+	done     sync.WaitGroup
+	queue    chan *appDatabaseSearchIndex
 
 	mutex      sync.Mutex
 	indexes    map[string]*appDatabaseSearchIndex // by database, schema and table, folded
@@ -74,6 +81,8 @@ type appDatabaseSearchIndex struct {
 	database, schema, table, file string
 	columns                       []appDatabaseSearchColumn
 	definition                    search.Schema
+	declared                      bool        // by application.work, not found in the file
+	retired                       atomic.Bool // replaced by an entry of other columns: never built again
 	queued                        atomic.Bool
 	built, total                  atomic.Int64
 
@@ -98,7 +107,7 @@ func appDatabaseSearchKey(database, schema, table string) string {
 func startAppDatabaseSearch(parent context.Context, root string, declared []AppDatabaseSearch) (*appDatabaseSearch, error) {
 	ctx, cancel := context.WithCancel(parent)
 	manager := &appDatabaseSearch{
-		cancel: cancel, queue: make(chan *appDatabaseSearchIndex, appDatabaseSearchQueue),
+		lifetime: ctx, cancel: cancel, queue: make(chan *appDatabaseSearchIndex, appDatabaseSearchQueue),
 		indexes: map[string]*appDatabaseSearchIndex{}, containers: map[string]*search.Container{},
 		watchers: map[string]*appDatabaseSearchWatcher{},
 	}
@@ -107,18 +116,16 @@ func startAppDatabaseSearch(parent context.Context, root string, declared []AppD
 		if declaration.Schema != "public" {
 			file = filepath.Join(root, declaration.Database, declaration.Schema+".db")
 		}
-		entry := &appDatabaseSearchIndex{database: declaration.Database, schema: declaration.Schema, table: declaration.Table, file: file}
-		fields := make([]search.Field, 0, len(declaration.Columns))
+		columns := make([]appDatabaseSearchColumn, 0, len(declaration.Columns))
 		for _, column := range declaration.Columns {
-			entry.columns = append(entry.columns, appDatabaseSearchColumn{Name: column.Name, Boost: column.Boost})
-			fields = append(fields, search.Text(column.Name, search.VietnameseAnalyzer(), search.Boost(column.Boost)))
+			columns = append(columns, appDatabaseSearchColumn{Name: column.Name, Boost: column.Boost})
 		}
-		definition, err := search.NewSchema(fields...)
+		entry, err := newAppDatabaseSearchIndex(declaration.Database, declaration.Schema, declaration.Table, file, columns)
 		if err != nil {
 			cancel()
 			return nil, fmt.Errorf("app.database search %s: %w", entry.name(), err)
 		}
-		entry.definition = definition
+		entry.declared = true
 		manager.indexes[appDatabaseSearchKey(entry.database, entry.schema, entry.table)] = entry
 	}
 	manager.done.Add(2)
@@ -128,6 +135,64 @@ func startAppDatabaseSearch(parent context.Context, root string, declared []AppD
 		manager.open(ctx, entry)
 	}
 	return manager, nil
+}
+
+// newAppDatabaseSearchIndex is the index of one table of file over columns, not opened yet.
+func newAppDatabaseSearchIndex(database, schema, table, file string, columns []appDatabaseSearchColumn) (*appDatabaseSearchIndex, error) {
+	entry := &appDatabaseSearchIndex{database: database, schema: schema, table: table, file: file, columns: columns}
+	fields := make([]search.Field, 0, len(columns))
+	for _, column := range columns {
+		fields = append(fields, search.Text(column.Name, search.VietnameseAnalyzer(), search.Boost(column.Boost)))
+	}
+	definition, err := search.NewSchema(fields...)
+	if err != nil {
+		return entry, err
+	}
+	entry.definition = definition
+	return entry, nil
+}
+
+// discover finds the indexes the files of a database ask for, the tables whose kitwork_columns give a column a search
+// weight, and opens each one it does not hold yet with these columns; an index of other columns is replaced, one
+// application.work declares is left as declared.
+func (manager *appDatabaseSearch) discover(database string, schemas map[string]string, columns appDatabaseColumns) {
+	if manager == nil {
+		return
+	}
+	type place struct{ schema, table, file string }
+	wanted := map[string][]appDatabaseSearchColumn{}
+	places := map[string]place{}
+	for _, column := range columns {
+		if column.weight <= 0 || schemas[column.schema] == "" {
+			continue
+		}
+		key := appDatabaseSearchKey(database, column.schema, column.table)
+		wanted[key] = append(wanted[key], appDatabaseSearchColumn{Name: column.column, Boost: float64(column.weight)})
+		places[key] = place{column.schema, column.table, schemas[column.schema]}
+	}
+	for key, found := range wanted {
+		sort.Slice(found, func(left, right int) bool { return found[left].Name < found[right].Name })
+		manager.mutex.Lock()
+		current := manager.indexes[key]
+		if current != nil && (current.declared || reflect.DeepEqual(current.columns, found)) {
+			manager.mutex.Unlock()
+			continue
+		}
+		at := places[key]
+		entry, err := newAppDatabaseSearchIndex(database, at.schema, at.table, at.file, found)
+		if err != nil {
+			manager.mutex.Unlock()
+			fmt.Printf("[database] search %s: the index cannot be made: %v\n", entry.name(), err)
+			continue
+		}
+		manager.indexes[key] = entry
+		manager.mutex.Unlock()
+		if current != nil {
+			current.retired.Store(true)
+			current.swap(nil, appDatabaseSearchSignature{}, nil)
+		}
+		manager.open(manager.lifetime, entry)
+	}
 }
 
 func (entry *appDatabaseSearchIndex) name() string {
@@ -215,6 +280,10 @@ func (manager *appDatabaseSearch) work(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case entry := <-manager.queue:
+			if entry.retired.Load() {
+				entry.queued.Store(false)
+				continue
+			}
 			started := time.Now()
 			fmt.Printf("[database] search %s: building the index of %s\n", entry.name(), strings.Join(entry.columnNames(), ", "))
 			signature, err := manager.build(ctx, entry)
@@ -329,12 +398,19 @@ func (manager *appDatabaseSearch) watch(ctx context.Context) {
 			return
 		case <-ticker.C:
 		}
+		// A file is looked at once a tick for every index of it: a look consumes the change it reports.
+		changes := map[string]bool{}
 		for _, entry := range manager.snapshot() {
 			if ctx.Err() != nil {
 				return
 			}
-			changed, err := manager.fileChanged(ctx, entry.file)
-			if err != nil || !changed {
+			changed, looked := changes[entry.file]
+			if !looked {
+				found, err := manager.fileChanged(ctx, entry.file)
+				changed = err == nil && found
+				changes[entry.file] = changed
+			}
+			if !changed {
 				continue
 			}
 			signature, err := readAppDatabaseSearchSignature(ctx, entry.file, entry.table)
@@ -418,6 +494,10 @@ func (manager *appDatabaseSearch) lookup(database, schema, table string, fields 
 		manager.mutex.Unlock()
 	}
 	if entry == nil {
+		if strings.Contains(database, "/") {
+			return nil, nil, pgwire.NewError("42704", fmt.Sprintf(
+				"table %s.%s has no search index: mark its columns .searchable() in the app's .shared/schema/ (kitwork/schema)", schema, table))
+		}
 		return nil, nil, pgwire.NewError("42704", fmt.Sprintf(
 			"table %s.%s has no search index: declare its columns in the search of app.database (application.work)", schema, table))
 	}
@@ -547,9 +627,10 @@ func appDatabaseMatchQuery(fields []string, query gateway.SearchQuery) search.Ma
 	return search.MatchQuery{Fields: fields, Text: query.Text}
 }
 
-// openAppDatabaseSearchFile opens one connection to file, read-only.
+// openAppDatabaseSearchFile opens one connection to file, read-only. It waits for a lock as the session's own
+// connection does: two read-only connections opening a WAL file at once meet SQLITE_BUSY_RECOVERY otherwise.
 func openAppDatabaseSearchFile(ctx context.Context, file string) (*sql.DB, *sql.Conn, error) {
-	uri := "file:" + strings.NewReplacer("%", "%25", "?", "%3f", "#", "%23").Replace(filepath.ToSlash(file)) + "?mode=ro"
+	uri := "file:" + strings.NewReplacer("%", "%25", "?", "%3f", "#", "%23").Replace(filepath.ToSlash(file)) + "?mode=ro&_pragma=busy_timeout(5000)"
 	database, err := sql.Open("sqlite", uri)
 	if err != nil {
 		return nil, nil, err

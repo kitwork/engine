@@ -106,8 +106,12 @@ func (c *ColumnSpec) Nullable(_ ...value.Value) *ColumnSpec {
 	return c
 }
 
-// Search puts the column in the table's full-text index: the spec's spelling of .searchable().
+// Search is the older spelling of .searchable() for kitwork/schema (search is a method of a JavaScript string);
+// the older ORM still reads it.
 func (c *ColumnSpec) Search(_ ...value.Value) *ColumnSpec {
+	if c.legacyModifier("search") {
+		return c
+	}
 	c.searchable = true
 	if c.searchWt == 0 {
 		c.searchWt = 1
@@ -317,8 +321,14 @@ func (c *ColumnSpec) Index(args ...value.Value) *ColumnSpec {
 // Bare .searchable() is weight 1. Search runs on the durable pure-Go segment engine owned by the
 // process search manager; the relational database remains the source of truth and is never opened as
 // a search-index file.
+//
+// In kitwork/schema (KITWORK_DATABASE.md mục 1) it puts the column in the table's full-text index and takes no
+// argument.
 func (c *ColumnSpec) Searchable(args ...value.Value) *ColumnSpec {
-	if c.legacyModifier("searchable") {
+	if c.vocabulary && len(args) != 0 {
+		if c.declareErr == "" {
+			c.declareErr = ".searchable() không nhận đối số"
+		}
 		return c
 	}
 	c.searchable = true
