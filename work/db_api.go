@@ -24,8 +24,7 @@ import (
 //
 // Safety: OFF unless the db is declared served — sqlite("db", {schema}, { token }) (no serve → 404,
 // nothing exposed). Read-only — only SELECT/WITH is accepted, and stacked statements are rejected — so
-// a leaked token cannot mutate or drop data here (writes go through the libSQL endpoint under an
-// access:"readwrite" serve).
+// a leaked token cannot mutate or drop data here.
 const dataAPIQueryPath = "/_db/query"
 
 // serveDataAPIIf handles the reserved /_db/query path. Returns true when it owned the response.
@@ -59,7 +58,7 @@ func (t *Tenant) serveDataAPIIf(w http.ResponseWriter, r *http.Request, scope *r
 		writeDataJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
 		return true
 	}
-	// /_db/query is the simple, always-read-only surface (writes go through the libSQL endpoint).
+	// /_db/query is the simple, always-read-only surface: it never writes, whatever the serve's access.
 	if !isReadOnlySQL(req.SQL) {
 		writeDataJSON(w, http.StatusForbidden, map[string]any{"error": "read-only endpoint: only a single SELECT/WITH statement is allowed"})
 		return true

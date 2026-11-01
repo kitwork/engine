@@ -38,7 +38,8 @@ type identifierIndexInfo struct {
 }
 
 type identifierIndex struct {
-	file       *os.File
+	file       io.ReaderAt
+	closer     io.Closer
 	path       string
 	documents  uint32
 	bodyCRC    uint32
@@ -202,7 +203,22 @@ func openIdentifierIndex(path string, schemaHash [32]byte, documents uint32, exp
 	if err != nil {
 		return nil, err
 	}
-	if !stat.Mode().IsRegular() || stat.Size() < identifierIndexHeaderSize || uint64(stat.Size()) != expectedBytes {
+	if !stat.Mode().IsRegular() {
+		return nil, corruptIndexf("identifier index has an invalid file size")
+	}
+	index, err := readIdentifierIndex(path, file, stat.Size(), schemaHash, documents, expectedBytes)
+	if err != nil {
+		return nil, err
+	}
+	index.closer = file
+	closeOnError = false
+	return index, nil
+}
+
+// readIdentifierIndex validates an identifier sidecar held by any reader: a
+// file, or a section of a container.
+func readIdentifierIndex(path string, file io.ReaderAt, size int64, schemaHash [32]byte, documents uint32, expectedBytes uint64) (*identifierIndex, error) {
+	if size < identifierIndexHeaderSize || uint64(size) != expectedBytes {
 		return nil, corruptIndexf("identifier index has an invalid file size")
 	}
 	var encoded [identifierIndexHeaderSize]byte
@@ -218,8 +234,8 @@ func openIdentifierIndex(path string, schemaHash [32]byte, documents uint32, exp
 	if size := binary.LittleEndian.Uint32(encoded[12:16]); size != identifierIndexHeaderSize {
 		return nil, corruptIndexf("identifier index header size is %d", size)
 	}
-	if size := binary.LittleEndian.Uint64(encoded[16:24]); size != uint64(stat.Size()) {
-		return nil, corruptIndexf("identifier index records %d bytes; actual size is %d", size, stat.Size())
+	if recorded := binary.LittleEndian.Uint64(encoded[16:24]); recorded != uint64(size) {
+		return nil, corruptIndexf("identifier index records %d bytes; actual size is %d", recorded, size)
 	}
 	if !bytes.Equal(encoded[24:56], schemaHash[:]) || binary.LittleEndian.Uint32(encoded[56:60]) != documents {
 		return nil, corruptIndexf("identifier index metadata does not match its segment")
@@ -237,16 +253,36 @@ func openIdentifierIndex(path string, schemaHash [32]byte, documents uint32, exp
 		return nil, corruptIndexf("identifier index header checksum is %08x; expected %08x", got, wantHeaderCRC)
 	}
 	bodyLength, overflow := multiplyUint64(uint64(documents), identifierIndexEntrySize)
-	if overflow || bodyLength != uint64(stat.Size())-identifierIndexHeaderSize {
+	if overflow || bodyLength != uint64(size)-identifierIndexHeaderSize {
 		return nil, corruptIndexf("identifier index body has an invalid length")
 	}
-	index := &identifierIndex{
+	return &identifierIndex{
 		file: file, path: path, documents: documents,
 		bodyCRC:    binary.LittleEndian.Uint32(encoded[identifierIndexBodyCRCOffset : identifierIndexBodyCRCOffset+4]),
 		bodyLength: bodyLength,
+	}, nil
+}
+
+// encodeIdentifierIndex returns the complete sidecar for identifiers, the
+// bytes a .ki file holds, in memory.
+func encodeIdentifierIndex(schemaHash [32]byte, identifiers []string) ([]byte, error) {
+	documents := uint32(len(identifiers))
+	if documents == 0 || len(identifiers) > maxIntValue()/identifierIndexEntrySize {
+		return nil, fmt.Errorf("search: identifier index needs between 1 and %d documents", maxIntValue()/identifierIndexEntrySize)
 	}
-	closeOnError = false
-	return index, nil
+	entries := make([]identifierIndexEntry, documents)
+	for document, value := range identifiers {
+		entries[document] = identifierIndexEntry{hash: identifierHash(value), document: uint32(document)}
+	}
+	sort.Slice(entries, func(i, j int) bool { return compareIdentifierIndexEntry(entries[i], entries[j]) < 0 })
+	data := make([]byte, identifierIndexHeaderSize, identifierIndexHeaderSize+len(entries)*identifierIndexEntrySize)
+	for _, entry := range entries {
+		data = append(data, entry.hash[:]...)
+		data = binary.LittleEndian.AppendUint32(data, entry.document)
+	}
+	header := marshalIdentifierIndexHeader(schemaHash, documents, uint64(len(data)), crc32.Checksum(data[identifierIndexHeaderSize:], crcTable))
+	copy(data, header[:])
+	return data, nil
 }
 
 func (index *identifierIndex) Find(ctx context.Context, segment *Segment, identifier string) (uint32, bool, error) {
@@ -308,38 +344,94 @@ func (index *identifierIndex) Verify(ctx context.Context, segment *Segment) erro
 	if ctx == nil {
 		return fmt.Errorf("search: identifier verify context is nil")
 	}
-	if err := verifySectionChecksum(ctx, index.file, sectionDescriptor{
-		offset: identifierIndexHeaderSize, length: index.bodyLength, checksum: index.bodyCRC,
-	}); err != nil {
-		return fmt.Errorf("search: verify identifier index: %w", err)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// One read of the body and one bulk pass over the stored identifiers: a
+	// positioned read per entry cost two system calls per document.
+	if index.bodyLength > uint64(maxIntValue()) {
+		return corruptIndexf("identifier index body exceeds platform range")
+	}
+	body := make([]byte, int(index.bodyLength))
+	if err := readAtFull(index.file, body, identifierIndexHeaderSize); err != nil {
+		return err
+	}
+	if crc32.Checksum(body, crcTable) != index.bodyCRC {
+		return fmt.Errorf("search: verify identifier index: %w", corruptIndexf("identifier index body checksum does not match"))
+	}
+	hashes, err := segment.documentIdentifierHashes(ctx)
+	if err != nil {
+		return err
+	}
+	if uint32(len(hashes)) != index.documents {
+		return corruptIndexf("identifier index covers %d documents; its segment has %d", index.documents, len(hashes))
 	}
 	var previous identifierIndexEntry
-	var encoded [identifierIndexEntrySize]byte
 	for position := uint32(0); position < index.documents; position++ {
 		if position&8191 == 0 {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
 		}
-		if err := index.readEntry(encoded[:], position); err != nil {
-			return err
-		}
+		encoded := body[position*identifierIndexEntrySize : (position+1)*identifierIndexEntrySize]
 		var current identifierIndexEntry
 		copy(current.hash[:], encoded[:16])
 		current.document = binary.LittleEndian.Uint32(encoded[16:20])
 		if current.document >= index.documents || (position > 0 && compareIdentifierIndexEntry(previous, current) >= 0) {
 			return corruptIndexf("identifier index entry %d is invalid or unordered", position)
 		}
-		identifier, err := segment.documentIdentifier(current.document)
-		if err != nil {
-			return err
-		}
-		if identifierHash(identifier) != current.hash {
+		if hashes[current.document] != current.hash {
 			return corruptIndexf("identifier index entry %d has the wrong hash", position)
 		}
 		previous = current
 	}
 	return nil
+}
+
+// documentIdentifierHashes hashes every stored identifier of the segment,
+// reading the stored sections sequentially in bounded chunks.
+func (segment *Segment) documentIdentifierHashes(ctx context.Context) ([][16]byte, error) {
+	if err := segment.ensureOpen(); err != nil {
+		return nil, err
+	}
+	documents := uint64(segment.header.documentN)
+	offsetsSection := segment.header.sections[sectionStoredOffsets]
+	dataSection := segment.header.sections[sectionStoredData]
+	offsetBytes, overflow := multiplyUint64(documents+1, 8)
+	if overflow || offsetBytes > offsetsSection.length || offsetBytes > uint64(maxIntValue()) {
+		return nil, corruptf("stored identifier offsets are truncated")
+	}
+	offsets := make([]byte, int(offsetBytes))
+	if err := readAtFull(segment.file, offsets, offsetsSection.offset); err != nil {
+		return nil, err
+	}
+	const chunk = 1 << 20
+	var buffer []byte
+	var bufferStart uint64
+	hashes := make([][16]byte, documents)
+	for document := uint64(0); document < documents; document++ {
+		if document&8191 == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
+		start := binary.LittleEndian.Uint64(offsets[document*8:])
+		end := binary.LittleEndian.Uint64(offsets[document*8+8:])
+		if start > end || end > dataSection.length || end-start > uint64(maxIntValue()) {
+			return nil, corruptf("document %d has invalid stored offsets", document)
+		}
+		if start < bufferStart || end > bufferStart+uint64(len(buffer)) {
+			length := max(uint64(chunk), end-start)
+			length = min(length, dataSection.length-start)
+			buffer = make([]byte, int(length))
+			if err := readAtFull(segment.file, buffer, dataSection.offset+start); err != nil {
+				return nil, err
+			}
+			bufferStart = start
+		}
+		hashes[document] = identifierHash(string(buffer[start-bufferStart : end-bufferStart]))
+	}
+	return hashes, nil
 }
 
 func (index *identifierIndex) readEntry(destination []byte, position uint32) error {
@@ -351,10 +443,10 @@ func (index *identifierIndex) readEntry(destination []byte, position uint32) err
 }
 
 func (index *identifierIndex) Close() error {
-	if index == nil || !index.closed.CompareAndSwap(false, true) {
+	if index == nil || !index.closed.CompareAndSwap(false, true) || index.closer == nil {
 		return nil
 	}
-	return index.file.Close()
+	return index.closer.Close()
 }
 
 func identifierHash(identifier string) [16]byte {

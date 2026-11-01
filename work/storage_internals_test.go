@@ -11,7 +11,7 @@ import (
 // The engine's own tests reach the storage machinery that app code reached until 22/10/2026 through the
 // older spellings of kitwork/database: kitdb(…), sqlite(…), struct and the column builders on `database`.
 // That machinery stays the engine's (dbProxy, SchemaTable, the KitDB ORM, its predicates, migrations, its
-// Hrana and PostgreSQL wire serving), and the spec's handle runs on it (ManagedDatabase); the spellings
+// PostgreSQL wire serving), and the spec's handle runs on it (ManagedDatabase); the spellings
 // are errors now (database_module.go). This test-only module builds the same proxies through the Go API
 // (newDbProxy), so the internals keep their coverage while no app can write them:
 //

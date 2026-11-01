@@ -1,6 +1,7 @@
 package search
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/binary"
@@ -134,31 +135,55 @@ func (builder *Builder) AddContext(ctx context.Context, document Document) error
 	if uint64(len(builder.identifiers)) >= uint64(builder.options.MaxDocuments) {
 		return ErrSegmentFull
 	}
-	if document.ID == "" || !utf8.ValidString(document.ID) || len(document.ID) > builder.options.MaxIdentifierBytes {
-		return fmt.Errorf("search: document identifier is invalid or exceeds %d bytes", builder.options.MaxIdentifierBytes)
+	if err := validateDocumentIdentifier(document.ID, builder.options); err != nil {
+		return err
 	}
 	if _, duplicate := builder.identifierSet[document.ID]; duplicate {
 		return fmt.Errorf("%w: %q", ErrPendingDocument, document.ID)
 	}
+	analyzed, err := analyzeDocument(ctx, builder.schema, builder.options, document)
+	if err != nil {
+		return err
+	}
+	return builder.insert(analyzed)
+}
 
+// analyzedDocument is one document after analysis. Any builder with the same
+// schema and options can insert it without analyzing it again; insert copies
+// what it keeps, so one analyzed document may enter many builders.
+type analyzedDocument struct {
+	id              string
+	terms           []map[string]*posting
+	lengths         []uint32
+	additionalBytes int64
+}
+
+func validateDocumentIdentifier(identifier string, options BuildOptions) error {
+	if identifier == "" || !utf8.ValidString(identifier) || len(identifier) > options.MaxIdentifierBytes {
+		return fmt.Errorf("search: document identifier is invalid or exceeds %d bytes", options.MaxIdentifierBytes)
+	}
+	return nil
+}
+
+func analyzeDocument(ctx context.Context, schema Schema, options BuildOptions, document Document) (analyzedDocument, error) {
 	documentBytes := int64(len(document.ID))
-	if documentBytes > int64(builder.options.MaxDocumentBytes) {
-		return fmt.Errorf("search: document %q exceeds %d bytes", document.ID, builder.options.MaxDocumentBytes)
+	if documentBytes > int64(options.MaxDocumentBytes) {
+		return analyzedDocument{}, fmt.Errorf("search: document %q exceeds %d bytes", document.ID, options.MaxDocumentBytes)
 	}
 	for name, text := range document.Fields {
-		if _, _, exists := builder.schema.field(name); !exists {
-			return fmt.Errorf("search: document %q contains unknown field %q", document.ID, name)
+		if _, _, exists := schema.field(name); !exists {
+			return analyzedDocument{}, fmt.Errorf("search: document %q contains unknown field %q", document.ID, name)
 		}
 		documentBytes += int64(len(name)) + int64(len(text))
-		if documentBytes > int64(builder.options.MaxDocumentBytes) {
-			return fmt.Errorf("search: document %q exceeds %d bytes", document.ID, builder.options.MaxDocumentBytes)
+		if documentBytes > int64(options.MaxDocumentBytes) {
+			return analyzedDocument{}, fmt.Errorf("search: document %q exceeds %d bytes", document.ID, options.MaxDocumentBytes)
 		}
 	}
 
-	fieldTerms := make([]map[string]*posting, len(builder.schema.fields))
-	fieldLengths := make([]uint32, len(builder.schema.fields))
-	additionalBytes := documentBytes + int64(len(builder.schema.fields))*4
-	for fieldID, field := range builder.schema.fields {
+	fieldTerms := make([]map[string]*posting, len(schema.fields))
+	fieldLengths := make([]uint32, len(schema.fields))
+	additionalBytes := documentBytes + int64(len(schema.fields))*4
+	for fieldID, field := range schema.fields {
 		text := document.Fields[field.Name]
 		frequencies := make(map[string]*posting)
 		var tokenErr error
@@ -167,15 +192,15 @@ func (builder *Builder) AddContext(ctx context.Context, document Document) error
 				tokenErr = fmt.Errorf("search: analyzer %q emitted an invalid term", field.Analyzer.Identifier())
 				return false
 			}
-			if len(token.Term) > builder.options.MaxTermBytes {
-				if builder.options.SkipLongTerms {
+			if len(token.Term) > options.MaxTermBytes {
+				if options.SkipLongTerms {
 					return true
 				}
-				tokenErr = fmt.Errorf("search: analyzer %q emitted a term exceeding %d bytes", field.Analyzer.Identifier(), builder.options.MaxTermBytes)
+				tokenErr = fmt.Errorf("search: analyzer %q emitted a term exceeding %d bytes", field.Analyzer.Identifier(), options.MaxTermBytes)
 				return false
 			}
-			if fieldLengths[fieldID] >= uint32(builder.options.MaxTokensPerField) {
-				tokenErr = fmt.Errorf("search: field %q exceeds %d tokens", field.Name, builder.options.MaxTokensPerField)
+			if fieldLengths[fieldID] >= uint32(options.MaxTokensPerField) {
+				tokenErr = fmt.Errorf("search: field %q exceeds %d tokens", field.Name, options.MaxTokensPerField)
 				return false
 			}
 			fieldLengths[fieldID]++
@@ -192,23 +217,48 @@ func (builder *Builder) AddContext(ctx context.Context, document Document) error
 			return true
 		})
 		if err != nil {
-			return fmt.Errorf("search: analyze field %q: %w", field.Name, err)
+			return analyzedDocument{}, fmt.Errorf("search: analyze field %q: %w", field.Name, err)
 		}
 		if tokenErr != nil {
-			return tokenErr
+			return analyzedDocument{}, tokenErr
 		}
 		fieldTerms[fieldID] = frequencies
 	}
+	return analyzedDocument{id: document.ID, terms: fieldTerms, lengths: fieldLengths, additionalBytes: additionalBytes}, nil
+}
 
+// addAnalyzed adds a document that analyzeDocument accepted under this
+// builder's schema and options.
+func (builder *Builder) addAnalyzed(ctx context.Context, analyzed analyzedDocument) error {
+	if ctx == nil {
+		return fmt.Errorf("search: builder context is nil")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if builder.sealed {
+		return ErrBuilderSealed
+	}
+	if uint64(len(builder.identifiers)) >= uint64(builder.options.MaxDocuments) {
+		return ErrSegmentFull
+	}
+	if _, duplicate := builder.identifierSet[analyzed.id]; duplicate {
+		return fmt.Errorf("%w: %q", ErrPendingDocument, analyzed.id)
+	}
+	return builder.insert(analyzed)
+}
+
+func (builder *Builder) insert(analyzed analyzedDocument) error {
+	additionalBytes := analyzed.additionalBytes
 	if additionalBytes > math.MaxInt64-builder.estimatedBytes ||
 		(len(builder.identifiers) > 0 && additionalBytes > builder.options.FlushThresholdBytes-builder.estimatedBytes) {
 		return ErrSegmentFull
 	}
 	documentID := uint32(len(builder.identifiers))
-	builder.identifiers = append(builder.identifiers, strings.Clone(document.ID))
+	builder.identifiers = append(builder.identifiers, strings.Clone(analyzed.id))
 	builder.identifierSet[builder.identifiers[len(builder.identifiers)-1]] = struct{}{}
-	for fieldID, frequencies := range fieldTerms {
-		length := fieldLengths[fieldID]
+	for fieldID, frequencies := range analyzed.terms {
+		length := analyzed.lengths[fieldID]
 		builder.norms[fieldID] = append(builder.norms[fieldID], length)
 		builder.totalTokens[fieldID] += uint64(length)
 		for term, frequency := range frequencies {
@@ -274,8 +324,45 @@ func (builder *Builder) Write(ctx context.Context, path string) (SegmentInfo, er
 			_ = os.Remove(temporary)
 		}
 	}()
-	if _, err := file.Write(make([]byte, segmentHeaderSize)); err != nil {
+	fileSize, err := builder.encode(ctx, file)
+	if err != nil {
 		return SegmentInfo{}, err
+	}
+	if err := file.Sync(); err != nil {
+		return SegmentInfo{}, err
+	}
+	if err := file.Close(); err != nil {
+		return SegmentInfo{}, err
+	}
+	if _, err := os.Stat(path); err == nil {
+		return SegmentInfo{}, fmt.Errorf("search: segment path appeared while writing: %s", path)
+	} else if !os.IsNotExist(err) {
+		return SegmentInfo{}, err
+	}
+	if err := publishFile(temporary, path); err != nil {
+		return SegmentInfo{}, err
+	}
+	keepTemporary = false
+	if err := syncDirectory(filepath.Dir(path)); err != nil {
+		return SegmentInfo{}, err
+	}
+	builder.sealed = true
+	return SegmentInfo{Path: path, Documents: uint32(len(builder.identifiers)), Fields: uint16(len(builder.schema.fields)), Bytes: fileSize}, nil
+}
+
+// segmentOutput receives one encoded segment: a file for Write, memory for an
+// in-memory segment. Sections are written in order; the header is written back
+// at offset 0 last.
+type segmentOutput interface {
+	io.Writer
+	io.Seeker
+	io.WriterAt
+}
+
+func (builder *Builder) encode(ctx context.Context, file segmentOutput) (int64, error) {
+	var err error
+	if _, err := file.Write(make([]byte, segmentHeaderSize)); err != nil {
+		return 0, err
 	}
 
 	var sections [sectionCount]sectionDescriptor
@@ -290,7 +377,7 @@ func (builder *Builder) Write(ctx context.Context, path string) (SegmentInfo, er
 		return nil
 	})
 	if err != nil {
-		return SegmentInfo{}, err
+		return 0, err
 	}
 
 	keys := make([]termKey, 0, len(builder.terms))
@@ -331,7 +418,7 @@ func (builder *Builder) Write(ctx context.Context, path string) (SegmentInfo, er
 		return nil
 	})
 	if err != nil {
-		return SegmentInfo{}, err
+		return 0, err
 	}
 
 	indexes := make([]dictionaryBlockIndex, 0, (len(records)+dictionaryBlockMaxEntries-1)/dictionaryBlockMaxEntries)
@@ -364,7 +451,7 @@ func (builder *Builder) Write(ctx context.Context, path string) (SegmentInfo, er
 		return nil
 	})
 	if err != nil {
-		return SegmentInfo{}, err
+		return 0, err
 	}
 
 	sections[sectionDictionaryIndex], err = writeSection(file, func(destination io.Writer) error {
@@ -376,7 +463,7 @@ func (builder *Builder) Write(ctx context.Context, path string) (SegmentInfo, er
 		return err
 	})
 	if err != nil {
-		return SegmentInfo{}, err
+		return 0, err
 	}
 
 	sections[sectionNorms], err = writeSection(file, func(destination io.Writer) error {
@@ -407,7 +494,7 @@ func (builder *Builder) Write(ctx context.Context, path string) (SegmentInfo, er
 		return nil
 	})
 	if err != nil {
-		return SegmentInfo{}, err
+		return 0, err
 	}
 
 	sections[sectionStoredOffsets], err = writeSection(file, func(destination io.Writer) error {
@@ -427,7 +514,7 @@ func (builder *Builder) Write(ctx context.Context, path string) (SegmentInfo, er
 		return nil
 	})
 	if err != nil {
-		return SegmentInfo{}, err
+		return 0, err
 	}
 
 	sections[sectionStoredData], err = writeSection(file, func(destination io.Writer) error {
@@ -444,40 +531,74 @@ func (builder *Builder) Write(ctx context.Context, path string) (SegmentInfo, er
 		return nil
 	})
 	if err != nil {
-		return SegmentInfo{}, err
+		return 0, err
 	}
 
 	fileSize, err := file.Seek(0, io.SeekCurrent)
 	if err != nil {
-		return SegmentInfo{}, err
+		return 0, err
 	}
 	header := marshalSegmentHeader(segmentHeader{
 		version: builder.version, fileSize: uint64(fileSize), schemaHash: builder.schema.fingerprint,
 		documentN: uint32(len(builder.identifiers)), fieldN: uint16(len(builder.schema.fields)), sections: sections,
 	})
 	if _, err := file.WriteAt(header[:], 0); err != nil {
-		return SegmentInfo{}, err
+		return 0, err
 	}
-	if err := file.Sync(); err != nil {
-		return SegmentInfo{}, err
+	return fileSize, nil
+}
+
+// memoryOutput is a segmentOutput held in memory.
+type memoryOutput struct {
+	data []byte
+}
+
+func (output *memoryOutput) Write(data []byte) (int, error) {
+	output.data = append(output.data, data...)
+	return len(data), nil
+}
+
+func (output *memoryOutput) Seek(offset int64, whence int) (int64, error) {
+	if offset != 0 || whence != io.SeekCurrent {
+		return 0, fmt.Errorf("search: memory segment output only reports its end")
 	}
-	if err := file.Close(); err != nil {
-		return SegmentInfo{}, err
+	return int64(len(output.data)), nil
+}
+
+func (output *memoryOutput) WriteAt(data []byte, offset int64) (int, error) {
+	if offset < 0 || offset > int64(len(output.data))-int64(len(data)) {
+		return 0, fmt.Errorf("search: memory segment write at %d exceeds its %d bytes", offset, len(output.data))
 	}
-	if _, err := os.Stat(path); err == nil {
-		return SegmentInfo{}, fmt.Errorf("search: segment path appeared while writing: %s", path)
-	} else if !os.IsNotExist(err) {
-		return SegmentInfo{}, err
+	return copy(output.data[offset:], data), nil
+}
+
+// memorySegment seals the builder into a segment held in memory. It reads
+// exactly like a written segment file and owns no file handle.
+func (builder *Builder) memorySegment(ctx context.Context) (*Segment, error) {
+	data, err := builder.encodeBytes(ctx)
+	if err != nil {
+		return nil, err
 	}
-	if err := publishFile(temporary, path); err != nil {
-		return SegmentInfo{}, err
+	return openSegmentReader("<memory>", bytes.NewReader(data), int64(len(data)), builder.schema)
+}
+
+// encodeBytes seals the builder into the bytes of one segment file.
+func (builder *Builder) encodeBytes(ctx context.Context) ([]byte, error) {
+	if builder.sealed {
+		return nil, ErrBuilderSealed
 	}
-	keepTemporary = false
-	if err := syncDirectory(filepath.Dir(path)); err != nil {
-		return SegmentInfo{}, err
+	if ctx == nil {
+		return nil, fmt.Errorf("search: write context is nil")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	output := &memoryOutput{}
+	if _, err := builder.encode(ctx, output); err != nil {
+		return nil, err
 	}
 	builder.sealed = true
-	return SegmentInfo{Path: path, Documents: uint32(len(builder.identifiers)), Fields: uint16(len(builder.schema.fields)), Bytes: fileSize}, nil
+	return output.data, nil
 }
 
 type sectionWriter struct {
@@ -495,7 +616,7 @@ func (writer *sectionWriter) Write(data []byte) (int, error) {
 	return written, err
 }
 
-func writeSection(file *os.File, write func(io.Writer) error) (sectionDescriptor, error) {
+func writeSection(file io.WriteSeeker, write func(io.Writer) error) (sectionDescriptor, error) {
 	offset, err := file.Seek(0, io.SeekCurrent)
 	if err != nil {
 		return sectionDescriptor{}, err

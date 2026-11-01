@@ -3,32 +3,54 @@ package engine
 import (
 	"fmt"
 	"math"
-	"strconv"
+	"sort"
 	"strings"
-	"time"
-
-	"github.com/kitwork/engine/kitdb/relational"
 )
 
-const maximumAppDatabaseCacheDuration = 24 * time.Hour
-
-// AppDatabaseConfig is one KitDB file or managed root owned by the Kitwork
-// process. Port zero keeps the database embedded; a positive port also exposes
-// the PostgreSQL-compatible listener on Host. KitSQL exposes the same database
-// through the Kitwork HTTP(S) listener when the web surface is present.
+// AppDatabaseConfig is app.database(path, { … }) of application.work: the host's database port (KITWORK_KITDB.md
+// câu 13.5), the PostgreSQL wire, read-only, on the SQLite files of the host's .database/ (Path) and of every app's
+// .database/. A positive Port opens the listener on Host; User and Password are the admin of every cluster;
+// Concurrency bounds the statements running at once.
 type AppDatabaseConfig struct {
-	Alias         string
-	Path          string
-	Host          string
-	Port          int
-	User          string
-	Password      string
-	KitSQL        bool
-	MemoryBytes   int64
-	Concurrency   int
-	Warm          bool
-	WarmDatabases []string
-	Cache         relational.QueryCacheOptions
+	Path        string
+	Host        string
+	Port        int
+	User        string
+	Password    string
+	Concurrency int
+	// Search is the full-text index of each table SEARCH reads on the port (app_database_search.go).
+	Search []AppDatabaseSearch
+}
+
+// AppDatabaseSearch is one table's full-text index of app.database's search: a table of a database of the host's
+// .database/ (a folder), in a schema (public: kitwork.db), and the columns indexed with the weight of each.
+//
+//	search: { shopping: { shopping: { name: 5, brand: 2 } } }      database → table → { column: weight }
+//	search: { shopping: { "billing.invoices": ["note"] } }         a schema other than public; weight 1
+type AppDatabaseSearch struct {
+	Database string
+	Schema   string
+	Table    string
+	Columns  []AppDatabaseSearchColumn
+}
+
+// AppDatabaseSearchColumn is one indexed column and how much a match in it weighs (1 by default).
+type AppDatabaseSearchColumn struct {
+	Name  string
+	Boost float64
+}
+
+// maxAppDatabaseSearchColumns is how many columns one table's index may have.
+const maxAppDatabaseSearchColumns = 32
+
+// appDatabaseRemovedOptions are the options of app.database the KitDB port had, each with why it went when the port
+// moved to SQLite (30/10/2026).
+var appDatabaseRemovedOptions = map[string]string{
+	"alias":  "the port no longer publishes a database to the process under an alias; an app reads its own database with connection() of .shared/schema/",
+	"kitsql": "the /_kitsql/v1/query endpoint went with KitDB; read over the PostgreSQL wire",
+	"memory": "SQLite keeps its own page cache; the KitDB page cache it sized is gone",
+	"warm":   "a SQLite database opens with the session that reads it; nothing is kept warm",
+	"cache":  "the KitDB query cache is gone; the port answers each statement from the file",
 }
 
 func parseAppDatabaseConfigs(source interface{}) ([]AppDatabaseConfig, error) {
@@ -48,32 +70,30 @@ func parseAppDatabaseConfigs(source interface{}) ([]AppDatabaseConfig, error) {
 		}
 		result = append(result, config)
 	}
+	if len(result) > 1 {
+		return nil, fmt.Errorf("app.database is declared %d times: the host has one database port, on one .database/ folder", len(result))
+	}
 	return result, nil
 }
 
 func parseAppDatabaseConfig(source map[string]interface{}) (AppDatabaseConfig, error) {
 	config := AppDatabaseConfig{Host: "127.0.0.1", User: "kitdb"}
 	known := map[string]bool{
-		"path": true, "alias": true, "host": true, "port": true, "user": true, "password": true,
-		"kitsql": true, "memory": true, "concurrency": true, "warm": true, "cache": true,
+		"path": true, "host": true, "port": true, "user": true, "password": true, "concurrency": true, "search": true,
 	}
 	for key := range source {
+		if why, removed := appDatabaseRemovedOptions[key]; removed {
+			return config, fmt.Errorf("option %q is gone (30/10/2026, the port runs on SQLite, KITWORK_KITDB.md 13.5): %s", key, why)
+		}
 		if !known[key] {
-			return config, fmt.Errorf("unknown option %q", key)
+			return config, fmt.Errorf("unknown option %q: app.database takes path, host, port, user, password, concurrency, search", key)
 		}
 	}
 	path, ok := source["path"].(string)
 	if !ok || strings.TrimSpace(path) == "" {
-		return config, fmt.Errorf("path is required")
+		return config, fmt.Errorf("path is required: the host's .database/ folder")
 	}
 	config.Path = path
-	if value, found := source["alias"]; found {
-		alias, ok := value.(string)
-		if !ok || strings.TrimSpace(alias) == "" || strings.ContainsAny(alias, "\x00/\\") {
-			return config, fmt.Errorf("alias must be a non-empty logical name")
-		}
-		config.Alias = strings.TrimSpace(alias)
-	}
 	if value, found := source["host"]; found {
 		host, ok := value.(string)
 		if !ok || strings.TrimSpace(host) == "" {
@@ -102,22 +122,18 @@ func parseAppDatabaseConfig(source map[string]interface{}) (AppDatabaseConfig, e
 		}
 		config.Password = password
 	}
-	if value, found := source["kitsql"]; found {
-		enabled, ok := value.(bool)
-		if !ok {
-			return config, fmt.Errorf("kitsql must be a boolean")
-		}
-		config.KitSQL = enabled
+	if config.Port == 0 {
+		return config, fmt.Errorf("port is required: app.database is the host's database port")
 	}
-	if (config.Port != 0 || config.KitSQL) && config.Password == "" {
-		return config, fmt.Errorf("password is required when port or kitsql is configured")
+	if config.Password == "" {
+		return config, fmt.Errorf("password is required: user and password are the admin of every cluster on the port")
 	}
-	if value, found := source["memory"]; found {
-		memory, err := parseConfigBytes(value)
+	if value, found := source["search"]; found {
+		search, err := parseAppDatabaseSearch(value)
 		if err != nil {
-			return config, fmt.Errorf("memory: %w", err)
+			return config, err
 		}
-		config.MemoryBytes = memory
+		config.Search = search
 	}
 	if value, found := source["concurrency"]; found {
 		if text, ok := value.(string); ok && strings.EqualFold(strings.TrimSpace(text), "auto") {
@@ -130,141 +146,97 @@ func parseAppDatabaseConfig(source map[string]interface{}) (AppDatabaseConfig, e
 			config.Concurrency = concurrency
 		}
 	}
-	if value, found := source["warm"]; found {
-		switch warm := value.(type) {
-		case bool:
-			config.Warm = warm
-		case string:
-			if strings.TrimSpace(warm) == "" {
-				return config, fmt.Errorf("warm database name cannot be empty")
-			}
-			config.WarmDatabases = []string{warm}
-		case []interface{}:
-			for _, item := range warm {
-				name, ok := item.(string)
-				if !ok || strings.TrimSpace(name) == "" {
-					return config, fmt.Errorf("warm must contain non-empty database names")
-				}
-				config.WarmDatabases = append(config.WarmDatabases, name)
-			}
-		default:
-			return config, fmt.Errorf("warm must be a boolean, database name or array of names")
-		}
-	}
-	if value, found := source["cache"]; found {
-		cache, err := parseAppDatabaseCache(value)
-		if err != nil {
-			return config, err
-		}
-		config.Cache = cache
-	}
 	return config, nil
 }
 
-func parseAppDatabaseCache(source interface{}) (relational.QueryCacheOptions, error) {
-	var result relational.QueryCacheOptions
-	switch value := source.(type) {
-	case bool:
-		if value {
-			return result, fmt.Errorf("cache: true is ambiguous; provide a duration such as \"1m\"")
+// parseAppDatabaseSearch reads search: database → table ("name" or "schema.name") → columns, as a list (weight 1) or
+// an object of weights. The result is in a fixed order: databases, then tables, by name; columns as listed, or by name
+// from an object.
+func parseAppDatabaseSearch(source interface{}) ([]AppDatabaseSearch, error) {
+	databases, ok := source.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("search must be an object: { database: { table: [columns] } }")
+	}
+	var result []AppDatabaseSearch
+	for _, database := range sortedConfigKeys(databases) {
+		if !plainConfigName(database) {
+			return nil, fmt.Errorf("search: %q is not a database of the host's .database/ folder (a folder name)", database)
 		}
-		return result, nil
-	case string:
-		duration, err := parseCacheDuration(value)
-		if err != nil {
-			return result, fmt.Errorf("cache: %w", err)
+		tables, ok := databases[database].(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("search.%s must be an object: { table: [columns] }", database)
 		}
-		result.Select, result.Search, result.Analytics = duration, duration, duration
-		return result, nil
-	case map[string]interface{}:
-		for key := range value {
-			switch key {
-			case "select", "search", "analytics", "memory", "entries", "result":
+		for _, key := range sortedConfigKeys(tables) {
+			declaration := AppDatabaseSearch{Database: database, Schema: "public", Table: key}
+			if schema, table, qualified := strings.Cut(key, "."); qualified {
+				declaration.Schema, declaration.Table = schema, table
+			}
+			if !plainConfigName(declaration.Schema) || !plainConfigName(declaration.Table) {
+				return nil, fmt.Errorf("search.%s: %q is not a table name (table or schema.table)", database, key)
+			}
+			where := "search." + database + "." + key
+			switch columns := tables[key].(type) {
+			case []interface{}:
+				for _, item := range columns {
+					name, ok := item.(string)
+					if !ok || strings.TrimSpace(name) == "" {
+						return nil, fmt.Errorf("%s: each column is a name", where)
+					}
+					declaration.Columns = append(declaration.Columns, AppDatabaseSearchColumn{Name: strings.TrimSpace(name), Boost: 1})
+				}
+			case map[string]interface{}:
+				for _, name := range sortedConfigKeys(columns) {
+					weight, ok := columns[name].(float64)
+					if integer, isInteger := columns[name].(int); isInteger {
+						weight, ok = float64(integer), true
+					}
+					if !ok || weight <= 0 || weight > 1000 || strings.TrimSpace(name) == "" {
+						return nil, fmt.Errorf("%s.%s: the weight of a column is a number from more than 0 to 1000", where, name)
+					}
+					declaration.Columns = append(declaration.Columns, AppDatabaseSearchColumn{Name: strings.TrimSpace(name), Boost: weight})
+				}
 			default:
-				return result, fmt.Errorf("cache: unknown option %q", key)
+				return nil, fmt.Errorf("%s: write the columns as [\"name\", \"brand\"] or { name: 5, brand: 2 }", where)
 			}
-		}
-		for key, target := range map[string]*time.Duration{
-			"select": &result.Select, "search": &result.Search, "analytics": &result.Analytics,
-		} {
-			if item, found := value[key]; found {
-				text, ok := item.(string)
-				if !ok {
-					return result, fmt.Errorf("cache.%s must be a duration string", key)
+			if len(declaration.Columns) == 0 || len(declaration.Columns) > maxAppDatabaseSearchColumns {
+				return nil, fmt.Errorf("%s: an index has from 1 to %d columns", where, maxAppDatabaseSearchColumns)
+			}
+			seen := map[string]bool{}
+			for _, column := range declaration.Columns {
+				if seen[strings.ToLower(column.Name)] {
+					return nil, fmt.Errorf("%s: column %q is named twice", where, column.Name)
 				}
-				duration, err := parseCacheDuration(text)
-				if err != nil {
-					return result, fmt.Errorf("cache.%s: %w", key, err)
-				}
-				*target = duration
+				seen[strings.ToLower(column.Name)] = true
 			}
+			result = append(result, declaration)
 		}
-		if item, found := value["memory"]; found {
-			memory, err := parseConfigBytes(item)
-			if err != nil || memory == 0 {
-				return result, fmt.Errorf("cache.memory must be a positive byte size")
-			}
-			result.MaximumBytes = memory
-		}
-		if item, found := value["entries"]; found {
-			entries, err := strictConfigInteger(item)
-			if err != nil || entries < 1 {
-				return result, fmt.Errorf("cache.entries must be a positive integer")
-			}
-			result.MaximumEntries = entries
-		}
-		if item, found := value["result"]; found {
-			maximum, err := parseConfigBytes(item)
-			if err != nil || maximum == 0 {
-				return result, fmt.Errorf("cache.result must be a positive byte size")
-			}
-			result.MaximumResult = maximum
-		}
-		if result.Select == 0 && result.Search == 0 && result.Analytics == 0 &&
-			(result.MaximumBytes != 0 || result.MaximumEntries != 0 || result.MaximumResult != 0) {
-			return result, fmt.Errorf("cache requires at least one of select, search or analytics")
-		}
-		return result, nil
-	default:
-		return result, fmt.Errorf("cache must be false, a duration string or an object")
 	}
+	return result, nil
 }
 
-func parseCacheDuration(source string) (time.Duration, error) {
-	duration, err := time.ParseDuration(strings.TrimSpace(source))
-	if err != nil || duration <= 0 || duration > maximumAppDatabaseCacheDuration {
-		return 0, fmt.Errorf("must be between 1ns and %s", maximumAppDatabaseCacheDuration)
+func sortedConfigKeys(object map[string]interface{}) []string {
+	keys := make([]string, 0, len(object))
+	for key := range object {
+		keys = append(keys, key)
 	}
-	return duration, nil
+	sort.Strings(keys)
+	return keys
 }
 
-func parseConfigBytes(source interface{}) (int64, error) {
-	if text, ok := source.(string); ok {
-		text = strings.ToLower(strings.TrimSpace(text))
-		if text == "auto" {
-			return 0, nil
-		}
-		units := []struct {
-			suffix string
-			scale  int64
-		}{{"gib", 1 << 30}, {"gb", 1 << 30}, {"mib", 1 << 20}, {"mb", 1 << 20}, {"kib", 1 << 10}, {"kb", 1 << 10}, {"b", 1}}
-		for _, unit := range units {
-			if strings.HasSuffix(text, unit.suffix) {
-				number := strings.TrimSpace(strings.TrimSuffix(text, unit.suffix))
-				value, err := strconv.ParseInt(number, 10, 64)
-				if err != nil || value < 1 || value > math.MaxInt64/unit.scale {
-					return 0, fmt.Errorf("invalid byte size %q", source)
-				}
-				return value * unit.scale, nil
-			}
-		}
-		return 0, fmt.Errorf("invalid byte size %q; use b, kb, mb or gb", source)
+// plainConfigName is a folder, schema or table name: letters, digits, '_', '-' and '.', not "." or "..".
+func plainConfigName(name string) bool {
+	if name == "" || name == "." || name == ".." || len(name) > 128 {
+		return false
 	}
-	value, err := strictConfigInteger64(source)
-	if err != nil || value < 1 {
-		return 0, fmt.Errorf("must be \"auto\" or a positive byte size")
+	for _, character := range name {
+		switch {
+		case character >= 'a' && character <= 'z', character >= 'A' && character <= 'Z', character >= '0' && character <= '9',
+			character == '_', character == '-', character == '.':
+		default:
+			return false
+		}
 	}
-	return value, nil
+	return true
 }
 
 func strictConfigInteger(source interface{}) (int, error) {

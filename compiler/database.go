@@ -9,9 +9,9 @@ import (
 )
 
 // A database of an app is declared in its .shared/schema/ (KITWORK_DATABASE.md mục 1): a file-level const
-// whose value is connection().schema({ … }), exported, imported by the files that use it with
+// whose value is connection().tables({ … }), exported, imported by the files that use it with
 // import { db } from "app/.shared/schema/shop.work". The bundler reads each schema file it bundles, and
-// finds the tables and columns in its struct({ … }) literals; the resolver then translates every
+// finds the tables and columns in its table({ … }) literals; the resolver then translates every
 // statement written on an imported handle (db.list((orders) => …)) into one call of the handle with a
 // template (database/statement), checking each name against what the bundler read. The lambdas of a
 // statement are never compiled.

@@ -14,14 +14,14 @@ import (
 // in a schema file.
 func TestDatabaseOldSpellingsAreCompileErrors(t *testing.T) {
 	for _, test := range []struct{ source, marker, want string }{
-		{"import { kitdb } from \"kitwork/database\";\n", "import { kitdb", `import { kitdb } from "kitwork/database" đã bỏ: database của app khai export const db = connection().schema({ bảng })`},
+		{"import { kitdb } from \"kitwork/database\";\n", "import { kitdb", `import { kitdb } from "kitwork/database" đã bỏ: database của app khai export const db = connection().tables({ bảng })`},
 		{"import { kitdb } from \"kitwork/database\";\n", "import { kitdb", "app.database(path, { port }) của host"},
 		{"import { safe, sqlite } from \"kitwork\";\n", "import { safe", `import { sqlite } from "kitwork" đã bỏ: SQLite là connection("tên")`},
 		{"import { webhook } from \"kitwork\";\n", "import { webhook", `import { webhook } from "kitwork" đã bỏ: không có spec nên engine gỡ ngày 28/10/2026`},
 		{"import { insights } from \"kitwork\";\n", "import { insights", `import { insights } from "kitwork" đã bỏ: không có spec nên engine gỡ ngày 28/10/2026`},
 		{"import { playground } from \"kitwork\";\n", "import { playground", `import { playground } from "kitwork" đã bỏ: không có spec nên engine gỡ ngày 28/10/2026`},
 		{"import { open as file } from \"kitwork/database\";\n", "import { open", `import { open } from "kitwork/database" đã bỏ: database của app khai`},
-		{"import { struct, text } from \"kitwork/database\";\n", "import { struct", `import { struct } from "kitwork/database" đã bỏ: struct import từ "kitwork/schema"`},
+		{"import { struct, text } from \"kitwork/database\";\n", "import { struct", `import { struct } from "kitwork/database" đã bỏ: bảng khai bằng table() của "kitwork/schema"`},
 		{"import { text } from \"kitwork/database\";\n", "import { text", `import { text } from "kitwork/database" đã bỏ: kiểu cột import từ "kitwork/schema": import { text } from "kitwork/schema"`},
 		{"import { kitid } from \"kitwork/database\";\n", "import { kitid", `import { kitid } from "kitwork/database" đã bỏ: kiểu cột của "kitwork/schema", chỉ trong app/.shared/schema/: viết id()`},
 		{"import { choice } from \"kitwork/database\";\n", "import { choice", `choice() không có trong kiểu cột của "kitwork/schema": id(), text()`},
@@ -44,7 +44,7 @@ func TestDatabaseOldSpellingsAreCompileErrors(t *testing.T) {
 	}
 
 	// in a schema file the import is refused at its name, not later at the line that calls it
-	schema := "import { struct, id, text } from \"kitwork/schema\";\nimport { connection, kitdb } from \"kitwork/database\";\nconst orders = struct({ id: id(), email: text() });\nexport const db = connection().schema({ orders });\nexport const old = kitdb(\"old.kitdb\", { orders });\n"
+	schema := "import { table, id, text } from \"kitwork/schema\";\nimport { connection, kitdb } from \"kitwork/database\";\nconst orders = table({ id: id(), email: text() });\nexport const db = connection().tables({ orders });\nexport const old = kitdb(\"old.kitdb\", { orders });\n"
 	_, err := compileRoute(t, importDB+"const all = db.list((orders) => orders);\n", map[string]string{".shared/schema/shop.work": schema})
 	if err == nil || !strings.HasPrefix(err.Error(), "../.shared/schema/shop.work:2:1: ") || !strings.Contains(err.Error(), `import { kitdb } from "kitwork/database" đã bỏ`) {
 		t.Errorf("kitdb imported into a schema file: %v", err)
@@ -106,7 +106,7 @@ func TestDatabaseConnectHandle(t *testing.T) {
 // connection("warehouse") declares a database the host names in app.databases: the compiler reads its
 // tables as it reads the app's own and translates its statements the same way.
 func TestDatabaseNamedConnectionTranslates(t *testing.T) {
-	warehouse := "import { struct, id, text, integer } from \"kitwork/schema\";\nimport { connection } from \"kitwork/database\";\n\nconst stocks = struct({ id: id(), item: text().unique(), quantity: integer() });\n\nexport const warehouse = connection(\"warehouse\").schema({ stocks });\n"
+	warehouse := "import { table, id, text, integer } from \"kitwork/schema\";\nimport { connection } from \"kitwork/database\";\n\nconst stocks = table({ id: id(), item: text().unique(), quantity: integer() });\n\nexport const warehouse = connection(\"warehouse\").tables({ stocks });\n"
 	files := map[string]string{".shared/schema/warehouse.work": warehouse}
 	source := "import { warehouse } from \"app/.shared/schema/warehouse.work\";\nconst low = warehouse.list((stocks) => stocks.quantity < 5);\n"
 	bytecode, err := compileRoute(t, source, files)
@@ -128,5 +128,30 @@ func TestDatabaseNamedConnectionTranslates(t *testing.T) {
 	}
 	if catalog["warehouse"] == nil || catalog["warehouse"].Connection != "warehouse" || catalog["warehouse"].External != "" {
 		t.Fatalf("the catalog of warehouse.work: %#v", catalog["warehouse"])
+	}
+}
+
+// connection().schema("billing").tables({ … }) declares a schema of the app's database, a file of its own
+// beside public (KITWORK_DATABASE.md mục 1, "Schema", 29/10/2026): its statements translate as public's do,
+// and the catalogue records the schema.
+func TestDatabaseSchemaTranslates(t *testing.T) {
+	billing := "import { table, id, decimal } from \"kitwork/schema\";\nimport { connection } from \"kitwork/database\";\n\nconst invoices = table({ id: id(), total: decimal(12, 2) });\n\nexport const billing = connection().schema(\"billing\").tables({ invoices });\n"
+	files := map[string]string{".shared/schema/billing.work": billing}
+	source := "import { billing } from \"app/.shared/schema/billing.work\";\nconst big = billing.list((invoices) => invoices.total > 100);\n"
+	bytecode, err := compileRoute(t, source, files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := templates(t, bytecode)
+	if len(found) != 1 || found[0].Table != "invoices" || found[0].Where == nil || found[0].Where.Op != ">" {
+		t.Fatalf("billing.list: %v, want one statement on invoices with total > 100", found)
+	}
+	root := databaseApp(t, files)
+	catalog, err := SchemaCatalog(root, filepath.Join(root, ".shared", "schema", "billing.work"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if catalog["billing"] == nil || catalog["billing"].Schema != "billing" || catalog["billing"].Connection != "" {
+		t.Fatalf("the catalog of billing.work: %#v", catalog["billing"])
 	}
 }

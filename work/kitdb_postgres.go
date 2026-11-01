@@ -46,7 +46,7 @@ type KitDBPostgresOptions struct {
 }
 
 // ServeKitDBPostgres serves one tenant through PostgreSQL protocol 3.0. The
-// underlying pgwire profile rejects non-loopback listeners until TLS and SCRAM
+// underlying pgwire profile rejects non-loopback listeners until TLS
 // are implemented.
 func (tenant *Tenant) ServeKitDBPostgres(
 	ctx context.Context,

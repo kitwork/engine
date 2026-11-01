@@ -324,17 +324,6 @@ func validateDeclaredDatabaseAliases(external []database.Config, owned []AppData
 		}
 		seen[strings.ToLower(alias)] = "external connection"
 	}
-	for _, config := range owned {
-		alias := strings.TrimSpace(config.Alias)
-		if alias == "" {
-			continue
-		}
-		key := strings.ToLower(alias)
-		if previous, exists := seen[key]; exists {
-			return fmt.Errorf("database alias %q is declared by both %s and app.database", alias, previous)
-		}
-		seen[key] = "app.database"
-	}
 	return nil
 }
 

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -133,7 +134,10 @@ func encodeDiskRecord(record diskRecord) []byte {
 	out = append(out, diskMagic...)
 	var expire int64
 	if !record.expireAt.IsZero() {
-		expire = record.expireAt.UnixNano()
+		expire = math.MaxInt64 // the last instant nanoseconds since the epoch can say (year 2262): a later expiry expires there
+		if record.expireAt.Before(time.Unix(0, math.MaxInt64)) {
+			expire = record.expireAt.UnixNano()
+		}
 	}
 	out = binary.BigEndian.AppendUint64(out, uint64(expire))
 	out = binary.AppendUvarint(out, uint64(len(record.key)))

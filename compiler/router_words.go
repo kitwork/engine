@@ -153,7 +153,7 @@ func (word RouterWord) Takes(level RouterLevel) bool {
 // RouterConnectionRemoved and RouterConnectRemoved are the errors of router.connection(…) and
 // router.connect(…), removed on 22/10/2026 (work/router_connection.go says the same where a router runs).
 const (
-	RouterConnectionRemoved = `router.connection(…) đã bỏ: database có tên khai export const warehouse = connection("warehouse").schema({ bảng }) trong app/.shared/schema/<tên>.work, tên đó khai trong app.databases({ … }) của application.work; database của app là connection() không tên`
+	RouterConnectionRemoved = `router.connection(…) đã bỏ: database có tên khai export const warehouse = connection("warehouse").tables({ bảng }) trong app/.shared/schema/<tên>.work, tên đó khai trong app.databases({ … }) của application.work; database của app là connection() không tên`
 	RouterConnectRemoved    = `router.connect(…) đã bỏ: database ngoài khai export const crm = connect({ postgresql: environment.CRM_URL }) trong app/.shared/schema/<tên>.work, rồi crm.query(sql, [giá trị])`
 )
 

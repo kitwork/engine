@@ -204,7 +204,7 @@ func (segment *Segment) searchMatchAny(ctx context.Context, prepared preparedMat
 	if len(clauses) == 0 {
 		return nil, nil
 	}
-	return segment.searchDisjunctiveWAND(ctx, clauses, prepared.options)
+	return segment.searchDisjunctiveWAND(ctx, clauses, prepared.options, nil)
 }
 
 func (segment *Segment) searchMultiMatchAny(ctx context.Context, prepared preparedMultiMatchQuery) ([]Hit, error) {
@@ -235,7 +235,7 @@ func (segment *Segment) searchMultiMatchAny(ctx context.Context, prepared prepar
 	if len(clauses) == 0 {
 		return nil, nil
 	}
-	return segment.searchDisjunctiveWAND(ctx, clauses, prepared.options)
+	return segment.searchDisjunctiveWAND(ctx, clauses, prepared.options, nil)
 }
 
 func (index *Index) searchMatchAny(ctx context.Context, prepared preparedMatchQuery) ([]Hit, error) {
@@ -301,7 +301,7 @@ func (index *Index) searchMatchAny(ctx context.Context, prepared preparedMatchQu
 		if len(clauses) == 0 {
 			continue
 		}
-		hits, err := segment.searchDisjunctiveWAND(ctx, clauses, prepared.options)
+		hits, err := segment.searchDisjunctiveWAND(ctx, clauses, prepared.options, index.deletions[segmentIndex])
 		if err != nil {
 			return nil, err
 		}
@@ -398,7 +398,7 @@ func (index *Index) searchMultiMatchAny(ctx context.Context, prepared preparedMu
 		if len(clauses) == 0 {
 			continue
 		}
-		hits, err := segment.searchDisjunctiveWAND(ctx, clauses, prepared.options)
+		hits, err := segment.searchDisjunctiveWAND(ctx, clauses, prepared.options, index.deletions[segmentIndex])
 		if err != nil {
 			return nil, err
 		}

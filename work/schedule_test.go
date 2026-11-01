@@ -165,7 +165,7 @@ func TestScheduleSpecExampleBootsAndFires(t *testing.T) {
 	if strings.Contains(q.output, "[Schedule] baoCao.work") {
 		t.Fatalf("boot said a problem:\n%s", q.output)
 	}
-	if !strings.Contains(q.output, "[Schedule] đồng hồ chạy (kitwork_runs của .database/application/) — 3 lịch cho \"acme\": baoCaoSang, nhacCuoiThang, raMat") {
+	if !strings.Contains(q.output, "[Schedule] đồng hồ chạy (kitwork_runs của .database/application/kitwork.db) — 3 lịch cho \"acme\": baoCaoSang, nhacCuoiThang, raMat") {
 		t.Errorf("boot did not start the clock with the three schedules by their export:\n%s", q.output)
 	}
 
@@ -323,7 +323,7 @@ func TestScheduleConfigFile(t *testing.T) {
 	}
 	q := newQueueApp(t, map[string]string{
 		".schedule/config.work":    head + "import { db } from \"app/.shared/schema/shop.work\";\n\nschedule.keep(\"2d\");\nschedule.session({ role: \"system\" });\nschedule.database(db);\n",
-		".shared/schema/shop.work": "import { struct, id, text } from \"kitwork/schema\";\nimport { connection } from \"kitwork/database\";\nconst notes = struct({ id: id(), body: text() });\nexport const db = connection().schema({ notes });\n",
+		".shared/schema/shop.work": "import { table, id, text } from \"kitwork/schema\";\nimport { connection } from \"kitwork/database\";\nconst notes = table({ id: id(), body: text() });\nexport const db = connection().tables({ notes });\n",
 		".schedule/heartbeat.work": heartbeat,
 	})
 	if got := keep(q); got != 48*time.Hour {

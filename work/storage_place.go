@@ -43,6 +43,8 @@ type placeSet struct {
 	disk      *diskPlace
 	datastore *datastorePlace
 	closed    bool
+	// legacySaid is the line about the KitDB file of datastore() left behind, said once for each run of the app
+	legacySaid sync.Once
 }
 
 // place is the store of where for the app, as t (a tenant of the app) reaches it.

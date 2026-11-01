@@ -160,7 +160,7 @@ func (segment *Segment) searchPrefix(ctx context.Context, prepared preparedPrefi
 	if len(built) == 0 {
 		return nil, nil
 	}
-	return segment.searchDisjunctiveWAND(ctx, built, prepared.options)
+	return segment.searchDisjunctiveWAND(ctx, built, prepared.options, nil)
 }
 
 func (index *Index) searchPrefix(ctx context.Context, prepared preparedPrefixQuery) ([]Hit, error) {
@@ -216,7 +216,7 @@ func (index *Index) searchPrefix(ctx context.Context, prepared preparedPrefixQue
 		if len(built) == 0 {
 			continue
 		}
-		hits, err := segment.searchDisjunctiveWAND(ctx, built, prepared.options)
+		hits, err := segment.searchDisjunctiveWAND(ctx, built, prepared.options, index.deletions[segmentIndex])
 		if err != nil {
 			return nil, err
 		}

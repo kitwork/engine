@@ -131,7 +131,7 @@ func Run(configFile ...string) (err error) {
 	if err := validatePrewarmSurface(builder.hasWeb, cfg.Prewarm); err != nil {
 		return err
 	}
-	// An owned KitDB root is declared relative to the manifest, and kitsql needs the web surface.
+	// The host's .database/ of app.database is declared relative to the manifest.
 	manifestDirectory, err := filepath.Abs(filepath.Dir(file))
 	if err != nil {
 		return fmt.Errorf("resolve manifest directory: %w", err)
@@ -139,13 +139,6 @@ func Run(configFile ...string) (err error) {
 	for index := range cfg.AppDatabases {
 		if !filepath.IsAbs(cfg.AppDatabases[index].Path) {
 			cfg.AppDatabases[index].Path = filepath.Join(manifestDirectory, cfg.AppDatabases[index].Path)
-		}
-	}
-	if !builder.hasWeb {
-		for _, configured := range cfg.AppDatabases {
-			if configured.KitSQL {
-				return fmt.Errorf("app.database %q: kitsql requires an app.website server", configured.Path)
-			}
 		}
 	}
 
@@ -190,7 +183,8 @@ func Run(configFile ...string) (err error) {
 	}
 
 	appDatabaseContext, cancelAppDatabases := context.WithCancel(context.Background())
-	appDatabaseRuntimes, appDatabaseErrors, err := startAppDatabaseRuntimes(appDatabaseContext, cfg.AppDatabases, cfg.Databases)
+	appDatabaseRuntimes, appDatabaseErrors, err := startAppDatabaseRuntimes(appDatabaseContext, cfg.AppDatabases,
+		appDatabaseApps{root: cfg.Root, layout: cfg.RootLayout})
 	if err != nil {
 		cancelAppDatabases()
 		return err
@@ -360,14 +354,6 @@ func Run(configFile ...string) (err error) {
 	// bytes costs hundreds of milliseconds. The middleware leaves live streams, already-compressed
 	// formats and tiny bodies alone; see utilities/compress.
 	var baseHandler http.Handler = http.MaxBytesHandler(handler, work.MaxBodyBytes)
-	baseHandler, err = newAppDatabaseKitSQLHandler(
-		appDatabaseRuntimes,
-		baseHandler,
-		cfg.AllowLocal || host.IsLocalhost(),
-	)
-	if err != nil {
-		return fmt.Errorf("configure KitSQL endpoint: %w", err)
-	}
 	srvHandler := compress.Middleware(baseHandler)
 	var servers []*http.Server
 	serverErrors := make(chan error, 2)
@@ -439,7 +425,7 @@ func Check(configFile ...string) (core.CheckReport, error) {
 	if err != nil {
 		return core.CheckReport{}, err
 	}
-	if err := validateAppDatabaseRuntimeAliases(cfg.AppDatabases, cfg.Databases); err != nil {
+	if err := validateAppDatabaseConfigs(cfg.AppDatabases); err != nil {
 		return core.CheckReport{}, err
 	}
 	if !cfg.Web {
@@ -462,6 +448,37 @@ func Check(configFile ...string) (core.CheckReport, error) {
 		cfg.SharedEnvironment,
 		bytecodeCacheDirectory(cfg),
 	), nil
+}
+
+// KitDBCopyOptions is `kitwork migrate kitdb [--app <identity>] [--dry-run]`.
+type KitDBCopyOptions = core.KitDBCopyOptions
+
+// KitDBCopyResult is the copy of one app's KitDB files.
+type KitDBCopyResult = core.KitDBCopyResult
+
+// MigrateKitDB copies each app's KitDB files (application.kitdb, storage.kitdb) into its SQLite files, or
+// with DryRun says what it would copy (`kitwork migrate kitdb`). It reads the manifest as Check does, so an
+// app's .shared/schema/ sees the databases the server would (app.databases), and starts nothing: no listener,
+// no worker, no schedule.
+func MigrateKitDB(options KitDBCopyOptions, configFile ...string) ([]KitDBCopyResult, error) {
+	cfg, err := commandConfig(configFile...)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateAppDatabaseConfigs(cfg.AppDatabases); err != nil {
+		return nil, err
+	}
+	for i := range cfg.Databases {
+		dbConfig := cfg.Databases[i]
+		alias := dbConfig.Alias
+		if alias == "" {
+			alias = "default"
+		}
+		database.Configs[alias] = dbConfig
+	}
+	applyDatabaseManifest(cfg)
+	work.AllowLocal = cfg.AllowLocal
+	return core.CopyKitDB(cfg.Root, cfg.MaxEnergy, cfg.RootLayout, cfg.SharedEnvironment, options)
 }
 
 // applyDatabaseManifest hands the engine what application.work says an app's .shared/schema/ may reach
@@ -641,14 +658,7 @@ func printBanner(cfg *Config, isLocalhost, hasWeb bool) {
 		}
 	}
 	for _, db := range cfg.AppDatabases {
-		modes := []string{"native"}
-		if db.KitSQL {
-			modes = append(modes, "kitsql")
-		}
-		if db.Port != 0 {
-			modes = append(modes, fmt.Sprintf("postgresql:%d", db.Port))
-		}
-		fmt.Printf("%skitdb · %s %s(%s)%s\n", label("db"), db.Path, dim, strings.Join(modes, ", "), reset)
+		fmt.Printf("%sdatabase · %s %s(postgresql %s:%d, SQLite, read-only)%s\n", label("db"), db.Path, dim, db.Host, db.Port, reset)
 	}
 	for _, proxy := range cfg.Proxies {
 		hostname := proxy.Host

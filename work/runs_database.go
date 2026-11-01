@@ -21,7 +21,7 @@ import (
 // its .database call another database the app declares in .shared/schema/ (24/10/2026):
 //
 //	// app/.shared/schema/jobs.work
-//	export const jobs = connection("jobs").schema({ letters });
+//	export const jobs = connection("jobs").tables({ letters });
 //
 //	// app/.shared/queue/config.work
 //	import * as queue from "kitwork/queue";
@@ -36,13 +36,16 @@ import (
 // the database never moves a run: what the old one holds stays there, and boot says how much of it had not
 // ended when the old one is the app's (leftBehind).
 
-// runsPlace is the database of the host's catalogue the runs of a kind live in: its name there, and its
-// SQLite file. A nil place is the app's database.
+// runsPlace is the database the runs of a kind live in: the app's own (.database/application/kitwork.db,
+// appRunsPlace) or one of the host's catalogue, its name there and its SQLite file.
 type runsPlace struct {
 	name string
 	path string
 	// ready is set once the tables were made in the file for this place.
 	ready atomic.Bool
+	// writes counts the writes made in the file for this place, each under the file's gate: what an idle
+	// worker must not add to.
+	writes atomic.Int64
 }
 
 // readRunsDatabase reads what queue.database(…) or schedule.database(…) was handed as config.work ran: the
@@ -51,7 +54,7 @@ type runsPlace struct {
 // (refused true). The compiler refuses the same where it can follow the import (compiler/folder_config.go);
 // this is what reaches the call through another name.
 func readRunsDatabase(setting folderSetting, module, label, where string) (runs *runsPlace, refused bool) {
-	stays := "; các lần chạy nằm trong database của app (.database/application/)"
+	stays := "; các lần chạy nằm trong database của app (.database/application/kitwork.db)"
 	if len(setting.args) != 1 {
 		fmt.Printf("%s %s: %s%s\n", label, where, compiler.FolderDatabaseArity(module), stays)
 		return nil, true
@@ -61,8 +64,11 @@ func readRunsDatabase(setting folderSetting, module, label, where string) (runs 
 		if setting.args[0].K != value.Proxy || handle.proxy == nil {
 			break
 		}
-		if handle.proxy.engine == "kitdb" {
+		if handle.proxy.engine == "kitdb" || handle.proxy.dbName == kitDBApplicationName {
 			return nil, false
+		}
+		if schema, ownSchema := strings.CutPrefix(handle.proxy.dbName, kitDBApplicationName+"/"); ownSchema && handle.proxy.sqlitePath != "" {
+			return &runsPlace{name: schema, path: handle.proxy.sqlitePath}, false
 		}
 		if handle.proxy.sqlitePath != "" {
 			return &runsPlace{name: strings.TrimPrefix(handle.proxy.dbName, catalogDatabasePrefix), path: handle.proxy.sqlitePath}, false
@@ -146,7 +152,7 @@ func (t *Tenant) useRunsPlace(kind string, place *runsPlace, label, where string
 	}
 	catalogRunsOwners.Unlock()
 	if heldBy != nil {
-		fmt.Printf("%s %s: database %s đã giữ các lần chạy của app %s: kitwork_runs không ghi app nào, nên mỗi database của danh mục giữ các lần chạy của một app; host khai một tên khác cho app này. Các lần chạy nằm trong database của app (.database/application/)\n",
+		fmt.Printf("%s %s: database %s đã giữ các lần chạy của app %s: kitwork_runs không ghi app nào, nên mỗi database của danh mục giữ các lần chạy của một app; host khai một tên khác cho app này. Các lần chạy nằm trong database của app (.database/application/kitwork.db)\n",
 			label, where, place.name, heldBy.ID())
 		return nil
 	}
@@ -186,6 +192,7 @@ func (c catalogRuns) Write(fn func(db queuestore.SQL) error) error {
 	if err != nil {
 		return err
 	}
+	c.place.writes.Add(1)
 	return database.Write(fn)
 }
 
@@ -236,37 +243,75 @@ func (c catalogRuns) waiting(waited time.Duration) {
 // placeName is where the runs of a place live, as a line on the server's output says it.
 func placeName(place *runsPlace) string {
 	if place == nil {
-		return ".database/application/"
+		return ".database/application/kitwork.db"
 	}
 	return "database " + place.name
 }
 
-// sayLeftBehind says, when the runs of kind live in a database of the catalogue, how many runs of kind that
-// had not ended the app's own database still holds: they stay there, and no worker runs them. The app's file
-// is read only when it exists; none is made.
+// sayLeftBehind says how many runs of kind that had not ended stay where no worker reads them: the app's own
+// database (.database/application/kitwork.db) when queue.database or schedule.database put the runs in a
+// database of the catalogue, and the KitDB file the app's database was before 29/10/2026 (application.kitdb),
+// whatever the place, until `kitwork migrate kitdb` copies that file (kitdb_copy.go): once kitwork.db holds the
+// mark of the copy, the KitDB file is not opened and nothing is said of it. Neither file is made when it does
+// not exist.
 func (t *Tenant) sayLeftBehind(kind string, place *runsPlace, label, call string) {
-	if place == nil {
-		return
-	}
-	count, err := t.appRunsLeftBehind(kind)
-	if err != nil {
-		fmt.Printf("%s .database/application/: không đọc được các lần chạy còn ở đó: %v\n", label, err)
-		return
-	}
-	if count == 0 {
-		return
-	}
 	noun := "job"
 	if kind == scheduleKind {
 		noun = "lịch"
 	}
-	fmt.Printf("%s .database/application/ còn %d lần chạy chưa xong của %s (pending, running, cancelling): chúng ở lại đó và không chạy, vì %s đặt các lần chạy ở database %s; đổi database không dời lần chạy\n",
-		label, count, noun, call, place.name)
+	if place != nil {
+		count, err := t.appSQLiteRunsLeftBehind(kind)
+		switch {
+		case err != nil:
+			fmt.Printf("%s %s: không đọc được các lần chạy còn ở đó: %v\n", label, placeName(nil), err)
+		case count > 0:
+			fmt.Printf("%s %s còn %d lần chạy chưa xong của %s (pending, running, cancelling): chúng ở lại đó và không chạy, vì %s đặt các lần chạy ở database %s; đổi database không dời lần chạy\n",
+				label, placeName(nil), count, noun, call, place.name)
+		}
+	}
+	count, err := t.appRunsLeftBehind(kind)
+	switch {
+	case err != nil:
+		fmt.Printf("%s .database/application/application.kitdb: không đọc được các lần chạy còn ở đó: %v\n", label, err)
+	case count > 0:
+		fmt.Printf("%s .database/application/application.kitdb (KitDB cũ) còn %d lần chạy chưa xong của %s (pending, running, cancelling): chúng ở lại đó và không chạy, vì các lần chạy nay nằm ở %s; đổi database không dời lần chạy: `kitwork migrate kitdb` chép chúng sang .database/application/kitwork.db\n",
+			label, count, noun, placeName(place))
+	}
+}
+
+// appSQLiteRunsLeftBehind counts the runs of kind the app's own database holds that have not ended, reading
+// it without writing: a file that does not exist counts none and is not made, and one without kitwork_runs
+// counts none and is not given the table.
+func (t *Tenant) appSQLiteRunsLeftBehind(kind string) (int, error) {
+	place := t.appRunsPlace()
+	if _, err := os.Stat(place.path); err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	config := hostSQLiteConfig(catalogDatabaseName(place.name), place.path)
+	pool := t.lookupDatabase(config)
+	if pool == nil {
+		opened, err := t.openDatabase(config)
+		if err != nil {
+			return 0, err
+		}
+		pool = opened
+	}
+	var held int
+	if err := pool.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'kitwork_runs'`).Scan(&held); err != nil || held == 0 {
+		return 0, err
+	}
+	var count int
+	err := pool.QueryRow(`SELECT COUNT(*) FROM kitwork_runs WHERE kind = ? AND status IN ('pending', 'running', 'cancelling')`, kind).Scan(&count)
+	return count, err
 }
 
 // appRunsLeftBehind counts the runs of kind the app's own database holds that have not ended (pending,
 // running, cancelling), reading it without writing: a file that does not exist counts none and is not made,
-// and one without kitwork_runs counts none and is not given the table.
+// and one without kitwork_runs counts none and is not given the table. A file `kitwork migrate kitdb` copied
+// counts none and is not opened: what it held is in kitwork.db (applicationCopied).
 func (t *Tenant) appRunsLeftBehind(kind string) (int, error) {
 	path, _ := kitDBPath(t, kitDBApplicationName)
 	if _, err := os.Stat(path); err != nil {
@@ -274,6 +319,9 @@ func (t *Tenant) appRunsLeftBehind(kind string) (int, error) {
 			return 0, nil
 		}
 		return 0, err
+	}
+	if applicationCopied(t) {
+		return 0, nil
 	}
 	resource, err := t.runsResource()
 	if err != nil {
@@ -295,7 +343,7 @@ func (t *Tenant) appRunsLeftBehind(kind string) (int, error) {
 	if !held {
 		return 0, nil
 	}
-	db, _, err := resource.sqlFor(managed.database)
+	db, err := resource.sqlFor(managed.database)
 	if err != nil {
 		return 0, err
 	}

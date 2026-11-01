@@ -327,8 +327,9 @@ func (t *SchemaTable) kitDBCreate(row map[string]value.Value) value.Value {
 }
 
 // createKitDBRow is the error-preserving form used by the remote SQL adapter.
-// The public ORM still returns an in-band Value, while Hrana keeps sentinel
-// causes needed for one safe retry across a concurrent catalog cutover.
+// The public ORM still returns an in-band Value, while the remote SQL adapter
+// keeps sentinel causes needed for one safe retry across a concurrent catalog
+// cutover.
 func (t *SchemaTable) createKitDBRow(row map[string]value.Value) (value.Value, error) {
 	if err := t.writeKitDBRow(row); err != nil {
 		return value.Value{}, err

@@ -73,6 +73,12 @@ func (m *ManagedDatabase) run(prepared *preparedStatement, holes []value.Value) 
 		return failure
 	}
 	if truth == bindOpen && predicate != nil {
+		if m.proxy.engine != "kitdb" {
+			// a decimal on SQLite is a scaled integer: what it is compared with is too (db.sqlite_decimal.go)
+			if message := sqliteWritePredicate(s.Table, prepared.columns, predicate); message != "" {
+				return value.InvalidFailure(value.InvalidArgumentCode, message)
+			}
+		}
 		table.builder().WherePredicate(*predicate)
 	}
 	for _, key := range s.Order {
@@ -93,7 +99,12 @@ func (m *ManagedDatabase) run(prepared *preparedStatement, holes []value.Value) 
 	if offset > 0 {
 		table.Offset(offset)
 	}
-	return table.List()
+	// list is an array, [] when nothing matches (KITWORK_DATABASE.md mục 2): SQLite's query gives no rows as an
+	// array holding no slice, which JSON writes null
+	if rows := table.List(); rows.Failed() || rows.K == value.Array && len(rows.Array()) > 0 {
+		return rows
+	}
+	return value.New([]value.Value{})
 }
 
 // statementBinder binds one run of a statement: its holes, by the kind of the column each meets.

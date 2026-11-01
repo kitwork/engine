@@ -223,6 +223,114 @@ Actual site eviction and removal feed the generation-inherited index keys to
 `CloseIndex`, releasing writer goroutines and file handles for other tenants.
 Hot reload only transfers those keys and never closes the shared index.
 
+## Live views at a source revision
+
+`Live` answers searches at an exact source revision without publishing a
+generation for every change. It keeps one committed base `Index`, which reflects
+the source up to its revision, and every change applied after it in memory.
+`View(revision)` assembles an immutable snapshot from:
+
+- the base's segments, shared rather than copied;
+- in-memory pieces holding the changed documents, each encoded by the same builder
+  and read through the same segment reader as a file;
+- in-memory tombstones for every version a later change replaced or deleted, in the
+  base or in an earlier piece.
+
+Document frequency, average field length and therefore every BM25 score are those
+of an index rebuilt from the source at that revision, and every query shape of
+`Index` (AND, OR, phrase, prefix, multi-field, `Count`) runs on the view unchanged.
+The tests compare a view with a freshly rebuilt index at every revision of random
+histories (updates, inserts, deletes, revisions that change nothing, a base that
+already has tombstones), hit by hit and score by score. A control assembles the
+same view without the replacement tombstones and must disagree.
+
+```go
+live, err := search.NewLive(index, baseRevision, search.LiveOptions{})
+err = live.Apply(ctx, 42, []search.Change{
+	{ID: "p1", Fields: map[string]string{"title": "Ao thun cotton"}},
+	{ID: "p2", Delete: true},
+})
+view, err := live.View(ctx, 42) // ErrRevisionAhead until 42 is applied
+hits, err := view.Search(ctx, search.MatchQuery{Fields: []string{"title"}, Text: "ao thun"}, search.SearchOptions{})
+view.Close()
+
+// Fold the changes into a committed generation, then drop them from memory.
+changes, err := live.Changes(42) // latest change per identifier; Upsert or Delete each
+next, err := search.OpenIndex(directory, schema) // after the writer commits them
+err = live.Rebase(next, 42) // open views keep their own base until closed
+```
+
+- `Apply` analyzes each document once and rejects an invalid one before it can
+  reach a view. Revisions must increase; an empty change list only advances one.
+- Views of the same change set share one assembled snapshot. A view reuses its
+  base's multi-field frequency cache, adjusted by the replaced and changed
+  documents, so the first search after a change costs what a warm base search does.
+- Finding the base occurrences of a changed identifier uses an in-memory directory
+  per segment, loaded once from its `.ki` sidecar (about 1.4 bytes per document):
+  a Bloom filter skips segments without the identifier and every 128th hash
+  narrows the rest to one block read. Rebase hands the directories of segments
+  that survive to the next base.
+- A base opened from a packed snapshot has no `.ki` sidecars; locating an
+  identifier there scans stored identifiers and is only suitable for small indexes.
+- A piece is immutable and shared: a new view reuses the pieces of earlier views
+  and encodes only the changes none covers yet. More than eight pieces are merged
+  into one, so a view assembles at most nine. Each piece is bounded by
+  `LiveOptions.Segment`; a merge that no longer fits fails with `ErrSegmentFull`,
+  so fold and Rebase before the changes in memory grow that large.
+
+Measured on 2026-10-27 (Windows, one process, warm) against a 1,000,000-document
+index of real product text in ten segments, three multi-field queries per sample:
+
+| Changes in memory | Apply one change | First view after it | First search on it | Base, warm |
+| ---: | ---: | ---: | ---: | ---: |
+| 5 | 0.17 ms | 0.44 ms | 65.6 ms | 66.9 ms |
+| 104 | 0.07 ms | 0.35 ms | 72.7 ms | 66.9 ms |
+| 1,004 | 0.05 ms | 0.99 ms | 94.8 ms | 66.9 ms |
+| 3,004 | 0.04 ms | 2.2 ms | 91.7 ms | 66.9 ms |
+
+The machine ran this table about 1.8 times slower than the morning's first
+measurement (base 37.2 ms then); compare within the row. Before views shared
+pieces, the first view re-encoded every change in memory: 23.7 ms at 1,004
+changes and 83.7 ms at 3,004 on the faster run. A second view of the same change
+set takes about 0.002 ms, and a second search on a view matches the warm base.
+Before the per-segment directories, locating each new identifier cost about 2 ms
+of positioned `.ki` reads on this index.
+
+`IndexWriter` keeps every identifier index it verified, with its directory, for
+as long as a later commit still lists the file, and verifies one in two
+sequential reads (its body, then the segment's stored identifiers in 1 MiB
+chunks) instead of two positioned reads per document. A writer folding small
+batches into a 1,000,000-document index otherwise spent seconds re-verifying all
+ten segments after every commit.
+
+## One file: Container
+
+`Container` keeps the full-text indexes of one database in a single file, a
+KSNAP002 container (`internal/snapshotfile`, the format KCOL's `.analytics` uses).
+A generation of the file holds, for each named index, its segments (`.ks`),
+identifier sidecars (`.ki`) and tombstones (`.kd`) as sections, with the owner's
+state (for KitDB: the source revision and the indexed columns) in the directory.
+
+- `Replace(name, …)` builds an index from a feed, in segments encoded in memory.
+- `Fold(name, …, changes)` applies the latest change of each identifier: live
+  occurrences are tombstoned, new documents go to new segments. Unchanged sections
+  are referenced, not copied, so a fold appends only what changed, then switches
+  the root. Past 48 segments a fold first merges the smallest ones.
+- A crash during a fold leaves the previous generation: the root switch is the
+  last write. A child process killed in a fold loop always reopened to a whole
+  generation equal to the source at its stored revision.
+- Every generation is reference counted: the container holds the current one and
+  every `Index` opened from it holds it too, so an old generation's handles close
+  only after its last index does. Indexes read through a pool of eight handles.
+- Compaction copies the live sections to `<path>.compact`. The owner opens its
+  indexes from the copy and hands them to their `Live`; `Commit` waits until every
+  index of the old file has closed, then renames the copy over the path. The copy
+  is read through handles opened with `FILE_SHARE_DELETE`, which lets Windows
+  rename it while it is open; Windows refuses to rename over a file that is still
+  open, which is why the old file must close first.
+- `Live` works on container indexes unchanged; its identifier directories keep
+  their in-memory filter across generations and read blocks through the newest.
+
 ## Kitwork database adapter
 
 `db.<table>.search()` now uses this package rather than the legacy SQLite blob

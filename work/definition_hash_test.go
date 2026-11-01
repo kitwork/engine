@@ -56,7 +56,7 @@ func TestQueueDefinitionIsStoredUnderTheArtifactCacheKey(t *testing.T) {
 		{"a row stored under the current key is left alone", cacheKey, 1},
 	} {
 		q.app.StopQueueWorker()
-		err := appRuns{tenant: q.app}.Write(func(db queuestore.SQL) error {
+		err := q.app.runsDatabase(queueKind, nil, nil).Write(func(db queuestore.SQL) error {
 			_, err := db.Exec(`UPDATE kitwork_definitions SET content_hash = $1, retry = 1 WHERE name = 'mail'`, row.hash)
 			return err
 		})
@@ -106,7 +106,7 @@ func TestScheduleDefinitionIsStoredUnderTheArtifactCacheKey(t *testing.T) {
 		{"a row stored under the current key is left alone", cacheKey, 1},
 	} {
 		q.app.StopScheduleWorker()
-		err := appRuns{tenant: q.app}.Write(func(db queuestore.SQL) error {
+		err := q.app.runsDatabase(scheduleKind, nil, nil).Write(func(db queuestore.SQL) error {
 			_, err := db.Exec(`UPDATE kitwork_definitions SET content_hash = $1, retry = 1 WHERE kind = 'schedule' AND name = 'beat'`, row.hash)
 			return err
 		})

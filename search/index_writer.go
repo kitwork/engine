@@ -22,13 +22,16 @@ type WriterOptions struct {
 // change through immutable generation manifests. It is not safe for concurrent
 // use, and only one process may write an index directory at a time.
 type IndexWriter struct {
-	directory       string
-	schema          Schema
-	segmentOptions  BuildOptions
-	builder         *Builder
-	committed       indexManifest
-	snapshot        *Index
-	identifier      map[int]*identifierIndex
+	directory      string
+	schema         Schema
+	segmentOptions BuildOptions
+	builder        *Builder
+	committed      indexManifest
+	snapshot       *Index
+	// identifier holds verified identifier indexes by file name, each with its
+	// in-memory directory. The files are immutable, so one verification serves
+	// every later commit that keeps them.
+	identifier      map[string]*identifierDirectory
 	pending         []manifestSegment
 	pendingObsolete []manifestSegment
 	pendingDeletes  map[int]map[uint32]struct{}
@@ -81,7 +84,7 @@ func NewIndexWriter(directory string, schema Schema, options WriterOptions) (_ *
 	writer := &IndexWriter{
 		directory: directory, schema: schema, segmentOptions: builder.options,
 		builder: builder, committed: indexManifest{schemaHash: schema.fingerprint},
-		identifier: make(map[int]*identifierIndex), pendingDeletes: make(map[int]map[uint32]struct{}),
+		identifier: make(map[string]*identifierDirectory), pendingDeletes: make(map[int]map[uint32]struct{}),
 		pendingIDs: make(map[string]struct{}), lock: lock, fault: options.fault,
 		directorySync: directorySync,
 	}
@@ -363,11 +366,11 @@ func (writer *IndexWriter) findCommittedDocuments(ctx context.Context, identifie
 	return locations, nil
 }
 
-func (writer *IndexWriter) identifierIndex(ctx context.Context, position int) (*identifierIndex, error) {
-	if index := writer.identifier[position]; index != nil {
-		return index, nil
-	}
+func (writer *IndexWriter) identifierIndex(ctx context.Context, position int) (*identifierDirectory, error) {
 	entry := writer.snapshot.entries[position]
+	if directory := writer.identifier[entry.identifierName]; directory != nil {
+		return directory, nil
+	}
 	index, err := openIdentifierIndex(
 		filepath.Join(writer.directory, entry.identifierName), writer.schema.fingerprint,
 		entry.documents, entry.identifierBytes,
@@ -379,8 +382,13 @@ func (writer *IndexWriter) identifierIndex(ctx context.Context, position int) (*
 		_ = index.Close()
 		return nil, err
 	}
-	writer.identifier[position] = index
-	return index, nil
+	directory, err := loadIdentifierDirectory(ctx, index)
+	if err != nil {
+		_ = index.Close()
+		return nil, err
+	}
+	writer.identifier[entry.identifierName] = directory
+	return directory, nil
 }
 
 func (writer *IndexWriter) stageDeletions(locations []documentLocation) {
@@ -545,7 +553,7 @@ func (writer *IndexWriter) commit(ctx context.Context) (IndexInfo, error) {
 	manifest.path = publication.path
 	candidate.manifest = publication.path
 	previous := writer.snapshot
-	writer.closeIdentifierIndexes()
+	writer.retainIdentifierIndexes(candidate)
 	writer.committed = manifest
 	writer.snapshot = candidate
 	writer.pending = nil
@@ -676,9 +684,26 @@ func removeArtifactPaths(paths []string) {
 }
 
 func (writer *IndexWriter) closeIdentifierIndexes() {
-	for position, index := range writer.identifier {
-		_ = index.Close()
-		delete(writer.identifier, position)
+	for name, directory := range writer.identifier {
+		_ = directory.index.Close()
+		delete(writer.identifier, name)
+	}
+}
+
+// retainIdentifierIndexes keeps the verified indexes the next snapshot still
+// lists and closes the rest.
+func (writer *IndexWriter) retainIdentifierIndexes(next *Index) {
+	kept := make(map[string]bool, len(next.entries))
+	for _, entry := range next.entries {
+		if entry.identifierName != "" {
+			kept[entry.identifierName] = true
+		}
+	}
+	for name, directory := range writer.identifier {
+		if !kept[name] {
+			_ = directory.index.Close()
+			delete(writer.identifier, name)
+		}
 	}
 }
 

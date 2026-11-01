@@ -18,7 +18,7 @@ import (
 // what the lambdas read from outside them (email) is a hole, a value computed in place, before the
 // statement, in the code around it. The lambdas are never compiled, so they never run and make no
 // closure: a condition keeps both sides of && and ||, which a lambda run on a proxy cannot (a proxy is
-// always true). Every table and column is checked against the schema file's struct({ … }) where the
+// always true). Every table and column is checked against the schema file's table({ … }) where the
 // statement is written; the engine checks again against the live schema when it first runs.
 //
 // Only a program that imports a database is touched: every other program resolves and compiles as it
@@ -79,7 +79,7 @@ func (r *resolver) declarationSite(node *VarStatement) {
 		}
 	}
 	if refused != "" {
-		r.fail(fmt.Errorf("%s: %s chỉ có trong .shared/schema/ của app: struct(), connection(), connect() chỉ khai ở đó (KITWORK_DATABASE.md mục 1); file khác dùng database bằng import { db } from \"app/.shared/schema/<tên>.work\"",
+		r.fail(fmt.Errorf("%s: %s chỉ có trong .shared/schema/ của app: table(), connection(), connect() chỉ khai ở đó (KITWORK_DATABASE.md mục 1); file khác dùng database bằng import { db } from \"app/.shared/schema/<tên>.work\"",
 			r.where(node.Token), refused))
 	}
 }
@@ -172,7 +172,7 @@ func (r *resolver) namespaceDeclaration(object Expression, property *Identifier)
 		r.fail(fmt.Errorf("%s: %s.%s đã bỏ: %s", r.where(property.Token), namespace.Value, property.Value, spelling))
 		return true
 	}
-	r.fail(fmt.Errorf("%s: %s.%s chỉ có trong .shared/schema/ của app: struct(), connection(), connect() chỉ khai ở đó (KITWORK_DATABASE.md mục 1); file khác dùng database bằng import { db } from \"app/.shared/schema/<tên>.work\"",
+	r.fail(fmt.Errorf("%s: %s.%s chỉ có trong .shared/schema/ của app: table(), connection(), connect() chỉ khai ở đó (KITWORK_DATABASE.md mục 1); file khác dùng database bằng import { db } from \"app/.shared/schema/<tên>.work\"",
 		r.where(property.Token), namespace.Value, property.Value))
 	return true
 }

@@ -571,42 +571,9 @@ func (t *Tenant) Run() error {
 	// FILESYSTEM-ROUTED, always. There is no flat app.kitwork.js entry and no route table — the
 	// folder tree IS the router. Build the finite route declaration tree before activation so
 	// requests never publish a partially prepared generation.
-	t.bytecode = &compiler.Bytecode{Program: runtime.EmptyProgram()}
-	t.vm = runtime.New(t.bytecode.Program)
-	t.vm.MaxEnergy = t.MaxEnergy
-	if err := t.preparePathBoundaries(); err != nil {
-		return fmt.Errorf("prepare filesystem boundaries: %w", err)
-	}
-
-	// the app's .env, the site's over it key by key, over what the host shares (environment.go); an edit
-	// of either file builds the generation again, of every site of the app for the app's
-	vars, err := t.buildEnvironment()
-	if err != nil {
+	if err := t.prepareProgram(); err != nil {
 		return err
 	}
-	environment := NewEnv(vars)
-	if t.generation != nil {
-		if err := t.generation.SetEnvironment(environment); err != nil {
-			return err
-		}
-		for _, file := range t.environmentFiles() {
-			if err := t.generation.Sources().WatchFile(file); err != nil {
-				return err
-			}
-		}
-		t.env = t.generation.Environment()
-	} else {
-		t.env = environment
-	}
-
-	kitworkFunc := value.NewFunc(func(args ...value.Value) value.Value {
-		return value.New(&KitWork{tenant: t, vm: t.vm})
-	})
-	t.vm.Builtins = []value.Value{kitworkFunc}
-	t.vm.Globals = make(map[string]value.Value)
-	t.vm.Globals[kitwork] = kitworkFunc
-
-	injectJSCompat(t.vm.Globals)
 
 	if t.generation != nil && t.siteRuntime != nil {
 		if err := t.siteRuntime.ConfigureResources(t.resolve()); err != nil {
@@ -646,8 +613,52 @@ func (t *Tenant) Run() error {
 	if t.entity.Domain == "" {
 		t.LoadQueueFiles()
 		t.LoadScheduleFiles()
+		t.sayDatastoreLeftBehind()
 	}
 
+	return nil
+}
+
+// prepareProgram readies what every file of the tenant runs with, and nothing more: the VM and its globals,
+// the boundaries of the app's and the site's folders, and the environment. Run starts from it; `kitwork
+// migrate kitdb` (CopyKitDB) runs the app's .shared/schema/ on it without starting the workers Run starts.
+func (t *Tenant) prepareProgram() error {
+	t.bytecode = &compiler.Bytecode{Program: runtime.EmptyProgram()}
+	t.vm = runtime.New(t.bytecode.Program)
+	t.vm.MaxEnergy = t.MaxEnergy
+	if err := t.preparePathBoundaries(); err != nil {
+		return fmt.Errorf("prepare filesystem boundaries: %w", err)
+	}
+
+	// the app's .env, the site's over it key by key, over what the host shares (environment.go); an edit
+	// of either file builds the generation again, of every site of the app for the app's
+	vars, err := t.buildEnvironment()
+	if err != nil {
+		return err
+	}
+	environment := NewEnv(vars)
+	if t.generation != nil {
+		if err := t.generation.SetEnvironment(environment); err != nil {
+			return err
+		}
+		for _, file := range t.environmentFiles() {
+			if err := t.generation.Sources().WatchFile(file); err != nil {
+				return err
+			}
+		}
+		t.env = t.generation.Environment()
+	} else {
+		t.env = environment
+	}
+
+	kitworkFunc := value.NewFunc(func(args ...value.Value) value.Value {
+		return value.New(&KitWork{tenant: t, vm: t.vm})
+	})
+	t.vm.Builtins = []value.Value{kitworkFunc}
+	t.vm.Globals = make(map[string]value.Value)
+	t.vm.Globals[kitwork] = kitworkFunc
+
+	injectJSCompat(t.vm.Globals)
 	return nil
 }
 

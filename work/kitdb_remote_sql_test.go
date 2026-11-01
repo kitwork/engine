@@ -1,17 +1,12 @@
 package work
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
-	stderrors "errors"
-	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -19,7 +14,6 @@ import (
 	"sync"
 	"testing"
 
-	requestscope "github.com/kitwork/engine/request"
 	"github.com/kitwork/engine/utilities/query"
 	"github.com/kitwork/engine/value"
 )
@@ -929,277 +923,6 @@ func FuzzKitDBRemoteSQLParser(f *testing.F) {
 	})
 }
 
-func TestKitDBHranaOverRealURLAndBearerAuth(t *testing.T) {
-	root := t.TempDir()
-	directory := filepath.Join(root, "test", "localhost")
-	if err := os.MkdirAll(directory, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	router := `import { router, internals } from "kitwork";
-const { kitdb, struct, id, text, int, choice } = internals;
-const products = struct({
-  id: id(),
-  sku: text().notNull().unique().index(),
-  title: text().notNull(),
-  price: int().default(0).index(),
-  status: choice("active", "disabled").default("active").index()
-});
-const remote = kitdb("remote.kitdb", { products }, { token: "remote-secret", access: "readwrite" });
-const readonly = kitdb("readonly.kitdb", { products }, { token: "readonly-secret" });
-router.get((ctx) => {
-  const item = remote.products.where("sku", "=", "KIT-1").first();
-  return ctx.json({ count: remote.products.count(), price: item ? item.price : null });
-});`
-	if err := os.WriteFile(filepath.Join(directory, RouterFileName), []byte(router), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	tenant := NewTenant(root, "localhost")
-	if err := tenant.Run(); err != nil {
-		t.Fatal(err)
-	}
-	defer tenant.Close()
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		request.Host = "localhost"
-		tenant.Serve(writer, request)
-	}))
-	defer server.Close()
-
-	response, err := http.Get(server.URL + "/remote.kitdb/v3")
-	if err != nil {
-		t.Fatal(err)
-	}
-	response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		t.Fatalf("version probe status = %d", response.StatusCode)
-	}
-
-	pipeline := func(path, token string, body any) (int, map[string]any) {
-		t.Helper()
-		encoded, err := json.Marshal(body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		request, err := http.NewRequest(http.MethodPost, server.URL+path, bytes.NewReader(encoded))
-		if err != nil {
-			t.Fatal(err)
-		}
-		request.Header.Set("Content-Type", "application/json")
-		if token != "" {
-			request.Header.Set("Authorization", "Bearer "+token)
-		}
-		response, err := http.DefaultClient.Do(request)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer response.Body.Close()
-		decoded := map[string]any{}
-		_ = json.NewDecoder(response.Body).Decode(&decoded)
-		return response.StatusCode, decoded
-	}
-	execute := func(path, token, sql string, args []map[string]any, wantRows bool) (int, map[string]any) {
-		t.Helper()
-		return pipeline(path, token, map[string]any{
-			"baton": nil,
-			"requests": []any{
-				map[string]any{"type": "execute", "stmt": map[string]any{"sql": sql, "args": args, "want_rows": wantRows}},
-				map[string]any{"type": "close"},
-			},
-		})
-	}
-	textArg := func(text string) map[string]any { return map[string]any{"type": "text", "value": text} }
-	intArg := func(number string) map[string]any { return map[string]any{"type": "integer", "value": number} }
-
-	if status, _ := execute("/remote.kitdb/v3/pipeline", "wrong", `SELECT * FROM products`, nil, true); status != http.StatusUnauthorized {
-		t.Fatalf("wrong token status = %d", status)
-	}
-
-	status, inserted := execute(
-		"/remote.kitdb/v3/pipeline", "remote-secret",
-		`INSERT INTO products (sku, title, price) VALUES (?, ?, ?) RETURNING id, sku, status`,
-		[]map[string]any{textArg("KIT-1"), textArg("KitDB One"), intArg("100")}, true,
-	)
-	assertHranaOK(t, status, inserted, `"KIT-1"`, `"active"`)
-	status, inserted = execute(
-		"/remote.kitdb/v3/pipeline", "remote-secret",
-		`INSERT INTO products (sku, title, price, status) VALUES (?, ?, ?, ?) RETURNING *`,
-		[]map[string]any{textArg("KIT-2"), textArg("KitDB Two"), intArg("200"), textArg("disabled")}, true,
-	)
-	assertHranaOK(t, status, inserted, `"KIT-2"`, `"disabled"`)
-
-	status, selected := execute(
-		"/remote.kitdb/v3/pipeline", "remote-secret",
-		`SELECT sku, title, price FROM products WHERE price >= ? ORDER BY price DESC LIMIT ?`,
-		[]map[string]any{intArg("100"), intArg("20")}, true,
-	)
-	assertHranaOK(t, status, selected, `"KIT-2"`, `"KIT-1"`, `"value":"200"`)
-	status, selectedRange := execute(
-		"/remote.kitdb/v3/pipeline", "remote-secret",
-		`SELECT sku, price FROM products WHERE price >= ? AND price < ? ORDER BY price ASC LIMIT ?`,
-		[]map[string]any{intArg("100"), intArg("200"), intArg("1")}, true,
-	)
-	assertHranaOK(t, status, selectedRange, `"KIT-1"`, `"value":"100"`)
-	status, explainedRange := execute(
-		"/remote.kitdb/v3/pipeline", "remote-secret",
-		`EXPLAIN QUERY PLAN SELECT sku FROM products WHERE price >= ? AND price < ? ORDER BY price ASC LIMIT 1`,
-		[]map[string]any{intArg("100"), intArg("200")}, true,
-	)
-	assertHranaOK(
-		t, status, explainedRange,
-		`KITDB INDEX RANGE idx_products_price (price) ON price; FILTER; STATS MISSING; INDEX ORDER; LIMIT 1; EARLY STOP`,
-	)
-
-	// DB managers browse LibSQL tables with bound pagination and a separate count.
-	status, browsed := execute(
-		"/remote.kitdb/v3/pipeline", "remote-secret",
-		`SELECT * FROM "products" LIMIT ? OFFSET ?`,
-		[]map[string]any{intArg("50"), intArg("0")}, true,
-	)
-	assertHranaOK(t, status, browsed, `"KIT-1"`, `"KIT-2"`)
-	status, counted := execute(
-		"/remote.kitdb/v3/pipeline", "remote-secret",
-		`SELECT COUNT(*) AS total FROM "products"`, nil, true,
-	)
-	assertHranaOK(t, status, counted, `"total"`, `"value":"2"`)
-	status, aggregated := execute(
-		"/remote.kitdb/v3/pipeline", "remote-secret",
-		`SELECT COUNT(price) AS priced, SUM(price) AS total, AVG(price) AS mean, MIN(price) AS cheapest, MAX(price) AS costliest FROM products`, nil, true,
-	)
-	assertHranaOK(
-		t, status, aggregated,
-		`"priced"`, `"total"`, `"mean"`, `"cheapest"`, `"costliest"`,
-		`"value":"300"`, `"value":150`, `"value":"100"`, `"value":"200"`,
-	)
-	status, explained := execute(
-		"/remote.kitdb/v3/pipeline", "remote-secret",
-		`EXPLAIN QUERY PLAN SELECT sku FROM products WHERE status = ?`, []map[string]any{textArg("active")}, true,
-	)
-	assertHranaOK(
-		t, status, explained, `"detail"`,
-		`KITDB INDEX idx_products_status (status); FILTER; STATS MISSING; LIMIT 60; EARLY STOP`,
-	)
-	status, explainedAggregate := execute(
-		"/remote.kitdb/v3/pipeline", "remote-secret",
-		`EXPLAIN QUERY PLAN SELECT SUM(price) FROM products WHERE status = ? ORDER BY sku DESC LIMIT 1`,
-		[]map[string]any{textArg("active")}, true,
-	)
-	assertHranaOK(
-		t, status, explainedAggregate,
-		`KITDB INDEX idx_products_status (status); FILTER; STATS MISSING; STREAM AGGREGATE`,
-	)
-	explainedAggregateJSON, _ := json.Marshal(explainedAggregate)
-	if strings.Contains(string(explainedAggregateJSON), "TEMP SORT") ||
-		strings.Contains(string(explainedAggregateJSON), "LIMIT 1") {
-		t.Fatalf("aggregate explain reports work that execution skips: %s", explainedAggregateJSON)
-	}
-	status, mixedAggregate := execute(
-		"/remote.kitdb/v3/pipeline", "remote-secret",
-		`SELECT status, COUNT(*) FROM products`, nil, true,
-	)
-	assertHranaError(t, status, mixedAggregate, "cannot be mixed")
-	status, staleColumn := execute(
-		"/remote.kitdb/v3/pipeline", "remote-secret",
-		`SELECT * FROM "products" ORDER BY "test" ASC LIMIT ? OFFSET ?`,
-		[]map[string]any{intArg("50"), intArg("0")}, true,
-	)
-	assertHranaError(t, status, staleColumn, "no such column: test")
-	status, staleTable := execute(
-		"/remote.kitdb/v3/pipeline", "remote-secret",
-		`SELECT * FROM "archived_products" LIMIT ? OFFSET ?`,
-		[]map[string]any{intArg("50"), intArg("0")}, true,
-	)
-	assertHranaError(t, status, staleTable, "no such table: archived_products")
-
-	status, stored := pipeline("/remote.kitdb/v3/pipeline", "remote-secret", map[string]any{
-		"baton": nil,
-		"requests": []any{
-			map[string]any{"type": "store_sql", "sql_id": 7, "sql": `SELECT sku FROM products WHERE sku = :sku`},
-			map[string]any{"type": "execute", "stmt": map[string]any{
-				"sql_id": 7, "named_args": []any{map[string]any{"name": "sku", "value": textArg("KIT-2")}}, "want_rows": true,
-			}},
-			map[string]any{"type": "close_sql", "sql_id": 7},
-			map[string]any{"type": "close"},
-		},
-	})
-	assertHranaOK(t, status, stored, `"KIT-2"`, `"store_sql"`, `"close_sql"`)
-
-	status, updated := execute(
-		"/remote.kitdb/v2/pipeline", "remote-secret",
-		`UPDATE products SET price = ? WHERE sku = ?`,
-		[]map[string]any{intArg("125"), textArg("KIT-1")}, false,
-	)
-	assertHranaOK(t, status, updated, `"affected_row_count":1`)
-
-	status, catalog := execute(
-		"/remote.kitdb/v3/pipeline", "remote-secret",
-		`SELECT name, type FROM sqlite_master WHERE type = 'table' ORDER BY name LIMIT 20`, nil, true,
-	)
-	assertHranaOK(t, status, catalog, `"products"`, `"table"`)
-	status, pragma := execute(
-		"/remote.kitdb/v3/pipeline", "remote-secret", `PRAGMA table_info(products)`, nil, true,
-	)
-	assertHranaOK(t, status, pragma, `"sku"`, `"price"`, `"status"`)
-	status, indexStatus := execute(
-		"/remote.kitdb/v3/pipeline", "remote-secret", `PRAGMA index_status(products)`, nil, true,
-	)
-	assertHranaOK(t, status, indexStatus, `"mode"`, `"processed_rows"`, `"target_published"`)
-
-	status, unsafe := execute(
-		"/remote.kitdb/v3/pipeline", "remote-secret", `DELETE FROM products`, nil, false,
-	)
-	assertHranaError(t, status, unsafe, "DELETE requires WHERE")
-	status, transaction := execute(
-		"/remote.kitdb/v3/pipeline", "remote-secret", `BEGIN`, nil, false,
-	)
-	assertHranaError(t, status, transaction, "interactive transactions")
-	status, readonlyWrite := execute(
-		"/readonly.kitdb/v3/pipeline", "readonly-secret",
-		`INSERT INTO products (sku, title) VALUES (?, ?)`, []map[string]any{textArg("NO"), textArg("No")}, false,
-	)
-	assertHranaError(t, status, readonlyWrite, "read-only")
-	status, readonlyDDL := execute(
-		"/readonly.kitdb/v3/pipeline", "readonly-secret",
-		`CREATE TABLE denied (id KITID PRIMARY KEY)`, nil, false,
-	)
-	assertHranaError(t, status, readonlyDDL, "read-only")
-	status, readonlyIndex := execute(
-		"/readonly.kitdb/v3/pipeline", "readonly-secret",
-		`CREATE INDEX denied_products_price ON products (price)`, nil, false,
-	)
-	assertHranaError(t, status, readonlyIndex, "read-only")
-	status, readonlyAlter := execute(
-		"/readonly.kitdb/v3/pipeline", "readonly-secret",
-		`ALTER TABLE products ADD COLUMN denied TEXT`, nil, false,
-	)
-	assertHranaError(t, status, readonlyAlter, "read-only")
-
-	request, err := http.NewRequest(http.MethodPost, server.URL+dataAPIQueryPath, strings.NewReader(
-		`{"db":"remote.kitdb","sql":"SELECT sku, price FROM products WHERE sku = ?","args":["KIT-1"]}`,
-	))
-	if err != nil {
-		t.Fatal(err)
-	}
-	request.Header.Set("Authorization", "Bearer remote-secret")
-	response, err = http.DefaultClient.Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dataBody, _ := io.ReadAll(response.Body)
-	response.Body.Close()
-	if response.StatusCode != http.StatusOK || !strings.Contains(string(dataBody), `"sku":"KIT-1"`) || !strings.Contains(string(dataBody), `"price":125`) {
-		t.Fatalf("KitDB data API status = %d, body = %s", response.StatusCode, dataBody)
-	}
-
-	response, err = http.Get(server.URL + "/")
-	if err != nil {
-		t.Fatal(err)
-	}
-	routeBody, _ := io.ReadAll(response.Body)
-	response.Body.Close()
-	if response.StatusCode != http.StatusOK || !strings.Contains(string(routeBody), `"count":2`) || !strings.Contains(string(routeBody), `"price":125`) {
-		t.Fatalf("ORM view status = %d, body = %s", response.StatusCode, routeBody)
-	}
-}
-
 func TestKitDBRemoteCreateTablePersistsAndPublishesToORM(t *testing.T) {
 	root := t.TempDir()
 	directory := filepath.Join(root, "test", "localhost")
@@ -1214,129 +937,108 @@ router.get(() => db.products.count());`
 		t.Fatal(err)
 	}
 
-	start := func() (*Tenant, *httptest.Server) {
+	start := func() *Tenant {
 		t.Helper()
 		tenant := NewTenant(root, "localhost")
 		if err := tenant.Run(); err != nil {
 			t.Fatal(err)
 		}
-		server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-			request.Host = "localhost"
-			tenant.Serve(writer, request)
-		}))
-		return tenant, server
+		return tenant
 	}
-	execute := func(server *httptest.Server, sql string, wantRows bool) (int, map[string]any) {
+	// execute runs one statement through the remote SQL engine, the one the PostgreSQL wire runs, on the
+	// database the tenant declared served.
+	execute := func(tenant *Tenant, sql string) (string, error) {
 		t.Helper()
-		body, err := json.Marshal(map[string]any{
-			"baton": nil,
-			"requests": []any{
-				map[string]any{"type": "execute", "stmt": map[string]any{"sql": sql, "want_rows": wantRows}},
-				map[string]any{"type": "close"},
-			},
-		})
+		_, config, found := resolveServe(tenant, "dynamic.kitdb")
+		if !found || config.database == nil {
+			t.Fatal("dynamic.kitdb is not declared served")
+		}
+		result, err := executeKitDBRemoteSQL(
+			context.Background(), nil, config.database, sql,
+			kitSQLBindings{named: map[string]value.Value{}}, config.access != "readwrite",
+		)
+		if err != nil {
+			return "", err
+		}
+		encoded, err := json.Marshal(kitDBRemoteResultMaps(result))
 		if err != nil {
 			t.Fatal(err)
 		}
-		request, err := http.NewRequest(http.MethodPost, server.URL+"/dynamic.kitdb/v3/pipeline", bytes.NewReader(body))
+		return string(encoded), nil
+	}
+	succeeds := func(tenant *Tenant, sql string, contains ...string) {
+		t.Helper()
+		rows, err := execute(tenant, sql)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("%s: %v", sql, err)
 		}
-		request.Header.Set("Content-Type", "application/json")
-		request.Header.Set("Authorization", "Bearer dynamic-secret")
-		response, err := http.DefaultClient.Do(request)
-		if err != nil {
-			t.Fatal(err)
+		for _, expected := range contains {
+			if !strings.Contains(rows, expected) {
+				t.Fatalf("%s: rows = %s, want %s", sql, rows, expected)
+			}
 		}
-		defer response.Body.Close()
-		decoded := map[string]any{}
-		_ = json.NewDecoder(response.Body).Decode(&decoded)
-		return response.StatusCode, decoded
+	}
+	fails := func(tenant *Tenant, sql, contains string) {
+		t.Helper()
+		if _, err := execute(tenant, sql); err == nil || !strings.Contains(err.Error(), contains) {
+			t.Fatalf("%s: error = %v, want %q", sql, err, contains)
+		}
+	}
+	count := func(tenant *Tenant) string {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		tenant.Serve(recorder, httptest.NewRequest(http.MethodGet, "http://localhost/", nil))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("ORM count status = %d, body = %s", recorder.Code, recorder.Body.String())
+		}
+		return strings.TrimSpace(recorder.Body.String())
 	}
 
-	tenant, server := start()
-	defer func(initialTenant *Tenant, initialServer *httptest.Server) {
-		initialServer.Close()
-		initialTenant.Close()
-	}(tenant, server)
-	status, created := execute(server, `CREATE TABLE users (
+	tenant := start()
+	defer func(initialTenant *Tenant) { initialTenant.Close() }(tenant)
+	succeeds(tenant, `CREATE TABLE users (
   id KITID PRIMARY KEY,
   email TEXT NOT NULL UNIQUE
-)`, false)
-	assertHranaOK(t, status, created)
-	status, created = execute(server, `CREATE TABLE products (
+)`)
+	succeeds(tenant, `CREATE TABLE products (
   id KITID PRIMARY KEY,
   sku TEXT NOT NULL UNIQUE,
   price INTEGER DEFAULT 0,
   status CHOICE('active', 'disabled') DEFAULT 'active',
   owner_id TEXT REFERENCES users(id) ON DELETE RESTRICT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-)`, false)
-	assertHranaOK(t, status, created)
+)`)
 
-	status, insertedUser := execute(server, `INSERT INTO users (id, email) VALUES ('user_1', 'owner@example.com') RETURNING *`, true)
-	assertHranaOK(t, status, insertedUser, `"user_1"`, `"owner@example.com"`)
-	status, insertedProduct := execute(server, `INSERT INTO products (sku, owner_id) VALUES ('KIT-1', 'user_1') RETURNING id, sku, price, status, created_at`, true)
-	assertHranaOK(t, status, insertedProduct, `"KIT-1"`, `"active"`, `"value":"0"`)
-	status, createdIndex := execute(server, `CREATE INDEX products_status_price ON products (status, price)`, false)
-	assertHranaOK(t, status, createdIndex)
-	status, duplicateIndex := execute(server, `CREATE INDEX products_status_price ON products (status, price)`, false)
-	assertHranaError(t, status, duplicateIndex, "already exists on table")
-	status, idempotentIndex := execute(server, `CREATE INDEX IF NOT EXISTS products_status_price ON products (status, price)`, false)
-	assertHranaOK(t, status, idempotentIndex)
-	status, altered := execute(server, `ALTER TABLE products ADD COLUMN description TEXT NOT NULL DEFAULT ''`, false)
-	assertHranaOK(t, status, altered)
-	status, backfilled := execute(server, `SELECT sku, description FROM products WHERE sku = 'KIT-1'`, true)
-	assertHranaOK(t, status, backfilled, `"description"`, `"value":""`)
-	status, unsafeAlter := execute(server, `ALTER TABLE products ADD COLUMN required_note TEXT NOT NULL`, false)
-	assertHranaError(t, status, unsafeAlter, "migration refused")
-	status, duplicateColumn := execute(server, `ALTER TABLE products ADD COLUMN description TEXT`, false)
-	assertHranaError(t, status, duplicateColumn, "already has column")
-	status, idempotentColumn := execute(server, `ALTER TABLE products ADD COLUMN IF NOT EXISTS description TEXT`, false)
-	assertHranaOK(t, status, idempotentColumn)
+	succeeds(tenant, `INSERT INTO users (id, email) VALUES ('user_1', 'owner@example.com') RETURNING *`, `"user_1"`, `"owner@example.com"`)
+	succeeds(tenant, `INSERT INTO products (sku, owner_id) VALUES ('KIT-1', 'user_1') RETURNING id, sku, price, status, created_at`, `"KIT-1"`, `"active"`, `"price":0`)
+	succeeds(tenant, `CREATE INDEX products_status_price ON products (status, price)`)
+	fails(tenant, `CREATE INDEX products_status_price ON products (status, price)`, "already exists on table")
+	succeeds(tenant, `CREATE INDEX IF NOT EXISTS products_status_price ON products (status, price)`)
+	succeeds(tenant, `ALTER TABLE products ADD COLUMN description TEXT NOT NULL DEFAULT ''`)
+	succeeds(tenant, `SELECT sku, description FROM products WHERE sku = 'KIT-1'`, `"description":""`)
+	fails(tenant, `ALTER TABLE products ADD COLUMN required_note TEXT NOT NULL`, "migration refused")
+	fails(tenant, `ALTER TABLE products ADD COLUMN description TEXT`, "already has column")
+	succeeds(tenant, `ALTER TABLE products ADD COLUMN IF NOT EXISTS description TEXT`)
 
-	status, invalidReference := execute(server, `INSERT INTO products (sku, owner_id) VALUES ('KIT-BAD', 'missing')`, false)
-	assertHranaError(t, status, invalidReference, "references missing users.id")
-	status, invalidType := execute(server, `INSERT INTO products (sku, price, owner_id) VALUES ('KIT-TYPE', 'not-an-integer', 'user_1')`, false)
-	assertHranaError(t, status, invalidType, "expects an integer")
-	status, duplicateTable := execute(server, `CREATE TABLE products (id KITID PRIMARY KEY)`, false)
-	assertHranaError(t, status, duplicateTable, "already exists")
-	status, idempotentTable := execute(server, `CREATE TABLE IF NOT EXISTS products (id KITID PRIMARY KEY)`, false)
-	assertHranaOK(t, status, idempotentTable)
-	status, catalog := execute(server, `SELECT name, type FROM sqlite_master WHERE type = 'table' ORDER BY name`, true)
-	assertHranaOK(t, status, catalog, `"products"`, `"users"`)
-	status, indexes := execute(server, `PRAGMA index_list(products)`, true)
-	assertHranaOK(t, status, indexes, `"products_status_price"`)
-	status, pragma := execute(server, `PRAGMA table_info(products)`, true)
-	assertHranaOK(t, status, pragma, `"owner_id"`, `"created_at"`)
+	fails(tenant, `INSERT INTO products (sku, owner_id) VALUES ('KIT-BAD', 'missing')`, "references missing users.id")
+	fails(tenant, `INSERT INTO products (sku, price, owner_id) VALUES ('KIT-TYPE', 'not-an-integer', 'user_1')`, "expects an integer")
+	fails(tenant, `CREATE TABLE products (id KITID PRIMARY KEY)`, "already exists")
+	succeeds(tenant, `CREATE TABLE IF NOT EXISTS products (id KITID PRIMARY KEY)`)
+	succeeds(tenant, `SELECT name, type FROM sqlite_master WHERE type = 'table' ORDER BY name`, `"products"`, `"users"`)
+	succeeds(tenant, `PRAGMA index_list(products)`, `"products_status_price"`)
+	succeeds(tenant, `PRAGMA table_info(products)`, `"owner_id"`, `"created_at"`)
 
-	response, err := http.Get(server.URL + "/")
-	if err != nil {
-		t.Fatal(err)
+	if got := count(tenant); got != "1" {
+		t.Fatalf("live ORM count = %s", got)
 	}
-	body, _ := io.ReadAll(response.Body)
-	response.Body.Close()
-	if response.StatusCode != http.StatusOK || strings.TrimSpace(string(body)) != "1" {
-		t.Fatalf("live ORM count status = %d, body = %s", response.StatusCode, body)
-	}
-	server.Close()
 	tenant.Close()
 
-	tenant, server = start()
-	defer server.Close()
+	tenant = start()
 	defer tenant.Close()
-	status, selected := execute(server, `SELECT sku, price, status, owner_id, description FROM products WHERE sku = 'KIT-1'`, true)
-	assertHranaOK(t, status, selected, `"KIT-1"`, `"active"`, `"user_1"`, `"description"`)
-	status, reopenedIndexes := execute(server, `PRAGMA index_list(products)`, true)
-	assertHranaOK(t, status, reopenedIndexes, `"products_status_price"`)
-	response, err = http.Get(server.URL + "/")
-	if err != nil {
-		t.Fatal(err)
-	}
-	body, _ = io.ReadAll(response.Body)
-	response.Body.Close()
-	if response.StatusCode != http.StatusOK || strings.TrimSpace(string(body)) != "1" {
-		t.Fatalf("reopened ORM count status = %d, body = %s", response.StatusCode, body)
+	succeeds(tenant, `SELECT sku, price, status, owner_id, description FROM products WHERE sku = 'KIT-1'`, `"KIT-1"`, `"active"`, `"user_1"`, `"description"`)
+	succeeds(tenant, `PRAGMA index_list(products)`, `"products_status_price"`)
+	if got := count(tenant); got != "1" {
+		t.Fatalf("reopened ORM count = %s", got)
 	}
 }
 
@@ -1511,321 +1213,5 @@ router.get(() => db.items.count());`
 	}
 	if created.affected != 1 || len(created.rows) != 1 || created.rows[0][1].String() != "published" {
 		t.Fatalf("unexpected inserted row: %#v", created)
-	}
-}
-
-func TestKitDBHranaBatchTransactionIsAtomicAndBounded(t *testing.T) {
-	root := t.TempDir()
-	directory := filepath.Join(root, "test", "localhost")
-	if err := os.MkdirAll(directory, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	router := `import { router, internals } from "kitwork";
-const { kitdb, struct, id, text, ref } = internals;
-const users = struct({ id: id(), email: text().notNull().unique() });
-const products = struct({
-  id: id(),
-  code: text().notNull().unique().index(),
-  owner_id: ref(users.id).notNull()
-});
-const db = kitdb("batch.kitdb", { users, products }, { token: "batch-secret", access: "readwrite" });
-router.get(() => db.products.count());`
-	if err := os.WriteFile(filepath.Join(directory, RouterFileName), []byte(router), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	tenant := NewTenant(root, "localhost")
-	if err := tenant.Run(); err != nil {
-		t.Fatal(err)
-	}
-	defer tenant.Close()
-	_, config, found := resolveServe(tenant, "batch.kitdb")
-	if !found || config.database == nil {
-		t.Fatal("KitDB batch serve registration is unavailable")
-	}
-	if _, err := executeKitDBRemoteSQL(
-		context.Background(), nil, config.database,
-		`SELECT COUNT(*) AS total FROM users`,
-		kitSQLBindings{named: map[string]value.Value{}}, false,
-	); err != nil {
-		t.Fatal(err)
-	}
-	lastTransaction := func() uint64 {
-		t.Helper()
-		managed, err := kitDBForRequest(tenant, "batch.kitdb", nil).database()
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer managed.Release()
-		last, err := managed.database.LastTransaction()
-		if err != nil {
-			t.Fatal(err)
-		}
-		return last
-	}
-	beforeAtomicBatch := lastTransaction()
-
-	step := func(sql string, wantRows ...bool) hranaBatchStep {
-		want := len(wantRows) != 0 && wantRows[0]
-		return hranaBatchStep{Stmt: hranaStmt{SQL: &sql, WantRows: want}}
-	}
-	run := func(steps ...hranaBatchStep) ([]any, []any) {
-		t.Helper()
-		return runKitDBHranaBatch(
-			context.Background(), nil, config.database,
-			&hranaBatch{Steps: steps}, map[int32]string{}, false,
-		)
-	}
-	assertNoStepErrors := func(errors []any) {
-		t.Helper()
-		for index, item := range errors {
-			if item != nil {
-				t.Fatalf("batch step %d error = %#v", index, item)
-			}
-		}
-	}
-
-	results, errors := run(
-		step("BEGIN"),
-		step(`INSERT INTO users (id, email) VALUES ('user_1', 'owner@example.com')`),
-		step(`INSERT INTO products (id, code, owner_id) VALUES ('product_1', 'KIT-1', 'user_1')`),
-		step(`SELECT id, code FROM products WHERE code = 'KIT-1'`, true),
-		step("COMMIT"),
-	)
-	assertNoStepErrors(errors)
-	if after := lastTransaction(); after != beforeAtomicBatch+1 {
-		t.Fatalf("two-row atomic batch advanced transaction %d -> %d, want one WAL transaction", beforeAtomicBatch, after)
-	}
-	encodedRead, err := json.Marshal(results[3])
-	if err != nil || !bytes.Contains(encodedRead, []byte(`KIT-1`)) {
-		t.Fatalf("transaction did not read its own indexed write: %s, %v", encodedRead, err)
-	}
-
-	beforeResidualRollback := lastTransaction()
-	results, errors = run(
-		step("BEGIN"),
-		step(`UPDATE products SET code = LOWER(code) || '-draft' WHERE LENGTH(code) > 3 RETURNING code`, true),
-		step(`DELETE FROM products WHERE LENGTH(code) > 8 RETURNING code`, true),
-		step(`SELECT COUNT(*) AS total FROM products WHERE code = 'kit-1-draft'`, true),
-		step("ROLLBACK"),
-	)
-	assertNoStepErrors(errors)
-	encodedUpdate, updateErr := json.Marshal(results[1])
-	encodedDelete, deleteErr := json.Marshal(results[2])
-	encodedCount, countErr := json.Marshal(results[3])
-	if updateErr != nil || deleteErr != nil || countErr != nil ||
-		!bytes.Contains(encodedUpdate, []byte(`kit-1-draft`)) ||
-		!bytes.Contains(encodedDelete, []byte(`kit-1-draft`)) ||
-		!bytes.Contains(encodedCount, []byte(`"0"`)) {
-		t.Fatalf(
-			"residual transaction visibility update=%s delete=%s count=%s errors=%v/%v/%v",
-			encodedUpdate, encodedDelete, encodedCount, updateErr, deleteErr, countErr,
-		)
-	}
-	if after := lastTransaction(); after != beforeResidualRollback {
-		t.Fatalf("rolled-back residual mutations advanced transaction %d -> %d", beforeResidualRollback, after)
-	}
-	rolledBackProduct, err := executeKitDBRemoteSQL(
-		context.Background(), nil, config.database,
-		`SELECT code FROM products WHERE id = 'product_1'`,
-		kitSQLBindings{named: map[string]value.Value{}}, false,
-	)
-	if err != nil || len(rolledBackProduct.rows) != 1 || rolledBackProduct.rows[0][0].String() != "KIT-1" {
-		t.Fatalf("residual transaction rollback = %#v, %v", rolledBackProduct, err)
-	}
-
-	_, errors = run(
-		step("BEGIN IMMEDIATE"),
-		step(`INSERT INTO users (id, email) VALUES ('user_2', 'rollback@example.com')`),
-		step(`INSERT INTO products (id, code, owner_id) VALUES ('product_2', 'KIT-1', 'user_2')`),
-		step("COMMIT"),
-	)
-	if errors[2] == nil || !strings.Contains(fmt.Sprint(errors[2]), "must be unique") {
-		t.Fatalf("duplicate batch error = %#v", errors)
-	}
-	rolledBack, err := executeKitDBRemoteSQL(
-		context.Background(), nil, config.database,
-		`SELECT COUNT(*) AS total FROM users WHERE id = 'user_2'`,
-		kitSQLBindings{named: map[string]value.Value{}}, false,
-	)
-	if err != nil || len(rolledBack.rows) != 1 || rolledBack.rows[0][0].N != 0 {
-		t.Fatalf("failed batch leaked user_2: %#v, %v", rolledBack, err)
-	}
-
-	_, errors = run(
-		step("BEGIN TRANSACTION"),
-		step(`INSERT INTO users (id, email) VALUES ('user_3', 'explicit-rollback@example.com')`),
-		step("ROLLBACK"),
-	)
-	assertNoStepErrors(errors)
-	explicitRollback, err := executeKitDBRemoteSQL(
-		context.Background(), nil, config.database,
-		`SELECT COUNT(*) AS total FROM users WHERE id = 'user_3'`,
-		kitSQLBindings{named: map[string]value.Value{}}, false,
-	)
-	if err != nil || explicitRollback.rows[0][0].N != 0 {
-		t.Fatalf("explicit rollback leaked user_3: %#v, %v", explicitRollback, err)
-	}
-
-	_, errors = run(step("BEGIN"), step(`CREATE TABLE denied (id KITID PRIMARY KEY)`), step("COMMIT"))
-	if errors[1] == nil || !strings.Contains(fmt.Sprint(errors[1]), "schema changes are not allowed") {
-		t.Fatalf("transactional DDL error = %#v", errors)
-	}
-	if _, _, err := kitDBRemoteDefinition(config.database, "denied"); err == nil {
-		t.Fatal("refused transactional DDL published a struct")
-	}
-
-	transactionProxy, transaction, err := config.database.beginKitDBRecordTransaction(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := executeKitDBRemoteSQL(
-		context.Background(), nil, transactionProxy,
-		`INSERT INTO users (id, email) VALUES ('user_conflict', 'conflict@example.com')`,
-		kitSQLBindings{named: map[string]value.Value{}}, false,
-	); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := executeKitDBRemoteSQL(
-		context.Background(), nil, config.database,
-		`INSERT INTO users (id, email) VALUES ('user_winner', 'winner@example.com')`,
-		kitSQLBindings{named: map[string]value.Value{}}, false,
-	); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := transaction.Commit(); err == nil || !strings.Contains(err.Error(), "transaction conflict") ||
-		!stderrors.Is(err, errKitDBTransactionConflict) ||
-		kitDBRemoteErrorPayload(err)["code"] != kitDBWireConflictCode {
-		t.Fatalf("stale transaction commit error = %v", err)
-	}
-	conflictRows, err := executeKitDBRemoteSQL(
-		context.Background(), nil, config.database,
-		`SELECT id FROM users WHERE id IN ('user_conflict', 'user_winner') ORDER BY id`,
-		kitSQLBindings{named: map[string]value.Value{}}, false,
-	)
-	if err != nil || len(conflictRows.rows) != 1 || conflictRows.rows[0][0].String() != "user_winner" {
-		t.Fatalf("conflict publication = %#v, %v", conflictRows, err)
-	}
-
-	requestContext, cancel := context.WithCancel(context.Background())
-	request := httptest.NewRequest(http.MethodPost, "http://localhost/batch.kitdb/v3/pipeline", nil).WithContext(requestContext)
-	scope := requestscope.New(tenant, httptest.NewRecorder(), request)
-	cancelProxy, canceledTransaction, err := config.database.beginKitDBRecordTransaction(scope)
-	if err != nil {
-		scope.Close()
-		t.Fatal(err)
-	}
-	if _, err := executeKitDBRemoteSQL(
-		requestContext, scope, cancelProxy,
-		`INSERT INTO users (id, email) VALUES ('user_canceled', 'canceled@example.com')`,
-		kitSQLBindings{named: map[string]value.Value{}}, false,
-	); err != nil {
-		_ = canceledTransaction.Rollback()
-		scope.Close()
-		t.Fatal(err)
-	}
-	cancel()
-	if _, err := canceledTransaction.Commit(); !stderrors.Is(err, context.Canceled) {
-		scope.Close()
-		t.Fatalf("canceled transaction commit error = %v", err)
-	}
-	scope.Close()
-	canceledRows, err := executeKitDBRemoteSQL(
-		context.Background(), nil, config.database,
-		`SELECT COUNT(*) AS total FROM users WHERE id = 'user_canceled'`,
-		kitSQLBindings{named: map[string]value.Value{}}, false,
-	)
-	if err != nil || canceledRows.rows[0][0].N != 0 {
-		t.Fatalf("canceled transaction leaked a row: %#v, %v", canceledRows, err)
-	}
-
-	tooMany := make([]hranaBatchStep, kitDBRemoteTransactionStatementLimit+1)
-	for index := range tooMany {
-		tooMany[index] = step("SELECT 1")
-	}
-	_, errors = run(tooMany...)
-	if errors[0] == nil || !strings.Contains(fmt.Sprint(errors[0]), "exceeds 256 statements") {
-		t.Fatalf("oversized batch error = %#v", errors[0])
-	}
-}
-
-func TestKitDBOfficialLibSQLClient(t *testing.T) {
-	clientDirectory := os.Getenv("KITDB_LIBSQL_CLIENT_DIR")
-	if clientDirectory == "" {
-		t.Skip("set KITDB_LIBSQL_CLIENT_DIR to a directory containing @libsql/client")
-	}
-	root := t.TempDir()
-	directory := filepath.Join(root, "test", "localhost")
-	if err := os.MkdirAll(directory, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	router := `import { router, internals } from "kitwork";
-const { kitdb, struct, id, text, int } = internals;
-const products = struct({ id: id(), sku: text().notNull().unique().index(), title: text().notNull(), price: int().default(0) });
-const db = kitdb("official.kitdb", { products }, { token: "official-secret", access: "readwrite" });
-router.get(() => db.products.count());`
-	if err := os.WriteFile(filepath.Join(directory, RouterFileName), []byte(router), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	tenant := NewTenant(root, "localhost")
-	if err := tenant.Run(); err != nil {
-		t.Fatal(err)
-	}
-	defer tenant.Close()
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		request.Host = "localhost"
-		tenant.Serve(writer, request)
-	}))
-	defer server.Close()
-
-	script := `
-import { createClient } from "@libsql/client";
-const client = createClient({ url: process.env.KITDB_URL, authToken: "official-secret" });
-const probe = await client.execute("SELECT 1 AS connected");
-if (Number(probe.rows[0].connected) !== 1) {
-  throw new Error("connection probe failed: " + JSON.stringify(probe.rows));
-}
-const inserted = await client.execute({
-  sql: "INSERT INTO products (sku, title, price) VALUES (?, ?, ?) RETURNING sku, price",
-  args: ["NODE-1", "Official client", 42],
-});
-const selected = await client.execute({
-  sql: "SELECT sku, price FROM products WHERE sku = ?",
-  args: ["NODE-1"],
-});
-if (inserted.rows[0].sku !== "NODE-1" || Number(selected.rows[0].price) !== 42) {
-  throw new Error("unexpected KitDB rows: " + JSON.stringify({ inserted: inserted.rows, selected: selected.rows }));
-}
-client.close();
-console.log("official-libsql-client-ok");`
-	command := exec.Command("node", "--input-type=module", "--eval", script)
-	command.Dir = clientDirectory
-	command.Env = append(os.Environ(), "KITDB_URL="+server.URL+"/official.kitdb")
-	output, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("@libsql/client failed: %v\n%s", err, output)
-	}
-	if !strings.Contains(string(output), "official-libsql-client-ok") {
-		t.Fatalf("unexpected @libsql/client output: %s", output)
-	}
-}
-
-func assertHranaOK(t *testing.T, status int, body map[string]any, contains ...string) {
-	t.Helper()
-	encoded, _ := json.Marshal(body)
-	if status != http.StatusOK || strings.Contains(string(encoded), `"type":"error"`) {
-		t.Fatalf("Hrana status = %d, body = %s", status, encoded)
-	}
-	for _, expected := range contains {
-		if !strings.Contains(string(encoded), expected) {
-			t.Fatalf("Hrana body = %s, want %s", encoded, expected)
-		}
-	}
-}
-
-func assertHranaError(t *testing.T, status int, body map[string]any, contains string) {
-	t.Helper()
-	encoded, _ := json.Marshal(body)
-	if status != http.StatusOK || !strings.Contains(string(encoded), `"type":"error"`) || !strings.Contains(string(encoded), contains) {
-		t.Fatalf("Hrana error status = %d, body = %s, want %q", status, encoded, contains)
 	}
 }

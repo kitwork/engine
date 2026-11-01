@@ -18,7 +18,7 @@ const schemaFile = "app/.shared/schema/<tên>.work"
 const columnWords = "id(), text(), integer(), float(), decimal(12, 2), boolean(), date(), json(), timestamp()"
 
 const (
-	declareDatabase = "database của app khai export const db = connection().schema({ bảng }) trong " + schemaFile
+	declareDatabase = "database của app khai export const db = connection().tables({ bảng }) trong " + schemaFile
 	statementOnDB   = "câu viết trên database khai trong app/.shared/schema/: import { db } from \"" + schemaFile + "\" rồi db.list((bảng) => …)"
 	declareSQLite   = "SQLite là connection(\"tên\") trong app/.shared/schema/, với tên đó khai { sqlite: đường_dẫn } trong app.databases({ … }) của application.work; SQL thô trên database ngoài là connect({ … }).query(sql, [giá trị])"
 	noEntity        = "mỗi app có database của nó, connection() trong app/.shared/schema/; ai thấy dòng nào là policy() (chưa có trong engine hôm nay, lát 6)"
@@ -27,13 +27,13 @@ const (
 // removedWords are the older words of kitwork/database that are not column builders, with what the spec
 // writes instead.
 var removedWords = map[string]string{
-	"kitdb": declareDatabase + "; mở KitDB ra ngoài qua Hrana hay PostgreSQL wire (token, access) là app.database(path, { port }) của host trong application.work; " +
+	"kitdb": declareDatabase + "; mở KitDB ra ngoài qua PostgreSQL wire (token, access) là app.database(path, { port }) của host trong application.work; " +
 		"{ drop: true }, { migrate: true } không còn: phần thêm tự migrate lúc khai, phần mất dữ liệu bị từ chối; " +
 		"giữ lịch sử ({ recovery }) là việc của host (KITWORK_DATABASE.md mục 7.4), chưa có trong engine hôm nay",
 	"open":      declareDatabase,
 	"define":    declareDatabase,
 	"sqlite":    declareSQLite,
-	"struct":    `struct import từ "kitwork/schema": import { struct, id, text } from "kitwork/schema", chỉ trong app/.shared/schema/`,
+	"struct":    `bảng khai bằng table() của "kitwork/schema": import { table, id, text } from "kitwork/schema", chỉ trong app/.shared/schema/`,
 	"entity":    noEntity,
 	"system":    noEntity,
 	"connected": "database có tên là connection(\"tên\") trong app/.shared/schema/, tên đó khai trong app.databases({ … }) của application.work; tên host không khai là lỗi boot",
@@ -103,7 +103,7 @@ func RemovedKitworkWord(word string) (string, bool) {
 
 // EngineTable is whether name is a table of the engine, written in any case (SQLite reads table names without
 // case): kitwork_runs, kitwork_definitions, kitwork_schedules, kitwork_schema, kitwork_history, and on a SQLite
-// file the ledger of its migrations, _kitwork_migrations. schema({ … }) declares none of them.
+// file the ledger of its migrations, _kitwork_migrations. tables({ … }) declares none of them.
 func EngineTable(name string) bool {
 	lower := strings.ToLower(name)
 	return strings.HasPrefix(lower, "kitwork_") || strings.HasPrefix(lower, "_kitwork_")

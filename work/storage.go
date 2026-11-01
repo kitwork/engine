@@ -326,6 +326,9 @@ func (h *storageHandle) withExpire(args []value.Value) value.Value {
 	if args[0].K == value.Number && (args[0].N < 1 || math.IsNaN(args[0].N) || math.IsInf(args[0].N, 0)) {
 		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("expire(%s): số mili giây từ 1 trở lên; %s", args[0].Text(), usage))
 	}
+	if args[0].K == value.Number && args[0].N > storageExpireMilliseconds {
+		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("expire(%s): tối đa %d mili giây (khoảng 292 năm); %s", args[0].Text(), int64(storageExpireMilliseconds), usage))
+	}
 	resolver := parseExpiry(args[0])
 	if resolver == nil {
 		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("expire(%q): không đọc được hạn; %s", args[0].Text(), usage))
@@ -334,6 +337,9 @@ func (h *storageHandle) withExpire(args []value.Value) value.Value {
 	next.expire, next.expireText = resolver, args[0].Text()
 	return value.Value{K: value.Proxy, V: &next}
 }
+
+// storageExpireMilliseconds is the longest span expire() takes as a number: the longest time.Duration.
+const storageExpireMilliseconds = float64(math.MaxInt64 / int64(time.Millisecond))
 
 // expireAt is when a value written now expires; zero for never.
 func (h *storageHandle) expireAt(now time.Time) time.Time {

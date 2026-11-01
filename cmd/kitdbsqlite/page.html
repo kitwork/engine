@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KitDB trên SQLite</title>
+<style>
+  :root {
+    --canvas: #f6f9fc; --paper: #ffffff; --panel: #eff3f8; --ink: #0a2540; --ink-soft: #425466;
+    --line: #e6ebf1; --brand: #635bff; --brand-soft: #e6e5ff; --mark: #fff1b8; --danger: #c0392b;
+    font-family: system-ui, "Segoe UI", sans-serif; color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --canvas: #0b1220; --paper: #111a2b; --panel: #17223a; --ink: #e6edf7; --ink-soft: #9fb0c8;
+      --line: #22304a; --brand: #8b85ff; --brand-soft: #262650; --mark: #5c4a00; --danger: #ff7b6b; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--canvas); color: var(--ink); }
+  header { padding: 20px 24px 8px; }
+  h1 { margin: 0; font-size: 22px; letter-spacing: -0.02em; }
+  .status { color: var(--ink-soft); font-size: 13px; margin-top: 6px; font-family: ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; padding: 12px 24px 24px; }
+  @media (max-width: 960px) { main { grid-template-columns: minmax(0, 1fr); padding: 12px 16px; } header { padding: 16px; } }
+  section { background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 16px; min-width: 0; }
+  h2 { margin: 0 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--brand); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  input, select, textarea, button { font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 6px; padding: 8px 10px; }
+  input[type=search] { flex: 1 1 220px; min-width: 0; font-size: 16px; }
+  textarea { width: 100%; min-height: 110px; font-family: ui-monospace, Consolas, monospace; font-size: 13px; resize: vertical; }
+  button { background: var(--brand); color: #fff; border-color: var(--brand); cursor: pointer; }
+  button.quiet { background: var(--panel); color: var(--ink); border-color: var(--line); }
+  .meta { color: var(--ink-soft); font-size: 13px; margin: 10px 0; font-family: ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
+  .error { color: var(--danger); white-space: pre-wrap; }
+  ol.hits { list-style: none; margin: 0; padding: 0; }
+  ol.hits li { padding: 10px 0; border-top: 1px solid var(--line); }
+  .title { font-size: 15px; line-height: 1.45; overflow-wrap: anywhere; }
+  .second { font-size: 13px; color: var(--ink-soft); margin-top: 2px; }
+  .facts { color: var(--ink-soft); font-size: 12px; margin-top: 4px; font-family: ui-monospace, Consolas, monospace; }
+  mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1px; }
+  .table-wrap { overflow-x: auto; max-height: 420px; border: 1px solid var(--line); border-radius: 6px; }
+  table { border-collapse: collapse; font-size: 12px; font-family: ui-monospace, Consolas, monospace; width: 100%; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; max-width: 320px;
+    overflow: hidden; text-overflow: ellipsis; }
+  th { position: sticky; top: 0; background: var(--panel); }
+  .samples { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+  .samples button { font-size: 12px; padding: 4px 8px; }
+  #history { grid-column: 1 / -1; }
+  #history li { font-family: ui-monospace, Consolas, monospace; font-size: 12px; padding: 4px 0; border-top: 1px solid var(--line); list-style: none; }
+  #history ol { margin: 0; padding: 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>KitDB trên SQLite</h1>
+  <div class="status" id="status">đang mở…</div>
+</header>
+<main>
+  <section>
+    <h2>Tìm toàn văn</h2>
+    <div class="row">
+      <select id="table" aria-label="Bảng"></select>
+      <input id="q" type="search" placeholder="gõ để tìm, có dấu hay không dấu đều được: ao thun nam" autofocus>
+      <select id="mode" aria-label="Cách tìm">
+        <option value="all">mọi từ</option>
+        <option value="any">một từ là đủ</option>
+        <option value="prefix">tiền tố</option>
+        <option value="phrase">cụm từ</option>
+      </select>
+    </div>
+    <div class="meta" id="searchMeta"></div>
+    <ol class="hits" id="hits"></ol>
+  </section>
+  <section>
+    <h2>SQL</h2>
+    <textarea id="sql" spellcheck="false">SELECT merchant, id, name, price, sold FROM shopping WHERE merchant = 'tiki' AND id = 2</textarea>
+    <div class="samples" id="samples"></div>
+    <div class="row"><button id="run">Chạy (Ctrl+Enter)</button></div>
+    <div class="meta" id="sqlMeta"></div>
+    <div class="table-wrap" id="sqlResult" hidden></div>
+  </section>
+  <section id="history">
+    <h2>Lịch sử gần đây</h2>
+    <ol id="commits"></ol>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const samples = [
+  ["Tra một dòng", "SELECT merchant, id, name, price, sold FROM shopping WHERE merchant = 'tiki' AND id = 2"],
+  ["Một trang", "SELECT id, name, price FROM shopping WHERE merchant = 'lazada' ORDER BY id LIMIT 20"],
+  ["Đếm trong một merchant", "SELECT count(*), min(price), max(price) FROM shopping WHERE merchant = 'lazada'"],
+  ["Sửa tên (ghi)", "UPDATE shopping SET name = 'Áo thun cotton thử nghiệm KitDB' WHERE merchant = 'tiki' AND id = 2"],
+  ["Gộp cả bảng (quét ~30 giây)", "SELECT merchant, count(*) AS products, sum(price) AS value FROM shopping GROUP BY merchant"],
+];
+for (const [label, text] of samples) {
+  const button = document.createElement("button");
+  button.className = "quiet";
+  button.textContent = label;
+  button.onclick = () => { $("sql").value = text; };
+  $("samples").append(button);
+}
+function formatBytes(bytes) {
+  return bytes > 1e9 ? (bytes / 1e9).toFixed(1) + " GB" : (bytes / 1e6).toFixed(1) + " MB";
+}
+async function status() {
+  try {
+    const data = await (await fetch("/api/status")).json();
+    const indexes = Object.entries(data.indexes).map(([t, s]) => t + ": " + s).join(" · ");
+    $("status").textContent = data.path + " · " + formatBytes(data.bytes) + " · rev " + data.revision + (indexes ? " · " + indexes : "");
+    if ($("table").options.length === 0) {
+      for (const entry of data.search) {
+        const option = document.createElement("option");
+        option.value = entry.table;
+        option.textContent = entry.table + " (" + entry.columns.join(", ") + ")";
+        $("table").append(option);
+      }
+    }
+    return data;
+  } catch (error) {
+    $("status").textContent = "không nối được: " + error;
+  }
+}
+let searchTicket = 0;
+async function runSearch() {
+  const q = $("q").value.trim();
+  const ticket = ++searchTicket;
+  if (!q) { $("hits").replaceChildren(); $("searchMeta").textContent = ""; return; }
+  $("searchMeta").textContent = "đang tìm…";
+  const params = new URLSearchParams({ table: $("table").value, q, mode: $("mode").value, limit: "20" });
+  const response = await fetch("/api/search?" + params);
+  const data = await response.json();
+  if (ticket !== searchTicket) return;
+  if (!response.ok) { $("searchMeta").innerHTML = ""; $("searchMeta").append(Object.assign(document.createElement("span"), { className: "error", textContent: data.error })); return; }
+  $("searchMeta").textContent = (data.hits ? data.hits.length : 0) + " kết quả đầu · " + data.milliseconds.toFixed(2) + " ms (cả đọc dòng) · rev " + data.revision;
+  const items = (data.hits || []).map((hit) => {
+    const item = document.createElement("li");
+    const [first, ...others] = hit.highlighted;
+    const title = document.createElement("div");
+    title.className = "title";
+    // the server escapes every column and adds only <mark>
+    title.innerHTML = first.html || "(trống)";
+    item.append(title);
+    for (const field of others) {
+      if (!field.html) continue;
+      const line = document.createElement("div");
+      line.className = "second";
+      line.innerHTML = field.column + ": " + field.html;
+      item.append(line);
+    }
+    const facts = document.createElement("div");
+    facts.className = "facts";
+    const extra = Object.entries(hit.values).map(([k, v]) => k + ": " + (v === null ? "NULL" : String(v).slice(0, 80)));
+    facts.textContent = ["#" + hit.rowid, "điểm " + hit.score.toFixed(3), ...extra].join(" · ");
+    item.append(facts);
+    return item;
+  });
+  $("hits").replaceChildren(...items);
+}
+let timer;
+$("q").addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(runSearch, 120); });
+$("mode").addEventListener("change", runSearch);
+$("table").addEventListener("change", runSearch);
+async function runSQL() {
+  $("sqlMeta").textContent = "đang chạy…";
+  const response = await fetch("/api/sql", { method: "POST", body: $("sql").value });
+  const data = await response.json();
+  const wrap = $("sqlResult");
+  if (!response.ok) {
+    wrap.hidden = true;
+    $("sqlMeta").replaceChildren(Object.assign(document.createElement("span"), { className: "error", textContent: data.error }));
+    return;
+  }
+  if (data.kind !== "read") {
+    wrap.hidden = true;
+    $("sqlMeta").textContent = (data.kind === "schema" ? "đã đổi schema" : "đã ghi " + (data.rowsAffected || 0) + " dòng") +
+      " · rev " + data.revision + " · " + data.milliseconds.toFixed(2) + " ms";
+    status(); history();
+    if ($("q").value.trim()) runSearch();
+    return;
+  }
+  const rows = data.rows || [];
+  $("sqlMeta").textContent = rows.length + " dòng" + (data.truncated ? " (chỉ hiện 200 dòng đầu)" : "") +
+    " · rev " + data.revision + " · " + data.milliseconds.toFixed(2) + " ms";
+  const table = document.createElement("table");
+  const head = table.createTHead().insertRow();
+  for (const column of data.columns || []) head.append(Object.assign(document.createElement("th"), { textContent: column }));
+  const body = table.createTBody();
+  for (const row of rows) {
+    const line = body.insertRow();
+    for (const value of row) {
+      const cell = line.insertCell();
+      cell.textContent = value === null ? "NULL" : String(value);
+      cell.title = cell.textContent;
+    }
+  }
+  wrap.replaceChildren(table);
+  wrap.hidden = false;
+}
+$("run").onclick = runSQL;
+$("sql").addEventListener("keydown", (event) => { if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) runSQL(); });
+async function history() {
+  const commits = await (await fetch("/api/history")).json();
+  $("commits").replaceChildren(...(commits || []).map((commit) => {
+    const item = document.createElement("li");
+    const first = (commit.first || []).map((c) => c.operation + " " + c.table + (c.statement ? " " + c.statement : " #" + c.rowid) + " (" + c.by + ")").join(", ");
+    item.textContent = "rev " + commit.revision + " · " + commit.at + " · " + commit.changes + " thay đổi · " + first + (commit.changes > 3 ? " …" : "");
+    return item;
+  }));
+  if (!commits || commits.length === 0) $("commits").replaceChildren(Object.assign(document.createElement("li"), { textContent: "chưa có commit nào: thử một câu ghi ở ô SQL" }));
+}
+status().then(() => {
+  const preset = new URLSearchParams(location.search).get("q");
+  if (preset) { $("q").value = preset; runSearch(); }
+});
+history();
+setInterval(status, 3000);
+</script>
+</body>
+</html>

@@ -338,7 +338,7 @@ func FolderDatabaseArity(module string) string {
 func FolderDatabaseNotAHandle(module, name string) string {
 	const write = `import { db } from "app/.shared/schema/<tên>.work"; %s.database(db)`
 	if name == "" {
-		return fmt.Sprintf("%s.database(…) nhận tên import của một database khai trong .shared/schema/ (export const db = connection().schema({ … })): "+write+"; giá trị này không phải database đó",
+		return fmt.Sprintf("%s.database(…) nhận tên import của một database khai trong .shared/schema/ (export const db = connection().tables({ … })): "+write+"; giá trị này không phải database đó",
 			module, module)
 	}
 	return fmt.Sprintf("%s.database(%s): %s không phải database khai trong .shared/schema/; %s.database nhận tên import của database đó: "+write,
@@ -359,7 +359,7 @@ func FolderDatabaseName(module, name string) string {
 		return fmt.Sprintf(`%s.database(%q): một chuỗi không phải database; %q không phải tên database của danh mục, các lần chạy ở database của app (connection()) hay ở một tên host khai trong app.databases({ … })`,
 			module, name, name)
 	}
-	return fmt.Sprintf(`%s.database(%q): một chuỗi không phải database; database tên %s của host khai trong .shared/schema/ bằng export const db = connection(%q).schema({ … }), rồi %s.database(db) với tên import của nó`,
+	return fmt.Sprintf(`%s.database(%q): một chuỗi không phải database; database tên %s của host khai trong .shared/schema/ bằng export const db = connection(%q).tables({ … }), rồi %s.database(db) với tên import của nó`,
 		module, name, name, name, module)
 }
 

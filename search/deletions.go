@@ -124,23 +124,9 @@ func writeDeletionFile(ctx context.Context, path string, schemaHash [32]byte, de
 	if err := ctx.Err(); err != nil {
 		return deletionInfo{}, err
 	}
-	if deleted == nil || deleted.Count() == 0 || len(deleted.tokenTotals) == 0 {
-		return deletionInfo{}, fmt.Errorf("search: deletion file requires deleted documents")
-	}
-	bodyLength, overflow := deletionBodyLength(deleted.documents, uint32(len(deleted.ids)), uint16(len(deleted.tokenTotals)))
-	if overflow || bodyLength > uint64(maxIntValue()) || bodyLength > math.MaxInt64-deletionHeaderSize {
-		return deletionInfo{}, fmt.Errorf("search: deletion file exceeds platform range")
-	}
-	body := make([]byte, 0, int(bodyLength))
-	for _, total := range deleted.tokenTotals {
-		body = binary.LittleEndian.AppendUint64(body, total)
-	}
-	for _, document := range deleted.ids {
-		body = binary.LittleEndian.AppendUint32(body, document)
-	}
-	body = append(body, deleted.bits...)
-	if uint64(len(body)) != bodyLength {
-		return deletionInfo{}, fmt.Errorf("search: deletion body length is inconsistent")
+	encoded, err := encodeDeletion(schemaHash, deleted)
+	if err != nil {
+		return deletionInfo{}, err
 	}
 
 	path = filepath.Clean(path)
@@ -164,19 +150,12 @@ func writeDeletionFile(ctx context.Context, path string, schemaHash [32]byte, de
 			_ = os.Remove(temporary)
 		}
 	}()
-	fileSize := uint64(deletionHeaderSize) + bodyLength
-	header := marshalDeletionHeader(
-		schemaHash, deleted.documents, uint32(len(deleted.ids)), uint16(len(deleted.tokenTotals)),
-		fileSize, crc32.Checksum(body, crcTable),
-	)
-	if _, err := file.Write(header[:]); err != nil {
-		return deletionInfo{}, err
-	}
-	written, err := io.Copy(file, bytes.NewReader(body))
+	fileSize := uint64(len(encoded))
+	written, err := io.Copy(file, bytes.NewReader(encoded))
 	if err != nil {
 		return deletionInfo{}, err
 	}
-	if written != int64(len(body)) {
+	if written != int64(len(encoded)) {
 		return deletionInfo{}, io.ErrShortWrite
 	}
 	if err := ctx.Err(); err != nil {
@@ -196,6 +175,33 @@ func writeDeletionFile(ctx context.Context, path string, schemaHash [32]byte, de
 		return deletionInfo{}, err
 	}
 	return deletionInfo{Path: path, Deleted: uint32(len(deleted.ids)), Bytes: int64(fileSize)}, nil
+}
+
+// encodeDeletion returns the complete tombstone file for deleted, in memory.
+func encodeDeletion(schemaHash [32]byte, deleted *deletedDocuments) ([]byte, error) {
+	if deleted == nil || deleted.Count() == 0 || len(deleted.tokenTotals) == 0 {
+		return nil, fmt.Errorf("search: deletion file requires deleted documents")
+	}
+	bodyLength, overflow := deletionBodyLength(deleted.documents, uint32(len(deleted.ids)), uint16(len(deleted.tokenTotals)))
+	if overflow || bodyLength > uint64(maxIntValue()) || bodyLength > math.MaxInt64-deletionHeaderSize {
+		return nil, fmt.Errorf("search: deletion file exceeds platform range")
+	}
+	body := make([]byte, 0, int(bodyLength))
+	for _, total := range deleted.tokenTotals {
+		body = binary.LittleEndian.AppendUint64(body, total)
+	}
+	for _, document := range deleted.ids {
+		body = binary.LittleEndian.AppendUint32(body, document)
+	}
+	body = append(body, deleted.bits...)
+	if uint64(len(body)) != bodyLength {
+		return nil, fmt.Errorf("search: deletion body length is inconsistent")
+	}
+	header := marshalDeletionHeader(
+		schemaHash, deleted.documents, uint32(len(deleted.ids)), uint16(len(deleted.tokenTotals)),
+		uint64(deletionHeaderSize)+bodyLength, crc32.Checksum(body, crcTable),
+	)
+	return append(header[:], body...), nil
 }
 
 func marshalDeletionHeader(
@@ -236,13 +242,24 @@ func openDeletionFile(
 	if err != nil {
 		return nil, err
 	}
-	if !stat.Mode().IsRegular() || stat.Size() < deletionHeaderSize || uint64(stat.Size()) != expectedBytes {
+	if !stat.Mode().IsRegular() || stat.Size() < deletionHeaderSize || uint64(stat.Size()) != expectedBytes ||
+		stat.Size() > int64(maxIntValue()) {
+		return nil, corruptIndexf("deletion file has an invalid size")
+	}
+	data := make([]byte, int(stat.Size()))
+	if err := readAtFull(file, data, 0); err != nil {
+		return nil, err
+	}
+	return decodeDeletion(data, schemaHash, documents, expectedDeleted, fields)
+}
+
+// decodeDeletion validates a complete tombstone file held in memory.
+func decodeDeletion(data []byte, schemaHash [32]byte, documents, expectedDeleted uint32, fields uint16) (*deletedDocuments, error) {
+	if len(data) < deletionHeaderSize {
 		return nil, corruptIndexf("deletion file has an invalid size")
 	}
 	var encoded [deletionHeaderSize]byte
-	if err := readAtFull(file, encoded[:], 0); err != nil {
-		return nil, err
-	}
+	copy(encoded[:], data)
 	if !bytes.Equal(encoded[:8], deletionMagic[:]) {
 		return nil, corruptIndexf("deletion file has invalid magic")
 	}
@@ -252,8 +269,8 @@ func openDeletionFile(
 	if size := binary.LittleEndian.Uint32(encoded[12:16]); size != deletionHeaderSize {
 		return nil, corruptIndexf("deletion header size is %d", size)
 	}
-	if size := binary.LittleEndian.Uint64(encoded[16:24]); size != uint64(stat.Size()) {
-		return nil, corruptIndexf("deletion file records %d bytes; actual size is %d", size, stat.Size())
+	if size := binary.LittleEndian.Uint64(encoded[16:24]); size != uint64(len(data)) {
+		return nil, corruptIndexf("deletion file records %d bytes; actual size is %d", size, len(data))
 	}
 	deleted := binary.LittleEndian.Uint32(encoded[60:64])
 	if !bytes.Equal(encoded[24:56], schemaHash[:]) || binary.LittleEndian.Uint32(encoded[56:60]) != documents ||
@@ -269,13 +286,10 @@ func openDeletionFile(
 		return nil, corruptIndexf("deletion header checksum is %08x; expected %08x", got, wantHeaderCRC)
 	}
 	bodyLength, overflow := deletionBodyLength(documents, deleted, fields)
-	if overflow || bodyLength != uint64(stat.Size())-deletionHeaderSize || bodyLength > uint64(maxIntValue()) {
+	if overflow || bodyLength != uint64(len(data))-deletionHeaderSize || bodyLength > uint64(maxIntValue()) {
 		return nil, corruptIndexf("deletion body has an invalid length")
 	}
-	body := make([]byte, int(bodyLength))
-	if err := readAtFull(file, body, deletionHeaderSize); err != nil {
-		return nil, err
-	}
+	body := data[deletionHeaderSize:]
 	wantBodyCRC := binary.LittleEndian.Uint32(encoded[deletionBodyCRCOffset : deletionBodyCRCOffset+4])
 	if got := crc32.Checksum(body, crcTable); got != wantBodyCRC {
 		return nil, corruptIndexf("deletion body checksum is %08x; expected %08x", got, wantBodyCRC)

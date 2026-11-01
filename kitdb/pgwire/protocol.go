@@ -35,6 +35,11 @@ const (
 	OIDJSONB       uint32 = kitdbsql.PostgreSQLOIDJSONB
 	OIDTimestampTZ uint32 = kitdbsql.PostgreSQLOIDTimestampTZ
 	OIDInterval    uint32 = kitdbsql.PostgreSQLOIDInterval
+
+	// PostgreSQL's catalog types: "char" (one byte), name and pg_node_tree.
+	OIDChar     uint32 = 18
+	OIDName     uint32 = 19
+	OIDNodeTree uint32 = 194
 )
 
 const (

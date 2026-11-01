@@ -9,139 +9,47 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 
-	hostdatabase "github.com/kitwork/engine/database"
-	kitdbengine "github.com/kitwork/engine/kitdb"
-	"github.com/kitwork/engine/kitdb/managed"
-	kitdbnode "github.com/kitwork/engine/kitdb/node"
-	"github.com/kitwork/engine/kitdb/relational"
+	"github.com/kitwork/engine/kitdb/catalog"
+	"github.com/kitwork/engine/kitdb/gateway"
+	"github.com/kitwork/engine/kitdb/pgwire"
+	"github.com/kitwork/engine/work"
 )
 
+// app.database(path, { port, user, password }) is the host's database port (KITWORK_KITDB.md câu 13.5, 30/10/2026):
+// the PostgreSQL wire, read-only, on SQLite files. A client names its database the way the catalogue of a cluster
+// does: a folder of the host's .database/ (`shopping`), or `<domain>/<database>` of an app (`demo.kitwork.io/
+// application`, the folder application/ of the .database/ of the app that has the domain). The database's schemas
+// are the .db files of its folder: kitwork.db is public, billing.db is billing. Each .database/ is one cluster with
+// its own accounts, roles and grants in .catalog/kitwork.db (kitdb/catalog), managed by SQL over the port;
+// user/password of app.database is the admin of every cluster. SCRAM-SHA-256; loopback only until TLS.
+
+// appDatabaseRuntime is the port while the host runs.
 type appDatabaseRuntime struct {
-	cancel           context.CancelFunc
-	listener         net.Listener
-	serveDone        chan struct{}
-	file             *relational.Engine
-	node             *relational.PostgresNode
-	nativeDatabase   *sql.DB
-	nativeRoot       *appDatabaseNativeRoot
-	unregisterNative func()
-	alias            string
-	user             string
-	password         string
-	kitSQL           bool
-	concurrency      int
-	closeOnce        sync.Once
-	closeErr         error
+	cancel    context.CancelFunc
+	listener  net.Listener
+	serveDone chan struct{}
+	gateway   *appDatabaseGateway
+	closeOnce sync.Once
+	closeErr  error
 }
 
-type appDatabaseNativeRoot struct {
-	node        *relational.PostgresNode
-	concurrency int
-
-	mu        sync.Mutex
-	databases map[string]*sql.DB
-	closed    bool
+// appDatabaseApps is where the host's apps are, to find the app of a domain.
+type appDatabaseApps struct {
+	root   string
+	layout work.RootLayout
 }
 
-func (root *appDatabaseNativeRoot) resolve(alias string) (*sql.DB, bool, error) {
-	if root == nil || root.node == nil {
-		return nil, false, nil
-	}
-	names, err := root.node.Databases()
-	if err != nil {
-		return nil, false, err
-	}
-	var name string
-	// Databases returns the virtual maintenance database first. It has no user
-	// structs and is deliberately absent from the native application surface.
-	for _, candidate := range names[1:] {
-		if strings.EqualFold(candidate, strings.TrimSpace(alias)) {
-			name = candidate
-			break
-		}
-	}
-	if name == "" {
-		return nil, false, nil
-	}
-	key := strings.ToLower(name)
-	root.mu.Lock()
-	if root.closed {
-		root.mu.Unlock()
-		return nil, false, fmt.Errorf("KitDB managed root is closed")
-	}
-	if database := root.databases[key]; database != nil {
-		root.mu.Unlock()
-		return database, true, nil
-	}
-	root.mu.Unlock()
-
-	database, err := root.node.OpenNativeDatabase(name)
-	if err != nil {
-		return nil, false, err
-	}
-	if root.concurrency > 0 {
-		database.SetMaxOpenConns(root.concurrency)
-	}
-	// A cold logical database must not retain a node lease merely because one
-	// tenant queried it once. The node itself decides whether its idle engine
-	// remains warm or becomes an LRU eviction candidate.
-	database.SetMaxIdleConns(0)
-
-	root.mu.Lock()
-	if root.closed {
-		root.mu.Unlock()
-		_ = database.Close()
-		return nil, false, fmt.Errorf("KitDB managed root is closed")
-	}
-	if current := root.databases[key]; current != nil {
-		root.mu.Unlock()
-		_ = database.Close()
-		return current, true, nil
-	}
-	root.databases[key] = database
-	root.mu.Unlock()
-	return database, true, nil
-}
-
-func (root *appDatabaseNativeRoot) Close() error {
-	if root == nil {
-		return nil
-	}
-	root.mu.Lock()
-	if root.closed {
-		root.mu.Unlock()
-		return nil
-	}
-	root.closed = true
-	databases := make([]*sql.DB, 0, len(root.databases))
-	for _, database := range root.databases {
-		databases = append(databases, database)
-	}
-	root.databases = nil
-	root.mu.Unlock()
-	var closeErr error
-	for _, database := range databases {
-		closeErr = errors.Join(closeErr, database.Close())
-	}
-	return closeErr
-}
-
-func startAppDatabaseRuntimes(
-	parent context.Context,
-	configs []AppDatabaseConfig,
-	external []hostdatabase.Config,
-) ([]*appDatabaseRuntime, <-chan error, error) {
-	if err := validateAppDatabaseRuntimeAliases(configs, external); err != nil {
-		return nil, nil, err
-	}
+func startAppDatabaseRuntimes(parent context.Context, configs []AppDatabaseConfig, apps appDatabaseApps) ([]*appDatabaseRuntime, <-chan error, error) {
 	errorsChannel := make(chan error, max(1, len(configs)))
 	runtimes := make([]*appDatabaseRuntime, 0, len(configs))
 	for _, config := range configs {
-		runtime, err := startAppDatabaseRuntime(parent, config, errorsChannel)
+		runtime, err := startAppDatabaseRuntime(parent, config, apps, errorsChannel)
 		if err != nil {
 			for index := len(runtimes) - 1; index >= 0; index-- {
 				_ = runtimes[index].Close()
@@ -153,167 +61,51 @@ func startAppDatabaseRuntimes(
 	return runtimes, errorsChannel, nil
 }
 
-// validateAppDatabaseRuntimeAliases classifies owned paths before any database
-// is opened. A file owns one fixed alias; a managed root exposes dynamic names
-// and is therefore checked again by the resolver for each requested alias.
-func validateAppDatabaseRuntimeAliases(configs []AppDatabaseConfig, external []hostdatabase.Config) error {
-	externalAliases := make(map[string]struct{}, len(external))
-	for _, config := range external {
-		alias := strings.TrimSpace(config.Alias)
-		if alias == "" {
-			alias = "default"
-		}
-		externalAliases[strings.ToLower(alias)] = struct{}{}
-	}
-
-	ownedAliases := make(map[string]string, len(configs))
+// validateAppDatabaseConfigs checks what app.database names before anything opens: its path is a folder, or nothing
+// yet (the host's .database/ is made at the start).
+func validateAppDatabaseConfigs(configs []AppDatabaseConfig) error {
 	for _, config := range configs {
-		absolute, err := filepath.Abs(config.Path)
-		if err != nil {
-			return fmt.Errorf("app.database %q: resolve path: %w", config.Path, err)
+		info, err := os.Stat(config.Path)
+		if err == nil && !info.IsDir() {
+			return fmt.Errorf("app.database %q: path is a file; the port serves the host's .database/ folder (a KitDB file is copied with kitwork migrate kitdb)", config.Path)
 		}
-		directory, err := appDatabaseDirectoryTarget(config.Path, absolute)
-		if err != nil {
-			return err
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("app.database %q: %w", config.Path, err)
 		}
-		if directory {
-			if config.Alias != "" {
-				return fmt.Errorf("app.database %q: alias requires one KitDB file; managed roots expose databases by their own names", config.Path)
-			}
-			continue
-		}
-
-		alias := strings.TrimSpace(config.Alias)
-		if alias == "" {
-			alias = "default"
-		}
-		key := strings.ToLower(alias)
-		if previous, exists := ownedAliases[key]; exists {
-			return fmt.Errorf("app.database %q: alias %q is already owned by app.database %q", config.Path, alias, previous)
-		}
-		if _, exists := externalAliases[key]; exists {
-			return fmt.Errorf("app.database %q: alias %q conflicts with an external database declaration", config.Path, alias)
-		}
-		ownedAliases[key] = config.Path
 	}
 	return nil
 }
 
-func startAppDatabaseRuntime(
-	parent context.Context,
-	config AppDatabaseConfig,
-	errorsChannel chan<- error,
-) (*appDatabaseRuntime, error) {
+func startAppDatabaseRuntime(parent context.Context, config AppDatabaseConfig, apps appDatabaseApps, errorsChannel chan<- error) (*appDatabaseRuntime, error) {
 	if parent == nil {
 		return nil, fmt.Errorf("app.database %q: parent context is nil", config.Path)
 	}
-	absolute, err := filepath.Abs(config.Path)
+	if err := validateAppDatabaseConfigs([]AppDatabaseConfig{config}); err != nil {
+		return nil, err
+	}
+	host, err := filepath.Abs(config.Path)
 	if err != nil {
 		return nil, fmt.Errorf("app.database %q: resolve path: %w", config.Path, err)
 	}
-	directory, err := appDatabaseDirectoryTarget(config.Path, absolute)
-	if err != nil {
-		return nil, err
+	if err := os.MkdirAll(host, 0o700); err != nil {
+		return nil, fmt.Errorf("app.database %q: %w", config.Path, err)
 	}
-	if directory && config.Warm && len(config.WarmDatabases) == 0 {
-		return nil, fmt.Errorf("app.database %q: warm: true is only valid for one file; name warm databases for a managed root", config.Path)
+	if apps.root != "" {
+		if absolute, err := filepath.Abs(apps.root); err == nil {
+			apps.root = absolute
+		}
 	}
-	if directory && config.Alias != "" {
-		return nil, fmt.Errorf("app.database %q: alias requires one KitDB file; managed roots expose databases by their own names", config.Path)
+	port := &appDatabaseGateway{
+		host: host, apps: apps,
+		admin:    catalog.Admin{User: config.User, Password: config.Password},
+		options:  gateway.Options{MaxRows: 10_000, MaxBytes: 10 << 20},
+		catalogs: map[string]*catalog.Catalog{},
 	}
 	ctx, cancel := context.WithCancel(parent)
-	runtime := &appDatabaseRuntime{
-		cancel: cancel, user: config.User, password: config.Password,
-		kitSQL: config.KitSQL, concurrency: config.Concurrency,
-	}
-	options := relational.Options{
-		ExperimentalProjections: true,
-		BatchAggregates:         true,
-		QueryCache:              config.Cache,
-		Kernel: kitdbengine.OpenOptions{
-			PageCacheBytes: config.MemoryBytes,
-		},
-	}
-	if directory {
-		if err := prepareAppDatabaseRoot(absolute); err != nil {
-			cancel()
-			return nil, fmt.Errorf("app.database %q: %w", config.Path, err)
-		}
-		limits := kitdbnode.Limits{}
-		if config.MemoryBytes > 0 {
-			limits.MaxPageCacheBytes = config.MemoryBytes
-			limits.DefaultPageCacheBytes = min(config.MemoryBytes, int64(16<<20))
-		}
-		password := config.Password
-		if password == "" {
-			password = "embedded-only"
-		}
-		runtime.node, err = relational.OpenPostgresNode(relational.PostgresNodeOptions{
-			Root: absolute, User: config.User, Password: password,
-			WarmDatabases:            config.WarmDatabases,
-			WarmProjectionOpenPolicy: relational.ProjectionOpenValidate,
-			ManagerLimits:            limits,
-			Relational:               options,
-		})
-	} else {
-		if err := os.MkdirAll(filepath.Dir(absolute), 0o700); err != nil {
-			cancel()
-			return nil, fmt.Errorf("app.database %q: create parent: %w", config.Path, err)
-		}
-		if config.WarmDatabases != nil {
-			cancel()
-			return nil, fmt.Errorf("app.database %q: named warm databases require a directory target", config.Path)
-		}
-		if config.Warm {
-			options.ProjectionOpenPolicy = relational.ProjectionOpenValidate
-		}
-		runtime.file, err = relational.OpenWithContext(ctx, absolute, options)
-	}
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("app.database %q: open: %w", config.Path, err)
-	}
-	if runtime.file != nil {
-		runtime.alias = config.Alias
-		if runtime.alias == "" {
-			runtime.alias = "default"
-		}
-		if _, exists := hostdatabase.Configs[runtime.alias]; exists {
-			_ = runtime.Close()
-			return nil, fmt.Errorf("app.database %q: alias %q conflicts with an external database declaration", config.Path, runtime.alias)
-		}
-		runtime.nativeDatabase, err = relational.OpenNativeSQL(runtime.file)
-		if err != nil {
-			_ = runtime.Close()
-			return nil, fmt.Errorf("app.database %q: open native connection: %w", config.Path, err)
-		}
-		if config.Concurrency > 0 {
-			runtime.nativeDatabase.SetMaxOpenConns(config.Concurrency)
-			runtime.nativeDatabase.SetMaxIdleConns(config.Concurrency)
-		}
-		runtime.unregisterNative, err = hostdatabase.RegisterOwned(runtime.alias, runtime.nativeDatabase)
-		if err != nil {
-			_ = runtime.Close()
-			return nil, fmt.Errorf("app.database %q: publish native connection: %w", config.Path, err)
-		}
-	} else if runtime.node != nil {
-		runtime.nativeRoot = &appDatabaseNativeRoot{
-			node: runtime.node, concurrency: config.Concurrency,
-			databases: make(map[string]*sql.DB),
-		}
-		runtime.unregisterNative, err = hostdatabase.RegisterOwnedResolver(runtime.nativeRoot.resolve)
-		if err != nil {
-			_ = runtime.Close()
-			return nil, fmt.Errorf("app.database %q: publish native database root: %w", config.Path, err)
-		}
-	}
-	if config.Port == 0 {
-		if directory {
-			slog.Info("KitDB managed root opened for native access", "path", absolute)
-		} else {
-			slog.Info("KitDB opened for native access", "path", absolute, "alias", runtime.alias)
-		}
-		return runtime, nil
+	runtime := &appDatabaseRuntime{cancel: cancel, gateway: port}
+	if port.search, err = startAppDatabaseSearch(ctx, host, config.Search); err != nil {
+		_ = runtime.Close()
+		return nil, err
 	}
 	address := net.JoinHostPort(config.Host, strconv.Itoa(config.Port))
 	runtime.listener, err = net.Listen("tcp", address)
@@ -321,25 +113,21 @@ func startAppDatabaseRuntime(
 		_ = runtime.Close()
 		return nil, fmt.Errorf("app.database %q: listen on %s: %w", config.Path, address, err)
 	}
-	serverOptions := relational.PostgresServerOptions{}
+	if err := pgwire.ValidateCleartextListener(runtime.listener); err != nil {
+		_ = runtime.Close()
+		return nil, fmt.Errorf("app.database %q: %w (the port has no TLS yet: host must be 127.0.0.1 or ::1)", config.Path, err)
+	}
+	server := pgwire.Server{Authenticator: port}
 	if config.Concurrency > 0 {
-		serverOptions.MaxConcurrentQueries = config.Concurrency
-		serverOptions.MaxConcurrentQueriesPerKey = config.Concurrency
-		serverOptions.MaxConnections = max(16, config.Concurrency*4)
+		server.MaxConcurrentQueries = config.Concurrency
+		server.MaxConcurrentQueriesPerKey = config.Concurrency
+		server.MaxConnections = max(16, config.Concurrency*4)
 	}
 	listener := runtime.listener
 	runtime.serveDone = make(chan struct{})
 	go func() {
 		defer close(runtime.serveDone)
-		var serveErr error
-		if runtime.node != nil {
-			serveErr = runtime.node.ServePostgres(ctx, listener, serverOptions)
-		} else {
-			serverOptions.PostgresOptions = relational.PostgresOptions{
-				User: config.User, Password: config.Password,
-			}
-			serveErr = runtime.file.ServePostgres(ctx, listener, serverOptions)
-		}
+		serveErr := server.Serve(ctx, listener)
 		if serveErr != nil && ctx.Err() == nil && !errors.Is(serveErr, net.ErrClosed) {
 			select {
 			case errorsChannel <- fmt.Errorf("app.database %q stopped: %w", config.Path, serveErr):
@@ -347,51 +135,8 @@ func startAppDatabaseRuntime(
 			}
 		}
 	}()
-	slog.Info("KitDB PostgreSQL listener started", "path", absolute, "alias", runtime.alias, "address", runtime.listener.Addr(), "managed", directory)
+	slog.Info("Database port started (PostgreSQL wire, SQLite, read-only)", "path", host, "address", runtime.listener.Addr())
 	return runtime, nil
-}
-
-func appDatabaseDirectoryTarget(source, absolute string) (bool, error) {
-	if strings.HasSuffix(source, "/") || strings.HasSuffix(source, "\\") || filepath.Base(filepath.Clean(source)) == ".kitdb" {
-		return true, nil
-	}
-	info, err := os.Stat(absolute)
-	if err == nil {
-		return info.IsDir(), nil
-	}
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	}
-	return false, fmt.Errorf("app.database %q: inspect path: %w", source, err)
-}
-
-func prepareAppDatabaseRoot(path string) error {
-	info, err := os.Stat(path)
-	if errors.Is(err, os.ErrNotExist) {
-		_, err = managed.Init(path)
-		return err
-	}
-	if err != nil {
-		return err
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("managed root is not a directory")
-	}
-	present, err := managed.Present(path)
-	if err != nil || present {
-		return err
-	}
-	entries, err := os.ReadDir(path)
-	if err != nil {
-		return err
-	}
-	if len(entries) == 0 {
-		_, err = managed.Init(path)
-		return err
-	}
-	// Keep legacy flat roots readable. They can be adopted explicitly later;
-	// silently creating .catalog beside existing data would change authority.
-	return nil
 }
 
 func (runtime *appDatabaseRuntime) Close() error {
@@ -406,21 +151,304 @@ func (runtime *appDatabaseRuntime) Close() error {
 		if runtime.serveDone != nil {
 			<-runtime.serveDone
 		}
-		if runtime.unregisterNative != nil {
-			runtime.unregisterNative()
-		}
-		if runtime.nativeDatabase != nil {
-			runtime.closeErr = errors.Join(runtime.closeErr, runtime.nativeDatabase.Close())
-		}
-		if runtime.nativeRoot != nil {
-			runtime.closeErr = errors.Join(runtime.closeErr, runtime.nativeRoot.Close())
-		}
-		if runtime.node != nil {
-			runtime.closeErr = errors.Join(runtime.closeErr, runtime.node.Close())
-		}
-		if runtime.file != nil {
-			runtime.closeErr = errors.Join(runtime.closeErr, runtime.file.Close())
+		if runtime.gateway != nil {
+			runtime.closeErr = errors.Join(runtime.closeErr, runtime.gateway.Close())
 		}
 	})
 	return runtime.closeErr
+}
+
+// appDatabaseGateway finds the database a client names, its cluster's catalog, and opens its session.
+type appDatabaseGateway struct {
+	host    string // the host's .database/, a cluster of its own
+	apps    appDatabaseApps
+	admin   catalog.Admin
+	options gateway.Options
+	// search holds the full-text indexes of app.database's search (app_database_search.go).
+	search *appDatabaseSearch
+
+	mu       sync.Mutex
+	catalogs map[string]*catalog.Catalog // by the cluster's folder
+	closed   bool
+}
+
+// appDatabaseTarget is one database as a client named it.
+type appDatabaseTarget struct {
+	name    string // as the catalog names it: lower case
+	cluster string // its .database/
+	folder  string // its own folder in the cluster
+}
+
+// appDatabasePart is one part of a database's name: a domain or a folder, never a path out of where it is looked for.
+var appDatabasePart = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+
+// resolve finds the database a client names, or why there is none.
+func (g *appDatabaseGateway) resolve(name string) (appDatabaseTarget, error) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	domain, database, ofApp := strings.Cut(name, "/")
+	if !ofApp {
+		database, domain = domain, ""
+	}
+	if !appDatabasePart.MatchString(database) || strings.Contains(database, "..") || (ofApp && (!appDatabasePart.MatchString(domain) || strings.Contains(domain, ".."))) {
+		return appDatabaseTarget{}, fmt.Errorf("database %q does not exist: a database is <folder> of the host's .database/ or <domain>/<folder> of an app", name)
+	}
+	cluster := g.host
+	if ofApp {
+		app, err := g.appOf(domain)
+		if err != nil {
+			return appDatabaseTarget{}, err
+		}
+		cluster = filepath.Join(app, ".database")
+	}
+	folder := filepath.Join(cluster, database)
+	if info, err := os.Stat(filepath.Join(folder, "kitwork.db")); err != nil || !info.Mode().IsRegular() {
+		return appDatabaseTarget{}, fmt.Errorf("database %q does not exist: no %s", name, filepath.ToSlash(filepath.Join(database, "kitwork.db")))
+	}
+	return appDatabaseTarget{name: name, cluster: cluster, folder: folder}, nil
+}
+
+// appOf is the folder of the app that has domain.
+func (g *appDatabaseGateway) appOf(domain string) (string, error) {
+	missing := fmt.Errorf("database of %q does not exist: no app has that domain", domain)
+	if g.apps.root == "" {
+		return "", missing
+	}
+	if g.apps.layout.IsSingleApp() {
+		if g.apps.layout == work.RootLayoutMultiDomain {
+			if info, err := os.Stat(filepath.Join(g.apps.root, domain)); err != nil || !info.IsDir() {
+				return "", missing
+			}
+		}
+		return g.apps.root, nil
+	}
+	identity, err := work.ResolveIdentityForLayout(g.apps.root, domain, g.apps.layout)
+	if err != nil || identity == "" {
+		return "", missing
+	}
+	return filepath.Join(g.apps.root, identity), nil
+}
+
+// catalogOf is the catalog of a cluster, opened once; the accounts of its old KitDB catalog are brought in the first
+// time (catalog.ImportKitDB keeps a mark and never writes the KitDB file).
+func (g *appDatabaseGateway) catalogOf(ctx context.Context, cluster string) (*catalog.Catalog, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.closed {
+		return nil, fmt.Errorf("the database port is closing")
+	}
+	if current := g.catalogs[cluster]; current != nil {
+		return current, nil
+	}
+	opened, err := catalog.Open(ctx, cluster, g.admin)
+	if err != nil {
+		return nil, err
+	}
+	if legacy := filepath.Join(cluster, catalog.Directory, "data.kitdb"); fileExists(legacy) {
+		if _, err := opened.ImportKitDB(ctx, legacy); err != nil {
+			slog.Warn("Database port: the accounts of the old KitDB catalog were not imported", "catalog", legacy, "error", err)
+		}
+	}
+	g.catalogs[cluster] = opened
+	return opened, nil
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular()
+}
+
+// Authenticate is the cleartext exchange, which the port does not offer: it authenticates with SCRAM-SHA-256.
+func (g *appDatabaseGateway) Authenticate(context.Context, pgwire.Startup, string) (pgwire.Session, error) {
+	return nil, pgwire.NewError("28000", "this server authenticates with SCRAM-SHA-256")
+}
+
+// SCRAMVerifier is the verifier of the startup's user in the cluster of the database it names. For a database that
+// does not exist only the host's admin is known (it is told the database does not exist once authenticated); anyone
+// else fails as a wrong password does.
+func (g *appDatabaseGateway) SCRAMVerifier(ctx context.Context, startup pgwire.Startup) (pgwire.SCRAMVerifier, bool, error) {
+	cluster := g.host
+	if target, err := g.resolve(startup.Database()); err == nil {
+		cluster = target.cluster
+	} else if startup.User() != g.admin.User {
+		return pgwire.SCRAMVerifier{}, false, nil
+	}
+	accounts, err := g.catalogOf(ctx, cluster)
+	if err != nil {
+		slog.Warn("Database port: catalog unavailable", "cluster", cluster, "error", err)
+		return pgwire.SCRAMVerifier{}, false, pgwire.NewError("58000", "the catalog of this database is unavailable")
+	}
+	return accounts.Verifier(ctx, startup.User())
+}
+
+// OpenSession opens the session of an authenticated user on the database it names.
+func (g *appDatabaseGateway) OpenSession(ctx context.Context, startup pgwire.Startup) (pgwire.Session, error) {
+	target, err := g.resolve(startup.Database())
+	if err != nil {
+		return nil, pgwire.NewError("3D000", err.Error())
+	}
+	accounts, err := g.catalogOf(ctx, target.cluster)
+	if err != nil {
+		return nil, pgwire.NewError("58000", "the catalog of this database is unavailable")
+	}
+	user := startup.User()
+	access := &appDatabaseAccess{catalog: accounts, user: user, database: target.name, admin: accounts.IsAdmin(user)}
+	if !access.admin {
+		allowed, err := accounts.CanConnect(ctx, user, target.name)
+		if err != nil {
+			return nil, err
+		}
+		if !allowed {
+			return nil, pgwire.NewError("42501", fmt.Sprintf("permission denied for database %q", target.name))
+		}
+	}
+	if access.stamp, err = accounts.Stamp(ctx, user); err != nil {
+		return nil, err
+	}
+	schemas, err := appDatabaseSchemas(target.folder)
+	if err != nil {
+		return nil, pgwire.NewError("3D000", fmt.Sprintf("database %q: %v", target.name, err))
+	}
+	columns, err := readAppDatabaseColumns(ctx, schemas)
+	if err != nil {
+		return nil, pgwire.NewError("58000", fmt.Sprintf("database %q: %v", target.name, err))
+	}
+	options := g.options
+	options.User = user
+	options.Search = appDatabaseSearchProvider{manager: g.search, database: target.name}
+	options.Log = func(statement string, err error) { logAppDatabaseFailure(target.name, user, statement, err) }
+	return gateway.Open(ctx, gateway.Target{Name: target.name, Schemas: schemas}, access, columns, options)
+}
+
+// logAppDatabaseFailure prints a statement the port refused or could not run, with its error, as PostgreSQL logs a
+// failed statement: what a database tool asks that the port does not answer shows where the host's other lines do
+// ([Queue], [Schedule]).
+func logAppDatabaseFailure(database, user, statement string, err error) {
+	text := []rune(strings.Join(strings.Fields(statement), " "))
+	if len(text) > 2000 {
+		text = append(text[:2000], []rune(" …")...)
+	}
+	fmt.Printf("[database] %s (%s): %v — %s\n", database, user, err, string(text))
+}
+
+// Close closes every cluster's catalog.
+func (g *appDatabaseGateway) Close() error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.closed = true
+	var closeErr error
+	for _, opened := range g.catalogs {
+		closeErr = errors.Join(closeErr, opened.Close())
+	}
+	g.catalogs = nil
+	return errors.Join(closeErr, g.search.Close())
+}
+
+// appDatabaseSchema is a schema file's name: kitwork.db is public, <name>.db the schema <name>.
+var appDatabaseSchema = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
+// appDatabaseSchemas are the schemas of a database: each .db file of its folder.
+func appDatabaseSchemas(folder string) (map[string]string, error) {
+	entries, err := os.ReadDir(folder)
+	if err != nil {
+		return nil, err
+	}
+	schemas := map[string]string{}
+	for _, entry := range entries {
+		name := entry.Name()
+		if !entry.Type().IsRegular() || !strings.HasSuffix(name, ".db") {
+			continue
+		}
+		schema := strings.TrimSuffix(name, ".db")
+		if name == "kitwork.db" {
+			schema = "public"
+		} else if !appDatabaseSchema.MatchString(schema) || schema == "public" || schema == "main" || schema == "temp" {
+			continue
+		}
+		schemas[schema] = filepath.Join(folder, name)
+	}
+	if schemas["public"] == "" {
+		return nil, fmt.Errorf("no kitwork.db")
+	}
+	return schemas, nil
+}
+
+// appDatabaseAccess is what one session's user may do, asked of its cluster's catalog.
+type appDatabaseAccess struct {
+	catalog  *catalog.Catalog
+	user     string
+	database string
+	admin    bool
+	stamp    uint64
+}
+
+func (access *appDatabaseAccess) CanSelect(ctx context.Context, schema, table string) (bool, error) {
+	if access.admin {
+		return true, nil
+	}
+	return access.catalog.CanSelect(ctx, access.user, access.database, schema, table)
+}
+
+func (access *appDatabaseAccess) Command(ctx context.Context, statement string) (string, bool, error) {
+	return access.catalog.Command(ctx, access.user, access.database, statement)
+}
+
+// Current is false once the user's password, roles or grants changed since the session opened: it ends.
+func (access *appDatabaseAccess) Current(ctx context.Context) (bool, error) {
+	stamp, err := access.catalog.Stamp(ctx, access.user)
+	return err == nil && stamp == access.stamp, err
+}
+
+// appDatabaseColumns is what kitwork_columns of each schema file says of its columns (db.sqlite_columns.go in work).
+type appDatabaseColumns map[string]appDatabaseColumn
+
+type appDatabaseColumn struct {
+	kind             string
+	precision, scale int
+}
+
+func (columns appDatabaseColumns) Column(schema, table, column string) (string, int, int, bool) {
+	found, ok := columns[strings.ToLower(schema+"."+table+"."+column)]
+	return found.kind, found.precision, found.scale, ok
+}
+
+// readAppDatabaseColumns reads kitwork_columns of every schema file, read-only; a file without it says nothing.
+func readAppDatabaseColumns(ctx context.Context, schemas map[string]string) (appDatabaseColumns, error) {
+	columns := appDatabaseColumns{}
+	names := make([]string, 0, len(schemas))
+	for schema := range schemas {
+		names = append(names, schema)
+	}
+	sort.Strings(names)
+	for _, schema := range names {
+		if err := readAppDatabaseColumnsOf(ctx, schema, schemas[schema], columns); err != nil {
+			return nil, err
+		}
+	}
+	return columns, nil
+}
+
+func readAppDatabaseColumnsOf(ctx context.Context, schema, path string, columns appDatabaseColumns) error {
+	file, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?mode=ro&_pragma=busy_timeout(5000)")
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	var held int
+	if err := file.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'kitwork_columns'`).Scan(&held); err != nil || held == 0 {
+		return err
+	}
+	rows, err := file.QueryContext(ctx, `SELECT table_name, column_name, kind, precision, scale FROM kitwork_columns`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var table, column string
+		var found appDatabaseColumn
+		if err := rows.Scan(&table, &column, &found.kind, &found.precision, &found.scale); err != nil {
+			return err
+		}
+		columns[strings.ToLower(schema+"."+table+"."+column)] = found
+	}
+	return rows.Err()
 }

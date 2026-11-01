@@ -16,6 +16,8 @@ import (
 	"time"
 
 	kitdbengine "github.com/kitwork/engine/kitdb"
+	requestscope "github.com/kitwork/engine/request"
+	"github.com/kitwork/engine/value"
 )
 
 const (
@@ -164,52 +166,44 @@ func exerciseKitDBReleaseFrontends(journey *kitDBReleaseJourney, evidence *kitDB
 		return fmt.Errorf("local ORM seed transaction: %w", err)
 	}
 
-	batch := []string{
-		"BEGIN",
+	if err := kitDBReleaseTransaction(tenant, "journey.kitdb", []string{
 		"UPDATE products SET price = price + 5 WHERE sku = 'KIT-1'",
 		"INSERT INTO products (id, sku, title, price, stock, status) VALUES ('product_3', 'KIT-3', 'Gamma', 300, 4, 'disabled')",
 		"DELETE FROM products WHERE sku = 'KIT-2'",
-		"COMMIT",
-	}
-	if body, err := kitDBReleaseHranaBatch(server.URL, "journey.kitdb", batch); err != nil {
-		return err
-	} else if bytes.Contains(body, []byte(`"type":"error"`)) {
-		return fmt.Errorf("remote transaction failed: %s", boundedKitDBReleaseBody(body))
+	}); err != nil {
+		return fmt.Errorf("remote transaction failed: %w", err)
 	}
 
-	selected, err := kitDBReleaseHranaExecute(
-		server.URL,
+	selected, err := kitDBReleaseExecute(
+		tenant,
 		"journey.kitdb",
 		"SELECT sku, price, stock, status FROM products ORDER BY sku ASC",
-		true,
 	)
 	if err != nil {
 		return err
 	}
-	if err := requireKitDBReleaseContains(selected, `"KIT-1"`, `"KIT-3"`, `"105"`, `"disabled"`); err != nil {
+	if err := requireKitDBReleaseContains(selected, `"KIT-1"`, `"KIT-3"`, `"price":105`, `"disabled"`); err != nil {
 		return fmt.Errorf("remote select after transaction: %w", err)
 	}
 	if bytes.Contains(selected, []byte(`"KIT-2"`)) {
 		return fmt.Errorf("remote transaction retained deleted KIT-2: %s", boundedKitDBReleaseBody(selected))
 	}
 
-	if _, err := kitDBReleaseHranaExecute(
-		server.URL,
+	if _, err := kitDBReleaseExecute(
+		tenant,
 		"journey.kitdb",
 		"CREATE INDEX products_status_price ON products (status, price)",
-		false,
 	); err != nil {
 		return err
 	}
-	if _, err := kitDBReleaseHranaExecute(
-		server.URL,
+	if _, err := kitDBReleaseExecute(
+		tenant,
 		"journey.kitdb",
 		"PRAGMA index_status(products)",
-		true,
 	); err != nil {
 		return err
 	}
-	if err := waitForKitDBReleaseIndex(server.URL, "journey.kitdb"); err != nil {
+	if err := waitForKitDBReleaseIndex(tenant, "journey.kitdb"); err != nil {
 		return err
 	}
 
@@ -248,11 +242,10 @@ func restartKitDBReleaseSource(journey *kitDBReleaseJourney, _ *kitDBReleaseEvid
 	if err := requireKitDBReleaseContains(status, `"count":2`, `"total":405`, `"stock":8`); err != nil {
 		return fmt.Errorf("catalog-hydrated ORM restart: %w", err)
 	}
-	selected, err := kitDBReleaseHranaExecute(
-		server.URL,
+	selected, err := kitDBReleaseExecute(
+		tenant,
 		"journey.kitdb",
 		"SELECT sku FROM products WHERE status = 'disabled' AND price >= 250 ORDER BY price ASC LIMIT 5",
-		true,
 	)
 	if err != nil {
 		return err
@@ -377,23 +370,21 @@ func reopenKitDBReleaseRestore(journey *kitDBReleaseJourney, evidence *kitDBRele
 	); err != nil {
 		return fmt.Errorf("restored local ORM query: %w", err)
 	}
-	selected, err := kitDBReleaseHranaExecute(
-		server.URL,
+	selected, err := kitDBReleaseExecute(
+		tenant,
 		"restored.kitdb",
 		"SELECT sku, price FROM products WHERE status = 'disabled' ORDER BY price ASC",
-		true,
 	)
 	if err != nil {
 		return err
 	}
-	if err := requireKitDBReleaseContains(selected, `"KIT-3"`, `"300"`); err != nil {
-		return fmt.Errorf("restored Hrana query: %w", err)
+	if err := requireKitDBReleaseContains(selected, `"KIT-3"`, `"price":300`); err != nil {
+		return fmt.Errorf("restored remote query: %w", err)
 	}
-	explained, err := kitDBReleaseHranaExecute(
-		server.URL,
+	explained, err := kitDBReleaseExecute(
+		tenant,
 		"restored.kitdb",
 		"EXPLAIN QUERY PLAN SELECT sku FROM products WHERE status = 'disabled' AND price >= 250 ORDER BY price ASC LIMIT 5",
-		true,
 	)
 	if err != nil {
 		return err
@@ -479,77 +470,77 @@ func kitDBReleaseGET(url string) ([]byte, error) {
 	return body, nil
 }
 
-func kitDBReleaseHranaExecute(serverURL, databaseName, sql string, wantRows bool) ([]byte, error) {
-	return kitDBReleaseHranaRequest(serverURL, databaseName, map[string]any{
-		"baton": nil,
-		"requests": []any{
-			map[string]any{
-				"type": "execute",
-				"stmt": map[string]any{"sql": sql, "want_rows": wantRows},
-			},
-			map[string]any{"type": "close"},
-		},
-	})
-}
-
-func kitDBReleaseHranaBatch(serverURL, databaseName string, statements []string) ([]byte, error) {
-	steps := make([]any, 0, len(statements))
-	for _, sql := range statements {
-		steps = append(steps, map[string]any{
-			"stmt": map[string]any{"sql": sql, "want_rows": false},
-		})
-	}
-	return kitDBReleaseHranaRequest(serverURL, databaseName, map[string]any{
-		"baton": nil,
-		"requests": []any{
-			map[string]any{"type": "batch", "batch": map[string]any{"steps": steps}},
-			map[string]any{"type": "close"},
-		},
-	})
-}
-
-func kitDBReleaseHranaRequest(serverURL, databaseName string, payload any) ([]byte, error) {
-	encoded, err := json.Marshal(payload)
+// kitDBReleaseExecute runs one statement through the KitDB remote SQL engine,
+// the one the PostgreSQL wire runs, in process, on the database the tenant
+// declared served, with the access it declared, inside a request scope as a
+// session's statement is.
+func kitDBReleaseExecute(tenant *Tenant, databaseName, source string) ([]byte, error) {
+	database, readonly, err := kitDBReleaseDatabase(tenant, databaseName)
 	if err != nil {
-		return nil, fmt.Errorf("encode release-gate Hrana request: %w", err)
+		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	request, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodPost,
-		serverURL+"/"+databaseName+"/v3/pipeline",
-		bytes.NewReader(encoded),
+	scope := requestscope.New(tenant, nil, (&http.Request{}).WithContext(ctx))
+	defer scope.Close()
+	result, err := executeKitDBRemoteSQL(
+		ctx, scope, database, source, kitSQLBindings{named: map[string]value.Value{}}, readonly,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("create release-gate Hrana request: %w", err)
+		return nil, fmt.Errorf("release-gate remote SQL %q: %w", source, err)
 	}
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer release-secret")
-	response, err := http.DefaultClient.Do(request)
+	encoded, err := json.Marshal(kitDBRemoteResultMaps(result))
 	if err != nil {
-		return nil, fmt.Errorf("execute release-gate Hrana request: %w", err)
+		return nil, fmt.Errorf("encode release-gate remote SQL rows: %w", err)
 	}
-	defer response.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(response.Body, 2<<20))
-	if err != nil {
-		return nil, fmt.Errorf("read release-gate Hrana response: %w", err)
-	}
-	if response.StatusCode != http.StatusOK || bytes.Contains(body, []byte(`"type":"error"`)) {
-		return nil, fmt.Errorf("release-gate Hrana status %d: %s", response.StatusCode, boundedKitDBReleaseBody(body))
-	}
-	return body, nil
+	return encoded, nil
 }
 
-func waitForKitDBReleaseIndex(serverURL, databaseName string) error {
+// kitDBReleaseTransaction runs statements as one BEGIN ... COMMIT through the
+// remote SQL engine: every statement or none.
+func kitDBReleaseTransaction(tenant *Tenant, databaseName string, statements []string) error {
+	database, readonly, err := kitDBReleaseDatabase(tenant, databaseName)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	scope := requestscope.New(tenant, nil, (&http.Request{}).WithContext(ctx))
+	defer scope.Close()
+	transactionProxy, transaction, err := database.beginKitDBRecordTransaction(scope)
+	if err != nil {
+		return fmt.Errorf("begin release-gate transaction: %w", err)
+	}
+	for _, source := range statements {
+		if _, err := executeKitDBRemoteSQL(
+			ctx, scope, transactionProxy, source, kitSQLBindings{named: map[string]value.Value{}}, readonly,
+		); err != nil {
+			_ = transaction.Rollback()
+			return fmt.Errorf("release-gate transaction statement %q: %w", source, err)
+		}
+	}
+	if _, err := transaction.Commit(); err != nil {
+		return fmt.Errorf("commit release-gate transaction: %w", err)
+	}
+	return nil
+}
+
+func kitDBReleaseDatabase(tenant *Tenant, databaseName string) (*dbProxy, bool, error) {
+	_, config, found := resolveServe(tenant, databaseName)
+	if !found || config.database == nil || config.engine != "kitdb" {
+		return nil, false, fmt.Errorf("release-gate database %q is not declared served", databaseName)
+	}
+	return config.database, config.access != "readwrite", nil
+}
+
+func waitForKitDBReleaseIndex(tenant *Tenant, databaseName string) error {
 	deadline := time.Now().Add(15 * time.Second)
 	var last []byte
 	for {
-		explained, err := kitDBReleaseHranaExecute(
-			serverURL,
+		explained, err := kitDBReleaseExecute(
+			tenant,
 			databaseName,
 			"EXPLAIN QUERY PLAN SELECT sku FROM products WHERE status = 'disabled' AND price >= 250 ORDER BY price ASC LIMIT 5",
-			true,
 		)
 		if err != nil {
 			return err

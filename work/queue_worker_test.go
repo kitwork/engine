@@ -152,10 +152,7 @@ func TestQueueIdleWorkerWritesNothing(t *testing.T) {
 		"localhost/send/router.work": sendRoute,
 	})
 	worker := q.app.queueWorker()
-	resource, err := q.app.runsResource()
-	if err != nil {
-		t.Fatal(err)
-	}
+	resource := q.app.appRunsPlace()
 	idle := func(when string) {
 		t.Helper()
 		writes, polls := resource.writes.Load(), worker.polls.Load()
@@ -268,7 +265,7 @@ func TestQueueWorkerDeletesRunsPastKeep(t *testing.T) {
 	recent := q.serve(t, http.MethodPost, "/send", order("an@example.com", "2", "order:2", ""))["id"].(string)
 	watch.until(t, old, "completed")
 	watch.until(t, recent, "completed")
-	if err := (appRuns{tenant: q.app}).Write(func(db queuestore.SQL) error {
+	if err := q.app.runsDatabase(queueKind, nil, nil).Write(func(db queuestore.SQL) error {
 		_, err := db.Exec(`UPDATE kitwork_runs SET finished_at = '2000-01-01T00:00:00.000Z' WHERE id = $1`, old)
 		return err
 	}); err != nil {

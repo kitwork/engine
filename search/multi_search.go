@@ -148,7 +148,10 @@ func (index *Index) searchMultiMatch(
 	for term, value := range prepared.terms {
 		key := multiFrequencyKey(prepared.fieldIDs, value)
 		frequencyKeys[term] = key
-		frequency, cached := index.multiFreq.get(key)
+		frequency, cached, err := index.cachedMultiFrequency(ctx, prepared, term, key)
+		if err != nil {
+			return nil, err
+		}
 		if cached {
 			documentFrequencies[term] = frequency
 		} else {
@@ -238,17 +241,9 @@ func (segment *Segment) prepareMultiTermRecords(
 	complete := true
 	var dictionaryBuffer []byte
 	for termIndex, term := range prepared.terms {
-		fields := make([]multiFieldTermRecord, 0, len(prepared.fieldIDs))
-		for fieldIndex, fieldID := range prepared.fieldIDs {
-			record, found, err := segment.lookupTermBuffered(fieldID, term, &dictionaryBuffer)
-			if err != nil {
-				return nil, nil, false, err
-			}
-			if found {
-				fields = append(fields, multiFieldTermRecord{
-					fieldIndex: fieldIndex, fieldID: fieldID, record: record,
-				})
-			}
+		fields, err := segment.multiTermFields(prepared, term, &dictionaryBuffer)
+		if err != nil {
+			return nil, nil, false, err
 		}
 		if len(fields) == 0 {
 			complete = false
@@ -272,6 +267,27 @@ func (segment *Segment) prepareMultiTermRecords(
 		frequencies[termIndex] = frequency
 	}
 	return records, frequencies, complete, nil
+}
+
+// multiTermFields looks term up in every selected field of this segment.
+func (segment *Segment) multiTermFields(
+	prepared preparedMultiMatchQuery,
+	term string,
+	dictionaryBuffer *[]byte,
+) ([]multiFieldTermRecord, error) {
+	fields := make([]multiFieldTermRecord, 0, len(prepared.fieldIDs))
+	for fieldIndex, fieldID := range prepared.fieldIDs {
+		record, found, err := segment.lookupTermBuffered(fieldID, term, dictionaryBuffer)
+		if err != nil {
+			return nil, err
+		}
+		if found {
+			fields = append(fields, multiFieldTermRecord{
+				fieldIndex: fieldIndex, fieldID: fieldID, record: record,
+			})
+		}
+	}
+	return fields, nil
 }
 
 func approximateMultiDocumentFrequency(records []multiFieldTermRecord, documents uint32) uint32 {

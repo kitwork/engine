@@ -162,10 +162,22 @@ func Open(path string) (*Reader, error) {
 // platforms whose positioned reads are serialized per handle. All handles are
 // verified to reference the same file before any section is returned.
 func OpenWithReadHandles(path string, handles int) (*Reader, error) {
+	return openWithReadHandles(path, handles, os.Open)
+}
+
+// OpenRenamable is OpenWithReadHandles with handles that let the file be
+// renamed while they read it (FILE_SHARE_DELETE on Windows). A compacted
+// container opened this way can be moved over the path of the one it
+// replaces once that one is closed, without pausing its own readers.
+func OpenRenamable(path string, handles int) (*Reader, error) {
+	return openWithReadHandles(path, handles, openRenamable)
+}
+
+func openWithReadHandles(path string, handles int, openFile func(string) (*os.File, error)) (*Reader, error) {
 	if handles < 1 || handles > maximumReadHandles {
 		return nil, fmt.Errorf("snapshot: read handles must be between 1 and %d", maximumReadHandles)
 	}
-	file, err := os.Open(path)
+	file, err := openFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +197,7 @@ func OpenWithReadHandles(path string, handles int) (*Reader, error) {
 		return nil, err
 	}
 	for len(files) < handles {
-		candidate, openErr := os.Open(path)
+		candidate, openErr := openFile(path)
 		if openErr != nil {
 			closeReadHandles(files)
 			return nil, openErr

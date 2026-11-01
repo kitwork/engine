@@ -15,8 +15,9 @@ import (
 // asc, one, like, search, sum, count, avg, min, max).
 //
 //	import { connection, connect } from "kitwork/database";
-//	export const db = connection().schema({ orders });                    // the app's own: KitDB in its folder
-//	export const warehouse = connection("warehouse").schema({ stocks });  // a name of the host's app.databases
+//	export const db = connection().tables({ orders });                    // the app's own: .database/application/kitwork.db
+//	export const billing = connection().schema("billing").tables({ invoices });  // a schema of it: billing.db beside it
+//	export const warehouse = connection("warehouse").tables({ stocks });  // a name of the host's app.databases
 //	export const crm = connect({ postgresql: environment.CRM_URL });      // a database outside the app: query()
 //
 // The older spellings of the module (database.kitdb(…), database.text(), database.entity(), database.where(…),
@@ -34,7 +35,7 @@ type DatabaseModule struct {
 }
 
 // Connection is connection(): the app's database, or with a name one the host declared in app.databases;
-// both are declared with .schema({ bảng }).
+// both are declared with .tables({ bảng }), after .schema("tên") for a schema other than public.
 func (m *DatabaseModule) Connection() value.Value {
 	tenant := m.tenant
 	return value.NewFunc(func(args ...value.Value) value.Value {
@@ -88,39 +89,65 @@ func lambdaWord(word string) value.Value {
 	})
 }
 
-// ConnectionDeclaration is connection() before its action: .schema({ bảng }) declares the database. name
-// is the host's name of it (connection("warehouse")); "" is the app's own.
+// ConnectionDeclaration is connection() before its action: .tables({ bảng }) declares the database. name
+// is the host's name of it (connection("warehouse")); "" is the app's own. schema is what .schema("billing")
+// picked (KITWORK_DATABASE.md mục 1, "Schema"); "" is public.
 type ConnectionDeclaration struct {
 	tenant *Tenant
 	name   string
+	schema string
 }
 
 func (c *ConnectionDeclaration) OnGet(key string) value.Value {
-	return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("connection().%s không có: khai connection() [.policy]* [.before]* [.after]* .schema({ bảng })", key))
+	return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf(`connection().%s không có: khai connection() [.schema("tên")] [.policy]* [.before]* [.after]* .tables({ bảng })`, key))
 }
 
 func (c *ConnectionDeclaration) OnCompare(_ string, _ value.Value) value.Value { return value.NewNil() }
 
 func (c *ConnectionDeclaration) OnInvoke(method string, args ...value.Value) value.Value {
 	switch method {
+	case "tables":
+		return c.tables(args)
 	case "schema":
-		return c.schema(args)
+		return c.pickSchema(args)
 	case "policy", "before", "after":
 		return value.InvalidFailure(value.UnsupportedCode, fmt.Sprintf(".%s(…) chưa có trong engine hôm nay (lát 6 của KITWORK_DATABASE.md)", method))
 	}
 	return c.OnGet(method)
 }
 
-// schema declares the database: the tables by their names, each a struct of kitwork/schema. Nothing
-// opens: the app's KitDB file, or the host's SQLite file of a named connection, opens when the first
-// statement runs.
-func (c *ConnectionDeclaration) schema(args []value.Value) value.Value {
+// pickSchema is .schema("billing"): the schema the tables go in, a file of its own beside the public one.
+// Written once, right after connection(…); .schema({ bảng }), the older spelling of .tables, says so.
+func (c *ConnectionDeclaration) pickSchema(args []value.Value) value.Value {
+	if len(args) == 1 && args[0].K == value.Map {
+		return value.InvalidFailure(value.InvalidArgumentCode, statement.TablesRenamed)
+	}
+	if c.schema != "" {
+		return value.InvalidFailure(value.InvalidArgumentCode, `.schema("tên") viết một lần, ngay sau connection(…)`)
+	}
+	if len(args) != 1 || args[0].K != value.String {
+		return value.InvalidFailure(value.InvalidArgumentCode, statement.SchemaName(""))
+	}
+	name := args[0].String()
+	if refused := statement.SchemaName(name); refused != "" {
+		return value.InvalidFailure(value.InvalidArgumentCode, refused)
+	}
+	if c.name != "" {
+		return value.InvalidFailure(value.UnsupportedCode, fmt.Sprintf(`connection(%q).schema(…) chưa có trong engine hôm nay: schema chạy trên database của app, connection()`, c.name))
+	}
+	return value.Value{K: value.Proxy, V: &ConnectionDeclaration{tenant: c.tenant, name: c.name, schema: name}}
+}
+
+// tables declares the database: the tables by their names, each a table of kitwork/schema. Nothing opens:
+// the app's SQLite file of the schema (appDatabasePath), or the host's SQLite file of a named connection,
+// opens when the first statement runs.
+func (c *ConnectionDeclaration) tables(args []value.Value) value.Value {
 	if len(args) != 1 || args[0].K != value.Map {
-		return value.InvalidFailure(value.InvalidArgumentCode, "schema nhận một object bảng: .schema({ orders })")
+		return value.InvalidFailure(value.InvalidArgumentCode, "tables nhận một object bảng: .tables({ orders })")
 	}
 	tables := args[0].Map()
 	if len(tables) == 0 {
-		return value.InvalidFailure(value.InvalidArgumentCode, "schema cần ít nhất một bảng")
+		return value.InvalidFailure(value.InvalidArgumentCode, "tables cần ít nhất một bảng")
 	}
 	names := make([]string, 0, len(tables))
 	for name := range tables {
@@ -136,12 +163,12 @@ func (c *ConnectionDeclaration) schema(args []value.Value) value.Value {
 		}
 		definition, ok := tables[name].V.(*StructDef)
 		if !ok || definition == nil {
-			return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("bảng %s là một struct: const %s = struct({ … }) của kitwork/schema", name, name))
+			return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("bảng %s là một table: const %s = table({ … }) của kitwork/schema", name, name))
 		}
 		primary := 0
 		for column, spec := range definition.columns {
 			if !spec.vocabulary {
-				return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf(`bảng %s: cột %s viết bằng kiểu của kitwork/schema: import { struct, text } from "kitwork/schema"`, name, column))
+				return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf(`bảng %s: cột %s viết bằng kiểu của kitwork/schema: import { table, text } from "kitwork/schema"`, name, column))
 			}
 			if spec.declareErr != "" {
 				return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("bảng %s, cột %s: %s", name, column, spec.declareErr))
@@ -157,12 +184,29 @@ func (c *ConnectionDeclaration) schema(args []value.Value) value.Value {
 	if c.name != "" {
 		return c.catalogSchema(args[0])
 	}
-	proxy := declareDbProxy(c.tenant, nil, "kitdb", value.New(kitDBApplicationName), args[0],
-		value.New(map[string]value.Value{"migrate": value.New(true)}))
+	proxy := declareDbProxy(c.tenant, nil, "sqlite", value.New(appDatabaseName(c.schema)), args[0])
 	if proxy.K != value.Proxy {
 		return proxy
 	}
-	return value.Value{K: value.Proxy, V: newManagedDatabase(proxy.V.(*dbProxy))}
+	own := proxy.V.(*dbProxy)
+	own.sqlitePath = appDatabasePath(c.tenant, c.schema)
+	return value.Value{K: value.Proxy, V: newManagedDatabase(own)}
+}
+
+// appDatabaseName is the name a schema of the app's database is registered under: @application for public,
+// @application/billing for .schema("billing"). @ marks a name as the engine's, which no site file takes.
+func appDatabaseName(schema string) string {
+	if schema == "" {
+		return kitDBApplicationName
+	}
+	return kitDBApplicationName + "/" + schema
+}
+
+// appDatabasePath is the SQLite file a schema of the app's database lives in (KITWORK_KITDB.md mục 3,
+// 29/10/2026): .database/application/kitwork.db for public, billing.db beside it for .schema("billing"). The
+// KitDB file the app's database was before, application.kitdb, is left as it is.
+func appDatabasePath(t *Tenant, schema string) string {
+	return t.resolveApp(".database", "application", statement.SchemaFileName(schema))
 }
 
 // catalogSchema declares the tables of connection("tên") on the database the host declared under that

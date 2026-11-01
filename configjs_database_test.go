@@ -124,7 +124,7 @@ app.sqlite("main", "a.db").sqlite("main", "b.db").web({ port: 8080 });`)
 func TestAppDatabaseSurfaceAndUntypedConnection(t *testing.T) {
 	file := writeServerJS(t, `import { app } from "kitwork";
 app
-  .database("./.database/", { memory: "64mb", concurrency: 2, warm: ["demo"] })
+  .database("./.database/", { port: 5455, password: "p", concurrency: 2 })
   .database({ alias: "system", type: "postgres", host: "h", port: 5432, user: "u", password: "p", name: "n" })
   .sqlite("local", "x.db");`)
 	raw, err := evalConfigJS(file)
@@ -132,7 +132,7 @@ app
 		t.Fatalf("a database-only manifest declares a surface: %v", err)
 	}
 	owned, _ := raw["owned_databases"].([]interface{})
-	if len(owned) != 1 || owned[0].(map[string]interface{})["path"] != "./.database/" || owned[0].(map[string]interface{})["memory"] != "64mb" {
+	if len(owned) != 1 || owned[0].(map[string]interface{})["path"] != "./.database/" || owned[0].(map[string]interface{})["concurrency"] != float64(2) {
 		t.Fatalf("owned_databases = %v", raw["owned_databases"])
 	}
 	dbs, _ := raw["databases"].([]interface{})
@@ -143,7 +143,7 @@ app
 
 func TestAppDatabaseAcceptsCanonicalOwnedObject(t *testing.T) {
 	file := writeServerJS(t, `import { app } from "kitwork";
-app.database({ alias: "main", path: "./main.kitdb", memory: "64mb", concurrency: 2 });`)
+app.database({ path: "./.database/", port: 5455, password: "p", concurrency: 2 });`)
 	raw, err := evalConfigJS(file)
 	if err != nil {
 		t.Fatal(err)
@@ -153,14 +153,14 @@ app.database({ alias: "main", path: "./main.kitdb", memory: "64mb", concurrency:
 		t.Fatalf("owned databases = %v", owned)
 	}
 	declaration := owned[0].(map[string]interface{})
-	if declaration["alias"] != "main" || declaration["path"] != "./main.kitdb" {
+	if declaration["path"] != "./.database/" || declaration["port"] != float64(5455) {
 		t.Fatalf("owned declaration = %v", declaration)
 	}
 	cfg, err := ParseConfig(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.AppDatabases) != 1 || cfg.AppDatabases[0].Alias != "main" {
+	if len(cfg.AppDatabases) != 1 || cfg.AppDatabases[0].Port != 5455 || cfg.AppDatabases[0].Concurrency != 2 {
 		t.Fatalf("parsed owned databases = %+v", cfg.AppDatabases)
 	}
 }

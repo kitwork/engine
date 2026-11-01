@@ -372,7 +372,7 @@ func TestStorageIsTheAppsAndOnlyTheApps(t *testing.T) {
 // expiry; a value that has expired is gone (mục 2, 6).
 //
 // CONTROL: with diskPlace.set writing no file, the value written was not there to read: "written = {…
-// \"disk\":null …}"; with datastoreAccess.set not committing, "written = {\"code\":null, … \"flag\":null, …}".
+// \"disk\":null …}"; with datastoreAccess.set writing no row, "written = {\"code\":null, … \"flag\":null, …}".
 func TestStorageDiskAndDatastoreSurviveARestart(t *testing.T) {
 	advance := storageTestClock(t)
 	root := writeSite(t, map[string]string{
@@ -402,10 +402,13 @@ func TestStorageDiskAndDatastoreSurviveARestart(t *testing.T) {
 	if body := serve("/keep?write=1"); body != `{"code":"123456","disk":{"bytes":3},"flag":{"newFlow":true},"ttl":60000}` {
 		t.Fatalf("written = %s", body)
 	}
-	for _, place := range []string{filepath.Join("disk"), filepath.Join("storage", datastoreFile)} {
+	for _, place := range []string{filepath.Join("disk"), filepath.Join("storage", "kitwork.db")} {
 		if _, err := os.Stat(filepath.Join(root, "test", ".database", place)); err != nil {
 			t.Fatalf(".database/%s of the app: %v", place, err)
 		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "test", ".database", "storage", datastoreLegacyFile)); !os.IsNotExist(err) {
+		t.Fatalf(".database/storage/%s of the app: %v, want none (datastore() is SQLite since 30/10/2026)", datastoreLegacyFile, err)
 	}
 	advance(30 * time.Second)
 	if body := serve("/keep"); body != `{"code":"123456","disk":{"bytes":3},"flag":{"newFlow":true},"ttl":30000}` {
@@ -769,8 +772,8 @@ func listing(t *testing.T, root string) []string {
 // place full of values that never expire refuses each further write without reading all it holds again,
 // and sweeps again once a value it keeps has expired (mục 9, 10.5).
 //
-// CONTROL: with storageSweepDue always true, every refused write swept again: "disk swept 4 times, want 2",
-// "datastore swept 4 times, want 1".
+// CONTROL: with storageSweepDue always true, every refused write of disk swept again: "disk swept 4 times,
+// want 2"; with datastorePlace.expiredHeld always true, "datastore swept 4 times, want 1".
 func TestStorageFullPlaceSweepsOnlyWhenSomethingCanHaveExpired(t *testing.T) {
 	advance := storageTestClock(t)
 	savedDisk, savedData := storageDiskKeys, storageDatastoreKeys
@@ -796,7 +799,7 @@ func TestStorageFullPlaceSweepsOnlyWhenSomethingCanHaveExpired(t *testing.T) {
 		}
 		steps := []struct{ key, expire, want string }{
 			{"a", "10s", `"ok"`}, {"b", "", `"ok"`},
-			{"c", "", `"TOO_LARGE"`}, // full: disk has not read its files yet (a sweep); datastore counted a's expiry
+			{"c", "", `"TOO_LARGE"`}, // full: disk has not read its files yet (a sweep); datastore's index holds no expired row
 			{"c", "", `"TOO_LARGE"`}, // a has not expired: no sweep
 		}
 		for _, step := range steps {

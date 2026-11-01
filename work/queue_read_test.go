@@ -239,12 +239,12 @@ export const slow = queue.job((context) => {
 	}
 }
 
-// The runs are the app's data, in its own KitDB file, never in a database of the host: with a system
-// database connected (a host's app.postgresql({ alias: "system" }) is often a server other apps share),
-// a send and its run leave nothing there. The engine's tables share the file with the app's own tables:
-// the app's ORM still inserts and reads its orders, after the app booted again too, and the ORM can read
-// the engine's tables in the file's catalogue (its maintenance reads every table). CONTROL: the order
-// and the run are both in the app's file.
+// The runs are the app's data, in its own database (the SQLite file .database/application/kitwork.db since
+// 29/10/2026), never in a database of the host: with a system database connected (a host's
+// app.postgresql({ alias: "system" }) is often a server other apps share), a send and its run leave nothing
+// there. The engine's tables share the file with the app's own tables: the app still inserts and reads its
+// orders, after the app booted again too, and its handle never takes the engine's tables in. CONTROL: the
+// order and the run are both in the app's file.
 func TestQueueRunsLiveInTheAppDatabase(t *testing.T) {
 	system, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -259,10 +259,10 @@ func TestQueueRunsLiveInTheAppDatabase(t *testing.T) {
 	files := map[string]string{
 		".shared/email.work":       emailLibrary,
 		".shared/queue/camOn.work": camOnJob,
-		".shared/schema/shop.work": `import { struct, id, text, integer } from "kitwork/schema";
+		".shared/schema/shop.work": `import { table, id, text, integer } from "kitwork/schema";
 import { connection } from "kitwork/database";
-const orders = struct({ id: id(), email: text(), amount: integer() });
-export const db = connection().schema({ orders });
+const orders = table({ id: id(), email: text(), amount: integer() });
+export const db = connection().tables({ orders });
 `,
 		"localhost/order/router.work": `import * as router from "kitwork/router";
 import { db } from "app/.shared/schema/shop.work";
@@ -288,21 +288,17 @@ router.get((context) => context.json({ orders: db.list((orders) => orders.amount
 		t.Fatalf("the system database has %d tables (%v), want none", tables, err)
 	}
 
-	managed, err := kitDBForRequest(q.app, kitDBApplicationName, nil).database()
-	if err != nil {
-		t.Fatal(err)
-	}
-	catalog, err := managed.database.Catalog()
-	managed.Release()
-	if err != nil {
-		t.Fatal(err)
-	}
 	var names []string
-	for _, entry := range catalog.Structs {
-		names = append(names, entry.Name)
-		if _, err := decodeKitDBCatalog(entry.Definition, entry.Name); err != nil {
-			t.Errorf("the ORM cannot read %s: %v", entry.Name, err)
+	err = q.app.runsDatabase(queueKind, nil, nil).Read(func(db queuestore.SQL) error {
+		rows, err := db.Query(`SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name`)
+		if err != nil {
+			return err
 		}
+		names, err = textRows(rows)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 	if joined := strings.Join(names, ","); !strings.Contains(joined, "orders") || !strings.Contains(joined, "kitwork_runs") || !strings.Contains(joined, "kitwork_definitions") {
 		t.Fatalf("the app's file holds %v, want orders beside kitwork_runs and kitwork_definitions", names)
@@ -319,12 +315,11 @@ router.get((context) => context.json({ orders: db.list((orders) => orders.amount
 		t.Fatalf("runs after the restart = %d, want 2", len(runs))
 	}
 
-	// the app's handle never takes the engine's tables in as its own, neither when it first reads the
-	// file's catalogue nor when it reads it again
+	// the app's handle never takes the engine's tables in as its own
 	var proxy *dbProxy
 	schemaRegMu.Lock()
 	for key, registered := range schemaReg {
-		if strings.HasPrefix(key, tenantScopeKey(again.site)+"|kitdb|") {
+		if strings.HasPrefix(key, tenantScopeKey(again.site)+"|sqlite|"+kitDBApplicationName) {
 			proxy = registered
 		}
 	}
@@ -332,22 +327,12 @@ router.get((context) => context.json({ orders: db.list((orders) => orders.amount
 	if proxy == nil {
 		t.Fatal("the site declared no app database")
 	}
-	engineTables := func(when string) {
-		proxy.schemaMu.RLock()
-		defer proxy.schemaMu.RUnlock()
-		for name := range proxy.structs {
-			if strings.HasPrefix(name, "kitwork_") {
-				t.Errorf("%s the app's handle holds the engine's table %s", when, name)
-			}
-		}
-		if proxy.structs["orders"] == nil {
-			t.Errorf("%s the app's handle lost orders", when)
+	for name := range proxy.tables {
+		if strings.HasPrefix(name, "kitwork_") {
+			t.Errorf("the app's handle holds the engine's table %s", name)
 		}
 	}
-	engineTables("at its first read")
-	proxy.markKitDBCatalogPending()
-	if err := proxy.refreshKitDBCatalogDefinitions(); err != nil {
-		t.Fatal(err)
+	if proxy.tables["orders"] == nil {
+		t.Error("the app's handle lost orders")
 	}
-	engineTables("read again")
 }

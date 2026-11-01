@@ -15,25 +15,20 @@ import (
 	kitdbnode "github.com/kitwork/engine/kitdb/node"
 )
 
-// Two apps, each with its database declared in its .shared/schema/ (KITWORK_DATABASE.md mục 1): two KitDB
-// files, app/.database/application/application.kitdb, opened through the host's one bounded node manager.
-// With room for one open database, the second request evicts the first app's file.
+// Two apps, each with a job and the KitDB file its runs were in until 29/10/2026,
+// app/.database/application/application.kitdb: boot of each app opens that file, through the host's one
+// bounded node manager, to say the runs left in it (work/runs_database.go, appRunsLeftBehind). With room for one
+// open database, the second app's boot evicts the first app's file. (Since 29–30/10/2026 the app's database and
+// its datastore are SQLite files; the old KitDB file at boot is what a tenant still opens through the manager.)
 func TestEngineOwnsOneBoundedKitDBNodeManager(t *testing.T) {
 	root := t.TempDir()
-	app := func(identity, domain, table, answer string) {
+	app := func(identity, domain string) {
 		files := map[string]string{
-			filepath.Join(identity, ".shared", "schema", "data.work"): `import { struct, id, text } from "kitwork/schema";
-import { connection } from "kitwork/database";
-const ` + table + ` = struct({ id: id(), name: text() });
-export const db = connection().schema({ ` + table + ` });
-`,
 			filepath.Join(identity, domain, "router.work"): `import * as router from "kitwork/router";
-import { db } from "app/.shared/schema/data.work";
-router.get((context) => {
-  const name = "` + answer + `";
-  db.insert((` + table + `) => ({ name }));
-  return context.text(name);
-});
+router.get((context) => context.text("` + identity + `"));
+`,
+			filepath.Join(identity, ".shared", "queue", "ping.work"): `import * as queue from "kitwork/queue";
+export const ping = queue.job((context) => {});
 `,
 		}
 		for name, source := range files {
@@ -44,9 +39,20 @@ router.get((context) => {
 				t.Fatal(err)
 			}
 		}
+		legacy := filepath.Join(root, identity, ".database", "application", "application.kitdb")
+		if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		database, err := kitdbengine.Open(legacy)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := database.Close(); err != nil {
+			t.Fatal(err)
+		}
 	}
-	app("alpha", "localhost", "alpha", "first")
-	app("beta", "second.localhost", "beta", "second")
+	app("alpha", "localhost")
+	app("beta", "second.localhost")
 
 	engine := New(root, 0, false, "")
 	if err := engine.SetKitDBNodeLimits(kitdbnode.Limits{
@@ -57,20 +63,19 @@ router.get((context) => {
 		t.Fatal(err)
 	}
 
-	requestKitDBNodeRoute(t, engine, "localhost", "first")
+	if started := engine.StartAppSchedulers(); started != 2 {
+		engine.Close()
+		t.Fatalf("apps started = %d, want 2", started)
+	}
 	stats := engine.KitDBNodeStats()
 	if stats.ManagedDatabases != 1 || stats.IdleDatabases != 1 || stats.ActiveLeases != 0 ||
-		stats.ReservedPageCacheBytes != 64<<10 || stats.Opens != 1 {
+		stats.ReservedPageCacheBytes != 64<<10 || stats.Evictions != 1 || stats.Opens != 2 {
 		engine.Close()
-		t.Fatalf("first request node stats = %#v", stats)
+		t.Fatalf("node stats after both boots = %#v", stats)
 	}
-	requestKitDBNodeRoute(t, engine, "second.localhost", "second")
-	stats = engine.KitDBNodeStats()
-	if stats.ManagedDatabases != 1 || stats.IdleDatabases != 1 || stats.Evictions != 1 || stats.Opens != 2 {
-		engine.Close()
-		t.Fatalf("second request node stats = %#v", stats)
-	}
+	requestKitDBNodeRoute(t, engine, "localhost", "alpha")
 
+	// the apps boot in the order they are found (alpha, then beta): beta's file is the one kept open
 	firstPath := filepath.Join(root, "alpha", ".database", "application", "application.kitdb")
 	first, err := kitdbengine.Open(firstPath)
 	if err != nil {

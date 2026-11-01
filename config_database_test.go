@@ -68,28 +68,24 @@ func TestParseConfigPreservesNestedDatabaseAliases(t *testing.T) {
 	}
 }
 
-func TestParseConfigRejectsAliasSharedByExternalAndOwnedDatabase(t *testing.T) {
+// app.database no longer names a database for the process (30/10/2026, the port runs on SQLite): an alias is an
+// error saying why, and the host has one database port, so a second app.database is refused.
+func TestParseConfigRefusesAnOwnedAliasAndASecondPort(t *testing.T) {
 	_, err := ParseConfig(map[string]interface{}{
-		"databases": []interface{}{
-			map[string]interface{}{"alias": "Main", "type": "sqlite", "name": "external.db"},
-		},
 		"owned_databases": []interface{}{
-			map[string]interface{}{"alias": "main", "path": "owned.kitdb"},
+			map[string]interface{}{"alias": "main", "path": "./.database/", "port": float64(5455), "password": "p"},
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), `alias "main"`) {
-		t.Fatalf("shared alias must be rejected by name, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), `option "alias" is gone`) {
+		t.Fatalf("an owned alias must be refused saying why, got %v", err)
 	}
-}
-
-func TestParseConfigRejectsDuplicateOwnedDatabaseAliases(t *testing.T) {
-	_, err := ParseConfig(map[string]interface{}{
+	_, err = ParseConfig(map[string]interface{}{
 		"owned_databases": []interface{}{
-			map[string]interface{}{"alias": "Main", "path": "first.kitdb"},
-			map[string]interface{}{"alias": "main", "path": "second.kitdb"},
+			map[string]interface{}{"path": "./first/", "port": float64(5455), "password": "p"},
+			map[string]interface{}{"path": "./second/", "port": float64(5456), "password": "p"},
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), `alias "main"`) {
-		t.Fatalf("duplicate owned alias must be rejected by name, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "the host has one database port") {
+		t.Fatalf("a second app.database must be refused, got %v", err)
 	}
 }

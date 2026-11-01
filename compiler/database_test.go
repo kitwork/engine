@@ -15,12 +15,12 @@ import (
 )
 
 // shopSchema is the schema of KITWORK_DATABASE.md's slice 1, as the spec writes it.
-const shopSchema = `import { struct, id, text, decimal, date, timestamp } from "kitwork/schema";
+const shopSchema = `import { table, id, text, decimal, date, timestamp } from "kitwork/schema";
 import { connection } from "kitwork/database";
 
-const orders = struct({ id: id(), email: text(), item: text(), amount: decimal(12, 2), note: text().nullable(), day: date().index(), createdAt: timestamp().created() });
+const orders = table({ id: id(), email: text(), item: text(), amount: decimal(12, 2), note: text().nullable(), day: date().index(), createdAt: timestamp().created() });
 
-export const db = connection().schema({ orders });
+export const db = connection().tables({ orders });
 `
 
 // databaseApp writes an app with the shop schema and files (paths from the app's folder; a file named
@@ -328,13 +328,13 @@ func TestDatabaseGrammarErrors(t *testing.T) {
 func TestDatabaseSchemaModuleRules(t *testing.T) {
 	route := importDB + "const all = db.list((orders) => orders);\n"
 	schema := func(columns, declaration string) string {
-		return "import { struct, id, text, decimal, date, timestamp, kitid, number, bigint, computed } from \"kitwork/schema\";\n" +
+		return "import { table, id, text, decimal, date, timestamp, kitid, number, bigint, computed } from \"kitwork/schema\";\n" +
 			"import { connection, connect } from \"kitwork/database\";\n" +
-			"const users = struct({ id: id(), name: text() });\n" +
-			"const orders = struct({ " + columns + " });\n" +
+			"const users = table({ id: id(), name: text() });\n" +
+			"const orders = table({ " + columns + " });\n" +
 			declaration + "\n"
 	}
-	exported := "export const db = connection().schema({ orders });"
+	exported := "export const db = connection().tables({ orders });"
 	columns := "id: id(), email: text()"
 	for _, test := range []struct {
 		name, source, marker, want string
@@ -345,35 +345,46 @@ func TestDatabaseSchemaModuleRules(t *testing.T) {
 		{"bigint", schema("id: id(), total: bigint()", exported), "bigint()", "bigint() chưa có trong engine hôm nay (lát 9)"},
 		{"computed", schema("id: id(), total: computed((orders) => 1)", exported), "computed(", "computed() chưa có trong engine hôm nay (lát 9)"},
 		{"foreign key", schema("id: id(), userId: users.id", exported), ".id", "khoá ngoại users.id chưa có trong engine hôm nay (lát 5)"},
-		{"connection(application)", schema(columns, `export const db = connection("application").schema({ orders });`), `"application"`, `connection("application") không có: database của app là connection() không tên`},
-		{"connection(storage)", schema(columns, `export const db = connection("storage").schema({ orders });`), `"storage"`, `"storage" là tên dành cho datastore()`},
-		{"connection(files)", schema(columns, `export const db = connection("files").schema({ orders });`), `"files"`, `"files" là tên dành cho nơi lưu file dùng chung`},
-		{"connection(name) not a string", schema(columns, "export const db = connection(`w`).schema({ orders });"), "connection(`", `connection nhận tên database viết bằng chuỗi`},
-		{"connection with two names", schema(columns, `export const db = connection("a", "b").schema({ orders });`), `connection("a"`, `connection nhận một tên`},
-		{"policy", schema(columns, `export const db = connection().policy((orders, session) => true).schema({ orders });`), "policy", ".policy(…) chưa có trong engine hôm nay (lát 6)"},
-		{"connect sqlite", schema(columns, "export const db = connection().schema({ orders });\nexport const crm = connect({ sqlite: \"x\" });"), "sqlite:", "connect({ sqlite: … }) không có"},
-		{"connect unknown connector", schema(columns, "export const db = connection().schema({ orders });\nexport const crm = connect({ redis: \"x\" });"), "redis:", "connect({ redis: … }): connect nhận một object có một bộ nối"},
-		{"connect two connectors", schema(columns, "export const db = connection().schema({ orders });\nexport const crm = connect({ postgresql: \"x\", mysql: \"y\" });"), "connect({", "connect nhận một object có một bộ nối"},
-		{"connect with a schema", schema(columns, "export const db = connection().schema({ orders });\nexport const crm = connect({ postgresql: \"x\" }).schema({ users });"), "schema({ users })", "connect(…) không có .schema: database ngoài là của người khác, chỉ có crm.query(sql, [giá trị])"},
-		{"connect not exported", schema(columns, "export const db = connection().schema({ orders });\nconst crm = connect({ postgresql: \"x\" });"), "crm = connect", "database crm khai mà không export"},
-		{"not exported", schema(columns, `const db = connection().schema({ orders });`), "db = connection", "database db khai mà không export"},
-		{"session table", schema(columns, `export const db = connection().schema({ session: orders });`), "session:", "session là tên dành riêng"},
-		{"kitwork_ table", schema(columns, `export const db = connection().schema({ kitwork_x: orders });`), "kitwork_x", "tiền tố kitwork_ hay _kitwork_ (viết hoa hay thường) là của bảng engine"},
-		{"KITWORK_ table", schema(columns, `export const db = connection("jobs").schema({ KITWORK_RUNS: orders });`), "KITWORK_RUNS", "KITWORK_RUNS: tiền tố kitwork_ hay _kitwork_ (viết hoa hay thường) là của bảng engine"},
-		{"_kitwork_ table", schema(columns, `export const db = connection("jobs").schema({ _kitwork_migrations: orders });`), "_kitwork_migrations", "_kitwork_migrations: tiền tố kitwork_ hay _kitwork_ (viết hoa hay thường) là của bảng engine"},
-		{"a table twice in two cases", schema(columns, `export const db = connection().schema({ orders, Orders: users });`), "Orders:", "bảng Orders khai hai lần: orders là cùng tên, tên bảng không phân biệt chữ hoa, thường"},
+		{"connection(application)", schema(columns, `export const db = connection("application").tables({ orders });`), `"application"`, `connection("application") không có: database của app là connection() không tên`},
+		{"connection(storage)", schema(columns, `export const db = connection("storage").tables({ orders });`), `"storage"`, `"storage" là tên dành cho datastore()`},
+		{"connection(files)", schema(columns, `export const db = connection("files").tables({ orders });`), `"files"`, `"files" là tên dành cho nơi lưu file dùng chung`},
+		{"connection(name) not a string", schema(columns, "export const db = connection(`w`).tables({ orders });"), "connection(`", `connection nhận tên database viết bằng chuỗi`},
+		{"connection with two names", schema(columns, `export const db = connection("a", "b").tables({ orders });`), `connection("a"`, `connection nhận một tên`},
+		{"policy", schema(columns, `export const db = connection().policy((orders, session) => true).tables({ orders });`), "policy", ".policy(…) chưa có trong engine hôm nay (lát 6)"},
+		{"connect sqlite", schema(columns, "export const db = connection().tables({ orders });\nexport const crm = connect({ sqlite: \"x\" });"), "sqlite:", "connect({ sqlite: … }) không có"},
+		{"connect unknown connector", schema(columns, "export const db = connection().tables({ orders });\nexport const crm = connect({ redis: \"x\" });"), "redis:", "connect({ redis: … }): connect nhận một object có một bộ nối"},
+		{"connect two connectors", schema(columns, "export const db = connection().tables({ orders });\nexport const crm = connect({ postgresql: \"x\", mysql: \"y\" });"), "connect({", "connect nhận một object có một bộ nối"},
+		{"connect with tables", schema(columns, "export const db = connection().tables({ orders });\nexport const crm = connect({ postgresql: \"x\" }).tables({ users });"), "tables({ users })", "connect(…) không có .tables: database ngoài là của người khác, chỉ có crm.query(sql, [giá trị])"},
+		{"connect not exported", schema(columns, "export const db = connection().tables({ orders });\nconst crm = connect({ postgresql: \"x\" });"), "crm = connect", "database crm khai mà không export"},
+		{"not exported", schema(columns, `const db = connection().tables({ orders });`), "db = connection", "database db khai mà không export"},
+		{"session table", schema(columns, `export const db = connection().tables({ session: orders });`), "session:", "session là tên dành riêng"},
+		{"kitwork_ table", schema(columns, `export const db = connection().tables({ kitwork_x: orders });`), "kitwork_x", "tiền tố kitwork_ hay _kitwork_ (viết hoa hay thường) là của bảng engine"},
+		{"KITWORK_ table", schema(columns, `export const db = connection("jobs").tables({ KITWORK_RUNS: orders });`), "KITWORK_RUNS", "KITWORK_RUNS: tiền tố kitwork_ hay _kitwork_ (viết hoa hay thường) là của bảng engine"},
+		{"_kitwork_ table", schema(columns, `export const db = connection("jobs").tables({ _kitwork_migrations: orders });`), "_kitwork_migrations", "_kitwork_migrations: tiền tố kitwork_ hay _kitwork_ (viết hoa hay thường) là của bảng engine"},
+		{"a table twice in two cases", schema(columns, `export const db = connection().tables({ orders, Orders: users });`), "Orders:", "bảng Orders khai hai lần: orders là cùng tên, tên bảng không phân biệt chữ hoa, thường"},
 		{"created on text", schema("id: id(), note: text().created()", exported), "created", ".created() chỉ đi sau timestamp()"},
-		{"spread", schema("...users", exported), "{ ...users", "struct({ ...x }) chưa có trong engine hôm nay"},
-		{"helper", schema(columns, "const helper = 5;\n"+exported), "helper", "file trong .shared/schema/ chỉ khai struct và connection(): helper"},
-		{"no id", schema("email: text()", exported), "struct({ email", "bảng không có id() chưa có trong engine hôm nay"},
-		{"no schema", schema(columns, `export const db = connection();`), "db = connection", "câu chưa kết thúc"},
+		{"spread", schema("...users", exported), "{ ...users", "table({ ...x }) chưa có trong engine hôm nay"},
+		{"helper", schema(columns, "const helper = 5;\n"+exported), "helper", "file trong .shared/schema/ chỉ khai table và connection(): helper"},
+		{"no id", schema("email: text()", exported), "table({ email", "bảng không có id() chưa có trong engine hôm nay"},
+		{"no tables", schema(columns, `export const db = connection();`), "db = connection", "câu chưa kết thúc"},
+		// the words of 29/10/2026: table({ … }) for struct({ … }), .tables({ … }) for .schema({ … }), .schema("tên")
+		{"struct", strings.NewReplacer("{ table,", "{ struct,", " = table(", " = struct(").Replace(schema(columns, exported)), "struct(", "struct({ … }) đổi thành table({ … })"},
+		{"schema with tables", schema(columns, `export const db = connection().schema({ orders });`), "schema({ orders", ".schema({ bảng }) đổi thành .tables({ bảng })"},
+		{"schema public", schema(columns, `export const db = connection().schema("public").tables({ orders });`), `"public"`, `public là schema mặc định: bỏ .schema("public")`},
+		{"schema main", schema(columns, `export const db = connection().schema("main").tables({ orders });`), `"main"`, "main là tên SQLite giữ cho mình"},
+		{"schema uppercase", schema(columns, `export const db = connection().schema("Billing").tables({ orders });`), `"Billing"`, "tên schema viết chữ thường, số và gạch dưới"},
+		{"schema not written", schema(columns, "export const db = connection().schema(`billing`).tables({ orders });"), "schema(`", `schema nhận tên viết bằng chuỗi`},
+		{"schema after policy", schema(columns, `export const db = connection().policy((orders, session) => true).schema("billing").tables({ orders });`), "policy", ".policy(…) chưa có trong engine hôm nay (lát 6)"},
+		{"schema twice", schema(columns, `export const db = connection().schema("billing").schema("sales").tables({ orders });`), `schema("sales"`, `.schema("tên") đứng ngay sau connection(…)`},
+		{"schema of a named connection", schema(columns, `export const db = connection("warehouse").schema("stock").tables({ orders });`), `schema("stock"`, `connection("warehouse").schema(…) chưa có trong engine hôm nay`},
+		{"schema without tables", schema(columns, `export const db = connection().schema("billing");`), "db = connection", "câu chưa kết thúc"},
 	} {
 		_, err := compileRoute(t, route, map[string]string{".shared/schema/shop.work": test.source})
 		index := strings.Index(test.source, test.marker)
 		line := strings.Count(test.source[:index], "\n") + 1
 		start := strings.LastIndex(test.source[:index], "\n") + 1
 		place := "../.shared/schema/shop.work:" + strconv.Itoa(line) + ":" + strconv.Itoa(utf8.RuneCountInString(test.source[start:index])+1)
-		if test.marker == "{ ...users" || test.marker == "struct({ email" {
+		if test.marker == "{ ...users" || test.marker == "table({ email" {
 			// the error stands at the struct's object or its name
 			place = "../.shared/schema/shop.work:" + strconv.Itoa(line) + ":"
 		}
@@ -384,7 +395,7 @@ func TestDatabaseSchemaModuleRules(t *testing.T) {
 
 	// outside .shared/schema/: at the import
 	for _, line := range []string{
-		`import { struct, text } from "kitwork/schema";`,
+		`import { table, text } from "kitwork/schema";`,
 		`import { connection } from "kitwork/database";`,
 		`import * as schema from "kitwork/schema";`,
 	} {
@@ -397,7 +408,7 @@ func TestDatabaseSchemaModuleRules(t *testing.T) {
 	// the module by its own name counts as the module: kitwork's schema is kitwork/schema, and connection or
 	// connect read off a name of kitwork/database is refused where it is read
 	for _, test := range []struct{ source, marker, want string }{
-		{"import { schema } from \"kitwork\";\nconst users = schema.struct({});\n", "import { schema }", `import { schema } from "kitwork" chỉ có trong .shared/schema/ của app`},
+		{"import { schema } from \"kitwork\";\nconst users = schema.table({});\n", "import { schema }", `import { schema } from "kitwork" chỉ có trong .shared/schema/ của app`},
 		{"import * as database from \"kitwork/database\";\nconst c = database.connection();\n", "connection()", "database.connection chỉ có trong .shared/schema/ của app"},
 		{"import { database } from \"kitwork\";\nconst c = database.connect({ postgresql: \"x\" });\n", "connect(", "database.connect chỉ có trong .shared/schema/ của app"},
 		{"import { database as d } from \"kitwork\";\nconst c = d.connection;\n", "connection;", "d.connection chỉ có trong .shared/schema/ của app"},
@@ -422,14 +433,14 @@ func TestDatabaseSchemaModuleRules(t *testing.T) {
 		}
 	}
 	// in .shared/schema/ the names declare, as the imports do
-	namespaces := "import * as schema from \"kitwork/schema\";\nimport * as database from \"kitwork/database\";\nconst orders = schema.struct({ id: schema.id(), email: schema.text() });\nexport const db = database.connection().schema({ orders });\n"
+	namespaces := "import * as schema from \"kitwork/schema\";\nimport * as database from \"kitwork/database\";\nconst orders = schema.table({ id: schema.id(), email: schema.text() });\nexport const db = database.connection().tables({ orders });\n"
 	if _, err := compileRoute(t, route, map[string]string{".shared/schema/shop.work": namespaces}); err != nil {
 		t.Errorf("a schema file written with namespaces: %v", err)
 	}
 
 	// a file of no app has no .shared/schema/
 	path := filepath.Join(t.TempDir(), "router.work")
-	if err := os.WriteFile(path, []byte(`import { struct } from "kitwork/schema";`+"\nconst orders = struct({});\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(`import { table } from "kitwork/schema";`+"\nconst orders = table({});\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := CompileFile(path); err == nil || !strings.Contains(err.Error(), "chỉ có trong .shared/schema/ của app") {

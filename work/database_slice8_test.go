@@ -56,12 +56,12 @@ func withCatalogue(t *testing.T, entries map[string]hostdatabase.Config) {
 	t.Cleanup(hostdatabase.SetCatalog(entries))
 }
 
-const warehouseSchema = `import { struct, id, text, integer } from "kitwork/schema";
+const warehouseSchema = `import { table, id, text, integer } from "kitwork/schema";
 import { connection } from "kitwork/database";
 
-const stocks = struct({ id: id(), item: text().unique(), quantity: integer() });
+const stocks = table({ id: id(), item: text().unique(), quantity: integer() });
 
-export const warehouse = connection("warehouse").schema({ stocks });
+export const warehouse = connection("warehouse").tables({ stocks });
 `
 
 const warehouseRoute = `import * as router from "kitwork/router";
@@ -219,7 +219,7 @@ router.get((context) => {
 	}
 	refused := answer(t, other, "")
 	const want = `bảng stocks trên connection("warehouse"): đổi kiểu cột quantity INTEGER→TEXT, bỏ cột item làm mất dữ liệu nên không chạy, database giữ nguyên; ` +
-		`đưa struct về như database đang có (mọi app gọi tên warehouse cùng khai một bảng); đổi mất dữ liệu là việc của kitwork migrate, chưa có trong engine hôm nay (lát 7)`
+		`đưa table về như database đang có (mọi app gọi tên warehouse cùng khai một bảng); đổi mất dữ liệu là việc của kitwork migrate, chưa có trong engine hôm nay (lát 7)`
 	if refused["code"] != value.DatabaseCode || refused["message"] != want {
 		t.Fatalf("a struct that loses data: %v, want DATABASE %q", refused, want)
 	}
@@ -280,9 +280,9 @@ router.get((context) => {
 func TestDatabaseModuleOldWordsAreErrors(t *testing.T) {
 	module := value.New(&DatabaseModule{})
 	for word, want := range map[string]string{
-		"kitdb":     "database.kitdb đã bỏ: database của app khai export const db = connection().schema({ bảng }) trong app/.shared/schema/<tên>.work; mở KitDB ra ngoài qua Hrana hay PostgreSQL wire (token, access) là app.database(path, { port }) của host trong application.work",
+		"kitdb":     "database.kitdb đã bỏ: database của app khai export const db = connection().tables({ bảng }) trong app/.shared/schema/<tên>.work; mở KitDB ra ngoài qua PostgreSQL wire (token, access) là app.database(path, { port }) của host trong application.work",
 		"sqlite":    `database.sqlite đã bỏ: SQLite là connection("tên")`,
-		"struct":    `database.struct đã bỏ: struct import từ "kitwork/schema"`,
+		"struct":    `database.struct đã bỏ: bảng khai bằng table() của "kitwork/schema"`,
 		"text":      `database.text đã bỏ: kiểu cột import từ "kitwork/schema"`,
 		"kitid":     "database.kitid đã bỏ: kiểu cột của \"kitwork/schema\", chỉ trong app/.shared/schema/: viết id()",
 		"entity":    "database.entity đã bỏ: mỗi app có database của nó",

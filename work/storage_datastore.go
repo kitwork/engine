@@ -1,24 +1,28 @@
 package work
 
 import (
-	"bytes"
-	"context"
-	"encoding/binary"
+	"database/sql"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	kitdbengine "github.com/kitwork/engine/kitdb"
+	"github.com/kitwork/engine/database/statement"
+	queuestore "github.com/kitwork/engine/utilities/queue"
 )
 
-// datastore() is the app's own store at .database/storage/ (KITWORK_STORAGE.md mục 2, 22/10/2026): a KitDB of
-// its own, not a table of the app's database, so db never reads it and it is never part of
-// db.transaction(…). Each value is one key of the file, its prefix keeping it apart from what KitDB holds
-// for itself, written as when it expires then the value. The file is opened through the app's KitDB
-// manager for each operation, as the runs of the queue are (queue_runs.go), and a write holds the file's
-// writer gate. An expired value is gone for every read, and is removed when the store would be full and
-// something kept can have expired since the last sweep; full, a write fails and nothing kept is pushed out.
+// datastore() is the app's own store at .database/storage/ (KITWORK_STORAGE.md mục 2, 22/10/2026): a database
+// of its own, not a table of the app's database, so db never reads it and it is never part of a transaction
+// of db. Since 30/10/2026 it is the SQLite file .database/storage/kitwork.db (the schema public of the database
+// storage, KITWORK_KITDB.md mục 3), one row of kitwork_storage a value: its key, its encoded value and when it
+// expires, in milliseconds since the epoch (NULL for never). The file is reached through the app's pool of it, as the runs of the queue reach
+// theirs (runs_database.go), and a write is one transaction begun IMMEDIATE under the file's gate. An expired
+// value is gone for every read, and is removed when the store would be full and something kept has expired;
+// full, a write fails and nothing kept is pushed out. The KitDB file it was before, storage.kitdb, is never
+// opened: the app says it is there while what it holds has not been copied (sayDatastoreLeftBehind).
 
 // The ceilings of datastore() of one app (mục 9; the numbers are open, mục 10.2). Vars so tests can lower them.
 var (
@@ -26,33 +30,44 @@ var (
 	storageDatastoreBytes = 256 << 20
 )
 
-// datastoreFile is the KitDB of datastore() inside the app's .database/storage/.
-const datastoreFile = "storage.kitdb"
+// datastoreDatabaseName names the pool of the file among the app's pools.
+const datastoreDatabaseName = "@storage"
 
-// datastorePrefix begins every key datastore() writes in its file.
-var datastorePrefix = []byte("storage:")
+// datastoreSchema makes the table of datastore() in its file, with the index a sweep finds what has expired by.
+// A plain rowid table, no trigger: what the writer of KitDB on SQLite can keep the history of (kitdb/sqlite).
+var datastoreSchema = []string{
+	`CREATE TABLE IF NOT EXISTS kitwork_storage (key BLOB NOT NULL PRIMARY KEY, value BLOB NOT NULL, expire INTEGER)`,
+	`CREATE INDEX IF NOT EXISTS kitwork_storage_expire ON kitwork_storage (expire) WHERE expire IS NOT NULL`,
+}
 
-// datastorePlace is datastore() of one app: the count of its keys and bytes the ceilings are measured on,
-// and when the soonest value kept expires (zero when none does), kept by its writes in this process (KitDB
-// has one writer process).
+// datastoreLegacyFile is the KitDB file datastore() was until 30/10/2026, beside kitwork.db.
+const datastoreLegacyFile = "storage.kitdb"
+
+// datastorePlace is datastore() of one app: whether its table was made in this process, and the count of its
+// keys and bytes the ceilings are measured on, kept by its writes in this process (the file has one owner
+// process, dblock.go). Expired values are counted as kept until a sweep removes them.
 type datastorePlace struct {
-	mu         sync.Mutex
-	counted    bool
-	keys       int
-	bytes      int64
-	nextExpiry time.Time
+	mu      sync.Mutex
+	ready   atomic.Bool
+	counted bool
+	keys    int
+	bytes   int64
 }
 
 func (p *placeSet) openDatastore(t *Tenant) (storagePlace, error) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	if p.closed {
+		p.mu.Unlock()
 		return nil, fmt.Errorf("%w: app đang dừng", errStorageUnavailable)
 	}
 	if p.datastore == nil {
 		p.datastore = &datastorePlace{}
 	}
-	return datastoreAccess{place: p.datastore, tenant: t}, nil
+	place := p.datastore
+	p.mu.Unlock()
+	// an app with routes only boots no tenant of its own: its first use of datastore() says it instead
+	p.legacySaid.Do(t.sayDatastoreLeftBehindNow)
+	return datastoreAccess{place: place, tenant: t}, nil
 }
 
 func (d *datastorePlace) close() {}
@@ -63,64 +78,118 @@ type datastoreAccess struct {
 	tenant *Tenant
 }
 
-// open leases the app's datastore file for one operation.
-func (a datastoreAccess) open() (*managedKitDB, error) {
-	handle := &kitDatabaseHandle{
-		tenant:    a.tenant,
-		path:      a.tenant.resolveApp(".database", "storage", datastoreFile),
-		appScoped: true,
+// datastorePath is the file of datastore() of t's app.
+func datastorePath(t *Tenant) string {
+	return t.resolveApp(".database", "storage", statement.PublicFile)
+}
+
+// database is the app's pool of the file. With create false, a file never made yet, or one without the table,
+// is found false with no error (it holds nothing) and nothing is made; with create true the folder and the
+// table are made first.
+func (a datastoreAccess) database(create bool) (queuestore.Immediate, bool, error) {
+	path := datastorePath(a.tenant)
+	if !a.tenant.insideAppRoot(path) {
+		return queuestore.Immediate{}, false, fmt.Errorf("%w: .database/storage/ ở ngoài thư mục của app", errStorageUnavailable)
 	}
-	managed, err := handle.database()
+	config := hostSQLiteConfig(datastoreDatabaseName, path)
+	pool := a.tenant.lookupDatabase(config)
+	if pool == nil {
+		if _, err := os.Stat(path); err != nil {
+			if !os.IsNotExist(err) {
+				return queuestore.Immediate{}, false, fmt.Errorf("%w: .database/storage/ của app: %v", errStorageUnavailable, err)
+			}
+			if !create {
+				return queuestore.Immediate{}, false, nil
+			}
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				return queuestore.Immediate{}, false, fmt.Errorf("%w: không tạo được .database/storage/ của app: %v", errStorageUnavailable, err)
+			}
+		}
+		opened, err := a.tenant.openDatabase(config)
+		if err != nil {
+			return queuestore.Immediate{}, false, fmt.Errorf("%w: không mở được .database/storage/ của app: %v", errStorageUnavailable, err)
+		}
+		pool = opened
+	}
+	database := queuestore.Immediate{Pool: pool, Gate: queuestore.FileGate(path)}
+	if a.place.ready.Load() {
+		return database, true, nil
+	}
+	if !create {
+		var held int
+		err := pool.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'kitwork_storage'`).Scan(&held)
+		if err != nil || held == 0 {
+			return queuestore.Immediate{}, false, datastoreError(err)
+		}
+		a.place.ready.Store(true)
+		return database, true, nil
+	}
+	err := database.Write(func(db queuestore.SQL) error {
+		for _, statement := range datastoreSchema {
+			if _, err := db.Exec(statement); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("%w: không mở được .database/storage/ của app: %v", errStorageUnavailable, err)
+		return queuestore.Immediate{}, false, datastoreError(err)
 	}
-	return managed, nil
+	a.place.ready.Store(true)
+	return database, true, nil
 }
 
-func datastoreKey(key string) []byte {
-	return append(append([]byte(nil), datastorePrefix...), key...)
+// datastoreError is err of the file as storage says it: UNAVAILABLE when another writer held the file past
+// the busy timeout, the error itself otherwise (DATABASE).
+func datastoreError(err error) error {
+	var coded interface{ Code() int }
+	if err != nil && errors.As(err, &coded) && coded.Code()&0xff == 5 {
+		return fmt.Errorf("%w: .database/storage/ của app đang bận: %v", errStorageUnavailable, err)
+	}
+	return err
 }
 
-// datastoreRecord is when a value expires (zero for never), then the value.
-func datastoreRecord(data []byte, expireAt time.Time) []byte {
-	var expire int64
-	if !expireAt.IsZero() {
-		expire = expireAt.UnixNano()
+// datastoreExpire is when a value expires as the table keeps it: milliseconds since the epoch, NULL for never.
+// A value expires within the millisecond its expiry falls in, read and swept alike: now >= expire, in
+// milliseconds.
+func datastoreExpire(expireAt time.Time) any {
+	if expireAt.IsZero() {
+		return nil
 	}
-	out := binary.BigEndian.AppendUint64(make([]byte, 0, 8+len(data)), uint64(expire))
-	return append(out, data...)
+	return expireAt.UnixMilli()
 }
 
-func readDatastoreRecord(record []byte) ([]byte, time.Time, bool) {
-	if len(record) < 8 {
-		return nil, time.Time{}, false
+func datastoreExpiry(expire sql.NullInt64) time.Time {
+	if !expire.Valid {
+		return time.Time{}
 	}
-	var expireAt time.Time
-	if expire := int64(binary.BigEndian.Uint64(record)); expire != 0 {
-		expireAt = time.Unix(0, expire)
-	}
-	return record[8:], expireAt, true
+	return time.UnixMilli(expire.Int64)
 }
 
 func storageExpired(expireAt, now time.Time) bool {
 	return !expireAt.IsZero() && !now.Before(expireAt)
 }
 
-// read is the live value of key: data, when it expires, found; a record that has expired is not found.
+// read is the live value of key: data, when it expires, found; a value that has expired is not found. The key
+// is always bound as bytes: the column holds BLOBs, and a TEXT parameter never equals a BLOB in SQLite.
 func (a datastoreAccess) read(key string) ([]byte, time.Time, bool, error) {
-	managed, err := a.open()
-	if err != nil {
-		return nil, time.Time{}, false, err
-	}
-	defer managed.Release()
-	managed.writeMu.RLock()
-	record, found, err := managed.database.Get(datastoreKey(key))
-	managed.writeMu.RUnlock()
+	database, found, err := a.database(false)
 	if err != nil || !found {
 		return nil, time.Time{}, false, err
 	}
-	data, expireAt, ok := readDatastoreRecord(record)
-	if !ok || storageExpired(expireAt, storageClock()) {
+	var data []byte
+	var expire sql.NullInt64
+	err = database.Read(func(db queuestore.SQL) error {
+		return db.QueryRow(`SELECT value, expire FROM kitwork_storage WHERE key = ?`, []byte(key)).Scan(&data, &expire)
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, time.Time{}, false, nil
+	}
+	if err != nil {
+		return nil, time.Time{}, false, datastoreError(err)
+	}
+	expireAt := datastoreExpiry(expire)
+	if storageExpired(expireAt, storageClock()) {
 		return nil, time.Time{}, false, nil
 	}
 	return data, expireAt, true, nil
@@ -137,35 +206,32 @@ func (a datastoreAccess) expiry(key string) (time.Time, bool, error) {
 }
 
 func (a datastoreAccess) set(key string, data []byte, expireAt time.Time) error {
-	managed, err := a.open()
-	if err != nil {
-		return err
-	}
-	defer managed.Release()
-	if err := checkpointKitDBBeforeWrite(managed); err != nil {
-		return err
-	}
-	managed.writeMu.Lock()
-	defer managed.writeMu.Unlock()
 	place := a.place
 	place.mu.Lock()
 	defer place.mu.Unlock()
-	if err := place.count(managed.database); err != nil {
+	database, _, err := a.database(true)
+	if err != nil {
 		return err
 	}
-	stored := datastoreKey(key)
-	record := datastoreRecord(data, expireAt)
-	keys, size, err := place.after(managed.database, stored, record)
+	if err := place.count(database); err != nil {
+		return err
+	}
+	stored := []byte(key)
+	keys, size, err := place.after(database, stored, data)
 	if err != nil {
 		return err
 	}
 	if keys > storageDatastoreKeys || size > int64(storageDatastoreBytes) {
-		// what has expired is gone already: sweep it before refusing, when something can have expired
-		if storageSweepDue(true, place.nextExpiry) {
-			if err := place.sweep(managed.database); err != nil {
+		// what has expired is gone already: sweep it before refusing, when the table holds any
+		held, err := place.expiredHeld(database)
+		if err != nil {
+			return err
+		}
+		if held {
+			if err := place.sweep(database); err != nil {
 				return err
 			}
-			if keys, size, err = place.after(managed.database, stored, record); err != nil {
+			if keys, size, err = place.after(database, stored, data); err != nil {
 				return err
 			}
 		}
@@ -173,140 +239,155 @@ func (a datastoreAccess) set(key string, data []byte, expireAt time.Time) error 
 			return fmt.Errorf("%w: datastore() của app đã tới trần %d khoá, %d byte; lần ghi hỏng, không gì đã lưu bị xoá (KITWORK_STORAGE.md mục 9)", errStorageFull, storageDatastoreKeys, storageDatastoreBytes)
 		}
 	}
-	if err := commitDatastore(managed.database, func(tx *kitdbengine.Tx) error { return tx.Put(stored, record) }); err != nil {
+	err = database.Write(func(db queuestore.SQL) error {
+		_, err := db.Exec(`INSERT INTO kitwork_storage (key, value, expire) VALUES (?, ?, ?)
+ON CONFLICT (key) DO UPDATE SET value = excluded.value, expire = excluded.expire`, stored, data, datastoreExpire(expireAt))
 		return err
+	})
+	if err != nil {
+		return datastoreError(err)
 	}
 	place.keys, place.bytes = keys, size
-	place.nextExpiry = storageSooner(true, place.nextExpiry, expireAt)
 	return nil
 }
 
 func (a datastoreAccess) remove(key string) (bool, error) {
-	managed, err := a.open()
-	if err != nil {
-		return false, err
-	}
-	defer managed.Release()
-	if err := checkpointKitDBBeforeWrite(managed); err != nil {
-		return false, err
-	}
-	managed.writeMu.Lock()
-	defer managed.writeMu.Unlock()
 	place := a.place
 	place.mu.Lock()
 	defer place.mu.Unlock()
-	if err := place.count(managed.database); err != nil {
-		return false, err
-	}
-	stored := datastoreKey(key)
-	record, found, err := managed.database.Get(stored)
+	database, found, err := a.database(false)
 	if err != nil || !found {
 		return false, err
 	}
-	if err := commitDatastore(managed.database, func(tx *kitdbengine.Tx) error { return tx.Delete(stored) }); err != nil {
+	if err := place.count(database); err != nil {
 		return false, err
 	}
+	stored := []byte(key)
+	var size int64
+	var expire sql.NullInt64
+	removed := false
+	err = database.Write(func(db queuestore.SQL) error {
+		err := db.QueryRow(`SELECT length(key) + length(value), expire FROM kitwork_storage WHERE key = ?`, stored).Scan(&size, &expire)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if _, err := db.Exec(`DELETE FROM kitwork_storage WHERE key = ?`, stored); err != nil {
+			return err
+		}
+		removed = true
+		return nil
+	})
+	if err != nil || !removed {
+		return false, datastoreError(err)
+	}
 	place.keys--
-	place.bytes -= int64(len(stored) + len(record))
-	_, expireAt, ok := readDatastoreRecord(record)
-	return ok && !storageExpired(expireAt, storageClock()), nil
+	place.bytes -= size
+	return !storageExpired(datastoreExpiry(expire), storageClock()), nil
 }
 
-// after is the count of keys and bytes once stored holds record.
-func (d *datastorePlace) after(database *kitdbengine.DB, stored, record []byte) (int, int64, error) {
-	keys, size := d.keys, d.bytes+int64(len(stored)+len(record))
-	previous, found, err := database.Get(stored)
-	if err != nil {
-		return 0, 0, err
-	}
-	if found {
-		size -= int64(len(stored) + len(previous))
-	} else {
+// after is the count of keys and bytes once stored holds data. Called with the place's lock.
+func (d *datastorePlace) after(database queuestore.Immediate, stored, data []byte) (int, int64, error) {
+	keys, size := d.keys, d.bytes+int64(len(stored)+len(data))
+	var previous int64
+	err := database.Read(func(db queuestore.SQL) error {
+		return db.QueryRow(`SELECT length(key) + length(value) FROM kitwork_storage WHERE key = ?`, stored).Scan(&previous)
+	})
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
 		keys++
+	case err != nil:
+		return 0, 0, datastoreError(err)
+	default:
+		size -= previous
 	}
 	return keys, size, nil
 }
 
-// count measures what the file holds, and when the soonest value expires, once per process. Called with the
-// place's lock and the writer gate.
-func (d *datastorePlace) count(database *kitdbengine.DB) error {
+// count measures what the file holds, once per process. Called with the place's lock.
+func (d *datastorePlace) count(database queuestore.Immediate) error {
 	if d.counted {
 		return nil
 	}
-	keys, size, soonest, _, err := d.measure(database, time.Time{})
+	err := database.Read(func(db queuestore.SQL) error {
+		return db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(length(key) + length(value)), 0) FROM kitwork_storage`).Scan(&d.keys, &d.bytes)
+	})
 	if err != nil {
-		return err
+		return datastoreError(err)
 	}
-	d.keys, d.bytes, d.nextExpiry, d.counted = keys, size, soonest, true
+	d.counted = true
 	return nil
 }
 
-// measure walks the values of the file once: the keys and bytes of those kept, when the soonest of them
-// expires, and, with now given, the keys of those that have expired by then (not counted as kept).
-func (d *datastorePlace) measure(database *kitdbengine.DB, now time.Time) (int, int64, time.Time, [][]byte, error) {
-	keys, size := 0, int64(0)
-	var soonest time.Time
-	var gone [][]byte
-	err := database.Walk(func(key, record []byte) error {
-		if !bytes.HasPrefix(key, datastorePrefix) {
-			return nil
-		}
-		_, expireAt, ok := readDatastoreRecord(record)
-		if ok && !now.IsZero() && storageExpired(expireAt, now) {
-			gone = append(gone, bytes.Clone(key))
-			return nil
-		}
-		keys++
-		size += int64(len(key) + len(record))
-		if ok {
-			soonest = storageSooner(true, soonest, expireAt)
-		}
-		return nil
+// expiredHeld reports whether the table holds a value that has expired, found by the index on expire: a store
+// full of values that never expire is refused without reading all it holds.
+func (d *datastorePlace) expiredHeld(database queuestore.Immediate) (bool, error) {
+	var held bool
+	err := database.Read(func(db queuestore.SQL) error {
+		return db.QueryRow(`SELECT EXISTS (SELECT 1 FROM kitwork_storage WHERE expire IS NOT NULL AND expire <= ?)`, storageClock().UnixMilli()).Scan(&held)
 	})
-	return keys, size, soonest, gone, err
+	return held, datastoreError(err)
 }
 
-// sweep removes every value that has expired, and counts what is left in the same walk.
-func (d *datastorePlace) sweep(database *kitdbengine.DB) error {
+// sweep removes every value that has expired, and counts what is left in the same transaction.
+func (d *datastorePlace) sweep(database queuestore.Immediate) error {
 	if storageSwept != nil {
 		storageSwept("datastore")
 	}
-	keys, size, soonest, gone, err := d.measure(database, storageClock())
-	if err != nil {
-		return err
-	}
-	if len(gone) > 0 {
-		err := commitDatastore(database, func(tx *kitdbengine.Tx) error {
-			for _, key := range gone {
-				if err := tx.Delete(key); err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-		if err != nil {
+	now := storageClock().UnixMilli()
+	var keys int
+	var size int64
+	err := database.Write(func(db queuestore.SQL) error {
+		if _, err := db.Exec(`DELETE FROM kitwork_storage WHERE expire IS NOT NULL AND expire <= ?`, now); err != nil {
 			return err
 		}
+		return db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(length(key) + length(value)), 0) FROM kitwork_storage`).Scan(&keys, &size)
+	})
+	if err != nil {
+		return datastoreError(err)
 	}
-	d.keys, d.bytes, d.nextExpiry, d.counted = keys, size, soonest, true
+	d.keys, d.bytes, d.counted = keys, size, true
 	return nil
 }
 
-// commitDatastore writes what apply puts in one transaction.
-func commitDatastore(database *kitdbengine.DB, apply func(tx *kitdbengine.Tx) error) error {
-	tx, err := database.Begin()
+// sayDatastoreLeftBehind says, once for each run of the app, that the KitDB file datastore() was before
+// 30/10/2026 is still there and no longer read: what it holds stays in it until `kitwork migrate kitdb` copies
+// it. It is said at the boot of an app that has background work (the only apps that boot a tenant of their own),
+// or else at the app's first use of datastore() (openDatastore).
+func (t *Tenant) sayDatastoreLeftBehind() {
+	shared, err := t.storage()
 	if err != nil {
-		return err
+		return
 	}
-	if err := apply(tx); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	if _, err := tx.Commit(); err != nil {
-		if errors.Is(err, context.Canceled) {
-			return fmt.Errorf("%w: %v", errStorageUnavailable, err)
-		}
-		return err
-	}
-	return nil
+	shared.places.legacySaid.Do(t.sayDatastoreLeftBehindNow)
 }
+
+// sayDatastoreLeftBehindNow looks at the folder and at the mark of a copy only: the KitDB file is never opened,
+// kitwork.db is never made, and neither is looked at when its path leads out of the app.
+func (t *Tenant) sayDatastoreLeftBehindNow() {
+	legacy := t.resolveApp(".database", "storage", datastoreLegacyFile)
+	if !t.insideAppRoot(legacy) || !t.insideAppRoot(datastorePath(t)) {
+		return
+	}
+	if info, err := os.Stat(legacy); err != nil || info.IsDir() {
+		return
+	}
+	if datastoreCopied(t) {
+		return
+	}
+	fmt.Println(datastoreLegacyLine)
+}
+
+// datastoreLegacyLine is what boot says of an app whose datastore() is still in the KitDB file.
+const datastoreLegacyLine = "[Storage] .database/storage/storage.kitdb (KitDB cũ) không còn đọc: datastore() nay ở .database/storage/kitwork.db; giá trị cũ ở lại trong file đó cho tới khi `kitwork migrate kitdb` chép chúng sang"
+
+// datastoreCopied reports whether the app's kitwork.db of datastore() holds the mark of a copy from the KitDB
+// file (kitwork_copies, kitdb_copy.go).
+func datastoreCopied(t *Tenant) bool {
+	return kitDBCopyMarked(t, datastoreDatabaseName, datastorePath(t), datastoreLegacySource)
+}
+
+// datastoreLegacySource is the KitDB file of datastore() as the mark of a copy names it.
+const datastoreLegacySource = ".database/storage/" + datastoreLegacyFile

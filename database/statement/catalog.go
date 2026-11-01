@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// Database is what a statement may name: the tables of one connection().schema({ … }), each with its
+// Database is what a statement may name: the tables of one connection().tables({ … }), each with its
 // columns in the order they are declared. The compiler reads it from the schema file's struct({ … })
 // literals; the engine builds it from the live schema. Both check a statement with the same rules below,
 // so a name is refused in the same words at compile time and at run time.
@@ -18,7 +18,10 @@ type Database struct {
 	// External is the connector of connect({ postgresql: … }), a database outside the app that has no
 	// tables here and answers only query(sql, [giá trị]); "" for a database declared with connection().
 	External string
-	Tables   []Table
+	// Schema is the schema connection().schema("billing") picks, a file of its own beside the database's
+	// public one (KITWORK_DATABASE.md mục 1, "Schema", 29/10/2026); "" for public.
+	Schema string
+	Tables []Table
 }
 
 // Table is one table of a database.

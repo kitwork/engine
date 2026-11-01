@@ -81,7 +81,7 @@ func (err *kitDBTransactionConflictError) Unwrap() error {
 }
 
 // kitDatabaseHandle is private plumbing for the struct ORM. Application code
-// cannot access raw key/value operations; connection().schema({ … }) of
+// cannot access raw key/value operations; connection().tables({ … }) of
 // .shared/schema/ is the single Kitwork-facing storage contract.
 type kitDatabaseHandle struct {
 	tenant       *Tenant
@@ -94,7 +94,7 @@ type kitDatabaseHandle struct {
 	appScoped bool
 }
 
-// kitDBApplicationName is the name of the app's database, connection().schema({ … }) of
+// kitDBApplicationName is the name of the app's database, connection().tables({ … }) of
 // .shared/schema/ (KITWORK_DATABASE.md mục 1). Its file is in the app's folder,
 // app/.database/application/ (apps/<identity>/.database/application/ for a host of many apps), never in a
 // site's .data/. A proxy built by name cannot name it: newDbProxy (what the removed kitdb("…") built) refuses

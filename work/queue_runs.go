@@ -3,8 +3,8 @@ package work
 import (
 	"database/sql"
 	"fmt"
+	"path/filepath"
 	"sync"
-	"sync/atomic"
 
 	kitdbengine "github.com/kitwork/engine/kitdb"
 	"github.com/kitwork/engine/kitdb/relational"
@@ -12,38 +12,29 @@ import (
 )
 
 // The runs of an app's background work live in its own database (KITWORK_QUEUE.md mục 2: "Các lần chạy lưu
-// trong kitwork_runs của database của app"): the table kitwork_runs of the KitDB file in
-// .database/application/, the file connection().schema({ … }) of .shared/schema/ declares the app's tables
-// in. Never a connection of the host's own (app.postgresql({ alias: "system" })): a host's system database is
-// often a server other apps and other machines share, and an app's runs are the app's data. The config.work of
-// a folder may choose a database of the host's catalogue the app declares (queue.database(db),
-// schedule.database(db): runs_database.go); that is the app's choice, made in its own files.
+// trong kitwork_runs của database của app"): the table kitwork_runs of the SQLite file
+// .database/application/kitwork.db, the file connection().tables({ … }) of .shared/schema/ declares the app's
+// tables in (29/10/2026; before, the KitDB file application.kitdb beside it, which appRunsLeftBehind still
+// reads for the runs it holds). Never a connection of the host's own (app.postgresql({ alias: "system" })): a
+// host's system database is often a server other apps and other machines share, and an app's runs are the
+// app's data. The config.work of a folder may choose a database of the host's catalogue the app declares
+// (queue.database(db), schedule.database(db): runs_database.go); that is the app's choice, made in its own files.
 //
-// The file is reached as the app's ORM reaches it, a lease of the app's KitDB manager for each use (so a
-// file nobody uses can close, and the manager never waits on a lease the queue keeps), with KitDB's own SQL
-// on top (relational.Attach, OpenNativeSQL; the kernel stays the manager's). A write holds the file's
-// writer gate, the one every write of the ORM holds: one writer at a time, which is what makes a claim, a
-// settle, a cancel and a replay one step each (utilities/queue).
+// Either way the file is reached as catalogRuns reaches a file of the catalogue: through the app's pool of it,
+// the one its statements use, and a write holds the file's gate (queuestore.FileGate): one writer at a time,
+// which is what makes a claim, a settle, a cancel and a replay one step each (utilities/queue).
 
 const runsResourceName = "kitwork:runs"
 
-// runsDatabase is the SQL face of the app's KitDB file, kept by the app runtime while the file stays open:
-// the kernel it is attached to, and whether the tables were made in it.
+// runsDatabase is the SQL face of the app's old KitDB file, application.kitdb, where the runs lived until
+// 29/10/2026, kept by the app runtime while the file stays open: boot reads it to say what it still holds
+// (appRunsLeftBehind), and nothing writes it any more.
 type runsDatabase struct {
 	mu     sync.Mutex
 	kernel *kitdbengine.DB
 	engine *relational.Engine
 	db     *sql.DB
-	ready  bool
 	closed bool
-	// seq is the highest seq of kitwork_runs in the file attached, read from the table once (seqRead) and
-	// counted on by every run stored after: each is stored under the file's writer gate, by this process
-	// alone (the file has one owner), so a send never reads the whole table for its number.
-	seq     int64
-	seqRead bool
-	// writes counts the writes made through it, each one under the file's writer gate: what an idle
-	// worker must not add to.
-	writes atomic.Int64
 }
 
 func (r *runsDatabase) Close() {
@@ -60,66 +51,31 @@ func (r *runsDatabase) detachLocked() {
 	if r.engine != nil {
 		_ = r.engine.Close()
 	}
-	r.kernel, r.engine, r.db, r.ready = nil, nil, nil, false
-	r.seq, r.seqRead = 0, false
-}
-
-// nextSeq is the seq of the next run stored through db, the SQL face attached now; called under the
-// file's writer gate.
-func (r *runsDatabase) nextSeq(db queuestore.SQL) (int64, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.db != db {
-		// attached again since the call began: read the table, as a store with no counter does
-		highest, err := queuestore.HighestSeq(db)
-		return highest + 1, err
-	}
-	if !r.seqRead {
-		highest, err := queuestore.HighestSeq(db)
-		if err != nil {
-			return 0, err
-		}
-		r.seq, r.seqRead = highest, true
-	}
-	r.seq++
-	return r.seq, nil
+	r.kernel, r.engine, r.db = nil, nil, nil
 }
 
 // sqlFor gives the SQL face of kernel, attaching it when the file was opened again since (the manager closes
 // a file nobody uses; the next lease opens a new kernel).
-func (r *runsDatabase) sqlFor(kernel *kitdbengine.DB) (*sql.DB, bool, error) {
+func (r *runsDatabase) sqlFor(kernel *kitdbengine.DB) (*sql.DB, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
-		return nil, false, fmt.Errorf("kitwork_runs: app đã đóng")
+		return nil, fmt.Errorf("kitwork_runs: app đã đóng")
 	}
 	if r.kernel != kernel {
 		r.detachLocked()
 		engine, err := relational.Attach(kernel, relational.Options{})
 		if err != nil {
-			return nil, false, err
+			return nil, err
 		}
 		db, err := relational.OpenNativeSQL(engine)
 		if err != nil {
 			_ = engine.Close()
-			return nil, false, err
+			return nil, err
 		}
 		r.kernel, r.engine, r.db = kernel, engine, db
 	}
-	return r.db, r.ready, nil
-}
-
-func (r *runsDatabase) markReady(kernel *kitdbengine.DB) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.kernel == kernel {
-		r.ready = true
-	}
-}
-
-// appRuns is the runs database of t's app: queuestore.Database over the app's KitDB file.
-type appRuns struct {
-	tenant *Tenant
+	return r.db, nil
 }
 
 func (t *Tenant) runsResource() (*runsDatabase, error) {
@@ -138,58 +94,6 @@ func (t *Tenant) runsResource() (*runsDatabase, error) {
 		return nil, fmt.Errorf("kitwork_runs: app resource has unexpected type %T", resource)
 	}
 	return current, nil
-}
-
-func (a appRuns) Read(fn func(db queuestore.SQL) error) error  { return a.use(false, fn) }
-func (a appRuns) Write(fn func(db queuestore.SQL) error) error { return a.use(true, fn) }
-
-// NextSeq numbers a run being stored (queuestore.Sequencer), inside Write.
-func (a appRuns) NextSeq(db queuestore.SQL) (int64, error) {
-	resource, err := a.tenant.runsResource()
-	if err != nil {
-		return 0, err
-	}
-	return resource.nextSeq(db)
-}
-
-// use runs fn on the app's file: a lease for the call, the tables made the first time the file is used, the
-// writer gate held for a write and shared for a read.
-func (a appRuns) use(write bool, fn func(db queuestore.SQL) error) error {
-	resource, err := a.tenant.runsResource()
-	if err != nil {
-		return err
-	}
-	managed, err := kitDBForRequest(a.tenant, kitDBApplicationName, nil).database()
-	if err != nil {
-		return err
-	}
-	defer managed.Release()
-	db, ready, err := resource.sqlFor(managed.database)
-	if err != nil {
-		return err
-	}
-	if !ready {
-		managed.writeMu.Lock()
-		err := queuestore.InitSchema(db)
-		managed.writeMu.Unlock()
-		if err != nil {
-			return err
-		}
-		resource.markReady(managed.database)
-	}
-	if !write {
-		managed.writeMu.RLock()
-		defer managed.writeMu.RUnlock()
-		return fn(db)
-	}
-	// as before every write of the ORM: a file whose log has grown is checkpointed first
-	if err := checkpointKitDBBeforeWrite(managed); err != nil {
-		return err
-	}
-	managed.writeMu.Lock()
-	defer managed.writeMu.Unlock()
-	resource.writes.Add(1)
-	return fn(db)
 }
 
 // appID is the key of t's app: its identity (the identity column of entity). Every domain of an app shares
@@ -236,7 +140,23 @@ func (t *Tenant) runsStoreAt(kind string, place *runsPlace) *queuestore.Store {
 // sync, a request's send, cancel, replay) a write fails when the busy timeout runs out.
 func (t *Tenant) runsDatabase(kind string, place *runsPlace, stop <-chan struct{}) queuestore.Database {
 	if place == nil {
-		return appRuns{tenant: t}
+		place = t.appRunsPlace()
 	}
 	return catalogRuns{tenant: t, place: place, kind: kind, stop: stop}
+}
+
+// appRunsPlaces holds the place of each app's own database file, so the tables of the runs are made once per
+// file (runsPlace.ready).
+var appRunsPlaces sync.Map
+
+// appRunsPlace is where the runs live by default (29/10/2026): the app's database, the SQLite file
+// .database/application/kitwork.db its statements on connection() write too, through the same pool. The
+// KitDB file it was before, application.kitdb, keeps what it held (sayLeftBehind).
+func (t *Tenant) appRunsPlace() *runsPlace {
+	path := appDatabasePath(t, "")
+	if absolute, err := filepath.Abs(path); err == nil {
+		path = filepath.Clean(absolute)
+	}
+	place, _ := appRunsPlaces.LoadOrStore(path, &runsPlace{name: "application", path: path})
+	return place.(*runsPlace)
 }

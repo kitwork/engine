@@ -9,7 +9,7 @@ import (
 	"github.com/kitwork/engine/value"
 )
 
-// ManagedDatabase is the handle connection().schema({ … }) gives: the app's database, declared in its
+// ManagedDatabase is the handle connection().tables({ … }) gives: the app's database, declared in its
 // .shared/schema/ (KITWORK_DATABASE.md mục 1). It answers one call, the one the compiler writes for every
 // statement on an imported handle (database_translate.go of the compiler):
 //

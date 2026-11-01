@@ -40,7 +40,17 @@ type Index struct {
 	bytes      int64
 	fieldStats []uint64
 	multiFreq  multiFrequencyCache
-	closed     atomic.Bool
+	// shared counts leading segments that belong to another Index (the base of
+	// a live view); Close leaves them open for their owner. live lets such a
+	// view reuse its base's multi-field frequencies.
+	shared int
+	live   *liveFrequencies
+	// identifiers opens the identifier sidecar of a segment when the index
+	// lives in a container rather than a directory; onClose releases the
+	// container generation the index reads.
+	identifiers func(position int) (*identifierIndex, error)
+	onClose     func()
+	closed      atomic.Bool
 }
 
 // OpenIndex opens the newest committed manifest in directory.
@@ -251,10 +261,7 @@ func (index *Index) Verify(ctx context.Context) error {
 		}
 		entry := index.entries[position]
 		if entry.identifierName != "" {
-			identifier, err := openIdentifierIndex(
-				filepath.Join(index.directory, entry.identifierName), index.schema.fingerprint,
-				entry.documents, entry.identifierBytes,
-			)
+			identifier, err := index.openIdentifiers(position)
 			if err != nil {
 				return fmt.Errorf("search: verify identifier index %d: %w", position, err)
 			}
@@ -271,16 +278,32 @@ func (index *Index) Verify(ctx context.Context) error {
 	return nil
 }
 
+// openIdentifiers opens the identifier sidecar of one segment, from its file or
+// from the container the index lives in.
+func (index *Index) openIdentifiers(position int) (*identifierIndex, error) {
+	if index.identifiers != nil {
+		return index.identifiers(position)
+	}
+	entry := index.entries[position]
+	return openIdentifierIndex(
+		filepath.Join(index.directory, entry.identifierName), index.schema.fingerprint,
+		entry.documents, entry.identifierBytes,
+	)
+}
+
 // Close releases all segment file handles owned by this snapshot.
 func (index *Index) Close() error {
 	if index == nil || !index.closed.CompareAndSwap(false, true) {
 		return nil
 	}
 	var closeErrors []error
-	for _, segment := range index.segments {
+	for _, segment := range index.segments[index.shared:] {
 		if err := segment.Close(); err != nil {
 			closeErrors = append(closeErrors, err)
 		}
+	}
+	if index.onClose != nil {
+		index.onClose()
 	}
 	return errors.Join(closeErrors...)
 }

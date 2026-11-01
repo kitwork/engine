@@ -2,6 +2,7 @@ package work
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -14,6 +15,7 @@ import (
 	"reflect"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -26,12 +28,12 @@ import (
 )
 
 // managedShopSchema is the schema of KITWORK_DATABASE.md's first slice, as the spec writes it.
-const managedShopSchema = `import { struct, id, text, decimal, date, timestamp } from "kitwork/schema";
+const managedShopSchema = `import { table, id, text, decimal, date, timestamp } from "kitwork/schema";
 import { connection } from "kitwork/database";
 
-const orders = struct({ id: id(), email: text(), item: text(), amount: decimal(12, 2), note: text().nullable(), day: date().index(), createdAt: timestamp().created() });
+const orders = table({ id: id(), email: text(), item: text(), amount: decimal(12, 2), note: text().nullable(), day: date().index(), createdAt: timestamp().created() });
 
-export const db = connection().schema({ orders });
+export const db = connection().tables({ orders });
 `
 
 // managedRoute is a router.work whose POST inserts an order from the form's fields (amount as typed
@@ -237,14 +239,14 @@ router.get((context) => {
 	}
 
 	// the app's folder holds the data, the site's folder nothing
-	appData := filepath.Join(shop.root, "acme", ".database", "application", "application.kitdb")
+	appData := filepath.Join(shop.root, "acme", ".database", "application", "kitwork.db")
 	if _, err := os.Stat(appData); err != nil {
 		t.Fatalf("the app's database is not at %s: %v", appData, err)
 	}
 	if _, err := os.Stat(filepath.Join(shop.root, "acme", "shop.example", ".data")); !os.IsNotExist(err) {
 		t.Fatalf("the site's .data/ exists (%v): the app's database lives in the app's folder", err)
 	}
-	if status, _ := managedGet(tenant, "/.database/application/application.kitdb"); status == http.StatusOK {
+	if status, _ := managedGet(tenant, "/.database/application/kitwork.db"); status == http.StatusOK {
 		t.Fatalf("the app's database file is served")
 	}
 
@@ -699,9 +701,9 @@ func goStruct(t *testing.T, columns ...goColumn) value.Value {
 		}
 		fields[column.name] = built
 	}
-	defined := schema.Struct().Call("struct", value.New(fields))
+	defined := schema.Table().Call("table", value.New(fields))
 	if defined.K != value.Proxy {
-		t.Fatalf("struct: %v", defined)
+		t.Fatalf("table: %v", defined)
 	}
 	return defined
 }
@@ -719,13 +721,13 @@ func goOrders(t *testing.T) value.Value {
 	)
 }
 
-// goManaged declares connection().schema(tables) for tenant, as a schema file does.
+// goManaged declares connection().tables(tables) for tenant, as a schema file does.
 func goManaged(t *testing.T, tenant *Tenant, tables map[string]value.Value) *ManagedDatabase {
 	t.Helper()
-	declared := (&ConnectionDeclaration{tenant: tenant}).OnInvoke("schema", value.New(tables))
+	declared := (&ConnectionDeclaration{tenant: tenant}).OnInvoke("tables", value.New(tables))
 	managed, ok := declared.V.(*ManagedDatabase)
 	if !ok {
-		t.Fatalf("connection().schema: %v", declared)
+		t.Fatalf("connection().tables: %v", declared)
 	}
 	return managed
 }
@@ -788,17 +790,17 @@ func TestManagedDatabaseRefusesUntranslatedCalls(t *testing.T) {
 	}
 }
 
-// The compiler reads the schema file's struct({ … }) literals; the engine sees what their builders made.
+// The compiler reads the schema file's table({ … }) literals; the engine sees what their builders made.
 // Both give the same tables, columns, order and kinds, so a name the compiler let through is one the
 // engine knows.
 func TestManagedDatabaseCatalogParity(t *testing.T) {
-	schema := `import { struct, id, text, integer, float, decimal, boolean, date, json, timestamp } from "kitwork/schema";
+	schema := `import { table, id, text, integer, float, decimal, boolean, date, json, timestamp } from "kitwork/schema";
 import { connection } from "kitwork/database";
 
-const users = struct({ id: id(), email: text().unique(), name: text().search(), role: text().default("customer"), active: boolean().default(true), createdAt: timestamp().created(), updatedAt: timestamp().updated() });
-const orders = struct({ id: id(), item: text(), quantity: integer(), weight: float().nullable(), amount: decimal(12, 2).index("day_amount"), note: text().nullable(), day: date().index().index("day_amount"), meta: json().nullable(), createdAt: timestamp().created() });
+const users = table({ id: id(), email: text().unique(), name: text().search(), role: text().default("customer"), active: boolean().default(true), createdAt: timestamp().created(), updatedAt: timestamp().updated() });
+const orders = table({ id: id(), item: text(), quantity: integer(), weight: float().nullable(), amount: decimal(12, 2).index("day_amount"), note: text().nullable(), day: date().index().index("day_amount"), meta: json().nullable(), createdAt: timestamp().created() });
 
-export const db = connection().schema({ users, orders });
+export const db = connection().tables({ users, orders });
 `
 	shop := newManagedApp(t, map[string]string{
 		".shared/schema/shop.work": schema,
@@ -811,7 +813,7 @@ export const db = connection().schema({ users, orders });
 		t.Fatal(err)
 	}
 	schemaRegMu.Lock()
-	proxy := schemaReg[tenantScopeKey(tenant)+"|kitdb|"+kitDBApplicationName]
+	proxy := schemaReg[tenantScopeKey(tenant)+"|sqlite|"+kitDBApplicationName]
 	schemaRegMu.Unlock()
 	if proxy == nil {
 		t.Fatal("the schema file's database is not registered")
@@ -1013,7 +1015,7 @@ func TestKitDBApplicationNameIsReserved(t *testing.T) {
 		declared := legacy.Kitdb(value.New(name), value.New(map[string]value.Value{"users": users}),
 			value.New(map[string]value.Value{"drop": value.New(true)}))
 		code, message := failureOf(declared)
-		want := fmt.Sprintf("db: tên %q dành cho database của app; database của app khai export const db = connection().schema({ … }) trong .shared/schema/", name)
+		want := fmt.Sprintf("db: tên %q dành cho database của app; database của app khai export const db = connection().tables({ … }) trong .shared/schema/", name)
 		if code != value.InvalidArgumentCode || message != want {
 			t.Errorf("kitdb(%q): %s %q, want INVALID_ARGUMENT %q", name, code, message, want)
 		}
@@ -1035,10 +1037,10 @@ func TestSchemaModuleRefusesOlderSpellings(t *testing.T) {
 	tenant := shop.site("shop.example")
 	schema := &SchemaModule{}
 	declare := func(tables map[string]value.Value) value.Value {
-		return (&ConnectionDeclaration{tenant: tenant}).OnInvoke("schema", value.New(tables))
+		return (&ConnectionDeclaration{tenant: tenant}).OnInvoke("tables", value.New(tables))
 	}
 
-	older := schema.Struct().Call("struct", value.New(map[string]value.Value{
+	older := schema.Table().Call("table", value.New(map[string]value.Value{
 		"id":    schema.Id().Call("id"),
 		"email": schema.Text().Call("text").Invoke("notNull"),
 	}))
@@ -1048,7 +1050,7 @@ func TestSchemaModuleRefusesOlderSpellings(t *testing.T) {
 	}
 
 	users := goStruct(t, goColumn{name: "id", builder: "id"}, goColumn{name: "email", builder: "text"})
-	foreign := schema.Struct().Call("struct", value.New(map[string]value.Value{
+	foreign := schema.Table().Call("table", value.New(map[string]value.Value{
 		"id":     schema.Id().Call("id"),
 		"userId": users.Get("id"),
 	}))
@@ -1060,5 +1062,223 @@ func TestSchemaModuleRefusesOlderSpellings(t *testing.T) {
 	}
 	if code, message := failureOf(declare(map[string]value.Value{"session": users})); code != value.InvalidArgumentCode || !strings.HasPrefix(message, "session là tên dành riêng") {
 		t.Errorf("a table named session: %s %q", code, message)
+	}
+}
+
+// connection().schema("billing").tables({ … }) keeps its tables in a file of their own beside the app's
+// database (KITWORK_DATABASE.md mục 1, "Schema", 29/10/2026): a row inserted there is read there, the
+// public database never has the table, and .schema refuses what the compiler refuses.
+//
+// CONTROL (29/10/2026): with kitDBPath reading @application/billing as a name of the site's .data/, the row
+// landed in shop.example/.data/@application/billing and .database/application/billing.kitdb never appeared.
+func TestManagedDatabaseSchemaFile(t *testing.T) {
+	shop := newManagedApp(t, map[string]string{"shop.example/router.work": `import * as router from "kitwork/router";`})
+	tenant := shop.site("shop.example")
+	invoices := goStruct(t, goColumn{name: "id", builder: "id"}, goColumn{name: "name", builder: "text"})
+	picked := (&ConnectionDeclaration{tenant: tenant}).OnInvoke("schema", value.New("billing"))
+	declaration, ok := picked.V.(*ConnectionDeclaration)
+	if !ok {
+		t.Fatalf(`connection().schema("billing"): %v`, picked)
+	}
+	billing, ok := declaration.OnInvoke("tables", value.New(map[string]value.Value{"invoices": invoices})).V.(*ManagedDatabase)
+	if !ok {
+		t.Fatal(`connection().schema("billing").tables({ invoices }) is not a database`)
+	}
+	insert := `{"v":1,"action":"insert","table":"invoices","values":[{"column":"name","value":{"op":"hole","hole":0}}],"holes":[{"site":"a"}]}`
+	if created := billing.OnInvoke(statement.Method, value.New(insert), value.New("first")); created.Failed() {
+		t.Fatalf("insert: %v", created)
+	}
+	listed := billing.OnInvoke(statement.Method, value.New(`{"v":1,"action":"list","table":"invoices"}`))
+	if listed.Failed() || namesOf(listed.Interface()) != "first" {
+		t.Fatalf("billing.list: %v, want the row inserted", listed)
+	}
+	folder := filepath.Join(shop.root, "acme", ".database", "application")
+	if _, err := os.Stat(filepath.Join(folder, statement.SchemaFileName("billing"))); err != nil {
+		t.Fatalf("the schema's file: %v", err)
+	}
+	public := goManaged(t, tenant, map[string]value.Value{"orders": goOrders(t)})
+	if code, message := failureOf(public.OnInvoke(statement.Method, value.New(`{"v":1,"action":"list","table":"invoices"}`))); code != value.InvalidArgumentCode || !strings.HasPrefix(message, "không có bảng invoices") {
+		t.Errorf("public.list(invoices): %s %q", code, message)
+	}
+
+	for _, test := range []struct {
+		declaration *ConnectionDeclaration
+		argument    value.Value
+		code, want  string
+	}{
+		{&ConnectionDeclaration{tenant: tenant}, value.New("public"), value.InvalidArgumentCode, `public là schema mặc định: bỏ .schema("public")`},
+		{&ConnectionDeclaration{tenant: tenant}, value.New("Billing"), value.InvalidArgumentCode, "tên schema viết chữ thường"},
+		{&ConnectionDeclaration{tenant: tenant}, value.New(map[string]value.Value{"invoices": invoices}), value.InvalidArgumentCode, ".schema({ bảng }) đổi thành .tables({ bảng })"},
+		{declaration, value.New("sales"), value.InvalidArgumentCode, `.schema("tên") viết một lần`},
+		{&ConnectionDeclaration{tenant: tenant, name: "warehouse"}, value.New("stock"), value.UnsupportedCode, `connection("warehouse").schema(…) chưa có trong engine hôm nay`},
+	} {
+		if code, message := failureOf(test.declaration.OnInvoke("schema", test.argument)); code != test.code || !strings.HasPrefix(message, test.want) {
+			t.Errorf(".schema(%v): %s %q, want %s %q", test.argument, code, message, test.code, test.want)
+		}
+	}
+	if code, message := failureOf((&SchemaModule{}).Struct().Call("struct", value.New(map[string]value.Value{}))); code != value.InvalidArgumentCode || message != statement.TableRenamed {
+		t.Errorf("struct(…): %s %q", code, message)
+	}
+}
+
+// A decimal on SQLite is the integer its value times 10^scale (KITWORK_KITDB.md câu 13.1, 29/10/2026): it
+// compares, matches one(…) and orders as a number, reads back as the number written, and gives the rows
+// KitDB gives.
+//
+// CONTROL (29/10/2026): with the column TEXT and the value its text (the engine before), amount > 5 counted
+// 0 rows of 6 on SQLite, amount === 35000 found 35000 but not 35000.00, and the order put 4.5 before 35000.
+func TestManagedDatabaseSQLiteDecimal(t *testing.T) {
+	shop := newManagedApp(t, map[string]string{"shop.example/router.work": `import * as router from "kitwork/router";`})
+	tenant := shop.site("shop.example")
+	items := func() value.Value {
+		return goStruct(t,
+			goColumn{name: "id", builder: "id"},
+			goColumn{name: "name", builder: "text"},
+			goColumn{name: "amount", builder: "decimal", arguments: []value.Value{value.New(12), value.New(2)}},
+		)
+	}
+	kitdb := goManaged(t, tenant, map[string]value.Value{"items": items()})
+	declared := declareDbProxy(tenant, nil, "sqlite", value.New("decimal.db"), value.New(map[string]value.Value{"items": items()}))
+	sqlite := newManagedDatabase(declared.V.(*dbProxy))
+
+	insert := `{"v":1,"action":"insert","table":"items","values":[{"column":"name","value":{"op":"hole","hole":0}},{"column":"amount","value":{"op":"hole","hole":1}}],"holes":[{"site":"a"},{"site":"b"}]}`
+	rows := [][]value.Value{
+		{value.New("a"), value.New(5)},
+		{value.New("b"), value.New(35000)},
+		{value.New("c"), value.New(100.5)},
+		{value.New("d"), value.New("35000.00")},
+		{value.New("e"), value.New(4.5)},
+		{value.New("f"), value.New(10)},
+	}
+	for _, database := range []*ManagedDatabase{kitdb, sqlite} {
+		for _, row := range rows {
+			if created := database.OnInvoke(statement.Method, append([]value.Value{value.New(insert)}, row...)...); created.Failed() {
+				t.Fatalf("insert: %v", created)
+			}
+		}
+	}
+	for _, test := range []struct {
+		template string
+		holes    []value.Value
+		want     string
+	}{
+		{`{"v":1,"action":"count","table":"items","where":{"op":">","args":[{"op":"column","column":"amount"},{"op":"literal","value":5}]}}`, nil, "4"},
+		{`{"v":1,"action":"list","table":"items","where":{"op":"===","args":[{"op":"column","column":"amount"},{"op":"hole","hole":0}]},"order":[{"column":"name"}],"holes":[{"site":"a"}]}`,
+			[]value.Value{value.New(35000)}, "b, d"},
+		{`{"v":1,"action":"list","table":"items","where":{"op":"===","args":[{"op":"column","column":"amount"},{"op":"one","args":[{"op":"hole","hole":0}]}]},"order":[{"column":"name"}],"holes":[{"site":"a"}]}`,
+			[]value.Value{value.New([]value.Value{value.New(35000), value.New(4.5)})}, "b, d, e"},
+		{`{"v":1,"action":"list","table":"items","order":[{"column":"amount","desc":true},{"column":"name"}]}`, nil, "b, d, c, f, a, e"},
+	} {
+		for index, database := range []*ManagedDatabase{kitdb, sqlite} {
+			result := database.OnInvoke(statement.Method, append([]value.Value{value.New(test.template)}, test.holes...)...)
+			if result.Failed() {
+				t.Fatalf("%s: %v", test.template, result)
+			}
+			got := namesOf(result.Interface())
+			if result.K == value.Number {
+				got = strconv.Itoa(int(result.N))
+			}
+			if got != test.want {
+				t.Errorf("%s:\n  %s gave %q, want %q", test.template, []string{"KitDB", "SQLite"}[index], got, test.want)
+			}
+		}
+	}
+	read := sqlite.OnInvoke(statement.Method, value.New(`{"v":1,"action":"first","table":"items","where":{"op":"===","args":[{"op":"column","column":"name"},{"op":"literal","value":"c"}]}}`))
+	if row, ok := read.Interface().(map[string]any); !ok || row["amount"] != 100.5 {
+		t.Errorf("amount of c reads %v, want 100.5", read)
+	}
+	table, failure := declared.V.(*dbProxy).table("items")
+	if table == nil {
+		t.Fatal(failure)
+	}
+	file, err := sql.Open("sqlite", table.sqliteFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	var kind string
+	var stored int64
+	if err := file.QueryRow(`select typeof(amount), amount from items where name = 'e'`).Scan(&kind, &stored); err != nil || kind != "integer" || stored != 450 {
+		t.Errorf("4.5 in decimal(12, 2) is stored as %s %d (%v), want integer 450", kind, stored, err)
+	}
+}
+
+// A host's SQLite file that kept a decimal as its text, from before 29/10/2026, is left as it is: the first
+// statement fails saying so, and the column keeps its text (the change is kitwork migrate's, lát 7).
+func TestManagedDatabaseSQLiteDecimalTextIsRefused(t *testing.T) {
+	shop := newManagedApp(t, map[string]string{"shop.example/router.work": `import * as router from "kitwork/router";`})
+	tenant := shop.site("shop.example")
+	path := filepath.Join(t.TempDir(), "ledger.db")
+	file, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	for _, statementSQL := range []string{
+		`CREATE TABLE "items" ("id" TEXT PRIMARY KEY NOT NULL, "name" TEXT NOT NULL, "amount" TEXT NOT NULL)`,
+		`INSERT INTO "items" VALUES ('x', 'a', '35000.00')`,
+	} {
+		if _, err := file.Exec(statementSQL); err != nil {
+			t.Fatal(err)
+		}
+	}
+	items := goStruct(t,
+		goColumn{name: "id", builder: "id"},
+		goColumn{name: "name", builder: "text"},
+		goColumn{name: "amount", builder: "decimal", arguments: []value.Value{value.New(12), value.New(2)}},
+	)
+	declared := declareDbProxy(tenant, nil, "sqlite", value.New(catalogDatabaseName("ledger")), value.New(map[string]value.Value{"items": items}))
+	declared.V.(*dbProxy).sqlitePath = path
+	ledger := newManagedDatabase(declared.V.(*dbProxy))
+	code, message := failureOf(ledger.OnInvoke(statement.Method, value.New(`{"v":1,"action":"list","table":"items"}`)))
+	if code != value.DatabaseCode || !strings.Contains(message, "cột amount là decimal lưu dạng chữ (cách trước 29/10/2026)") {
+		t.Fatalf("a file of the old layout: %s %q", code, message)
+	}
+	var kind string
+	if err := file.QueryRow(`SELECT type FROM pragma_table_info('items') WHERE name = 'amount'`).Scan(&kind); err != nil || kind != "TEXT" {
+		t.Fatalf("the column became %q (%v), want TEXT kept", kind, err)
+	}
+}
+
+// The app's SQLite file keeps the kind each column was declared with in kitwork_columns, written when the engine
+// first checks the table: what the file alone does not say (a decimal's scale, a boolean stored 0 or 1), which the
+// PostgreSQL wire port reads to give 4.50 for 450 and true for 1 (KITWORK_KITDB.md câu 13.5).
+//
+// CONTROL: with ensureTable not calling recordColumnKinds, "kitwork_columns: SQL logic error: no such table:
+// kitwork_columns (1)".
+func TestManagedDatabaseRecordsColumnKinds(t *testing.T) {
+	shop := newManagedApp(t, map[string]string{"shop.example/router.work": `import * as router from "kitwork/router";`})
+	tenant := shop.site("shop.example")
+	items := goStruct(t,
+		goColumn{name: "id", builder: "id"},
+		goColumn{name: "name", builder: "text"},
+		goColumn{name: "amount", builder: "decimal", arguments: []value.Value{value.New(12), value.New(2)}},
+		goColumn{name: "paid", builder: "boolean"},
+	)
+	database := goManaged(t, tenant, map[string]value.Value{"items": items})
+	if counted := database.OnInvoke(statement.Method, value.New(`{"v":1,"action":"count","table":"items"}`)); counted.Failed() {
+		t.Fatalf("count: %v", counted)
+	}
+	file, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(shop.root, "acme", ".database", "application", "kitwork.db"))+"?mode=ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	rows, err := file.Query(`SELECT column_name, kind, precision, scale FROM kitwork_columns WHERE table_name = 'items' ORDER BY column_name`)
+	if err != nil {
+		t.Fatalf("kitwork_columns: %v", err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var name, kind string
+		var precision, scale int
+		if err := rows.Scan(&name, &kind, &precision, &scale); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, fmt.Sprintf("%s %s %d %d", name, kind, precision, scale))
+	}
+	if want := "amount decimal 12 2, id kitid 0 0, name text 0 0, paid bool 0 0"; strings.Join(got, ", ") != want {
+		t.Fatalf("kitwork_columns of items = %q, want %q", strings.Join(got, ", "), want)
 	}
 }

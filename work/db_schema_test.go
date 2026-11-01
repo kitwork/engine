@@ -962,18 +962,50 @@ router.get((ctx) => { db.things.create({ zebra: "z", apple: "a", mango: "m" }); 
 	if rec.Code != 200 {
 		t.Fatalf("seed failed: %d %s", rec.Code, rec.Body.String())
 	}
-	// SELECT * via libSQL and check the column order in the response.
-	body := `{"baton":null,"requests":[{"type":"execute","stmt":{"sql":"SELECT * FROM things","want_rows":true}},{"type":"close"}]}`
-	req := httptest.NewRequest(http.MethodPost, "http://localhost/v2/pipeline", strings.NewReader(body))
-	req.Header.Set("Authorization", "Bearer tok")
-	rec = httptest.NewRecorder()
-	tenant.Serve(rec, req)
-	got := rec.Body.String()
-	// The cols must appear in declared order.
-	idx := func(s string) int { return strings.Index(got, `"name":"`+s+`"`) }
-	if !(idx("id") < idx("zebra") && idx("zebra") < idx("apple") && idx("apple") < idx("mango")) {
-		t.Errorf("columns not in declared order (id,zebra,apple,mango); body: %s", got)
+	// The file's own columns, read-only beside the tenant that writes it, must be in declared order.
+	db := openSiteSQLiteReadOnly(t, filepath.Join(dir, ".data", "app.db"))
+	defer db.Close()
+	got := sqliteStrings(t, db, `SELECT name FROM pragma_table_info('things') ORDER BY cid`)
+	if !reflect.DeepEqual(got, []string{"id", "zebra", "apple", "mango"}) {
+		t.Errorf("columns not in declared order (id,zebra,apple,mango): %v", got)
 	}
+}
+
+// openSiteSQLiteReadOnly opens a site's SQLite file read-only, beside the tenant that writes it, to see
+// what the engine built in the file the way any other reader of the file sees it. The caller closes it.
+func openSiteSQLiteReadOnly(t *testing.T, path string) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?mode=ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Ping(); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	return db
+}
+
+// sqliteStrings is the first column of every row of a query, as text.
+func sqliteStrings(t *testing.T, db *sql.DB, query string) []string {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("%s: %v", query, err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var item string
+		if err := rows.Scan(&item); err != nil {
+			t.Fatalf("%s: %v", query, err)
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("%s: %v", query, err)
+	}
+	return out
 }
 
 // An EXISTING table whose columns are in the wrong order is REBUILT into the declared order on
@@ -1172,15 +1204,12 @@ router.get((ctx) => { db.links.create({ slug: "s", code: "c", status: "active" }
 	if rec.Code != 200 {
 		t.Fatalf("seed failed: %d %s", rec.Code, rec.Body.String())
 	}
-	// list indexes the way a manager does
-	body := `{"baton":null,"requests":[{"type":"execute","stmt":{"sql":"SELECT name FROM sqlite_master WHERE type='index' AND sql IS NOT NULL","want_rows":true}},{"type":"close"}]}`
-	req := httptest.NewRequest(http.MethodPost, "http://localhost/v2/pipeline", strings.NewReader(body))
-	req.Header.Set("Authorization", "Bearer tok")
-	rec = httptest.NewRecorder()
-	tenant.Serve(rec, req)
-	got := rec.Body.String()
+	// list the file's indexes the way a manager does: those made by CREATE INDEX (origin "c")
+	db := openSiteSQLiteReadOnly(t, filepath.Join(dir, ".data", "app.db"))
+	defer db.Close()
+	got := strings.Join(sqliteStrings(t, db, `SELECT name FROM pragma_index_list('links') WHERE origin = 'c'`), ",")
 	if !strings.Contains(got, "idx_links_slug") || !strings.Contains(got, "status_code") {
-		t.Errorf(".index() indexes not found via sqlite_master; body: %s", got)
+		t.Errorf(".index() indexes not found in the file's index list: %s", got)
 	}
 }
 
@@ -1297,27 +1326,30 @@ router.get((ctx) => {
 		t.Errorf("FK column must keep the given id (no auto-gen): uid=%q link_user=%q", f["uid"], f["link_user"])
 	}
 
-	q := func(sql string, wantRows bool) string {
-		w := "false"
-		if wantRows {
-			w = "true"
-		}
-		body := `{"baton":null,"requests":[{"type":"execute","stmt":{"sql":"` + sql + `","want_rows":` + w + `}},{"type":"close"}]}`
-		req := httptest.NewRequest(http.MethodPost, "http://localhost/v2/pipeline", strings.NewReader(body))
-		req.Header.Set("Authorization", "Bearer tok")
-		rr := httptest.NewRecorder()
-		tenant.Serve(rr, req)
-		return rr.Body.String()
+	// The file's own foreign key, read-only beside the tenant that writes it.
+	db := openSiteSQLiteReadOnly(t, filepath.Join(dir, ".data", "app.db"))
+	defer db.Close()
+	if fk := sqliteStrings(t, db, `SELECT "table" || '.' || "to" || ' <- ' || "from" || ' ON DELETE ' || on_delete FROM pragma_foreign_key_list('links')`); !reflect.DeepEqual(fk, []string{"users.id <- user_id ON DELETE CASCADE"}) {
+		t.Errorf("links foreign keys = %v, want users.id <- user_id ON DELETE CASCADE", fk)
 	}
-	if ddl := q("SELECT sql FROM sqlite_master WHERE type='table' AND name='links'", true); !strings.Contains(ddl, "REFERENCES") || !strings.Contains(ddl, "ON DELETE CASCADE") {
-		t.Errorf("links DDL missing the FK: %s", ddl)
+	// Enforced, and cascading, on the engine's own connections to the file (a foreign key is enforced per
+	// connection; a read-only reader enforces nothing).
+	pool := sqliteFor(tenant, "app.db").db()
+	if pool == nil {
+		t.Fatal("the tenant's app.db pool is unavailable")
 	}
-	if bad := q("INSERT INTO links(id,user_id,code) VALUES('l9','GHOST','z')", false); !strings.Contains(bad, "FOREIGN KEY") && !strings.Contains(bad, "constraint") {
-		t.Errorf("FK not enforced: %s", bad)
+	if _, err := pool.Exec(`INSERT INTO links(id,user_id,code) VALUES('l9','GHOST','z')`); err == nil ||
+		(!strings.Contains(err.Error(), "FOREIGN KEY") && !strings.Contains(err.Error(), "constraint")) {
+		t.Errorf("FK not enforced: %v", err)
 	}
-	q("DELETE FROM users", false)
-	if after := q("SELECT count(*) c FROM links", true); !strings.Contains(after, `"value":"0"`) {
-		t.Errorf("ON DELETE CASCADE did not fire: %s", after)
+	if before := sqliteStrings(t, db, `SELECT count(*) FROM links`); !reflect.DeepEqual(before, []string{"1"}) {
+		t.Fatalf("links count before the delete = %v, want 1", before)
+	}
+	if _, err := pool.Exec(`DELETE FROM users`); err != nil {
+		t.Fatal(err)
+	}
+	if after := sqliteStrings(t, db, `SELECT count(*) FROM links`); !reflect.DeepEqual(after, []string{"0"}) {
+		t.Errorf("ON DELETE CASCADE did not fire: links count %v", after)
 	}
 }
 

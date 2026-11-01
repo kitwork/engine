@@ -10,12 +10,12 @@ import (
 )
 
 // readSchemaModule reads a file of .shared/schema/ (KITWORK_DATABASE.md mục 1): its imports of Kitwork,
-// its tables (const orders = struct({ … })) and its databases (export const db = connection().schema({
-// orders })). It reads the syntax and never guesses: a statement it cannot read is a compile error at that
+// its tables (const orders = table({ … })) and its databases (export const db = connection().tables({
+// orders }), connection().schema("billing").tables({ invoices })). It reads the syntax and never guesses: a statement it cannot read is a compile error at that
 // statement, so what the compiler checks a statement against is what the file declares. The engine checks
 // again against the live schema when the statement first runs.
 func readSchemaModule(program *Program, place func(Token) string) (map[string]*statement.Database, error) {
-	reader := &schemaReader{place: place, words: map[string]kitworkWord{}, structs: map[string]*statement.Table{}}
+	reader := &schemaReader{place: place, words: map[string]kitworkWord{}, tables: map[string]*statement.Table{}}
 	exported := make(map[string]bool, len(program.Exports))
 	for _, name := range program.Exports {
 		exported[name] = true
@@ -34,18 +34,18 @@ func readSchemaModule(program *Program, place func(Token) string) (map[string]*s
 		}
 		switch node := node.(type) {
 		case *ImportStatement:
-			reader.fail(node.Token, fmt.Sprintf("import %q trong .shared/schema/ chưa có trong engine hôm nay (lát 5: struct từ file khác; lát 6: queue cho after()); khai bảng ngay trong file này", node.Source))
+			reader.fail(node.Token, fmt.Sprintf("import %q trong .shared/schema/ chưa có trong engine hôm nay (lát 5: bảng từ file khác; lát 6: queue cho after()); khai bảng ngay trong file này", node.Source))
 		case *VarStatement:
 			if len(node.Names) != 1 || node.DestructMode != DestructNone || node.Token.Kind != Const {
-				reader.fail(node.Token, "file trong .shared/schema/ chỉ khai struct và connection(): mỗi dòng là const tên = struct({ … }) hay export const db = connection().schema({ … })")
+				reader.fail(node.Token, "file trong .shared/schema/ chỉ khai table và connection(): mỗi dòng là const tên = table({ … }) hay export const db = connection().tables({ … })")
 				continue
 			}
 			name := node.Names[0]
 			switch {
-			case reader.isStructCall(node.Value):
-				table := reader.readStruct(node.Value)
+			case reader.isTableCall(node.Value):
+				table := reader.readTable(node.Value)
 				if table != nil {
-					reader.structs[name.Value] = table
+					reader.tables[name.Value] = table
 					reader.order = append(reader.order, name.Value)
 				}
 			case reader.isDeclaration(node.Value):
@@ -59,10 +59,10 @@ func readSchemaModule(program *Program, place func(Token) string) (map[string]*s
 				}
 				databases[name.Value] = database
 			default:
-				reader.fail(name.Token, fmt.Sprintf("file trong .shared/schema/ chỉ khai struct và connection(): %s không phải struct({ … }) hay connection()….schema({ … }); hàm và hằng dùng chung đặt trong .shared/", name.Value))
+				reader.fail(name.Token, fmt.Sprintf("file trong .shared/schema/ chỉ khai table và connection(): %s không phải table({ … }) hay connection()….tables({ … }); hàm và hằng dùng chung đặt trong .shared/", name.Value))
 			}
 		default:
-			reader.fail(statementToken(node), "file trong .shared/schema/ chỉ khai struct và connection(), không chạy gì khi nạp")
+			reader.fail(statementToken(node), "file trong .shared/schema/ chỉ khai table và connection(), không chạy gì khi nạp")
 		}
 	}
 	if reader.err != nil {
@@ -79,11 +79,11 @@ type kitworkWord struct {
 }
 
 type schemaReader struct {
-	place   func(Token) string
-	words   map[string]kitworkWord
-	structs map[string]*statement.Table
-	order   []string
-	err     error
+	place  func(Token) string
+	words  map[string]kitworkWord
+	tables map[string]*statement.Table
+	order  []string
+	err    error
 }
 
 func (reader *schemaReader) fail(token Token, message string) {
@@ -131,7 +131,7 @@ func (reader *schemaReader) kitworkImport(node Statement) bool {
 
 // removedImport refuses an older word of the database module imported into a schema file (import { kitdb }
 // from "kitwork/database"), with what the spec writes instead: the file would otherwise fail later, at the
-// line that calls it, saying only that it declares neither struct nor connection.
+// line that calls it, saying only that it declares neither table nor connection.
 func (reader *schemaReader) removedImport(token Token, module, imported string) {
 	if refused := removedImportMessage(module, imported); refused != "" {
 		reader.fail(token, refused)
@@ -159,7 +159,7 @@ func isKitworkCall(e Expression) bool {
 	return ok && callee.Value == "kitwork"
 }
 
-// callee is the word a call names: struct(…) by an import of struct, schema.struct(…) by a namespace.
+// callee is the word a call names: table(…) by an import of table, schema.table(…) by a namespace.
 // token is where the name is written; ok is false when the call names no word of Kitwork.
 func (reader *schemaReader) callee(e Expression) (word kitworkWord, token Token, arguments []Expression, ok bool) {
 	switch node := e.(type) {
@@ -187,9 +187,10 @@ func (reader *schemaReader) callee(e Expression) (word kitworkWord, token Token,
 	return kitworkWord{}, Token{}, nil, false
 }
 
-func (reader *schemaReader) isStructCall(e Expression) bool {
+// isTableCall reports a call of table, or of struct, the word it replaced, which readTable refuses saying so.
+func (reader *schemaReader) isTableCall(e Expression) bool {
 	word, _, _, ok := reader.callee(e)
-	return ok && word.imported == "struct"
+	return ok && (word.imported == "table" || word.imported == "struct")
 }
 
 // isDeclaration reports a chain that starts at connection() or connect() of kitwork/database.
@@ -206,20 +207,24 @@ func (reader *schemaReader) isDeclaration(e Expression) bool {
 	}
 }
 
-// readStruct reads struct({ cột }) into a table without a name: the key in schema({ … }) names it.
-func (reader *schemaReader) readStruct(e Expression) *statement.Table {
+// readTable reads table({ cột }) into a table without a name: the key in tables({ … }) names it.
+func (reader *schemaReader) readTable(e Expression) *statement.Table {
 	word, token, arguments, _ := reader.callee(e)
+	if word.imported == "struct" {
+		reader.fail(token, statement.TableRenamed)
+		return nil
+	}
 	if word.module != "schema" {
-		reader.fail(token, `struct import từ "kitwork/schema": import { struct, id, text } from "kitwork/schema"`)
+		reader.fail(token, `table import từ "kitwork/schema": import { table, id, text } from "kitwork/schema"`)
 		return nil
 	}
 	if len(arguments) != 1 {
-		reader.fail(token, "struct nhận một object cột: struct({ id: id(), name: text() })")
+		reader.fail(token, "table nhận một object cột: table({ id: id(), name: text() })")
 		return nil
 	}
 	fields, ok := arguments[0].(*ObjectLiteral)
 	if !ok {
-		reader.fail(token, "struct nhận một object cột viết ngay trong lời gọi: struct({ id: id(), name: text() })")
+		reader.fail(token, "table nhận một object cột viết ngay trong lời gọi: table({ id: id(), name: text() })")
 		return nil
 	}
 	table := &statement.Table{}
@@ -227,12 +232,12 @@ func (reader *schemaReader) readStruct(e Expression) *statement.Table {
 	primary := 0
 	for _, entry := range fields.Entries {
 		if entry.IsSpread {
-			reader.fail(fields.Token, "struct({ ...x }) chưa có trong engine hôm nay: viết từng cột")
+			reader.fail(fields.Token, "table({ ...x }) chưa có trong engine hôm nay: viết từng cột")
 			return nil
 		}
 		name, nameToken, ok := objectKeyName(entry.Key)
 		if !ok {
-			reader.fail(fields.Token, "tên cột viết bằng chữ: struct({ email: text() })")
+			reader.fail(fields.Token, "tên cột viết bằng chữ: table({ email: text() })")
 			return nil
 		}
 		if seen[name] {
@@ -254,7 +259,7 @@ func (reader *schemaReader) readStruct(e Expression) *statement.Table {
 		table.Columns = append(table.Columns, column)
 	}
 	if len(table.Columns) == 0 {
-		reader.fail(token, "struct cần ít nhất một cột")
+		reader.fail(token, "table cần ít nhất một cột")
 		return nil
 	}
 	if primary == 0 {
@@ -394,7 +399,8 @@ func (reader *schemaReader) readColumn(name string, e Expression) (statement.Col
 	return column, true
 }
 
-// readDeclaration reads connection()….schema({ bảng }): the tables, named by their keys.
+// readDeclaration reads connection()….tables({ bảng }), with .schema("tên") picking the schema: the tables, named
+// by their keys.
 func (reader *schemaReader) readDeclaration(name *Identifier, e Expression) *statement.Database {
 	var links []*MethodCallExpression
 	base := e
@@ -428,32 +434,46 @@ func (reader *schemaReader) readDeclaration(name *Identifier, e Expression) *sta
 		reader.fail(token, `connection nhận một tên: connection() là database của app, connection("warehouse") là tên host khai trong app.databases({ … })`)
 		return nil
 	}
-	if len(links) == 0 || links[len(links)-1].Method.Value != "schema" {
-		reader.fail(name.Token, fmt.Sprintf("câu chưa kết thúc: %s = connection()….schema({ bảng }), schema là hành động đứng cuối", name.Value))
+	last := len(links) - 1
+	if last < 0 || links[last].Method.Value != "tables" {
+		if last >= 0 && links[last].Method.Value == "schema" && len(links[last].Arguments) == 1 {
+			if _, isObject := links[last].Arguments[0].(*ObjectLiteral); isObject {
+				reader.fail(links[last].Method.Token, statement.TablesRenamed)
+				return nil
+			}
+		}
+		reader.fail(name.Token, fmt.Sprintf("câu chưa kết thúc: %s = connection()….tables({ bảng }), tables là hành động đứng cuối", name.Value))
 		return nil
 	}
-	for _, link := range links[:len(links)-1] {
+	schemaName := ""
+	for index, link := range links[:last] {
 		switch link.Method.Value {
+		case "schema":
+			schemaName = reader.readSchemaName(link, index, connectionName)
+			if schemaName == "" {
+				return nil
+			}
+			continue
 		case "policy", "before", "after":
 			reader.fail(link.Method.Token, fmt.Sprintf(".%s(…) chưa có trong engine hôm nay (lát 6)", link.Method.Value))
-		case "schema":
-			reader.fail(link.Method.Token, "schema là hành động, đứng cuối và một lần")
+		case "tables":
+			reader.fail(link.Method.Token, "tables là hành động, đứng cuối và một lần")
 		default:
-			reader.fail(link.Method.Token, fmt.Sprintf("connection().%s không có; khai: connection() [.policy]* [.before]* [.after]* .schema({ bảng })", link.Method.Value))
+			reader.fail(link.Method.Token, fmt.Sprintf(`connection().%s không có; khai: connection() [.schema("tên")] [.policy]* [.before]* [.after]* .tables({ bảng })`, link.Method.Value))
 		}
 		return nil
 	}
-	schema := links[len(links)-1]
+	schema := links[last]
 	if len(schema.Arguments) != 1 {
-		reader.fail(schema.Method.Token, "schema nhận một object bảng: .schema({ orders })")
+		reader.fail(schema.Method.Token, "tables nhận một object bảng: .tables({ orders })")
 		return nil
 	}
 	tables, ok := schema.Arguments[0].(*ObjectLiteral)
 	if !ok {
-		reader.fail(schema.Method.Token, "schema nhận một object bảng viết ngay trong lời gọi: .schema({ orders })")
+		reader.fail(schema.Method.Token, "tables nhận một object bảng viết ngay trong lời gọi: .tables({ orders })")
 		return nil
 	}
-	database := &statement.Database{Export: name.Value, Connection: connectionName}
+	database := &statement.Database{Export: name.Value, Connection: connectionName, Schema: schemaName}
 	seen := map[string]string{}
 	used := map[string]string{}
 	for _, entry := range tables.Entries {
@@ -484,22 +504,22 @@ func (reader *schemaReader) readDeclaration(name *Identifier, e Expression) *sta
 		var table *statement.Table
 		switch value := entry.Value.(type) {
 		case *Identifier:
-			table = reader.structs[value.Value]
+			table = reader.tables[value.Value]
 			if table == nil {
-				reader.fail(value.Token, fmt.Sprintf("%s không phải struct khai trong file này: const %s = struct({ … }) trước schema", value.Value, value.Value))
+				reader.fail(value.Token, fmt.Sprintf("%s không phải bảng khai trong file này: const %s = table({ … }) trước tables", value.Value, value.Value))
 				return nil
 			}
 			if first, twice := used[value.Value]; twice {
-				reader.fail(value.Token, fmt.Sprintf("struct %s đã là bảng %s: một struct một bảng", value.Value, first))
+				reader.fail(value.Token, fmt.Sprintf("table %s đã là bảng %s: một table một bảng", value.Value, first))
 				return nil
 			}
 			used[value.Value] = tableName
 		default:
-			if !reader.isStructCall(entry.Value) {
-				reader.fail(at, fmt.Sprintf("bảng %s là một struct: .schema({ %s }) với const %s = struct({ … })", tableName, tableName, tableName))
+			if !reader.isTableCall(entry.Value) {
+				reader.fail(at, fmt.Sprintf("bảng %s là một table: .tables({ %s }) với const %s = table({ … })", tableName, tableName, tableName))
 				return nil
 			}
-			table = reader.readStruct(entry.Value)
+			table = reader.readTable(entry.Value)
 			if table == nil {
 				return nil
 			}
@@ -514,6 +534,39 @@ func (reader *schemaReader) readDeclaration(name *Identifier, e Expression) *sta
 		return nil
 	}
 	return database
+}
+
+// readSchemaName reads .schema("billing"), which picks the schema the tables go in: right after connection(…),
+// once, a name written in place so the compiler knows the file without running anything. "" when it failed.
+func (reader *schemaReader) readSchemaName(link *MethodCallExpression, index int, connectionName string) string {
+	if index != 0 {
+		reader.fail(link.Method.Token, `.schema("tên") đứng ngay sau connection(…), trước policy, before, after`)
+		return ""
+	}
+	if len(link.Arguments) == 1 {
+		if _, isObject := link.Arguments[0].(*ObjectLiteral); isObject {
+			reader.fail(link.Method.Token, statement.TablesRenamed)
+			return ""
+		}
+	}
+	var literal *Literal
+	if len(link.Arguments) == 1 {
+		literal, _ = link.Arguments[0].(*Literal)
+	}
+	if literal == nil || literal.Value.K != value.String {
+		reader.fail(link.Method.Token, statement.SchemaName(""))
+		return ""
+	}
+	name := literal.Value.Text()
+	if refused := statement.SchemaName(name); refused != "" {
+		reader.fail(literal.Token, refused)
+		return ""
+	}
+	if connectionName != "" {
+		reader.fail(link.Method.Token, fmt.Sprintf(`connection(%q).schema(…) chưa có trong engine hôm nay: schema chạy trên database của app, connection()`, connectionName))
+		return ""
+	}
+	return name
 }
 
 // readConnect reads connect({ postgresql: … }): a database outside the app, which has no schema, policy,

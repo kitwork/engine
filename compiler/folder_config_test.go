@@ -76,7 +76,7 @@ func TestFolderConfigRunsItsCalls(t *testing.T) {
 		t.Fatalf("calls = %q, want parallel(4) keep(30d)", got)
 	}
 
-	const schema = "import { struct, id, text } from \"kitwork/schema\";\nimport { connection } from \"kitwork/database\";\nconst orders = struct({ id: id(), email: text() });\nexport const db = connection().schema({ orders });\n"
+	const schema = "import { table, id, text } from \"kitwork/schema\";\nimport { connection } from \"kitwork/database\";\nconst orders = table({ id: id(), email: text() });\nexport const db = connection().tables({ orders });\n"
 	if _, err := compileInApp(t, map[string]string{
 		".schedule/config.work":     "import * as schedule from \"kitwork/schedule\";\nimport { db } from \"app/.shared/schema/shop.work\";\n\nschedule.keep(\"7d\");\nschedule.session({ role: \"system\" });\nschedule.database(db);\n",
 		".shared/schema/shop.work":  schema,
@@ -209,9 +209,9 @@ func TestFolderConfigCallsOnlyAtTheTopOfTheirConfig(t *testing.T) {
 // knowing the three names, "application" and "files" got the hint `connection("application").schema(…)`; with
 // anything but a name or a literal let through as a value, -1, k + 1 and all.a compiled (got <nil>).
 func TestFolderConfigDatabaseTakesADatabaseOfTheSchema(t *testing.T) {
-	const schema = "import { struct, id, text } from \"kitwork/schema\";\nimport { connection, connect } from \"kitwork/database\";\n" +
-		"const orders = struct({ id: id(), email: text() });\nconst letters = struct({ id: id(), email: text() });\n" +
-		"export const db = connection().schema({ orders });\nexport const jobs = connection(\"jobs\").schema({ letters });\n" +
+	const schema = "import { table, id, text } from \"kitwork/schema\";\nimport { connection, connect } from \"kitwork/database\";\n" +
+		"const orders = table({ id: id(), email: text() });\nconst letters = table({ id: id(), email: text() });\n" +
+		"export const db = connection().tables({ orders });\nexport const jobs = connection(\"jobs\").tables({ letters });\n" +
 		"export const crm = connect({ postgresql: \"postgresql://user:secret@crm.example:5432/crm\" });\n"
 	const queueHead = "import * as queue from \"kitwork/queue\";\nimport { db, jobs, crm } from \"app/.shared/schema/shop.work\";\n"
 	const scheduleHead = "import * as schedule from \"kitwork/schedule\";\nimport { db, jobs, crm } from \"app/.shared/schema/shop.work\";\n"
@@ -226,7 +226,7 @@ func TestFolderConfigDatabaseTakesADatabaseOfTheSchema(t *testing.T) {
 		{"a name not declared", ".shared/queue/config.work", queueHead + "queue.database(orders);\n", "3:16",
 			"queue.database(orders): orders không phải database khai trong .shared/schema/"},
 		{"a name of the catalogue as a string", ".shared/queue/config.work", queueHead + "queue.database(\"jobs\");\n", "3:16",
-			`queue.database("jobs"): một chuỗi không phải database; database tên jobs của host khai trong .shared/schema/ bằng export const db = connection("jobs").schema({ … }), rồi queue.database(db) với tên import của nó`},
+			`queue.database("jobs"): một chuỗi không phải database; database tên jobs của host khai trong .shared/schema/ bằng export const db = connection("jobs").tables({ … }), rồi queue.database(db) với tên import của nó`},
 		{"the app's database as a string", ".schedule/config.work", scheduleHead + "schedule.database(\"application\");\n", "3:19",
 			`schedule.database("application"): một chuỗi không phải database; database của app là connection() không tên, và các lần chạy đã ở đó khi không gọi schedule.database`},
 		{"a name of no database as a string", ".shared/queue/config.work", queueHead + "queue.database(\"files\");\n", "3:16",
@@ -240,7 +240,7 @@ func TestFolderConfigDatabaseTakesADatabaseOfTheSchema(t *testing.T) {
 		{"a template with a value", ".shared/queue/config.work", queueHead + "const k = 1;\nqueue.database(`jobs${k}`);\n", "4:16",
 			"queue.database(…) nhận tên import của một database khai trong .shared/schema/"},
 		{"a number", ".shared/queue/config.work", queueHead + "queue.database(1);\n", "3:16",
-			"queue.database(…) nhận tên import của một database khai trong .shared/schema/ (export const db = connection().schema({ … })): " + write + "; giá trị này không phải database đó"},
+			"queue.database(…) nhận tên import của một database khai trong .shared/schema/ (export const db = connection().tables({ … })): " + write + "; giá trị này không phải database đó"},
 		{"a negative number", ".shared/queue/config.work", queueHead + "queue.database(-1);\n", "3:16",
 			"queue.database(…) nhận tên import của một database khai trong .shared/schema/"},
 		{"a computed value", ".shared/queue/config.work", queueHead + "const k = 1;\nqueue.database(k + 1);\n", "4:16",

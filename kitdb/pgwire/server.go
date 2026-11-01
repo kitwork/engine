@@ -37,16 +37,24 @@ const (
 	defaultCopyTimeout            = 30 * time.Minute
 	defaultWriteTimeout           = 10 * time.Second
 	defaultMaxCopyBytes           = int64(64 << 20)
+	defaultSCRAMMockIterations    = 600000
 	maxStartupBytes               = 64 << 10
+	maxSASLMessageBytes           = 64 << 10
 )
 
 var errTerminateConnection = errors.New("pgwire: terminate connection")
 
-// Server is the first bounded KitDB PostgreSQL wire profile. It deliberately
-// supports cleartext password exchange on loopback only. TLS and SCRAM belong
-// in a later network-facing profile.
+// Server is KitDB's bounded PostgreSQL wire server. It authenticates with
+// SCRAM-SHA-256 when its Authenticator is also a SCRAMAuthenticator, and with
+// a cleartext password otherwise. It has no TLS yet, so it listens on loopback
+// only: SCRAM keeps the password off the wire, but statements and rows still
+// travel in clear.
 type Server struct {
-	Authenticator              Authenticator
+	Authenticator Authenticator
+	// SCRAMMockIterations is the PBKDF2 iteration count a SCRAM exchange
+	// announces for an unknown or disabled user, so that it looks like a real
+	// account's; 600000 (what accounts are made with) when zero.
+	SCRAMMockIterations        int
 	MaxConnections             int
 	MaxConcurrentQueries       int
 	MaxConcurrentQueriesPerKey int
@@ -73,6 +81,9 @@ type serverRuntime struct {
 	nextPID        atomic.Uint32
 	queryAdmission *copyAdmissionScheduler
 	copyAdmission  *copyAdmissionScheduler
+	// scramMockSecret is drawn once per Serve; an unknown user's mock SCRAM
+	// verifier is derived from it and the user name.
+	scramMockSecret [32]byte
 }
 
 // QuerySnapshot is a race-free point-in-time view of server-wide statement
@@ -264,11 +275,15 @@ func (server Server) withDefaults() Server {
 	if server.QueryMetrics == nil {
 		server.QueryMetrics = &QueryMetrics{}
 	}
+	if server.SCRAMMockIterations <= 0 {
+		server.SCRAMMockIterations = defaultSCRAMMockIterations
+	}
 	return server
 }
 
 // Serve accepts PostgreSQL protocol 3.0 connections until ctx is canceled.
-// The cleartext local profile rejects non-loopback listeners by construction.
+// Without TLS it rejects non-loopback listeners by construction, whether it
+// authenticates with SCRAM-SHA-256 or with a cleartext password.
 func (server Server) Serve(ctx context.Context, listener net.Listener) error {
 	server = server.withDefaults()
 	if ctx == nil {
@@ -282,6 +297,9 @@ func (server Server) Serve(ctx context.Context, listener net.Listener) error {
 	}
 
 	runtime := &serverRuntime{server: server}
+	if _, err := rand.Read(runtime.scramMockSecret[:]); err != nil {
+		return fmt.Errorf("pgwire: SCRAM mock secret: %w", err)
+	}
 	runtime.queryAdmission = newCopyAdmissionScheduler(
 		server.MaxConcurrentQueries,
 		server.MaxConcurrentQueriesPerKey,
@@ -362,7 +380,9 @@ func (server Server) Serve(ctx context.Context, listener net.Listener) error {
 
 // ValidateCleartextListener checks the network boundary without accepting a
 // connection. Adapters use it before touching their local persistence so an
-// invalid public listener fails before any startup side effect.
+// invalid public listener fails before any startup side effect. Until the
+// server speaks TLS every listener must be loopback, with SCRAM-SHA-256 too:
+// the password stays off the wire, but statements and rows do not.
 func ValidateCleartextListener(listener net.Listener) error {
 	if listener == nil {
 		return fmt.Errorf("pgwire: listener is nil")
@@ -508,36 +528,18 @@ func decodeStartup(decoder *decoder) (Startup, error) {
 	return Startup{}, fmt.Errorf("pgwire: startup packet has no terminator")
 }
 
+// authenticate runs SCRAM-SHA-256 for an Authenticator that is also a
+// SCRAMAuthenticator and the cleartext password exchange for any other, then
+// reports the session to the client.
 func (wire *wireConnection) authenticate(ctx context.Context) error {
-	var auth encoder
-	auth.int32(3)
-	if err := wire.send('R', auth); err != nil {
-		return err
+	var session Session
+	var err error
+	if authenticator, ok := wire.runtime.server.Authenticator.(SCRAMAuthenticator); ok {
+		session, err = wire.authenticateSCRAM(ctx, authenticator)
+	} else {
+		session, err = wire.authenticateCleartext(ctx)
 	}
-	if err := wire.flush(); err != nil {
-		return err
-	}
-
-	kind, body, err := wire.readMessage()
 	if err != nil {
-		return err
-	}
-	if kind != 'p' {
-		err := NewError("08P01", "expected PostgreSQL password message")
-		_ = wire.sendError(err)
-		return err
-	}
-	passwordDecoder := decoder{data: body}
-	password, err := passwordDecoder.cstring()
-	if err != nil || passwordDecoder.done() != nil {
-		protocolErr := NewError("08P01", "invalid PostgreSQL password message")
-		_ = wire.sendError(protocolErr)
-		return protocolErr
-	}
-
-	session, err := wire.runtime.server.Authenticator.Authenticate(ctx, wire.startup, password)
-	if err != nil {
-		_ = wire.sendError(err)
 		return err
 	}
 	wire.session = session
@@ -587,6 +589,44 @@ func (wire *wireConnection) authenticate(ctx context.Context) error {
 		return err
 	}
 	return wire.flush()
+}
+
+// authenticateCleartext asks for the password in clear (AuthenticationCleartextPassword)
+// and hands it to the Authenticator. A failure has been sent to the client when
+// it returns an error.
+func (wire *wireConnection) authenticateCleartext(ctx context.Context) (Session, error) {
+	var auth encoder
+	auth.int32(3)
+	if err := wire.send('R', auth); err != nil {
+		return nil, err
+	}
+	if err := wire.flush(); err != nil {
+		return nil, err
+	}
+
+	kind, body, err := wire.readMessage()
+	if err != nil {
+		return nil, err
+	}
+	if kind != 'p' {
+		err := NewError("08P01", "expected PostgreSQL password message")
+		_ = wire.sendError(err)
+		return nil, err
+	}
+	passwordDecoder := decoder{data: body}
+	password, err := passwordDecoder.cstring()
+	if err != nil || passwordDecoder.done() != nil {
+		protocolErr := NewError("08P01", "invalid PostgreSQL password message")
+		_ = wire.sendError(protocolErr)
+		return nil, protocolErr
+	}
+
+	session, err := wire.runtime.server.Authenticator.Authenticate(ctx, wire.startup, password)
+	if err != nil {
+		_ = wire.sendError(err)
+		return nil, err
+	}
+	return session, nil
 }
 
 func randomUint32() uint32 {
@@ -1458,7 +1498,8 @@ func binaryResultField(field Field, column Column) (Field, error) {
 		return field, nil
 	}
 	switch column.DataTypeOID {
-	case OIDText, OIDVarchar, OIDBPChar, OIDJSON:
+	case OIDText, OIDVarchar, OIDBPChar, OIDJSON, OIDChar, OIDName, OIDNodeTree:
+		// "char", name and pg_node_tree (catalog columns) are their bytes in both formats.
 		return field, nil
 	case OIDJSONB:
 		data := make([]byte, len(field.Data)+1)
@@ -1639,6 +1680,12 @@ func (wire *wireConnection) readMessage() (byte, []byte, error) {
 }
 
 func (wire *wireConnection) readMessageWithin(timeout time.Duration) (byte, []byte, error) {
+	return wire.readBoundedMessage(timeout, wire.runtime.server.MaxMessageBytes)
+}
+
+// readBoundedMessage reads one frontend message whose body is at most
+// maxBytes long.
+func (wire *wireConnection) readBoundedMessage(timeout time.Duration, maxBytes int) (byte, []byte, error) {
 	if err := wire.conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
 		return 0, nil, err
 	}
@@ -1651,7 +1698,7 @@ func (wire *wireConnection) readMessageWithin(timeout time.Duration) (byte, []by
 		return 0, nil, err
 	}
 	length := binary.BigEndian.Uint32(header[:])
-	if length < 4 || length-4 > uint32(wire.runtime.server.MaxMessageBytes) {
+	if length < 4 || length-4 > uint32(maxBytes) {
 		return 0, nil, fmt.Errorf("pgwire: invalid message length %d", length)
 	}
 	body := make([]byte, int(length)-4)

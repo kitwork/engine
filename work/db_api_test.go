@@ -119,3 +119,114 @@ router.get((context) => context.json({ ok: true }));`
 		t.Errorf("endpoint should be 404 when no db is declared served, got %d", rec.Code)
 	}
 }
+
+// /_db/query reads a KitDB database too, through the remote SQL engine, with bound arguments. (This was
+// checked inside the Hrana test until the Hrana server went, 29/10/2026.)
+func TestDataAPIQueryReadsKitDB(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "test", "localhost")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	router := `import * as router from "kitwork/router";
+import { internals } from "kitwork";
+const { kitdb, struct, id, text, int } = internals;
+const products = struct({ id: id(), sku: text().notNull().unique(), price: int().default(0) });
+const db = kitdb("remote.kitdb", { products }, { token: "remote-secret", access: "readwrite" });
+router.get((context) => {
+  db.products.create({ sku: "KIT-1", price: 125 });
+  return context.json({ count: db.products.count() });
+});`
+	if err := os.WriteFile(filepath.Join(dir, UIRouterFileName), []byte(router), 0644); err != nil {
+		t.Fatal(err)
+	}
+	tenant := NewTenant(tmp, "localhost")
+	defer tenant.Close()
+	if err := tenant.Run(); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	tenant.Serve(rec, httptest.NewRequest(http.MethodGet, "http://localhost/", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"count":1`) {
+		t.Fatalf("seed = %d %s", rec.Code, rec.Body.String())
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "http://localhost/_db/query", strings.NewReader(
+		`{"db":"remote.kitdb","sql":"SELECT sku, price FROM products WHERE sku = ?","args":["KIT-1"]}`,
+	))
+	req.Header.Set("Authorization", "Bearer remote-secret")
+	rec = httptest.NewRecorder()
+	tenant.Serve(rec, req)
+	if body := rec.Body.String(); rec.Code != http.StatusOK || !strings.Contains(body, `"sku":"KIT-1"`) || !strings.Contains(body, `"price":125`) {
+		t.Fatalf("KitDB data API = %d %s", rec.Code, body)
+	}
+}
+
+// The libSQL server (Hrana over HTTP) went on 29/10/2026: a database's only port to the outside is the
+// PostgreSQL wire (KITWORK_KITDB.md 13.5). Its paths are a site's paths again. With a database declared
+// served, the way the Hrana tests declared one ({ token }), and its token sent, GET /v2 and
+// POST /v2/pipeline reach the site's routes there, and POST /app.db/v3/pipeline, where the site has no
+// route, is the site's 404; none of them is a Hrana answer.
+// CONTROL: with t.serveLibSQLIf(w, r, requestScope) put back in Tenant.Serve (work.go),
+// "GET /v2 = 200 \"\", want the route's answer".
+func TestHranaPathsFallThrough(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "test", "localhost")
+	routes := map[string]string{
+		"": `import * as router from "kitwork/router";
+import { internals } from "kitwork";
+const { sqlite, kitid, text } = internals;
+const things = { id: kitid().primaryKey(), name: text() };
+const db = sqlite("app.db", { things: things }, { token: "tok", access: "readwrite" });
+router.get((context) => context.json({ route: "root", count: db.things.count() }));`,
+		"v2": `import * as router from "kitwork/router";
+router.get((context) => context.json({ route: "v2" }));`,
+		filepath.Join("v2", "pipeline"): `import * as router from "kitwork/router";
+router.post((context) => context.json({ route: "v2/pipeline" }));`,
+	}
+	for folder, source := range routes {
+		if err := os.MkdirAll(filepath.Join(dir, folder), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, folder, UIRouterFileName), []byte(source), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tenant := NewTenant(tmp, "localhost")
+	defer tenant.Close()
+	if err := tenant.Run(); err != nil {
+		t.Fatal(err)
+	}
+	serve := func(method, path, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(method, "http://localhost"+path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer tok")
+		rec := httptest.NewRecorder()
+		tenant.Serve(rec, req)
+		return rec
+	}
+
+	// The database is declared served: the fall-through below is not for want of a served database.
+	if rec := serve(http.MethodGet, "/", ""); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"route":"root"`) {
+		t.Fatalf("GET / = %d %q", rec.Code, rec.Body.String())
+	}
+	if name, config, served := resolveServe(tenant, ""); !served || name != "app.db" || config.token != "tok" {
+		t.Fatalf("app.db is not declared served with its token: %q %+v %v", name, config, served)
+	}
+
+	pipeline := `{"baton":null,"requests":[{"type":"execute","stmt":{"sql":"SELECT * FROM things","want_rows":true}},{"type":"close"}]}`
+	hranaAnswer := func(body string) bool {
+		return strings.Contains(body, `"baton"`) || strings.Contains(body, `"results"`)
+	}
+	if rec := serve(http.MethodGet, "/v2", ""); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"route":"v2"`) {
+		t.Errorf("GET /v2 = %d %q, want the route's answer", rec.Code, rec.Body.String())
+	}
+	if rec := serve(http.MethodPost, "/v2/pipeline", pipeline); rec.Code != http.StatusOK ||
+		!strings.Contains(rec.Body.String(), `"route":"v2/pipeline"`) || hranaAnswer(rec.Body.String()) {
+		t.Errorf("POST /v2/pipeline = %d %q, want the route's answer", rec.Code, rec.Body.String())
+	}
+	if rec := serve(http.MethodPost, "/app.db/v3/pipeline", pipeline); rec.Code != http.StatusNotFound || hranaAnswer(rec.Body.String()) {
+		t.Errorf("POST /app.db/v3/pipeline = %d %q, want the site's 404", rec.Code, rec.Body.String())
+	}
+}

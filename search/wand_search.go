@@ -88,10 +88,13 @@ func (cursor *wandCursor) score(options SearchOptions) (float64, error) {
 	) * cursor.field.Boost, nil
 }
 
+// searchDisjunctiveWAND ranks the union of clauses. A document in deleted is
+// stepped over without being scored, so tombstones never reach the results.
 func (segment *Segment) searchDisjunctiveWAND(
 	ctx context.Context,
 	clauses []disjunctiveClause,
 	options SearchOptions,
+	deleted *deletedDocuments,
 ) ([]Hit, error) {
 	if err := segment.ensureOpen(); err != nil {
 		return nil, err
@@ -159,6 +162,7 @@ func (segment *Segment) searchDisjunctiveWAND(
 		}
 
 		candidateDoc := cursors[0].document
+		live := !deleted.Contains(candidateDoc)
 		score := 0.0
 		next := cursors[:0]
 		for _, cursor := range cursors {
@@ -166,11 +170,13 @@ func (segment *Segment) searchDisjunctiveWAND(
 				next = append(next, cursor)
 				continue
 			}
-			clauseScore, err := cursor.score(options)
-			if err != nil {
-				return nil, err
+			if live {
+				clauseScore, err := cursor.score(options)
+				if err != nil {
+					return nil, err
+				}
+				score += clauseScore
 			}
-			score += clauseScore
 			more, err := cursor.advanceTo(candidateDoc + 1)
 			if err != nil {
 				return nil, err
@@ -179,7 +185,9 @@ func (segment *Segment) searchDisjunctiveWAND(
 				next = append(next, cursor)
 			}
 		}
-		collectCandidate(&results, rankedCandidate{document: candidateDoc, score: score}, options.Limit)
+		if live {
+			collectCandidate(&results, rankedCandidate{document: candidateDoc, score: score}, options.Limit)
+		}
 		cursors = next
 	}
 	return segment.materializeHits(results, 0)

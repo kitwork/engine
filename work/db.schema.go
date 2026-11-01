@@ -27,7 +27,7 @@ import (
 
 // The schema'd database machinery: a schema maps table names to column specs (ColumnSpec, StructDef); the
 // engine migrates each table to match on first use and hands back a validated query on it (SchemaTable),
-// over SQLite or KitDB. The spec's handle runs on it: connection().schema({ … }) of an app's
+// over SQLite or KitDB. The spec's handle runs on it: connection().tables({ … }) of an app's
 // .shared/schema/ is a dbProxy, and every translated statement runs on one of its SchemaTables
 // (ManagedDatabase, database_managed.go). App code wrote this surface itself until 22/10/2026
 // (database.sqlite/kitdb with the older column builders, db.<table>.where(…)); those spellings are errors
@@ -642,12 +642,12 @@ type dbProxy struct {
 // and the data is left untouched.
 func newDbProxy(tenant *Tenant, scope *requestscope.Scope, engine string, args ...value.Value) value.Value {
 	// a name starting with @ is the engine's own (kitDBApplicationName: the app's database in
-	// .database/application/), which only connection().schema({ … }) declares. The name is checked as a
+	// .database/application/), which only connection().tables({ … }) declares. The name is checked as a
 	// read opens it, after kitDBRel: "./@application", "/@application", "x/../@application" are the app's
 	// database too (22/10/2026; the raw name alone was checked, so they opened it with this declaration's
 	// schema and options, drop and token among them)
 	if len(args) > 0 && args[0].K == value.String && strings.HasPrefix(kitDBRel(args[0].String()), "@") {
-		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db: tên %q dành cho database của app; database của app khai export const db = connection().schema({ … }) trong .shared/schema/", args[0].String()))
+		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db: tên %q dành cho database của app; database của app khai export const db = connection().tables({ … }) trong .shared/schema/", args[0].String()))
 	}
 	return declareDbProxy(tenant, scope, engine, args...)
 }
@@ -724,9 +724,9 @@ func declareDbProxy(tenant *Tenant, scope *requestscope.Scope, engine string, ar
 			p.retainHistory = retain
 			p.historyRetention = policy
 		}
-		// A token explicitly exposes this database over HTTP. The registry retains
-		// the backend and normalized schema so a KitDB file can never be opened by
-		// the SQLite driver merely because both use the same Hrana transport.
+		// A token explicitly exposes this database outside the app. The registry
+		// retains the backend and normalized schema so a KitDB file can never be
+		// opened by the SQLite driver merely because both are served the same way.
 		if tok, ok := opts["token"]; ok && !tok.IsNil() && tok.String() != "" {
 			access := ""
 			if a, ok := opts["access"]; ok && a.K == value.String {
@@ -979,12 +979,12 @@ func registerSchema(p *dbProxy) {
 	schemaRegMu.Unlock()
 }
 
-// ---- serve registry: which tenant dbs are exposed over libSQL/HTTP, and how ----
+// ---- serve registry: which tenant dbs are exposed over /_db/query or the PostgreSQL wire, and how ----
 //
 // Populated by a proxy declared with { token, access } (the removed kitdb(…, { token, access }); the
 // engine's tests build one through the Go API, and app code opens a KitDB to the outside with the
-// host's app.database(path, { port })). The Hrana
-// and /_db handlers consult this registry instead of environment variables: exposure is a declared
+// host's app.database(path, { port })). The /_db handler and the KitDB PostgreSQL wire
+// (kitdb_postgres.go) consult this registry instead of environment variables: exposure is a declared
 // application capability, not the side effect of a secret existing.
 
 type serveConfig struct {
@@ -1238,22 +1238,6 @@ func listServes(t *Tenant, engine string) []namedServeConfig {
 	return entries
 }
 
-// isWriteSQL reports whether a statement mutates data/schema — used to enforce access:"readonly".
-// SELECT/WITH/BEGIN/COMMIT/ROLLBACK/PRAGMA/EXPLAIN are allowed through; the rest are writes.
-func isWriteSQL(text string) bool {
-	s := strings.TrimSpace(text)
-	end := strings.IndexFunc(s, func(r rune) bool { return r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '(' })
-	first := s
-	if end > 0 {
-		first = s[:end]
-	}
-	switch strings.ToLower(first) {
-	case "insert", "update", "delete", "replace", "create", "drop", "alter", "truncate", "reindex", "vacuum", "analyze", "attach", "detach":
-		return true
-	}
-	return false
-}
-
 // OnGet is the whole point: db.vouchers routes here. A known table → a schema-aware handle; an unknown
 // name → an in-band error (so a typo fails loudly, not as an empty result).
 func (p *dbProxy) OnGet(key string) value.Value {
@@ -1495,7 +1479,7 @@ func (t *SchemaTable) List(args ...value.Value) value.Value {
 	if t.searchActive {
 		return t.runSearch()
 	}
-	return coerceResult(t.columns, t.builder().List(args...))
+	return sqliteReadResult(t.columns, coerceResult(t.columns, t.builder().List(args...)))
 }
 
 // All is the collection-style spelling of the terminal; search reads naturally as
@@ -1509,7 +1493,7 @@ func (t *SchemaTable) First(args ...value.Value) value.Value {
 	if t.engine == "kitdb" {
 		return t.kitDBFirst(args...)
 	}
-	return coerceResult(t.columns, t.builder().First(args...))
+	return sqliteReadResult(t.columns, coerceResult(t.columns, t.builder().First(args...)))
 }
 
 // Find looks a row up by primary key — the schema knows which column that is.
@@ -1520,7 +1504,7 @@ func (t *SchemaTable) Find(args ...value.Value) value.Value {
 	if t.engine == "kitdb" {
 		return t.kitDBFind(args...)
 	}
-	return coerceResult(t.columns, t.builder().Find(args...))
+	return sqliteReadResult(t.columns, coerceResult(t.columns, t.builder().Find(args...)))
 }
 
 // Count is COUNT(*) through the builder — not list().length, which would load every row to count it.
@@ -1561,8 +1545,10 @@ func (t *SchemaTable) Create(args ...value.Value) value.Value {
 	if t.engine == "kitdb" {
 		return t.kitDBCreate(row)
 	}
-	result := coerceResult(t.columns, t.source().Table(t.table).Create(value.New(row)))
-	return result
+	if message := sqliteWriteRow(t.table, t.columns, row); message != "" {
+		return value.InvalidFailure(value.InvalidArgumentCode, message)
+	}
+	return sqliteReadResult(t.columns, coerceResult(t.columns, t.source().Table(t.table).Create(value.New(row))))
 }
 
 // fillRow is the shared create logic for both local SQLite and shared entity storage: validate every
@@ -1642,6 +1628,9 @@ func (t *SchemaTable) Update(args ...value.Value) value.Value {
 			return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db.update: table %q %s", t.table, errMsg))
 		}
 		applyTouch(t.columns, row) // now().onUpdate() columns refresh on every update
+		if message := sqliteWriteRow(t.table, t.columns, row); message != "" {
+			return value.InvalidFailure(value.InvalidArgumentCode, message)
+		}
 		args[0] = value.New(row)
 	}
 	result := t.builder().Update(args...)
@@ -1734,6 +1723,10 @@ func (t *SchemaTable) ensureTable() error {
 			fmt.Printf("[db.migrate] ERROR table %q: %v — not applied; will retry next request\n", name, err)
 			return err
 		}
+		// the declared kinds, which the PostgreSQL wire port reads (db.sqlite_columns.go)
+		if err := recordColumnKinds(t.source().db(), name, cols); err != nil {
+			return fmt.Errorf("kitwork_columns của bảng %s: %w", name, err)
+		}
 		ensuredTables.Store(key, true)
 	}
 	return nil
@@ -1743,14 +1736,24 @@ func (t *SchemaTable) ensureTable() error {
 func schemaDDL(table string, columns map[string]*ColumnSpec) string {
 	defs := make([]string, 0, len(columns))
 	for _, n := range orderedColumns(columns) { // lay the table out AS DECLARED, not alphabetically
-		defs = append(defs, columnSQL(n, columns[n]))
+		defs = append(defs, sqliteColumnSQL(n, columns[n]))
 	}
 	defs = append(defs, sqlCompositeForeignConstraints(columns)...)
 	return fmt.Sprintf("CREATE TABLE IF NOT EXISTS %q (%s)", table, strings.Join(defs, ", "))
 }
 
-func columnSQL(name string, c *ColumnSpec) string {
-	parts := []string{fmt.Sprintf("%q %s", name, storageClass(c.kind))}
+// columnSQL is a column's definition as KitDB's catalogue describes it (kitDBCatalogTableSQL).
+func columnSQL(name string, c *ColumnSpec) string { return columnDefinition(name, c, false) }
+
+// sqliteColumnSQL is a column's definition on a SQLite file, where a decimal is an INTEGER (sqliteStorage).
+func sqliteColumnSQL(name string, c *ColumnSpec) string { return columnDefinition(name, c, true) }
+
+func columnDefinition(name string, c *ColumnSpec, sqlite bool) string {
+	storage := storageClass(c.kind)
+	if sqlite {
+		storage = sqliteStorage(c)
+	}
+	parts := []string{fmt.Sprintf("%q %s", name, storage)}
 	if c.primary {
 		parts = append(parts, "PRIMARY KEY")
 	}
@@ -1768,9 +1771,11 @@ func columnSQL(name string, c *ColumnSpec) string {
 		if check.name != "" {
 			prefix = fmt.Sprintf("CONSTRAINT %q ", check.name)
 		}
-		parts = append(parts, fmt.Sprintf(
-			"%sCHECK (%q %s %s)", prefix, name, check.operator, sqlLiteral(coerceWrite(c.kind, check.value)),
-		))
+		literal := coerceWrite(c.kind, check.value)
+		if sqlite {
+			literal, _ = sqliteWrite(c, check.value)
+		}
+		parts = append(parts, fmt.Sprintf("%sCHECK (%q %s %s)", prefix, name, check.operator, sqlLiteral(literal)))
 	}
 	// Foreign key: REFERENCES target(column) [ON DELETE …] [ON UPDATE …]. Emitted inline so the rebuild
 	// (which reuses columnSQL) preserves the constraint automatically.
@@ -2378,7 +2383,7 @@ type destructiveMigrationError struct {
 
 func (e *destructiveMigrationError) Error() string {
 	return fmt.Sprintf(`bảng %s trên connection("%s"): %s làm mất dữ liệu nên không chạy, database giữ nguyên; `+
-		`đưa struct về như database đang có (mọi app gọi tên %s cùng khai một bảng); đổi mất dữ liệu là việc của kitwork migrate, chưa có trong engine hôm nay (lát 7)`,
+		`đưa table về như database đang có (mọi app gọi tên %s cùng khai một bảng); đổi mất dữ liệu là việc của kitwork migrate, chưa có trong engine hôm nay (lát 7)`,
 		e.table, e.connection, strings.Join(e.changes, ", "), e.connection)
 }
 
@@ -2396,6 +2401,9 @@ func refuseDestructiveMigration(db *sql.DB, name, table string, columns map[stri
 	var changes []string
 	for _, step := range planMigration(current, columns, false) {
 		switch {
+		case step.Action == "retype" && step.To == "INTEGER" && sameType(step.From, "TEXT") && columns[step.Column] != nil && columns[step.Column].kind == "decimal":
+			// written before 29/10/2026, when SQLite kept a decimal as its text (db.sqlite_decimal.go)
+			changes = append(changes, fmt.Sprintf("cột %s là decimal lưu dạng chữ (cách trước 29/10/2026), nay SQLite lưu decimal là số nguyên nhân 10^số_lẻ", step.Column))
 		case step.Action == "retype":
 			changes = append(changes, fmt.Sprintf("đổi kiểu cột %s %s→%s", step.Column, step.From, step.To))
 		case step.Action == "drop":
@@ -2556,7 +2564,7 @@ func rebuild(db *sql.DB, table string, columns map[string]*ColumnSpec, current m
 	var defs, intoCols, selectExprs []string
 
 	for _, name := range orderedColumns(columns) { // rebuild lays columns out AS DECLARED
-		defs = append(defs, columnSQL(name, columns[name]))
+		defs = append(defs, sqliteColumnSQL(name, columns[name]))
 		if curType, ok := current[name]; ok {
 			intoCols = append(intoCols, fmt.Sprintf("%q", name))
 			selectExprs = append(selectExprs, castExpr(name, desiredType(columns[name]), curType))
@@ -2626,7 +2634,7 @@ func castExpr(name, want, cur string) string {
 	return fmt.Sprintf("CAST(%q AS %s)", name, want)
 }
 
-func desiredType(c *ColumnSpec) string { return storageClass(c.kind) }
+func desiredType(c *ColumnSpec) string { return sqliteStorage(c) }
 
 func sameType(a, b string) bool { return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b)) }
 
@@ -2728,9 +2736,10 @@ func reorderNeeded(live, desired []string) bool {
 func addColumnSQL(name string, c *ColumnSpec) string {
 	def := ""
 	if c.hasDefault {
-		def = " DEFAULT " + sqlLiteral(coerceWrite(c.kind, c.def)) // coerce bool/json defaults for the backfill
+		stored, _ := sqliteWrite(c, c.def) // coerce bool/json defaults, scale a decimal's, for the backfill
+		def = " DEFAULT " + sqlLiteral(stored)
 	}
-	return fmt.Sprintf("%q %s%s", name, storageClass(c.kind), def)
+	return fmt.Sprintf("%q %s%s", name, sqliteStorage(c), def)
 }
 
 // sqlLiteral renders a column default as a SQL literal for DDL (the ADD COLUMN backfill above).

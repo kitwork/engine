@@ -7,11 +7,11 @@ import (
 	"github.com/kitwork/engine/value"
 )
 
-// kitwork/schema (KITWORK_DATABASE.md mục 1): struct and the column builders an app's .shared/schema/
+// kitwork/schema (KITWORK_DATABASE.md mục 1): table and the column builders an app's .shared/schema/
 // declares its tables with.
 //
-//	import { struct, id, text, decimal, date, timestamp } from "kitwork/schema";
-//	const orders = struct({ id: id(), email: text(), amount: decimal(12, 2), note: text().nullable(),
+//	import { table, id, text, decimal, date, timestamp } from "kitwork/schema";
+//	const orders = table({ id: id(), email: text(), amount: decimal(12, 2), note: text().nullable(),
 //	  day: date().index(), createdAt: timestamp().created() });
 //
 // Each builder is a getter giving a function, so a destructured import is the function itself. A column
@@ -22,9 +22,16 @@ func (w *KitWork) Schema() *SchemaModule { return &SchemaModule{} }
 // SchemaModule is kitwork/schema.
 type SchemaModule struct{}
 
-func (m *SchemaModule) Struct() value.Value {
+func (m *SchemaModule) Table() value.Value {
 	return value.NewFunc(func(args ...value.Value) value.Value {
 		return newStructDef(args, true)
+	})
+}
+
+// Struct is the word table replaced on 29/10/2026: its call is the error that says so.
+func (m *SchemaModule) Struct() value.Value {
+	return value.NewFunc(func(_ ...value.Value) value.Value {
+		return value.InvalidFailure(value.InvalidArgumentCode, statement.TableRenamed)
 	})
 }
 

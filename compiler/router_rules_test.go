@@ -209,7 +209,7 @@ func TestRouterImportOutsideRouterFiles(t *testing.T) {
 		{".schedule/daily.work", "import { router } from \"kitwork\";\nimport * as schedule from \"kitwork/schedule\";\nexport const daily = schedule.daily(\"09:00\").run((context) => null);\n"},
 		{".shared/queue/config.work", "import * as router from \"kitwork/router\";\nimport * as queue from \"kitwork/queue\";\nqueue.parallel(4);\n"},
 		{".schedule/config.work", "import * as router from \"kitwork/router\";\nimport * as schedule from \"kitwork/schedule\";\nschedule.keep(\"7d\");\n"},
-		{".shared/schema/shop.work", "import * as router from \"kitwork/router\";\nimport { struct, id } from \"kitwork/schema\";\nimport { connection } from \"kitwork/database\";\nconst items = struct({ id: id() });\nexport const db = connection().schema({ items });\n"},
+		{".shared/schema/shop.work", "import * as router from \"kitwork/router\";\nimport { table, id } from \"kitwork/schema\";\nimport { connection } from \"kitwork/database\";\nconst items = table({ id: id() });\nexport const db = connection().tables({ items });\n"},
 	} {
 		_, err := compileRouterApp(t, map[string]string{place.relative: place.source}, place.relative)
 		if want := filepath.Base(place.relative) + ":1:1: " + RouterImportOutside; err == nil || !strings.Contains(err.Error(), want) {

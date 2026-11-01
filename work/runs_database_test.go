@@ -21,10 +21,10 @@ import (
 // call, a database the app declares in .shared/schema/; the app's own by default.
 
 // jobsSchema declares the host's database jobs in the app: a table, since schema({ … }) takes one at least.
-const jobsSchema = `import { struct, id, text } from "kitwork/schema";
+const jobsSchema = `import { table, id, text } from "kitwork/schema";
 import { connection } from "kitwork/database";
-const letters = struct({ id: id(), email: text() });
-export const jobs = connection("jobs").schema({ letters });
+const letters = table({ id: id(), email: text() });
+export const jobs = connection("jobs").tables({ letters });
 `
 
 const beatSchedule = `import * as schedule from "kitwork/schedule";
@@ -122,11 +122,11 @@ func fileRows(t *testing.T, path, query string) []string {
 	return out
 }
 
-// appRows reads the app's own database, its KitDB file.
+// appRows reads the app's own database, its SQLite file .database/application/kitwork.db.
 func appRows(t *testing.T, q *queueApp, query string) []string {
 	t.Helper()
 	var out []string
-	err := appRuns{tenant: q.app}.Read(func(db queuestore.SQL) error {
+	err := q.app.runsDatabase(queueKind, nil, nil).Read(func(db queuestore.SQL) error {
 		rows, err := db.Query(query)
 		if err != nil {
 			return err
@@ -165,9 +165,9 @@ func TestRunsLiveInTheDatabaseEachFolderChose(t *testing.T) {
 	}{
 		{"the queue in jobs, the schedules in the app's", queueInJobs, "", "queue camOn completed", "schedule beat completed",
 			[]string{`[Queue] worker up (kitwork_runs của database jobs) — 1 job cho "acme": camOn`,
-				`[Schedule] đồng hồ chạy (kitwork_runs của .database/application/) — 1 lịch cho "acme": beat`}},
+				`[Schedule] đồng hồ chạy (kitwork_runs của .database/application/kitwork.db) — 1 lịch cho "acme": beat`}},
 		{"the schedules in jobs, the queue in the app's", "", scheduleInJobs, "schedule beat completed", "queue camOn completed",
-			[]string{`[Queue] worker up (kitwork_runs của .database/application/) — 1 job cho "acme": camOn`,
+			[]string{`[Queue] worker up (kitwork_runs của .database/application/kitwork.db) — 1 job cho "acme": camOn`,
 				`[Schedule] đồng hồ chạy (kitwork_runs của database jobs) — 1 lịch cho "acme": beat`}},
 	} {
 		t.Run(each.name, func(t *testing.T) {
@@ -371,7 +371,7 @@ func TestRunsDatabaseMovesWithALoadOfTheFolder(t *testing.T) {
 		t.Fatalf("the first run read on jobs: %v, want not found", err)
 	}
 
-	if said := reload(""); !strings.Contains(said, `[Queue] worker up (kitwork_runs của .database/application/)`) {
+	if said := reload(""); !strings.Contains(said, `[Queue] worker up (kitwork_runs của .database/application/kitwork.db)`) {
 		t.Fatalf("the load did not start the worker on the app's database:\n%s", said)
 	}
 	if runs, _ := q.app.queueStore().Runs(queuestore.Filter{}, 10, 0); len(runs) != 1 || runs[0].ID != first {
@@ -446,8 +446,8 @@ func TestRunsLeftInTheAppsDatabaseAreSaid(t *testing.T) {
 	writeQueueApp(t, q.root, map[string]string{".shared/queue/config.work": queueInJobs, ".schedule/config.work": scheduleInJobs})
 	again := bootQueueApp(t, q.root)
 	for _, line := range []string{
-		"[Queue] .database/application/ còn 2 lần chạy chưa xong của job (pending, running, cancelling): chúng ở lại đó và không chạy, vì queue.database(…) đặt các lần chạy ở database jobs; đổi database không dời lần chạy",
-		"[Schedule] .database/application/ còn 1 lần chạy chưa xong của lịch (pending, running, cancelling): chúng ở lại đó và không chạy, vì schedule.database(…) đặt các lần chạy ở database jobs; đổi database không dời lần chạy",
+		"[Queue] .database/application/kitwork.db còn 2 lần chạy chưa xong của job (pending, running, cancelling): chúng ở lại đó và không chạy, vì queue.database(…) đặt các lần chạy ở database jobs; đổi database không dời lần chạy",
+		"[Schedule] .database/application/kitwork.db còn 1 lần chạy chưa xong của lịch (pending, running, cancelling): chúng ở lại đó và không chạy, vì schedule.database(…) đặt các lần chạy ở database jobs; đổi database không dời lần chạy",
 	} {
 		if !strings.Contains(again.output, line) {
 			t.Errorf("boot did not say %q:\n%s", line, again.output)
@@ -490,11 +490,11 @@ func TestRunsDatabaseKeepsOneApp(t *testing.T) {
 	sent := first.serve(t, http.MethodPost, "/", order("an@example.com", "1", "", ""))["id"].(string)
 	watch.until(t, sent, "completed")
 	second := newQueueApp(t, files())
-	refused := `[Queue] .shared/queue/config.work:3:6: database jobs đã giữ các lần chạy của app acme: kitwork_runs không ghi app nào, nên mỗi database của danh mục giữ các lần chạy của một app; host khai một tên khác cho app này. Các lần chạy nằm trong database của app (.database/application/)`
+	refused := `[Queue] .shared/queue/config.work:3:6: database jobs đã giữ các lần chạy của app acme: kitwork_runs không ghi app nào, nên mỗi database của danh mục giữ các lần chạy của một app; host khai một tên khác cho app này. Các lần chạy nằm trong database của app (.database/application/kitwork.db)`
 	if strings.Contains(first.output, "đã giữ") || !strings.Contains(second.output, refused) {
 		t.Fatalf("the first app said:\n%s\nthe second:\n%s\nwant the second refused: %s", first.output, second.output, refused)
 	}
-	if !strings.Contains(second.output, `[Queue] worker up (kitwork_runs của .database/application/)`) || second.app.queueWorker().runs.Load() != nil {
+	if !strings.Contains(second.output, `[Queue] worker up (kitwork_runs của .database/application/kitwork.db)`) || second.app.queueWorker().runs.Load() != nil {
 		t.Fatalf("the second app's runs are not in its own database:\n%s", second.output)
 	}
 	first.close()
@@ -521,12 +521,12 @@ func TestRunsDatabaseKeepsOneApp(t *testing.T) {
 // nothing; with it not reading connection() as the app's database, connection() "gave <nil>, refused true" and
 // said "queue.database(…) nhận tên import của một database …".
 func TestRunsDatabaseRefusedAsItRuns(t *testing.T) {
-	const stays = "; các lần chạy nằm trong database của app (.database/application/)"
+	const stays = "; các lần chạy nằm trong database của app (.database/application/kitwork.db)"
 	for _, each := range []struct {
 		config, said string
 	}{
 		{"import * as queue from \"kitwork/queue\";\nconst q = queue;\nq.database(1);\n",
-			"[Queue] .shared/queue/config.work:3:2: queue.database(…) nhận tên import của một database khai trong .shared/schema/ (export const db = connection().schema({ … })): import { db } from \"app/.shared/schema/<tên>.work\"; queue.database(db); giá trị này không phải database đó" + stays},
+			"[Queue] .shared/queue/config.work:3:2: queue.database(…) nhận tên import của một database khai trong .shared/schema/ (export const db = connection().tables({ … })): import { db } from \"app/.shared/schema/<tên>.work\"; queue.database(db); giá trị này không phải database đó" + stays},
 		{"import * as queue from \"kitwork/queue\";\nconst q = queue;\nq.database();\n",
 			"[Queue] .shared/queue/config.work:3:2: queue.database(…) nhận đúng một database: queue.database(db), db là tên import của một database khai trong .shared/schema/" + stays},
 	} {

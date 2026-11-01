@@ -79,7 +79,7 @@ func TestAppPrewarmRejectsAmbiguousDeclarations(t *testing.T) {
 }
 
 func TestAppPrewarmRequiresWebSurface(t *testing.T) {
-	file := writeServerJS(t, `import { app } from "kitwork"; app.database({ path: "./data.kitdb" }).prewarm();`)
+	file := writeServerJS(t, `import { app } from "kitwork"; app.database({ path: "./.database/", port: 5455, password: "p" }).prewarm();`)
 	_, err := commandConfig(file)
 	if err == nil || !strings.Contains(err.Error(), "requires an app.website server") {
 		t.Fatalf("error = %v, want web surface validation", err)

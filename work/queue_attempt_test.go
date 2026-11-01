@@ -138,7 +138,7 @@ func TestQueueLateSuccessOfALostLeaseIsRefused(t *testing.T) {
 	id := q.serve(t, http.MethodPost, "/send", url.Values{})["id"].(string)
 	upstream.wait(t, 1)
 	// the lease of attempt 1 ran out with no heartbeat: the run goes back
-	if err := (appRuns{tenant: q.app}).Write(func(db queuestore.SQL) error {
+	if err := q.app.runsDatabase(queueKind, nil, nil).Write(func(db queuestore.SQL) error {
 		_, err := db.Exec(`UPDATE kitwork_runs SET lease_until = '2000-01-01T00:00:00.000Z' WHERE id = $1`, id)
 		return err
 	}); err != nil {

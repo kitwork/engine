@@ -232,7 +232,7 @@ func TestQueueSendFromRouteRunsHandlerWithContextData(t *testing.T) {
 		t.Fatalf("definitions = %+v", definitions)
 	}
 	// the runs are the app's, in its own database
-	if _, err := os.Stat(filepath.Join(q.root, "acme", ".database", "application", "application.kitdb")); err != nil {
+	if _, err := os.Stat(filepath.Join(q.root, "acme", ".database", "application", "kitwork.db")); err != nil {
 		t.Fatalf("the app's database: %v", err)
 	}
 }
@@ -404,12 +404,8 @@ router.get((context) => {
 	if got := q.serve(t, http.MethodGet, "/send", nil); got["ok"] != true {
 		t.Fatalf("control: %v", got)
 	}
-	// the app's database manager is closed under the site: the file cannot be opened
-	manager, ok := q.runtime.Resource(kitDBResourceName).(*kitDBManager)
-	if !ok {
-		t.Fatal("the app has no database manager")
-	}
-	manager.Close()
+	// the app's database manager is closed under the site: the file of its runs (kitwork.db) cannot be opened
+	q.runtime.Databases().Close()
 	if got := q.serve(t, http.MethodGet, "/send", nil); got["ok"] != false || got["code"] != "DATABASE" {
 		t.Fatalf("a send with no database = %v, want DATABASE", got)
 	}
