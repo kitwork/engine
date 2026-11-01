@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/kitwork/engine/kitdb/pgwire"
 	sqlite "modernc.org/sqlite" // also the "sqlite" database/sql driver
@@ -82,6 +83,9 @@ const (
 	limitAttached = 7 // SQLITE_LIMIT_ATTACHED: how many files may be attached
 )
 
+// busyTimeout is how long a statement waits for a lock another connection holds.
+const busyTimeout = 5 * time.Second
+
 // Session is one client's read-only connection to a Target. It implements pgwire.Session, pgwire.DescribeSession
 // and pgwire.TransactionStatusSession.
 type Session struct {
@@ -107,6 +111,10 @@ type Session struct {
 	catalogVersions []int64
 	// oids keeps the OID the catalog gave each table, index and constraint, for the session's life.
 	oids map[string]uint32
+	// tables is every table and view of the schemas, by lower-case schema then name, read with the catalog for the
+	// decimal rewrite (decimal.go); decimalColumns counts their decimal columns of a positive scale.
+	tables         map[string]map[string]*decimalTable
+	decimalColumns int
 
 	transaction byte  // pgwire.TransactionIdle, TransactionActive or TransactionFailed
 	ended       error // set once Access.Current said the session may not go on
@@ -227,6 +235,11 @@ func quoteIdentifier(name string) string {
 }
 
 func (session *Session) attach(ctx context.Context, files map[string]string) error {
+	// A file another connection holds a lock on (the engine writing it, a reader recovering its WAL index) is waited
+	// for, as PostgreSQL waits for a lock, not refused at once.
+	if _, err := session.connection.ExecContext(ctx, fmt.Sprintf("PRAGMA busy_timeout=%d", busyTimeout.Milliseconds())); err != nil {
+		return fmt.Errorf("gateway: busy timeout: %w", err)
+	}
 	for _, name := range session.order {
 		uri := fileURI(files[name])
 		if _, err := session.connection.ExecContext(ctx, "ATTACH ? AS "+quoteIdentifier(name), uri); err != nil {

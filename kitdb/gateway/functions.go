@@ -348,6 +348,7 @@ func init() {
 	sqlite.MustRegisterFunction("kitwork_pg_array_agg", &sqlite.FunctionImpl{NArgs: 1,
 		MakeAggregate: func(sqlite.FunctionContext) (sqlite.AggregateFunction, error) { return &arrayAggregate{}, nil }})
 	registerMatchFilters(scalar)
+	registerDecimalFunctions(scalar)
 	// kitwork_snippet(words, text, weight, text, weight, …) is MATCH's _snippet_ (search.go).
 	scalar("kitwork_snippet", -1, func(arguments []driver.Value) (driver.Value, error) {
 		if len(arguments)%2 != 1 {

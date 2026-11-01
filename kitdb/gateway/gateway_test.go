@@ -257,7 +257,7 @@ func TestSchemasJoinsAndParameters(t *testing.T) {
 		t.Fatalf("$1 twice = %q, want An|Binh", got)
 	}
 	typed, err := session.Execute(context.Background(), "SELECT count(*) FROM orders WHERE amount > $1",
-		[]pgwire.Parameter{{OID: pgwire.OIDInt8, Data: []byte("400")}})
+		[]pgwire.Parameter{{OID: pgwire.OIDInt8, Data: []byte("4")}})
 	if err != nil || cells(typed) != "2" {
 		t.Fatalf("an int8 parameter = %q (%v), want 2", cells(typed), err)
 	}
@@ -528,8 +528,8 @@ func TestLimits(t *testing.T) {
 	if err == nil {
 		t.Fatalf("more rows than allowed: no error, want 54000")
 	}
-	if codeOf(err) != "54000" || !strings.Contains(err.Error(), "result exceeds 2 rows") {
-		t.Fatalf("more rows than allowed: %s %v, want 54000 result exceeds 2 rows", codeOf(err), err)
+	if codeOf(err) != "54000" || !strings.Contains(err.Error(), "result exceeds 2 rows") || !strings.Contains(err.Error(), "LIMIT 2 OFFSET 2") {
+		t.Fatalf("more rows than allowed: %s %v, want 54000 result exceeds 2 rows, saying LIMIT 2 OFFSET 2", codeOf(err), err)
 	}
 	if got := cells(mustRun(t, rows, "SELECT count(*) FROM users")); got != "3" {
 		t.Fatalf("the session after a refusal = %q, want 3", got)
@@ -538,7 +538,7 @@ func TestLimits(t *testing.T) {
 	eighty := "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < 80) SELECT 'abcdefgh' FROM c"
 	if _, err := bytes.Execute(context.Background(), eighty, nil); err == nil {
 		t.Fatalf("SELECT 'abcdefgh' FROM eighty rows: no error, want 54000")
-	} else if codeOf(err) != "54000" || !strings.Contains(err.Error(), "result exceeds 64 bytes") {
+	} else if codeOf(err) != "54000" || !strings.Contains(err.Error(), "result exceeds 64 bytes (64 bytes)") || !strings.Contains(err.Error(), "add LIMIT") {
 		t.Fatalf("SELECT 'abcdefgh' FROM eighty rows: %s %v, want 54000 result exceeds 64 bytes", codeOf(err), err)
 	}
 	expectCode(t, bytes, "SELECT zeroblob(1000)", "54000", "a value exceeds")

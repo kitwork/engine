@@ -192,6 +192,9 @@ func (session *Session) read(
 	if err := session.refreshSchemas(ctx); err != nil {
 		return pgwire.Result{}, nil, err
 	}
+	if parsed, err = session.decimalStatement(parsed); err != nil {
+		return pgwire.Result{}, nil, err
+	}
 	if err := session.authorize(ctx, parsed, arguments); err != nil {
 		return pgwire.Result{}, nil, err
 	}
@@ -242,7 +245,9 @@ func (session *Session) run(ctx context.Context, parsed statement, arguments []a
 	var bytes int64
 	for rows.Next() {
 		if len(result.Rows) >= session.options.MaxRows {
-			return pgwire.Result{}, pgwire.NewError("54000", fmt.Sprintf("result exceeds %d rows", session.options.MaxRows))
+			return pgwire.Result{}, pgwire.NewError("54000", fmt.Sprintf("result exceeds %d rows, the most this port returns "+
+				"for one statement: add LIMIT (LIMIT %d OFFSET %d reads the next rows) or a narrower WHERE",
+				session.options.MaxRows, session.options.MaxRows, session.options.MaxRows))
 		}
 		if err := rows.Scan(pointers...); err != nil {
 			return pgwire.Result{}, sqliteError(err)
@@ -255,7 +260,9 @@ func (session *Session) run(ctx context.Context, parsed statement, arguments []a
 			bytes += int64(len(row[index].Data))
 		}
 		if bytes > session.options.MaxBytes {
-			return pgwire.Result{}, pgwire.NewError("54000", fmt.Sprintf("result exceeds %d bytes", session.options.MaxBytes))
+			return pgwire.Result{}, pgwire.NewError("54000", fmt.Sprintf("result exceeds %d bytes (%s), the most this port "+
+				"returns for one statement: add LIMIT, select fewer columns or a narrower WHERE",
+				session.options.MaxBytes, sizePretty(session.options.MaxBytes)))
 		}
 		result.Rows = append(result.Rows, row)
 	}
@@ -602,6 +609,9 @@ func sqliteError(err error) error {
 	message := cleanMessage(err.Error())
 	if strings.HasPrefix(message, "missing named argument") || strings.HasPrefix(message, "missing argument with index") {
 		return pgwire.NewError("42P02", "a parameter of the statement has no value: "+message)
+	}
+	if strings.HasPrefix(message, "invalid input syntax for type") {
+		return pgwire.NewError("22P02", message) // a parameter kitwork_decimal_input could not read (decimal.go)
 	}
 	var failure *sqlite.Error
 	if !errors.As(err, &failure) {

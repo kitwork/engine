@@ -325,13 +325,14 @@ func (session *Session) refreshCatalog(ctx context.Context) error {
 		return fmt.Errorf("gateway: SQLite length limit: %w", err)
 	}
 	defer func() { _, _ = sqlite.Limit(session.connection, limitLength, bound) }()
-	rows, err := session.catalogRows(ctx)
+	rows, relations, err := session.catalogRows(ctx)
 	if err != nil {
 		return err
 	}
 	if err := session.writeCatalog(ctx, rows); err != nil {
 		return err
 	}
+	session.keepDecimalTables(relations)
 	session.catalogVersions = versions
 	return nil
 }
@@ -1009,10 +1010,10 @@ func nullable(value sql.NullInt64) any {
 }
 
 // catalogRows builds every row of the catalog from the attached schemas.
-func (session *Session) catalogRows(ctx context.Context) (map[string][]catalogRow, error) {
+func (session *Session) catalogRows(ctx context.Context) (map[string][]catalogRow, []*catalogRelation, error) {
 	relations, err := session.readRelations(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	rows := map[string][]catalogRow{}
 	looked := map[[2]string]bool{}
@@ -1117,7 +1118,7 @@ func (session *Session) catalogRows(ctx context.Context) (map[string][]catalogRo
 	for _, relation := range relations {
 		session.addRelationRows(relation, database, user, add)
 	}
-	return rows, nil
+	return rows, relations, nil
 }
 
 // catalogRelationOIDs are pg_class rows for the catalog tables themselves, at PostgreSQL's OIDs, so a client's
