@@ -100,47 +100,6 @@ router.get((ctx) => {
 	}
 }
 
-func TestRealAppCollectionContractFixture(t *testing.T) {
-	tmp := t.TempDir()
-	appDir := filepath.Join(tmp, "acme", "localhost")
-
-	postsDir := filepath.Join(appDir, "_collection", "posts")
-	if err := os.MkdirAll(postsDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(postsDir, "welcome.md"), []byte("---\ntitle: Welcome\nstatus: published\npublishedAt: \"2026-01-01\"\n---\nHello World"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	routerScript := `
-import { router, collection } from "kitwork";
-
-router.get((ctx) => {
-    const posts = collection.open("posts").all();
-    return ctx.json({ list: posts });
-});
-`
-	if err := os.WriteFile(filepath.Join(appDir, "router.kitwork.js"), []byte(routerScript), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	tenant := NewTenant(tmp, "localhost")
-	if err := tenant.Run(); err != nil {
-		t.Fatal(err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "http://localhost/", nil)
-	rec := httptest.NewRecorder()
-	tenant.Serve(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d. Body: %s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "welcome") {
-		t.Fatalf("expected 'welcome' in response body, got: %s", rec.Body.String())
-	}
-}
-
 func TestRealAppJWTContractFixture(t *testing.T) {
 	tmp := t.TempDir()
 	appDir := filepath.Join(tmp, "acme", "localhost")

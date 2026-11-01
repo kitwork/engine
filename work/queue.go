@@ -705,7 +705,7 @@ func decodeJobData(data string) value.Value {
 	if err := json.Unmarshal([]byte(data), &decoded); err != nil {
 		return value.Value{K: value.Nil}
 	}
-	return collectionValue(decoded)
+	return value.New(decoded)
 }
 
 // ── cancel(id) and replay(id) (mục 9) ───────────────────────────────────────────────────────────────

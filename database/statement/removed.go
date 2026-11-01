@@ -89,6 +89,11 @@ var helpersRemoved = map[string]bool{"webhook": true, "insights": true, "playgro
 
 const helperRemoved = "không có spec nên engine gỡ ngày 28/10/2026; cần lại thì viết spec trước, rồi thêm thành một module (KITWORK_ENGINE.md mục 7)"
 
+// collectionRemoved is what stands for collection (the Markdown files of _collection/<name>/, read and searched),
+// removed on 01/11/2026 once a database statement could search (KITWORK_ENGINE.md mục 7).
+const collectionRemoved = "engine gỡ ngày 01/11/2026: nội dung cần tìm là một bảng của app, cột .searchable() trong app/.shared/schema/, " +
+	"tìm bằng db.list((bảng) => bảng.matches(q)) (KITWORK_DATABASE.md mục 2); đọc một file là file.read(…) của \"kitwork/file\""
+
 // RemovedKitworkWord is what the spec writes for word, an older word of the module kitwork itself
 // (import { sqlite } from "kitwork"), and whether it is one.
 func RemovedKitworkWord(word string) (string, bool) {
@@ -97,6 +102,9 @@ func RemovedKitworkWord(word string) (string, bool) {
 	}
 	if helpersRemoved[word] {
 		return helperRemoved, true
+	}
+	if word == "collection" {
+		return collectionRemoved, true
 	}
 	return "", false
 }

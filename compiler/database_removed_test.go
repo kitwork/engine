@@ -20,6 +20,7 @@ func TestDatabaseOldSpellingsAreCompileErrors(t *testing.T) {
 		{"import { webhook } from \"kitwork\";\n", "import { webhook", `import { webhook } from "kitwork" đã bỏ: không có spec nên engine gỡ ngày 28/10/2026`},
 		{"import { insights } from \"kitwork\";\n", "import { insights", `import { insights } from "kitwork" đã bỏ: không có spec nên engine gỡ ngày 28/10/2026`},
 		{"import { playground } from \"kitwork\";\n", "import { playground", `import { playground } from "kitwork" đã bỏ: không có spec nên engine gỡ ngày 28/10/2026`},
+		{"import { collection } from \"kitwork\";\n", "import { collection", `import { collection } from "kitwork" đã bỏ: engine gỡ ngày 01/11/2026: nội dung cần tìm là một bảng của app, cột .searchable()`},
 		{"import { open as file } from \"kitwork/database\";\n", "import { open", `import { open } from "kitwork/database" đã bỏ: database của app khai`},
 		{"import { struct, text } from \"kitwork/database\";\n", "import { struct", `import { struct } from "kitwork/database" đã bỏ: bảng khai bằng table() của "kitwork/schema"`},
 		{"import { text } from \"kitwork/database\";\n", "import { text", `import { text } from "kitwork/database" đã bỏ: kiểu cột import từ "kitwork/schema": import { text } from "kitwork/schema"`},

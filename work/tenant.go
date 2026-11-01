@@ -13,7 +13,6 @@ import (
 
 	"github.com/kitwork/engine/app"
 	"github.com/kitwork/engine/capabilities"
-	collectioncap "github.com/kitwork/engine/capabilities/collection"
 	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/database"
 	kitdbnode "github.com/kitwork/engine/kitdb/node"
@@ -21,7 +20,6 @@ import (
 	"github.com/kitwork/engine/search"
 	"github.com/kitwork/engine/site"
 	"github.com/kitwork/engine/utilities/cache"
-	collectionhelper "github.com/kitwork/engine/utilities/collection"
 	httphelper "github.com/kitwork/engine/utilities/http"
 	"github.com/kitwork/engine/utilities/persist"
 	"github.com/kitwork/engine/utilities/ratelimit"
@@ -128,19 +126,12 @@ type Tenant struct {
 	persistStore *persist.Store
 	limiter      *ratelimit.Limiter
 
-	collectionMu    sync.Mutex
-	collectionStore *collectionhelper.Store
-	collectionErr   error
-	collectionFTS   map[string]string // collection path → dir signature at last FTS sync
-
 	searchMu          sync.Mutex
 	searchManager     *search.Manager
 	searchManagerErr  error
 	searchManagerSet  bool
 	ownsSearchManager bool
 	searchStates      map[string]*searchIndexState
-	collectionCanary  bool
-	collectionMetrics *collectioncap.SegmentSearchCanaryTelemetry
 
 	kitDBNodeMu      sync.Mutex
 	kitDBNodeManager *kitdbnode.Manager
@@ -251,63 +242,6 @@ func (t *Tenant) kitDBNode() (*kitdbnode.Manager, error, bool) {
 	manager, managerErr, configured := t.kitDBNodeManager, t.kitDBNodeErr, t.kitDBNodeSet
 	t.kitDBNodeMu.Unlock()
 	return manager, managerErr, configured
-}
-
-// SetCollectionSearchCanary configures the generation before capabilities are
-// resolved. Serving remains on the legacy collection index; only shadow work
-// is enabled.
-func (t *Tenant) SetCollectionSearchCanary(enabled bool) {
-	if t == nil {
-		return
-	}
-	t.searchMu.Lock()
-	t.collectionCanary = enabled
-	t.searchMu.Unlock()
-}
-
-func (t *Tenant) SetCollectionSearchCanaryTelemetry(telemetry *collectioncap.SegmentSearchCanaryTelemetry) {
-	if t == nil {
-		return
-	}
-	t.searchMu.Lock()
-	t.collectionMetrics = telemetry
-	t.searchMu.Unlock()
-}
-
-// CollectionSearchCanaryEnabled is the optional collection capability seam.
-func (t *Tenant) CollectionSearchCanaryEnabled() bool {
-	if t == nil {
-		return false
-	}
-	t.searchMu.Lock()
-	enabled := t.collectionCanary
-	t.searchMu.Unlock()
-	return enabled
-}
-
-func (t *Tenant) CollectionSearchCanaryTelemetry() *collectioncap.SegmentSearchCanaryTelemetry {
-	if t == nil {
-		return nil
-	}
-	t.searchMu.Lock()
-	telemetry := t.collectionMetrics
-	t.searchMu.Unlock()
-	return telemetry
-}
-
-// CollectionSearchManager lets the collection canary borrow the same bounded
-// host owner used by database search.
-func (t *Tenant) CollectionSearchManager() (*search.Manager, error) {
-	return t.searchManagerFor()
-}
-
-// RegisterCollectionSearchIndex includes a hashed collection index in proven
-// site-idle cleanup without exposing tenant paths or collection names.
-func (t *Tenant) RegisterCollectionSearchIndex(key string) {
-	if t == nil || key == "" {
-		return
-	}
-	t.searchIndexState(key)
 }
 
 func (t *Tenant) searchManagerFor() (*search.Manager, error) {

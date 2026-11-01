@@ -10,8 +10,8 @@ import (
 
 type handlerBenchmarkFixture struct {
 	name string
-	// file is the router file router is written to: router.work, or "" for a router.kitwork.js (the
-	// row that measures a collection; the rows that drew a template page draw a .ui page since the
+	// file is the router file router is written to: router.work, or "" for a router.kitwork.js (no row
+	// since collection went, 01/11/2026; the rows that drew a template page draw a .ui page since the
 	// template pages went, 27/10/2026)
 	file                 string
 	router               string
@@ -150,23 +150,6 @@ router.get((context) => context.title("Generation-prepared SSR").view({
 	</card>
 	<text>{{ ready }}</text>
 </content>`,
-			},
-		},
-		{
-			name: "collection",
-			router: `
-import { router, collection } from "kitwork";
-
-const posts = collection.open("posts").cache("30m");
-router.get((ctx) => ctx.json({ posts: posts.all() }));
-`,
-			files: map[string]string{
-				"_collection/posts/welcome.md": `---
-title: Welcome
-status: published
----
-Hello from the benchmark corpus.
-`,
 			},
 		},
 		{

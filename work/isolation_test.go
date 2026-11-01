@@ -11,7 +11,7 @@ import (
 
 // Per-app isolation is what Kitwork sells: many sites in one process, none able to reach another's
 // files. That promise is only as good as the weakest path sink, and the sinks are spread across
-// kitwork/file (each read, each change of a handle, context.file), collection, sqlite, plus two
+// kitwork/file (each read, each change of a handle, context.file), sqlite, plus two
 // URL-driven static paths. A session that found
 // two unguarded sinks by hand-grepping (fixed in bbe9ece) is the reason this is a TABLE: adding a
 // capability that takes a path means adding a row here, not remembering to re-grep.
@@ -72,7 +72,6 @@ func serveIsolation(t *testing.T, tenant *Tenant, target string) *httptest.Respo
 // data (.database/files/) or, written app/…, in its code: the escapes are tried from both.
 const readSinkRouter = `
 import * as router from "kitwork/router";
-import { collection } from "kitwork";
 import * as file from "kitwork/file";
 
 router.get((ctx) => {
@@ -106,9 +105,6 @@ router.get((ctx) => {
     if (api === "ctx.file") {
         return ctx.file(file.open(p));
     }
-    if (api === "collection.open") {
-        return ctx.json({ items: collection.open(p).all() });
-    }
     return ctx.text("no-api");
 });
 `
@@ -127,7 +123,7 @@ func TestAppIsolationReadSinksDenyEscape(t *testing.T) {
 		"app/localhost/../../victim-corp/victim.com/secret.txt",
 	}
 	apis := []string{"file.read", "file.text", "file.bytes", "file.json", "file.list", "file.info", "file.exists",
-		"open.copy", "ctx.file", "collection.open"}
+		"open.copy", "ctx.file"}
 
 	for _, api := range apis {
 		for _, p := range escapes {

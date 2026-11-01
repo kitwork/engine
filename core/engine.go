@@ -9,11 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/kitwork/engine/app"
-	collectioncap "github.com/kitwork/engine/capabilities/collection"
 	"github.com/kitwork/engine/compiler"
 	dom "github.com/kitwork/engine/domain"
 	kitdbnode "github.com/kitwork/engine/kitdb/node"
@@ -102,8 +100,6 @@ type Engine struct {
 	searchManagerErr error
 	kitDBNodeManager *kitdbnode.Manager
 	kitDBNodeErr     error
-	collectionCanary atomic.Bool
-	collectionStats  *collectioncap.SegmentSearchCanaryTelemetry
 	mu               sync.RWMutex
 	stopCleanup      chan struct{}
 	closeOnce        sync.Once
@@ -167,7 +163,6 @@ func newEngine(root string, maxEnergy uint64, hotReload bool, hostname string, w
 		searchManagerErr: searchManagerErr,
 		kitDBNodeManager: kitDBNodeManager,
 		kitDBNodeErr:     kitDBNodeErr,
-		collectionStats:  collectioncap.NewSegmentSearchCanaryTelemetry(),
 		idleTimeout:      10 * time.Minute, // mặc định; chỉnh bằng SetIdleTimeout (0 = không evict)
 		webEnabled:       webEnabled,
 		stopCleanup:      make(chan struct{}),
@@ -248,8 +243,6 @@ func (e *Engine) StartAppSchedulers() (started int) {
 		)
 		appTenant.SetSearchManager(e.searchManager, e.searchManagerErr)
 		appTenant.SetKitDBNodeManager(e.kitDBNodeManager, e.kitDBNodeErr)
-		appTenant.SetCollectionSearchCanary(e.collectionCanary.Load())
-		appTenant.SetCollectionSearchCanaryTelemetry(e.collectionStats)
 		appTenant.SetRuntimeHealth(e.runtimeHealth)
 		appTenant.SetSharedEnvironment(e.sharedEnvironmentNow())
 		appTenant.MaxEnergy = e.maxEnergy
@@ -404,34 +397,6 @@ func (e *Engine) SetKitDBNodeLimits(limits kitdbnode.Limits) error {
 		return previous.Close()
 	}
 	return nil
-}
-
-// SetCollectionSearchCanary enables bounded shadow comparison during host
-// boot. The legacy collection engine remains the serving path. Configuration
-// is frozen once an app or site starts loading.
-func (e *Engine) SetCollectionSearchCanary(enabled bool) error {
-	if e == nil {
-		return fmt.Errorf("engine is nil")
-	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.closed || len(e.cache) != 0 || len(e.appTenants) != 0 ||
-		len(e.appRuntimes) != 0 || len(e.appStarting) != 0 {
-		return fmt.Errorf("collection search canary must be set before loading apps or sites")
-	}
-	e.collectionCanary.Store(enabled)
-	return nil
-}
-
-// CollectionSearchCanaryStats returns fixed-cardinality host counters that
-// survive tenant generation replacement.
-func (e *Engine) CollectionSearchCanaryStats() collectioncap.SegmentSearchCanaryStats {
-	if e == nil || e.collectionStats == nil {
-		return collectioncap.SegmentSearchCanaryStats{}
-	}
-	stats := e.collectionStats.Snapshot()
-	stats.Enabled = e.collectionCanary.Load()
-	return stats
 }
 
 // SearchStats returns bounded process-local manager counters without tenant or
@@ -752,8 +717,6 @@ func (e *Engine) prepareTenantCandidate(
 	)
 	candidate.SetSearchManager(e.searchManager, e.searchManagerErr)
 	candidate.SetKitDBNodeManager(e.kitDBNodeManager, e.kitDBNodeErr)
-	candidate.SetCollectionSearchCanary(e.collectionCanary.Load())
-	candidate.SetCollectionSearchCanaryTelemetry(e.collectionStats)
 	candidate.SetRuntimeHealth(e.runtimeHealth)
 	candidate.SetSharedEnvironment(e.sharedEnvironmentNow())
 	candidate.MaxEnergy = e.maxEnergy
