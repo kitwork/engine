@@ -34,6 +34,9 @@ type DatabaseImport struct {
 	// Export is the name the file exports the database under (db).
 	Export   string
 	Database *statement.Database
+	// Transaction marks the handle db.transaction((database) => …) gives its function: its statements run inside
+	// the transaction, and it begins none of its own.
+	Transaction bool
 }
 
 // SchemaCatalog reads the databases a schema file declares, by the name each is exported under, as the

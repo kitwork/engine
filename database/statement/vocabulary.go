@@ -83,17 +83,14 @@ var LegacyModifiers = map[string]string{
 // Actions are the actions of a statement the engine runs today; Descriptions the descriptions before them.
 var (
 	Actions = map[string]bool{ActionList: true, ActionFirst: true, ActionCount: true, ActionInsert: true,
-		ActionUpdate: true, ActionDelete: true, ActionUpsert: true}
-	Descriptions = map[string]bool{"where": true, "orderBy": true}
+		ActionUpdate: true, ActionDelete: true, ActionUpsert: true, ActionHistory: true}
+	Descriptions = map[string]bool{"where": true, "orderBy": true, "at": true}
 )
 
 // NotYet are words of the spec's statement the engine does not have yet, with the slice that brings them.
 var NotYet = map[string]int{
 	"detail": 3, "exists": 3, "sum": 3, "avg": 3, "min": 3, "max": 3,
-	"transaction": 4,
-	"select":      5, "join": 5, "groupBy": 5,
-	"at":      9,
-	"history": 9,
+	"select": 5, "join": 5, "groupBy": 5,
 }
 
 // ManagedQuery is the error of query() on a database the app declared with connection(): the spec lets it

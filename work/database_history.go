@@ -193,10 +193,6 @@ func (t *Tenant) historyDatabase(path string) (*kitdbsqlite.Database, error) {
 // insertKept writes row into the table through the writer of its file, one commit of the history, and gives the row
 // as the file holds it, read back in the writer's transaction (the key and defaults the file gave it).
 func (t *SchemaTable) insertKept(row map[string]value.Value) value.Value {
-	database, err := t.tenant.historyDatabase(t.sqliteFile())
-	if err != nil {
-		return value.InvalidFailure(value.DatabaseCode, err.Error())
-	}
 	names := make([]string, 0, len(row))
 	for name := range row {
 		names = append(names, name)
@@ -214,8 +210,8 @@ func (t *SchemaTable) insertKept(row map[string]value.Value) value.Value {
 		insert = "INSERT INTO " + table + " DEFAULT VALUES"
 	}
 	var written []map[string]value.Value
-	_, err = database.Write(t.writeContext(), historyBy(t), func(transaction *kitdbsqlite.Transaction) error {
-		result, err := transaction.Exec(insert, arguments...)
+	err := t.write(func(exec writeExecutor) error {
+		result, err := exec.Exec(insert, arguments...)
 		if err != nil {
 			return err
 		}
@@ -223,7 +219,7 @@ func (t *SchemaTable) insertKept(row map[string]value.Value) value.Value {
 		if err != nil {
 			return err
 		}
-		rows, err := transaction.Query("SELECT * FROM "+table+" WHERE _rowid_ = ?", rowID)
+		rows, err := exec.Query("SELECT * FROM "+table+" WHERE _rowid_ = ?", rowID)
 		if err != nil {
 			return err
 		}
@@ -231,12 +227,21 @@ func (t *SchemaTable) insertKept(row map[string]value.Value) value.Value {
 		return err
 	})
 	if err != nil {
-		return query.DatabaseFailure("database insert error", err)
+		return databaseWriteFailure("database insert error", err)
 	}
 	if len(written) == 0 {
 		return value.NewNil()
 	}
 	return value.New(written[0])
+}
+
+// databaseWriteFailure is a write's error as the program's failure: one that would wait for the transaction it runs
+// in is said in words (database_transaction.go).
+func databaseWriteFailure(what string, err error) value.Value {
+	if errors.Is(err, kitdbsqlite.ErrReentrant) {
+		return reentrantFailure()
+	}
+	return query.DatabaseFailure(what, err)
 }
 
 // writeContext is the request's context, or the background for a statement no request runs.

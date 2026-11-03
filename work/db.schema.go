@@ -21,6 +21,7 @@ import (
 	"github.com/kitwork/engine/id"
 	kitdbengine "github.com/kitwork/engine/kitdb"
 	kitdbsql "github.com/kitwork/engine/kitdb/sql"
+	kitdbsqlite "github.com/kitwork/engine/kitdb/sqlite"
 	requestscope "github.com/kitwork/engine/request"
 	"github.com/kitwork/engine/utilities/query"
 	"github.com/kitwork/engine/value"
@@ -1306,6 +1307,12 @@ type SchemaTable struct {
 	transaction     *kitDBRecordTransaction
 	referential     *kitDBReferentialActionContext
 	catalogRequired bool
+	// frozenDB is the connection of a copy of the file as it was at a moment (at(), database_at.go): the table
+	// reads it, never migrates it, never writes it.
+	frozenDB *sql.DB
+	// historyTx is the writer's transaction of db.transaction (database_transaction.go): the table reads and
+	// writes through it.
+	historyTx *kitdbsqlite.Transaction
 
 	// Physical index state is loaded from the same durable snapshot as lifecycle
 	// metadata. The planner uses indexGenerations, while writes may additionally
@@ -1359,6 +1366,9 @@ func (t *SchemaTable) source() *SQLite {
 	if t.engine == "kitdb" {
 		return nil
 	}
+	if t.frozenDB != nil {
+		return &SQLite{Database: &Database{tenant: t.tenant, requestScope: t.scope, sqlDB: t.frozenDB}}
+	}
 	if t.sqlitePath != "" {
 		return hostSQLite(t.tenant, t.dbName, t.sqlitePath, t.scope)
 	}
@@ -1378,6 +1388,8 @@ func (t *SchemaTable) builder() *query.Query {
 	if t.q == nil {
 		if t.engine == "kitdb" {
 			t.q = query.New(nil, tenantLambdaExecutor{tenant: t.tenant, requestScope: t.scope}).Table(t.table)
+		} else if t.historyTx != nil {
+			t.q = query.New(transactionExecutor{tx: t.historyTx}, tenantLambdaExecutor{tenant: t.tenant, requestScope: t.scope}).Table(t.table)
 		} else {
 			t.q = t.source().Table(t.table)
 		}
@@ -1392,6 +1404,9 @@ func (t *SchemaTable) builder() *query.Query {
 func (t *SchemaTable) ready() (value.Value, bool) {
 	if t.failed {
 		return t.failVal(), false
+	}
+	if t.frozenDB != nil {
+		return value.Value{}, true
 	}
 	if err := t.ensureTable(); err != nil {
 		var destructive *destructiveMigrationError
@@ -1749,7 +1764,9 @@ func (t *SchemaTable) ensureTable() error {
 
 // keepsHistory reports a table of a file whose history the engine keeps: a file it declares tables on, the app's
 // .database/ or the host's of connection("tên") (database_history.go).
-func (t *SchemaTable) keepsHistory() bool { return t.engine != "kitdb" && t.sqlitePath != "" }
+func (t *SchemaTable) keepsHistory() bool {
+	return t.engine != "kitdb" && t.sqlitePath != "" && t.frozenDB == nil
+}
 
 // ensuredKey is what ensuredTables remembers a table of the file by: its schema hash with it.
 func (t *SchemaTable) ensuredKey(name string, cols map[string]*ColumnSpec) string {

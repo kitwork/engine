@@ -148,7 +148,7 @@ func TestDatabaseStatementLowersToOneInvoke(t *testing.T) {
 	}
 	call := -1
 	for index := range tail {
-		if strings.HasPrefix(tail[index], `PUSH "{\"v\":3`) {
+		if strings.HasPrefix(tail[index], `PUSH "{\"v\":4`) {
 			call = index
 		}
 	}
@@ -183,9 +183,9 @@ const created = db.insert((orders) => ({ email, item, amount: 35000, day: today 
 		}
 	}
 	want := []string{
-		`{"v":3,"action":"list","table":"orders","where":{"op":"&&","args":[{"op":"===","args":[{"op":"column","column":"day"},{"op":"hole","hole":0}]},{"op":">","args":[{"op":"column","column":"amount"},{"op":"literal","value":5}]}]},"holes":[{"site":"` + at(source, "today &&") + `"}]}`,
-		`{"v":3,"action":"list","table":"orders","where":{"op":"===","args":[{"op":"column","column":"email"},{"op":"hole","hole":0}]},"order":[{"column":"amount","desc":true}],"limit":{"op":"literal","value":10},"holes":[{"site":"` + at(source, "email).") + `"}]}`,
-		`{"v":3,"action":"insert","table":"orders","values":[{"column":"email","value":{"op":"hole","hole":0}},{"column":"item","value":{"op":"hole","hole":1}},{"column":"amount","value":{"op":"literal","value":35000}},{"column":"day","value":{"op":"hole","hole":2}}],"holes":[{"site":"` + at(source, "email, item,") + `"},{"site":"` + at(source, "item, amount") + `"},{"site":"` + at(source, "today }") + `"}]}`,
+		`{"v":4,"action":"list","table":"orders","where":{"op":"&&","args":[{"op":"===","args":[{"op":"column","column":"day"},{"op":"hole","hole":0}]},{"op":">","args":[{"op":"column","column":"amount"},{"op":"literal","value":5}]}]},"holes":[{"site":"` + at(source, "today &&") + `"}]}`,
+		`{"v":4,"action":"list","table":"orders","where":{"op":"===","args":[{"op":"column","column":"email"},{"op":"hole","hole":0}]},"order":[{"column":"amount","desc":true}],"limit":{"op":"literal","value":10},"holes":[{"site":"` + at(source, "email).") + `"}]}`,
+		`{"v":4,"action":"insert","table":"orders","values":[{"column":"email","value":{"op":"hole","hole":0}},{"column":"item","value":{"op":"hole","hole":1}},{"column":"amount","value":{"op":"literal","value":35000}},{"column":"day","value":{"op":"hole","hole":2}}],"holes":[{"site":"` + at(source, "email, item,") + `"},{"site":"` + at(source, "item, amount") + `"},{"site":"` + at(source, "today }") + `"}]}`,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("templates:\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -252,7 +252,7 @@ func TestDatabaseGrammarErrors(t *testing.T) {
 		{`db.list((orders, users) => orders.id === "a");`, "nhiều bảng trong một câu chưa có"},
 		{`db.list((session) => session.id === "a");`, "session là phiên"},
 		{`db.list((orders) => orders.item === like("%x%"));`, "like(…) chưa có trong engine hôm nay (lát 2)"},
-		{`db.transaction((database) => 1);`, "db.transaction chưa có trong engine hôm nay (lát 4"},
+		{`db.transaction(1);`, "transaction nhận một hàm viết ngay trong câu: db.transaction((database) => { … })"},
 		{`const d = desc(1);`, "desc chỉ có nghĩa trong lambda của câu database"},
 		{`const r = db?.list((orders) => orders);`, "?. không có trên câu database"},
 		{`db.list((orders) => orders.note);`, "viết orders.note === true"},
@@ -639,7 +639,7 @@ func TestDatabaseFileCacheSeesSchemaEdits(t *testing.T) {
 // The template's format is part of the compiler's schema: a change of one without the other would give
 // an artifact the engine reads another way.
 func TestStatementVersionPairsWithSchema(t *testing.T) {
-	if statement.Version != 3 || CompilerSchemaVersion != 27 {
+	if statement.Version != 4 || CompilerSchemaVersion != 28 {
 		t.Fatalf("statement format %d with compiler schema %d: a change of the format bumps the schema (fingerprint.go) and this pair",
 			statement.Version, CompilerSchemaVersion)
 	}

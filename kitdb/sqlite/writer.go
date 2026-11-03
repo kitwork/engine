@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	goruntime "runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -59,6 +61,8 @@ type writer struct {
 	stopped bool
 
 	committed atomic.Uint64
+	// goroutine is the writer goroutine's id: a submit on it comes from inside one of its requests.
+	goroutine atomic.Int64
 
 	events   []event
 	hookErr  error
@@ -229,6 +233,9 @@ func (w *writer) hook(data modernc.SQLitePreUpdateData) {
 }
 
 func (w *writer) submit(ctx context.Context, request writerRequest) (uint64, error) {
+	if goroutineID() == w.goroutine.Load() {
+		return 0, ErrReentrant
+	}
 	request.done = make(chan writerOutcome, 1)
 	w.sending.RLock()
 	if w.stopped {
@@ -261,6 +268,7 @@ func (w *writer) close() error {
 
 func (w *writer) run() {
 	defer close(w.finished)
+	w.goroutine.Store(goroutineID())
 	var pending *writerRequest
 	for {
 		var first writerRequest
@@ -471,6 +479,23 @@ func (w *writer) runMaintain(request writerRequest) (err error) {
 	return request.maintain(w.conn)
 }
 
+// goroutineID is the id of the goroutine calling it, read from the first line of its stack ("goroutine 7
+// [running]:"); -1 when it cannot be read.
+func goroutineID() int64 {
+	var buffer [64]byte
+	line := buffer[:goruntime.Stack(buffer[:], false)]
+	line = []byte(strings.TrimPrefix(string(line), "goroutine "))
+	end := strings.IndexByte(string(line), ' ')
+	if end < 0 {
+		return -1
+	}
+	id, err := strconv.ParseInt(string(line[:end]), 10, 64)
+	if err != nil {
+		return -1
+	}
+	return id
+}
+
 // bookkeeping reports a table of the file's owner or of SQLite itself, whose
 // rows Maintain may change without a Barrier: kitwork_* and _kitwork_* (the
 // engine's: the declared kinds of columns, the runs of jobs), sqlite_*.
@@ -601,7 +626,7 @@ func (w *writer) netChanges(ctx context.Context, leading []Change) ([]Change, er
 		case entry.existed && exists:
 			change.Operation, change.Columns = Update, columns[key.table]
 		case entry.existed:
-			change.Operation, change.After = Delete, nil
+			change.Operation, change.After, change.Columns = Delete, nil, columns[key.table]
 		case exists:
 			change.Operation, change.Before, change.Columns = Insert, nil, columns[key.table]
 		default:

@@ -35,6 +35,9 @@ type writeExecutor interface {
 
 // write runs fn as one write on the table's file.
 func (t *SchemaTable) write(fn func(writeExecutor) error) error {
+	if t.historyTx != nil {
+		return fn(t.historyTx)
+	}
 	if t.keepsHistory() {
 		database, err := t.tenant.historyDatabase(t.sqliteFile())
 		if err != nil {
@@ -66,7 +69,7 @@ func (m *ManagedDatabase) runWrite(prepared *preparedStatement, binder *statemen
 	if m.proxy.engine == "kitdb" {
 		return value.InvalidFailure(value.UnsupportedCode, fmt.Sprintf("%s trên KitDB chưa có trong engine hôm nay: database của app là SQLite từ 29/10/2026", s.Action))
 	}
-	table, failure := m.proxy.table(s.Table)
+	table, failure := m.table(s.Table)
 	if table == nil {
 		return failure
 	}
@@ -187,7 +190,7 @@ func runUpsert(table *SchemaTable, binder *statementBinder) value.Value {
 		return err
 	})
 	if err != nil {
-		return query.DatabaseFailure("database upsert error", err)
+		return databaseWriteFailure("database upsert error", err)
 	}
 	if len(rows) == 0 {
 		return value.NewNil()
@@ -207,7 +210,7 @@ func (t *SchemaTable) affect(text string, args []any, what string) value.Value {
 		return err
 	})
 	if err != nil {
-		return query.DatabaseFailure(what, err)
+		return databaseWriteFailure(what, err)
 	}
 	return value.New(affected)
 }

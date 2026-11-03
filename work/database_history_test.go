@@ -33,9 +33,13 @@ func historyOf(t *testing.T, path string) ([]string, map[uint64]time.Time) {
 				parts = append(parts, "Barrier")
 			case kitdbsqlite.Insert, kitdbsqlite.Update, kitdbsqlite.Delete:
 				email := ""
+				image := change.After
+				if change.Operation == kitdbsqlite.Delete {
+					image = change.Before // a deleted row names its columns for its image before (03/11/2026)
+				}
 				for position, column := range change.Columns {
-					if column == "email" {
-						email = " " + fmt.Sprint(change.After[position])
+					if column == "email" && position < len(image) {
+						email = " " + fmt.Sprint(image[position])
 					}
 				}
 				parts = append(parts, map[kitdbsqlite.Operation]string{kitdbsqlite.Insert: "Insert", kitdbsqlite.Update: "Update",

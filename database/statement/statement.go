@@ -21,12 +21,18 @@ import (
 // Version is the template format. A template of another version was compiled by another engine: it is
 // refused, never guessed. A change of the format bumps it together with the compiler's schema (the
 // pairing test of the compiler holds the two together). Version 3 (03/11/2026) adds update, delete and
-// upsert, a column and + or - in the place of a value of their data, and an upsert's target.
-const Version = 3
+// upsert, a column and + or - in the place of a value of their data, and an upsert's target; version 4 (the
+// same day) history and at().
+const Version = 4
 
 // Method is the method a lowered statement invokes on its handle: LOAD db; PUSH template; holes…;
 // PUSH "#statement"; INVOKE 1+n. A source never spells # after a dot, so no program calls it by hand.
 const Method = "#statement"
+
+// TransactionMethod is what db.transaction((database) => { … }) lowers to: LOAD db; the function; PUSH
+// "#transaction"; INVOKE 1 (KITWORK_DATABASE.md mục 3). The function's parameter is a handle whose statements
+// run inside the transaction.
+const TransactionMethod = "#transaction"
 
 // Ops of a Node.
 const (
@@ -66,6 +72,8 @@ const (
 	ActionUpdate = "update"
 	ActionDelete = "delete"
 	ActionUpsert = "upsert"
+	// ActionHistory reads the changes of the rows its condition keeps (KITWORK_DATABASE.md mục 2).
+	ActionHistory = "history"
 )
 
 // Writes reports an action that changes rows.
@@ -97,6 +105,8 @@ type Statement struct {
 	// Target is the columns an upsert compares its data by, in the order the table declares them: a
 	// .unique() column, or every column of one .unique("tên") group.
 	Target []string `json:"target,omitempty"`
+	// At is the moment of at(): a literal or a hole; the statement reads the database as it was then.
+	At *Node `json:"at,omitempty"`
 	// Holes names, per hole, where its value is written in the source; never the value.
 	Holes []Hole `json:"holes,omitempty"`
 }
@@ -177,7 +187,7 @@ func (s *Statement) check() error {
 		return err
 	}
 	switch s.Action {
-	case ActionList, ActionFirst, ActionCount, ActionInsert, ActionUpdate, ActionDelete, ActionUpsert:
+	case ActionList, ActionFirst, ActionCount, ActionInsert, ActionUpdate, ActionDelete, ActionUpsert, ActionHistory:
 	default:
 		return fmt.Errorf("hành động %q", s.Action)
 	}
@@ -205,8 +215,22 @@ func (s *Statement) check() error {
 			}
 		}
 	}
-	if Writes(s.Action) && (len(s.Order) != 0 || s.Limit != nil || s.Page != nil || s.Bounds != nil) {
+	if (Writes(s.Action) || s.Action == ActionHistory) && (len(s.Order) != 0 || s.Limit != nil || s.Page != nil || s.Bounds != nil) {
 		return fmt.Errorf("%s có thứ tự hay giới hạn", s.Action)
+	}
+	if s.At != nil {
+		if Writes(s.Action) || s.Action == ActionHistory {
+			return fmt.Errorf("at() với %s", s.Action)
+		}
+		if err := s.At.checkValue(holes, false); err != nil {
+			return err
+		}
+		if s.Where.mentionsMatches() {
+			return fmt.Errorf("matches với at()")
+		}
+	}
+	if s.Action == ActionHistory && s.Where.mentionsMatches() {
+		return fmt.Errorf("matches trong history")
 	}
 	switch s.Action {
 	case ActionInsert, ActionUpsert:

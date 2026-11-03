@@ -39,19 +39,24 @@ func (m *ManagedDatabase) run(prepared *preparedStatement, holes []value.Value) 
 	switch s.Action {
 	case statement.ActionUpdate, statement.ActionDelete, statement.ActionUpsert:
 		return m.runWrite(prepared, binder)
+	case statement.ActionHistory:
+		return m.runHistory(prepared, binder)
 	}
 	if s.Action == statement.ActionInsert {
 		row, failure := binder.row()
 		if failure.Failed() {
 			return failure
 		}
-		table, failure := m.proxy.table(s.Table)
+		table, failure := m.table(s.Table)
 		if table == nil {
 			return failure
 		}
 		return table.Create(value.New(row))
 	}
 	if positive, negative := s.Where.Matches(); len(positive)+len(negative) > 0 {
+		if m.tx != nil {
+			return value.InvalidFailure(value.UnsupportedCode, "matches trong db.transaction chưa có trong engine hôm nay: chỉ mục toàn văn đọc dòng đã commit; tìm trước giao dịch")
+		}
 		return m.runMatches(prepared, binder, positive, negative)
 	}
 	predicate, truth, failure := binder.predicate(s.Where)
@@ -75,9 +80,29 @@ func (m *ManagedDatabase) run(prepared *preparedStatement, holes []value.Value) 
 		}
 		return value.New([]value.Value{})
 	}
-	table, failure := m.proxy.table(s.Table)
+	table, failure := m.table(s.Table)
 	if table == nil {
 		return failure
+	}
+	if s.At != nil {
+		// the database as it was then: a restored copy, read-only (database_at.go)
+		if !table.keepsHistory() {
+			return value.InvalidFailure(value.UnsupportedCode, fmt.Sprintf("at() đọc lịch sử của database, %s không giữ lịch sử", s.Table))
+		}
+		if failure, ok := table.ready(); !ok {
+			return failure
+		}
+		item, site := binder.value(s.At)
+		moment, failure := atMoment(item, site)
+		if failure.Failed() {
+			return failure
+		}
+		frozen, release, failure := table.atTable(moment)
+		if failure.Failed() {
+			return failure
+		}
+		defer release()
+		table = frozen
 	}
 	if truth == bindOpen && predicate != nil {
 		if m.proxy.engine != "kitdb" {

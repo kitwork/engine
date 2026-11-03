@@ -93,7 +93,9 @@ func encodeChanges(changes []Change) ([]byte, error) {
 	var tables []string
 	columns := map[string][]string{}
 	for _, change := range changes {
-		if change.Operation != Insert && change.Operation != Update {
+		switch {
+		case change.Operation == Delete && change.Columns != nil:
+		case change.Operation != Insert && change.Operation != Update:
 			continue
 		}
 		known, seen := columns[change.Table]
@@ -103,7 +105,7 @@ func encodeChanges(changes []Change) ([]byte, error) {
 		} else if len(known) != len(change.Columns) {
 			return nil, fmt.Errorf("kitdb: table %q changed its columns inside one commit", change.Table)
 		}
-		if len(change.Columns) != len(change.After) {
+		if change.Operation != Delete && len(change.Columns) != len(change.After) {
 			return nil, fmt.Errorf("kitdb: change of %q names %d columns for %d values", change.Table, len(change.Columns), len(change.After))
 		}
 	}
@@ -310,6 +312,9 @@ func decodeChanges(data []byte) ([]Change, error) {
 			if change.Operation != Insert {
 				change.Before = reader.values()
 			}
+			if change.Operation == Delete {
+				change.Columns = columns[change.Table] // nil for a commit written before 03/11/2026
+			}
 			if change.Operation != Delete {
 				change.After = reader.values()
 				change.Columns = columns[change.Table]
@@ -390,6 +395,17 @@ func ReadChanges(ctx context.Context, querier interface {
 		}
 		return visit(Commit{Revision: row.revision, At: time.Unix(0, row.at).UTC(), Changes: changes})
 	})
+}
+
+// RevisionAt is the last revision committed at or before moment, 0 for a moment before the first.
+func (database *Database) RevisionAt(ctx context.Context, moment time.Time) (uint64, error) {
+	if err := database.ensureOpen(); err != nil {
+		return 0, err
+	}
+	var revision int64
+	err := database.readers.QueryRowContext(ctx, `SELECT coalesce(max(rev), 0) FROM kitwork_history WHERE at <= ?`,
+		moment.UTC().UnixNano()).Scan(&revision)
+	return uint64(revision), err
 }
 
 // VerifyHistory checks that revisions are contiguous, that moments only move

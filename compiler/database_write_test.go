@@ -95,3 +95,86 @@ func TestDatabaseWriteErrors(t *testing.T) {
 		}
 	}
 }
+
+// history and at() compile to one template each (KITWORK_DATABASE.md mục 2, "Thời điểm và lịch sử"): history takes
+// its condition, at() a moment written in the code or from outside, before a read; each mistake is a compile error.
+//
+// CONTROL (03/11/2026): with at() taken in a write, the template is what fails, "câu database hỏng: at() với update".
+// The engine's statement package refuses it on its own as well, so a template written by hand cannot carry it.
+func TestDatabaseHistoryAndAtTranslate(t *testing.T) {
+	changes, err := compileWrite(t, `db.history((orders) => orders.email === email);`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changes.Action != statement.ActionHistory || changes.Where == nil {
+		t.Fatalf("history = %s", statement.Encode(changes))
+	}
+	then, err := compileWrite(t, `db.at("2026-10-16T23:00:00+07:00").list((orders) => orders.stock > 0);`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := statement.Encode(then); !strings.Contains(got, `"at":{"op":"literal","value":"2026-10-16T23:00:00+07:00"}`) {
+		t.Fatalf("at() = %s", got)
+	}
+	counted, err := compileWrite(t, `db.where((orders) => orders.stock > 0).at(today).count();`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counted.At == nil || counted.At.Op != statement.OpHole {
+		t.Fatalf("at(today) = %s", statement.Encode(counted))
+	}
+	for _, test := range []struct{ line, want string }{
+		{`db.where((orders) => orders.email === email).at(today).update((orders) => ({ stock: 1 }));`, "at() chỉ đi với câu đọc (list, first, count): update là câu ghi"},
+		{`db.at(today).history((orders) => orders.email === email);`, "at() chỉ đi với câu đọc (list, first, count): history là mọi thay đổi theo thời gian"},
+		{`db.at(today).at(today).list((orders) => orders);`, "at() viết một lần trong câu"},
+		{`db.at((orders) => orders).list((orders) => orders);`, "at nhận một thời điểm, không phải lambda"},
+		{`db.orderBy((orders) => orders.stock).history((orders) => orders);`, "orderBy không đi với history"},
+		{`db.at(today);`, "câu chưa kết thúc"},
+	} {
+		_, err := compileWrite(t, test.line)
+		if err == nil || !strings.Contains(err.Error(), test.want) || !strings.HasPrefix(err.Error(), "router.work:5:") {
+			t.Errorf("%s\n  got  %v\n  want router.work:5:…: %s", test.line, err, test.want)
+		}
+	}
+}
+
+// db.transaction((database) => { … }) lowers to db.#transaction(function) (KITWORK_DATABASE.md mục 3): the function is
+// code, and each statement on its parameter is translated as one on db. A write through db inside the function, a
+// transaction inside one, a function not written in place or with other than one parameter are compile errors.
+//
+// CONTROL (03/11/2026): with the parameter not bound as a handle, the statements inside are not translated,
+// "the transaction's function holds 0 templates, want 2"; with a write through db inside not looked at, "got <nil>".
+func TestDatabaseTransactionTranslate(t *testing.T) {
+	bytecode, err := compileRoute(t, writeHead+`const order = db.transaction((database) => {
+  const created = database.insert((orders) => ({ email, item: "x", amount: 1, stock: 2 }));
+  database.where((orders) => orders.email === email).update((orders) => ({ stock: orders.stock - 1 }));
+  return created;
+});
+`, map[string]string{".shared/schema/shop.work": writeSchema})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found := templates(t, bytecode); len(found) != 2 || found[0].Action != statement.ActionInsert || found[1].Action != statement.ActionUpdate {
+		t.Fatalf("the transaction's function holds %d templates, want 2", len(found))
+	}
+	lowered := false
+	for _, constant := range bytecode.Program.Constants() {
+		lowered = lowered || constant.Text() == statement.TransactionMethod
+	}
+	if !lowered {
+		t.Fatal("db.transaction is not lowered to #transaction")
+	}
+	for _, test := range []struct{ line, want string }{
+		{`db.transaction((database) => { db.insert((orders) => ({ email, item: "x", amount: 1, stock: 1 })); });`, "ghi qua db bên trong db.transaction(…): viết trên handle của giao dịch"},
+		{`db.transaction((database) => { database.transaction((inner) => 1); });`, "database.transaction(…) lồng trong giao dịch là lỗi"},
+		{`const work = (database) => 1;
+db.transaction(work);`, "transaction nhận một hàm viết ngay trong câu"},
+		{`db.transaction((a, b) => 1);`, "hàm của transaction nhận một tham số"},
+		{`db.where((orders) => orders.stock > 0).transaction((database) => 1);`, "transaction đứng một mình"},
+	} {
+		_, err := compileWrite(t, test.line)
+		if err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Errorf("%s\n  got  %v\n  want %s", test.line, err, test.want)
+		}
+	}
+}

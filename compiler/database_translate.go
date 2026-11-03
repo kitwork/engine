@@ -303,6 +303,13 @@ func (r *resolver) databaseStatement(node *MethodCallExpression) bool {
 		case word == "query":
 			r.fail(fmt.Errorf("%s: %s.%s", at, root.Value, statement.ManagedQuery))
 			return true
+		case word == "transaction":
+			if index != 0 || len(links) != 1 {
+				r.fail(fmt.Errorf("%s: transaction đứng một mình: %s.transaction((database) => { … })", at, root.Value))
+				return true
+			}
+			r.translateTransaction(root, found, link)
+			return true
 		case statement.Descriptions[word]:
 			if index == len(links)-1 {
 				r.fail(fmt.Errorf("%s: câu chưa kết thúc: cần list, first, count hay insert ở cuối; chỉ hành động mới chạy câu", at))
@@ -310,6 +317,12 @@ func (r *resolver) databaseStatement(node *MethodCallExpression) bool {
 			}
 		case statement.Actions[word]:
 			if index == len(links)-1 {
+				if statement.Writes(word) && !found.database.Transaction {
+					if outer := r.transactionWriting(found); outer != "" {
+						r.fail(fmt.Errorf("%s: %s", at, outer))
+						return true
+					}
+				}
 				r.translateStatement(root, found.database, links)
 				return true
 			}
@@ -331,6 +344,62 @@ func (r *resolver) databaseStatement(node *MethodCallExpression) bool {
 		}
 	}
 	return false
+}
+
+// translateTransaction lowers db.transaction((database) => { … }) to db.#transaction(function)
+// (KITWORK_DATABASE.md mục 3): the function is code that runs, whose parameter is a handle of the same database
+// bound to the transaction, so a statement written on it is translated as one on db and runs inside the
+// transaction. A transaction inside one is refused until there are real savepoints.
+func (r *resolver) translateTransaction(root *Identifier, found *binding, link *MethodCallExpression) {
+	at := r.where(link.Method.Token)
+	if found.database.Transaction {
+		r.fail(fmt.Errorf("%s: %s.transaction(…) lồng trong giao dịch là lỗi, cho tới khi có savepoint thật", at, root.Value))
+		return
+	}
+	var function *FunctionLiteral
+	if len(link.Arguments) == 1 {
+		function, _ = link.Arguments[0].(*FunctionLiteral)
+	}
+	if function == nil {
+		r.fail(fmt.Errorf("%s: transaction nhận một hàm viết ngay trong câu: %s.transaction((database) => { … })", at, root.Value))
+		return
+	}
+	if len(function.Parameters) != 1 || strings.HasPrefix(function.Parameters[0].Value, "{") || strings.HasPrefix(function.Parameters[0].Value, "[") {
+		r.fail(fmt.Errorf("%s: hàm của transaction nhận một tham số, handle của giao dịch: %s.transaction((database) => { … })", r.where(function.Token), root.Value))
+		return
+	}
+	inner := *found.database
+	inner.Transaction = true
+	if r.transactionHandles == nil {
+		r.transactionHandles = map[*FunctionLiteral]*DatabaseImport{}
+		r.transactionOuters = map[*FunctionLiteral]*binding{}
+	}
+	r.transactionHandles[function], r.transactionOuters[function] = &inner, found
+	r.handleUse = true
+	r.reference(root, false)
+	r.handleUse = false
+	r.expression(function)
+	r.result.statements[link] = &MethodCallExpression{
+		Token:     link.Token,
+		Object:    root,
+		Method:    &Identifier{Token: link.Method.Token, Value: statement.TransactionMethod},
+		Arguments: []Expression{function},
+	}
+}
+
+// transactionWriting is the error of a write written on a handle inside the function of a transaction: on the
+// handle the transaction began on, it would wait for the transaction itself; on another database, it would not be
+// part of it. "" when no transaction holds the code.
+func (r *resolver) transactionWriting(handle *binding) string {
+	if len(r.inTransactions) == 0 {
+		return ""
+	}
+	outer := r.inTransactions[len(r.inTransactions)-1]
+	if outer == handle {
+		return fmt.Sprintf("ghi qua %s bên trong %s.transaction(…): viết trên handle của giao dịch, (database) => database.insert(…)", handle.name, handle.name)
+	}
+	return fmt.Sprintf("ghi qua %s trong giao dịch của %s: một giao dịch ghi một database và một schema; bảng cần ghi cùng giao dịch thì để chung schema",
+		handle.name, outer.name)
 }
 
 // externalQuery takes a call on a handle of connect({ … }), a database outside the app: query(sql, [giá
@@ -405,6 +474,14 @@ func (r *resolver) translateStatement(root *Identifier, handle *DatabaseImport, 
 			if body := t.lambda(link); body != nil {
 				t.s.Order = append(t.s.Order, t.keys(body)...)
 			}
+		case "at":
+			t.at(link)
+		case statement.ActionHistory:
+			if len(link.Arguments) > 0 {
+				if body := t.lambda(link); body != nil {
+					t.s.Where = conjunction(t.s.Where, t.condition(body))
+				}
+			}
 		case statement.ActionList:
 			t.list(link)
 		case statement.ActionFirst, statement.ActionCount:
@@ -451,6 +528,16 @@ func (r *resolver) translateStatement(root *Identifier, handle *DatabaseImport, 
 	switch word := action.Method.Value; {
 	case statement.Writes(word) && len(t.s.Order) > 0:
 		t.fail(action.Method.Token, "orderBy không đi với %s: %s ghi mọi dòng khớp điều kiện", word, word)
+		return
+	case word == statement.ActionHistory && len(t.s.Order) > 0:
+		t.fail(action.Method.Token, "orderBy không đi với history: các thay đổi ra theo thời gian, cũ trước")
+		return
+	case t.s.At != nil && (statement.Writes(word) || word == statement.ActionHistory):
+		t.fail(action.Method.Token, "at() chỉ đi với câu đọc (list, first, count): %s là %s", word,
+			map[bool]string{true: "câu ghi, ghi vào database như bây giờ", false: "mọi thay đổi theo thời gian, không cần at()"}[statement.Writes(word)])
+		return
+	case (t.s.At != nil || word == statement.ActionHistory) && t.matched != nil:
+		t.fail(*t.matched, "matches với at() hay trong history chưa có trong engine hôm nay")
 		return
 	case word == statement.ActionUpdate && t.s.Where == nil:
 		t.fail(action.Method.Token, "update cần điều kiện: %s.where((%s) => …).update((%s) => ({ … })); sửa mọi dòng thì viết điều kiện ra, where((%s) => %s)",
@@ -1214,6 +1301,42 @@ func (t *translator) insert(body Expression) {
 	if err := t.table.CheckInsert(keys); err != nil {
 		t.fail(data.Token, "%v", err)
 	}
+}
+
+// at translates at(moment): one value, written in the code (an ISO text with its offset, milliseconds) or from
+// outside the lambda; the statement reads the database as it was then (KITWORK_DATABASE.md mục 2).
+func (t *translator) at(link *MethodCallExpression) {
+	if t.s.At != nil {
+		t.fail(link.Method.Token, "at() viết một lần trong câu")
+		return
+	}
+	if len(link.Arguments) != 1 {
+		t.fail(link.Method.Token, "at nhận một thời điểm: %s.at(\"2026-10-16T23:00:00+07:00\").list(…)", t.root.Value)
+		return
+	}
+	argument := link.Arguments[0]
+	if _, isFunction := argument.(*FunctionLiteral); isFunction || t.mentions(argument) {
+		t.fail(expressionToken(argument), "at nhận một thời điểm, không phải lambda: %s.at(thời_điểm).list(…)", t.root.Value)
+		return
+	}
+	switch node := argument.(type) {
+	case *Literal:
+		switch node.Value.K {
+		case value.String:
+			t.s.At = statement.Literal(node.Value.Text())
+			return
+		case value.Number:
+			t.s.At = statement.Literal(node.Value.N)
+			return
+		}
+		t.fail(node.Token, "at nhận chữ ISO có múi giờ hay số mili giây")
+		return
+	}
+	if offender := t.impure(argument); offender != nil {
+		t.untranslatable(offender)
+		return
+	}
+	t.s.At = t.hole(argument)
 }
 
 // data translates the data of update or upsert: an object whose keys are columns, each value one an insert takes

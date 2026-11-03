@@ -199,7 +199,13 @@ import (
 // error "chưa có trong engine hôm nay (lát 3)"; .unique("tên") names a group. A cached artifact of schema 26 holds
 // that error, or a template of version 2 the engine no longer reads: the bump retires it. A program that imports no
 // database compiles as before, byte for byte. No opcode or operand changed.
-const CompilerSchemaVersion uint16 = 27
+//
+// 28 (03/11/2026, KITWORK_DATABASE.md mục 2, "Thời điểm và lịch sử", and mục 3): history((bảng) => …) and
+// at(thời_điểm) are statements, in the template's version 4, and db.transaction((database) => { … }) lowers to
+// db.#transaction(function), its parameter a handle whose statements are translated, where they were the errors
+// "chưa có trong engine hôm nay (lát 9, lát 4)". A cached artifact of schema 27 holds those errors, or a template of
+// version 3 the engine no longer reads: the bump retires it. A program that imports no database compiles as before, byte for byte. No opcode or operand changed.
+const CompilerSchemaVersion uint16 = 28
 
 var currentCompilerFingerprint = compilerFingerprintFor(CompilerSchemaVersion)
 

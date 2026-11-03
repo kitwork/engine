@@ -72,23 +72,23 @@ func TestStatementRoundTripDeterminismVersion(t *testing.T) {
 		t.Fatalf("%s escapes &&: a template reads as written", encoded)
 	}
 
-	other := strings.Replace(encoded, `{"v":3,`, `{"v":2,`, 1)
-	if _, err := Decode(other); err == nil || !strings.Contains(err.Error(), "dịch bằng engine khác (bản 2, engine này đọc bản 3): dịch lại") {
-		t.Fatalf("Decode of version 2: %v, want the error that says to compile again", err)
+	other := strings.Replace(encoded, `{"v":4,`, `{"v":3,`, 1)
+	if _, err := Decode(other); err == nil || !strings.Contains(err.Error(), "dịch bằng engine khác (bản 3, engine này đọc bản 4): dịch lại") {
+		t.Fatalf("Decode of version 3: %v, want the error that says to compile again", err)
 	}
-	lonely := `{"v":3,"action":"list","table":"orders","where":{"op":"&&","args":[{"op":"table"}]}}`
+	lonely := `{"v":4,"action":"list","table":"orders","where":{"op":"&&","args":[{"op":"table"}]}}`
 	if _, err := Decode(lonely); err == nil || !strings.Contains(err.Error(), "&& cần hai vế, có 1") || !strings.Contains(err.Error(), "dịch lại") {
 		t.Fatalf("Decode of && with one side: %v, want malformed", err)
 	}
 	for template, want := range map[string]string{
-		`{"v":3,"action":"list","table":"orders","where":{"op":"===","args":[{"op":"column","column":"day"},{"op":"hole","hole":0}]}}`: "hole ngoài danh sách 0 hole",
-		`{"v":3,"action":"drop","table":"orders"}`:                                                                                                                        `hành động "drop"`,
-		`{"v":3,"action":"list","table":"orders","sql":"DROP TABLE orders"}`:                                                                                              "unknown field",
-		`{"v":3,"action":"insert","table":"orders"}`:                                                                                                                      "insert không có dữ liệu",
-		`{"v":3,"action":"list","table":"orders","where":{"op":"<","args":[{"op":"column","column":"note"},{"op":"null"}]}}`:                                              "null với <",
-		`{"v":3,"action":"list","table":"orders","where":{"op":"||","args":[{"op":"table"},{"op":"matches","args":[{"op":"literal","value":"x"}]}]}}`:                     "matches dưới ||",
-		`{"v":3,"action":"list","table":"orders","where":{"op":"!","args":[{"op":"&&","args":[{"op":"table"},{"op":"matches","args":[{"op":"literal","value":"x"}]}]}]}}`: "matches dưới !",
-		`{"v":3,"action":"list","table":"orders","where":{"op":"matches","args":[{"op":"column","column":"item"}]}}`:                                                      `giá trị "column"`,
+		`{"v":4,"action":"list","table":"orders","where":{"op":"===","args":[{"op":"column","column":"day"},{"op":"hole","hole":0}]}}`: "hole ngoài danh sách 0 hole",
+		`{"v":4,"action":"drop","table":"orders"}`:                                                                                                                        `hành động "drop"`,
+		`{"v":4,"action":"list","table":"orders","sql":"DROP TABLE orders"}`:                                                                                              "unknown field",
+		`{"v":4,"action":"insert","table":"orders"}`:                                                                                                                      "insert không có dữ liệu",
+		`{"v":4,"action":"list","table":"orders","where":{"op":"<","args":[{"op":"column","column":"note"},{"op":"null"}]}}`:                                              "null với <",
+		`{"v":4,"action":"list","table":"orders","where":{"op":"||","args":[{"op":"table"},{"op":"matches","args":[{"op":"literal","value":"x"}]}]}}`:                     "matches dưới ||",
+		`{"v":4,"action":"list","table":"orders","where":{"op":"!","args":[{"op":"&&","args":[{"op":"table"},{"op":"matches","args":[{"op":"literal","value":"x"}]}]}]}}`: "matches dưới !",
+		`{"v":4,"action":"list","table":"orders","where":{"op":"matches","args":[{"op":"column","column":"item"}]}}`:                                                      `giá trị "column"`,
 	} {
 		if _, err := Decode(template); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("Decode(%s) = %v, want %q", template, err, want)

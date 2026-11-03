@@ -42,6 +42,9 @@ var (
 	// ErrUnsupportedSchema means a table shape or schema object whose changes
 	// the history cannot record.
 	ErrUnsupportedSchema = errors.New("kitdb: schema is not supported by the history")
+	// ErrReentrant means a write asked for on the goroutine of the writer, from inside one of its requests: it
+	// would wait for the request it is part of.
+	ErrReentrant = errors.New("kitdb: a write from inside a write of the same database")
 	// ErrCorruptHistory means kitwork_history does not decode or does not chain.
 	ErrCorruptHistory = errors.New("kitdb: history is corrupt")
 	// ErrNoAnchor means no anchor is old enough for the requested moment.

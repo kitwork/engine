@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestCompilerV27GoldenContract(t *testing.T) {
-	if CompilerSchemaVersion != 27 {
-		t.Fatalf("CompilerSchemaVersion = %d, want schema v27", CompilerSchemaVersion)
+func TestCompilerV28GoldenContract(t *testing.T) {
+	if CompilerSchemaVersion != 28 {
+		t.Fatalf("CompilerSchemaVersion = %d, want schema v28", CompilerSchemaVersion)
 	}
 	// Bytecode 3 (14/10/2026) moved the fingerprint and every checksum below with the version alone: each
 	// fixture's instructions, constants and debug table are those bytecode 2 wrote (none needs a wide
@@ -36,10 +36,17 @@ func TestCompilerV27GoldenContract(t *testing.T) {
 	// a guard answers four ways only) moved the fingerprint alone: no fixture is a router.work or a config.work.
 	// Schema 26 (01/11/2026, matches in a database statement, its template version 2) moved the fingerprint alone: no
 	// fixture imports a database. Schema 27 (03/11/2026, update, delete and upsert, the template's version 3) moved the
-	// fingerprint alone: no fixture imports a database.
-	const expectedFingerprint = "56995740917bc135fca746437cbb0b2184096589ff56c903654255c611dfbf4f"
+	// fingerprint alone: no fixture imports a database. Schema 28 (03/11/2026, history and at(), the template's
+	// version 4) moved the fingerprint alone: no fixture imports a database.
+	const expectedFingerprint = "b0ee29a2eac7698a9622bd5b855ddbf4cddee6d985170493a67e4a5565647259"
 	if got := Fingerprint(); got != expectedFingerprint {
 		t.Fatalf("compiler fingerprint = %q, want %q", got, expectedFingerprint)
+	}
+	// schema 27 compiled history and at() as the error "chưa có", and its templates are version 3: its artifacts
+	// are not reused
+	const schema27 = "56995740917bc135fca746437cbb0b2184096589ff56c903654255c611dfbf4f"
+	if stamped := compilerFingerprintFor(27); hex.EncodeToString(stamped[:]) != schema27 || Fingerprint() == schema27 {
+		t.Fatalf("schema 27 on bytecode 4 stamps %x, the current compiler %s: want %s and another", stamped, Fingerprint(), schema27)
 	}
 	// schema 26 compiled update, delete and upsert as the error "chưa có", and its templates are version 2: its
 	// artifacts are not reused

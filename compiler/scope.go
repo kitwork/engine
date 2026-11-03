@@ -234,6 +234,11 @@ type resolver struct {
 	// first: a name of the request one of them reads from outside is refused (routineRequest).
 	routineGo   map[*FunctionLiteral]bool
 	goFunctions []*functionScope
+	// transactionHandles gives the function of db.transaction(…) the handle its parameter is, transactionOuters the
+	// handle the transaction began on; inTransactions are those whose function is being read, outermost first.
+	transactionHandles map[*FunctionLiteral]*DatabaseImport
+	transactionOuters  map[*FunctionLiteral]*binding
+	inTransactions     []*binding
 	// inApp: the program is a file of an app (compiled with its folder), where env of "kitwork" is refused;
 	// a manifest has none. environmentUse lets the next reference of environment through: a read by name.
 	inApp          bool
@@ -924,8 +929,16 @@ func (r *resolver) functionLiteral(literal *FunctionLiteral) {
 		r.goFunctions = append(r.goFunctions, r.function)
 		defer func() { r.goFunctions = r.goFunctions[:len(r.goFunctions)-1] }()
 	}
+	if outer := r.transactionOuters[literal]; outer != nil {
+		// the function of db.transaction: its parameter is the transaction's handle (database_translate.go)
+		r.inTransactions = append(r.inTransactions, outer)
+		defer func() { r.inTransactions = r.inTransactions[:len(r.inTransactions)-1] }()
+	}
 	for _, parameter := range literal.Parameters {
-		r.declare(parameter, bindingParameter)
+		declared := r.declare(parameter, bindingParameter)
+		if handle := r.transactionHandles[literal]; handle != nil && declared != nil {
+			declared.database = handle
+		}
 	}
 	if literal.Body != nil {
 		r.hoist(literal.Body.Statements)

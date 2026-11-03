@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"sync/atomic"
 
 	"github.com/kitwork/engine/database/statement"
+	kitdbsqlite "github.com/kitwork/engine/kitdb/sqlite"
 	"github.com/kitwork/engine/value"
 )
 
@@ -28,6 +30,10 @@ type ManagedDatabase struct {
 	catalog *statement.Database
 	// prepared holds, by template, the statement checked once (*preparedStatement).
 	prepared sync.Map
+	// tx is the writer's transaction of the handle db.transaction gives its function (database_transaction.go);
+	// over is set when that transaction is over, after which the handle answers nothing.
+	tx   *kitdbsqlite.Transaction
+	over atomic.Bool
 }
 
 // preparedStatement is a template checked against the live schema; failure is why it was refused.
@@ -51,6 +57,12 @@ func (m *ManagedDatabase) OnCompare(_ string, _ value.Value) value.Value { retur
 // it (a namespace import of kitwork/database, a handle that came another way): it is refused, and its
 // lambda never runs.
 func (m *ManagedDatabase) OnInvoke(method string, args ...value.Value) value.Value {
+	if m.over.Load() {
+		return value.InvalidFailure(value.InvalidArgumentCode, "handle của giao dịch hết hiệu lực khi giao dịch xong: câu viết trong hàm của db.transaction")
+	}
+	if method == statement.TransactionMethod {
+		return m.transaction(args)
+	}
 	if method != statement.Method {
 		return value.InvalidFailure(value.UnsupportedCode, fmt.Sprintf("db.%s(…) chỉ chạy khi viết thẳng trên tên import từ app/.shared/schema/ (import { db } from \"app/.shared/schema/shop.work\"): câu database được dịch lúc biên dịch", method))
 	}
