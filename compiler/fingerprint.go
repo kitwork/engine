@@ -188,7 +188,18 @@ import (
 // any case, and res as the context's response. A cached artifact of schema 24 of a router.work whose guard answers so would run until the
 // engine refused it: the bump retires it. A program that writes none of them compiles as before, byte for byte. No
 // opcode or operand changed.
-const CompilerSchemaVersion uint16 = 26
+//
+// 26 (01/11/2026, KITWORK_DATABASE.md mục 2, matches): a statement of a database may hold table.matches(q) and
+// table.column.matches(q), in its template's version 2. A cached artifact of schema 25 that wrote matches holds an
+// error where the statement now runs: the bump retires it. A program that imports no database compiles as before,
+// byte for byte. No opcode or operand changed.
+//
+// 27 (03/11/2026, KITWORK_DATABASE.md mục 2, lát 3): update, delete and upsert are statements, in the template's
+// version 3 (a column and + or - in the place of a value of their data, an upsert's target), where they were the
+// error "chưa có trong engine hôm nay (lát 3)"; .unique("tên") names a group. A cached artifact of schema 26 holds
+// that error, or a template of version 2 the engine no longer reads: the bump retires it. A program that imports no
+// database compiles as before, byte for byte. No opcode or operand changed.
+const CompilerSchemaVersion uint16 = 27
 
 var currentCompilerFingerprint = compilerFingerprintFor(CompilerSchemaVersion)
 

@@ -129,11 +129,16 @@ func catalogColumn(name string, spec *ColumnSpec) statement.Column {
 	if kind == "" {
 		kind = spec.kind
 	}
+	group := ""
+	if len(spec.uniques) > 0 {
+		group = spec.uniques[0].name
+	}
 	return statement.Column{
 		Name:           name,
 		Kind:           kind,
 		Nullable:       spec.nullable,
 		Unique:         spec.unique,
+		UniqueGroup:    group,
 		Search:         spec.searchable,
 		Primary:        spec.primary,
 		Generated:      spec.primary,

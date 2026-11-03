@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestCompilerV26GoldenContract(t *testing.T) {
-	if CompilerSchemaVersion != 26 {
-		t.Fatalf("CompilerSchemaVersion = %d, want schema v26", CompilerSchemaVersion)
+func TestCompilerV27GoldenContract(t *testing.T) {
+	if CompilerSchemaVersion != 27 {
+		t.Fatalf("CompilerSchemaVersion = %d, want schema v27", CompilerSchemaVersion)
 	}
 	// Bytecode 3 (14/10/2026) moved the fingerprint and every checksum below with the version alone: each
 	// fixture's instructions, constants and debug table are those bytecode 2 wrote (none needs a wide
@@ -35,10 +35,17 @@ func TestCompilerV26GoldenContract(t *testing.T) {
 	// draws no page) moved the fingerprint alone: no fixture is a router.work or a config.work. Schema 25 (25/10/2026,
 	// a guard answers four ways only) moved the fingerprint alone: no fixture is a router.work or a config.work.
 	// Schema 26 (01/11/2026, matches in a database statement, its template version 2) moved the fingerprint alone: no
-	// fixture imports a database.
-	const expectedFingerprint = "af99e3dc58132ac4d0450d117ed4d135085e622fdede655d3fc614adae4bb8cb"
+	// fixture imports a database. Schema 27 (03/11/2026, update, delete and upsert, the template's version 3) moved the
+	// fingerprint alone: no fixture imports a database.
+	const expectedFingerprint = "56995740917bc135fca746437cbb0b2184096589ff56c903654255c611dfbf4f"
 	if got := Fingerprint(); got != expectedFingerprint {
 		t.Fatalf("compiler fingerprint = %q, want %q", got, expectedFingerprint)
+	}
+	// schema 26 compiled update, delete and upsert as the error "chưa có", and its templates are version 2: its
+	// artifacts are not reused
+	const schema26 = "af99e3dc58132ac4d0450d117ed4d135085e622fdede655d3fc614adae4bb8cb"
+	if stamped := compilerFingerprintFor(26); hex.EncodeToString(stamped[:]) != schema26 || Fingerprint() == schema26 {
+		t.Fatalf("schema 26 on bytecode 4 stamps %x, the current compiler %s: want %s and another", stamped, Fingerprint(), schema26)
 	}
 	// schema 24 compiled a router.work whose guard answers with text, html, json with no status or a value: its
 	// artifacts are not reused

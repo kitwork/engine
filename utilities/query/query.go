@@ -934,6 +934,13 @@ func (q *Query) whereClause(argOffset int) (string, []any) {
 	return "(" + conditions + ") AND " + predicate, args
 }
 
+// PredicateSQL renders a predicate as a condition of SQL, its values arguments numbered from first ($first, …):
+// the condition of a write of the database statements (update, delete), whose data takes the numbers before it.
+func PredicateSQL(predicate Predicate, first int) (string, []any) {
+	var args []any
+	return buildPredicate(predicate, &args, first), args
+}
+
 // buildPredicate renders a grouped predicate: parentheses for AND and OR, NOT, IS [NOT] NULL only for
 // those operators (a null value compares unknown, as SQL), IN and NOT IN (an empty list is 1=0 and 1=1),
 // identifiers quoted and every value an argument appended to args.

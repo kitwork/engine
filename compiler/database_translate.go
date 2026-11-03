@@ -421,6 +421,24 @@ func (r *resolver) translateStatement(root *Identifier, handle *DatabaseImport, 
 			if body := t.lambda(link); body != nil {
 				t.insert(body)
 			}
+		case statement.ActionUpsert:
+			if len(links) > 1 {
+				t.fail(link.Method.Token, "upsert không đi sau where hay orderBy: %s.upsert((bảng) => ({ … })), so trùng theo cột .unique() trong dữ liệu", root.Value)
+				return
+			}
+			if body := t.lambda(link); body != nil {
+				t.data(body)
+			}
+		case statement.ActionUpdate:
+			if body := t.lambda(link); body != nil {
+				t.data(body)
+			}
+		case statement.ActionDelete:
+			if len(link.Arguments) > 0 {
+				if body := t.lambda(link); body != nil {
+					t.s.Where = conjunction(t.s.Where, t.condition(body))
+				}
+			}
 		}
 	}
 	if t.failed {
@@ -428,6 +446,22 @@ func (r *resolver) translateStatement(root *Identifier, handle *DatabaseImport, 
 	}
 	if t.table == nil {
 		t.fail(action.Method.Token, "câu cần một lambda có tham số là bảng: %s.%s((bảng) => …)", root.Value, action.Method.Value)
+		return
+	}
+	switch word := action.Method.Value; {
+	case statement.Writes(word) && len(t.s.Order) > 0:
+		t.fail(action.Method.Token, "orderBy không đi với %s: %s ghi mọi dòng khớp điều kiện", word, word)
+		return
+	case word == statement.ActionUpdate && t.s.Where == nil:
+		t.fail(action.Method.Token, "update cần điều kiện: %s.where((%s) => …).update((%s) => ({ … })); sửa mọi dòng thì viết điều kiện ra, where((%s) => %s)",
+			root.Value, t.parameter, t.parameter, t.parameter, t.parameter)
+		return
+	case word == statement.ActionDelete && t.s.Where == nil:
+		t.fail(action.Method.Token, "delete cần điều kiện: %s.delete((%s) => …); xoá mọi dòng thì viết điều kiện ra, delete((%s) => %s)",
+			root.Value, t.parameter, t.parameter, t.parameter)
+		return
+	case statement.Writes(word) && t.matched != nil:
+		t.fail(*t.matched, "matches trong %s chưa có trong engine hôm nay: tìm các dòng bằng list trước, rồi %s theo khoá của chúng", word, word)
 		return
 	}
 	if t.matched != nil {
@@ -1180,6 +1214,135 @@ func (t *translator) insert(body Expression) {
 	if err := t.table.CheckInsert(keys); err != nil {
 		t.fail(data.Token, "%v", err)
 	}
+}
+
+// data translates the data of update or upsert: an object whose keys are columns, each value one an insert takes
+// (a value from outside, a literal, null), a column of the table, or + or - of a number column and a number
+// (KITWORK_DATABASE.md mục 2: amount: orders.amount + 1000, count: clickDays.count + 1). An upsert's keys are an
+// insert's, and give its target.
+func (t *translator) data(body Expression) {
+	word := t.s.Action
+	data, ok := body.(*ObjectLiteral)
+	if !ok {
+		t.fail(expressionToken(body), "%s nhận một object dữ liệu: %s.%s((%s) => ({ … }))", word, t.root.Value, word, t.parameter)
+		return
+	}
+	seen := map[string]bool{}
+	keys := make([]string, 0, len(data.Entries))
+	at := map[string]Token{}
+	for _, entry := range data.Entries {
+		if entry.IsSpread {
+			t.fail(data.Token, "...spread trong dữ liệu %s chưa có trong engine hôm nay (lát 3): viết từng cột", word)
+			return
+		}
+		name, token, ok := objectKeyName(entry.Key)
+		if !ok {
+			t.fail(data.Token, "khoá của dữ liệu %s là tên cột viết bằng chữ", word)
+			return
+		}
+		if seen[name] {
+			t.fail(token, "cột %s viết hai lần trong dữ liệu %s", name, word)
+			return
+		}
+		seen[name] = true
+		column, err := t.table.Column(name)
+		if err != nil {
+			t.fail(token, "%v", err)
+			return
+		}
+		if err := column.CheckWrite(); err != nil {
+			t.fail(token, "%v", err)
+			return
+		}
+		written := t.dataValue(entry.Value)
+		if written == nil {
+			return
+		}
+		if err := t.table.CheckData(word, name, written, false); err != nil {
+			t.fail(expressionToken(entry.Value), "%v", err)
+			return
+		}
+		keys = append(keys, name)
+		at[name] = expressionToken(entry.Value)
+		t.s.Values = append(t.s.Values, statement.Field{Column: name, Value: written})
+	}
+	if word != statement.ActionUpsert {
+		return
+	}
+	if err := t.table.CheckInsert(keys); err != nil {
+		t.fail(data.Token, "%v", err)
+		return
+	}
+	target, err := t.table.UpsertTarget(keys)
+	if err != nil {
+		t.fail(data.Token, "%v", err)
+		return
+	}
+	for _, field := range t.s.Values {
+		for _, column := range target {
+			if field.Column == column {
+				if err := t.table.CheckData(word, column, field.Value, true); err != nil {
+					t.fail(at[column], "%v", err)
+					return
+				}
+			}
+		}
+	}
+	t.s.Target = target
+}
+
+// dataValue translates one value of update or upsert data.
+func (t *translator) dataValue(e Expression) *statement.Node {
+	if t.failed {
+		return nil
+	}
+	if !t.mentions(e) {
+		return t.value(e, "", false)
+	}
+	switch node := e.(type) {
+	case *MemberExpression:
+		if name, ok := t.column(node); ok {
+			return &statement.Node{Op: statement.OpColumn, Column: name}
+		}
+	case *InfixExpression:
+		switch node.Operator {
+		case "+", "-":
+			left, right := t.operand(node.Left), t.operand(node.Right)
+			if left == nil || right == nil {
+				return nil
+			}
+			return &statement.Node{Op: node.Operator, Args: []*statement.Node{left, right}}
+		case "*", "/", "%", "**":
+			t.fail(node.Token, "phép %s trên cột chưa có trong engine hôm nay: dữ liệu đọc cột thì viết %s.cột, %s.cột + số hay %s.cột - số",
+				node.Operator, t.parameter, t.parameter, t.parameter)
+			return nil
+		}
+	}
+	if !t.failed {
+		t.fail(expressionToken(e), "dữ liệu đọc bảng chỉ bằng %s.cột, %s.cột + số hay %s.cột - số; giá trị khác tính trước câu, đặt vào một const",
+			t.parameter, t.parameter, t.parameter)
+	}
+	return nil
+}
+
+// operand translates a side of + or - in data: a column, another + or -, or a number.
+func (t *translator) operand(e Expression) *statement.Node {
+	if t.mentions(e) {
+		return t.dataValue(e)
+	}
+	node := t.value(e, "", false)
+	if node == nil {
+		return nil
+	}
+	switch {
+	case node.Op == statement.OpNull:
+		t.fail(expressionToken(e), "+ và - trong dữ liệu là phép tính số: viết một số, không viết null")
+		return nil
+	case node.Op == statement.OpLiteral && !strings.HasPrefix(string(node.Value), "-") && (node.Value[0] < '0' || node.Value[0] > '9'):
+		t.fail(expressionToken(e), "+ và - trong dữ liệu là phép tính số: giá trị là một số")
+		return nil
+	}
+	return node
 }
 
 // walkExpression visits e and what it holds, outer first, while visit returns true. A function inside is

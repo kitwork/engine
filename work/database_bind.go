@@ -36,6 +36,10 @@ func (m *ManagedDatabase) run(prepared *preparedStatement, holes []value.Value) 
 		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("câu database nhận %d giá trị, có %d: dịch lại", len(s.Holes), len(holes)))
 	}
 	binder := &statementBinder{s: s, holes: holes, columns: prepared.columns}
+	switch s.Action {
+	case statement.ActionUpdate, statement.ActionDelete, statement.ActionUpsert:
+		return m.runWrite(prepared, binder)
+	}
 	if s.Action == statement.ActionInsert {
 		row, failure := binder.row()
 		if failure.Failed() {

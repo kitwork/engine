@@ -372,7 +372,18 @@ func (reader *schemaReader) readColumn(name string, e Expression) (statement.Col
 		case "nullable":
 			column.Nullable = true
 		case "unique":
-			column.Unique = true
+			// .unique() alone; .unique("tên") a group of columns unique together (the upsert's target)
+			group := ""
+			if len(modifier.Arguments) > 0 {
+				if literal, ok := modifier.Arguments[0].(*Literal); ok && literal.Value.K == value.String {
+					group = literal.Value.Text()
+				}
+			}
+			if group == "" {
+				column.Unique = true
+			} else {
+				column.UniqueGroup = group
+			}
 		case "searchable":
 			if len(modifier.Arguments) != 0 {
 				reader.fail(at, ".searchable() không nhận đối số")

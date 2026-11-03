@@ -20,8 +20,9 @@ import (
 
 // Version is the template format. A template of another version was compiled by another engine: it is
 // refused, never guessed. A change of the format bumps it together with the compiler's schema (the
-// pairing test of the compiler holds the two together).
-const Version = 2
+// pairing test of the compiler holds the two together). Version 3 (03/11/2026) adds update, delete and
+// upsert, a column and + or - in the place of a value of their data, and an upsert's target.
+const Version = 3
 
 // Method is the method a lowered statement invokes on its handle: LOAD db; PUSH template; holes…;
 // PUSH "#statement"; INVOKE 1+n. A source never spells # after a dot, so no program calls it by hand.
@@ -40,15 +41,20 @@ const (
 	// (Column empty), table.column.matches(text) over one; its one argument a literal string or a hole. It stands
 	// only in the outermost && chain, alone or under one !. Added with Version 2.
 	OpMatches = "matches"
-	OpAnd     = "&&"
-	OpOr      = "||"
-	OpNot     = "!"
-	OpEqual   = "==="
-	OpUnequal = "!=="
-	OpLess    = "<"
-	OpAtMost  = "<="
-	OpMore    = ">"
-	OpAtLeast = ">="
+	// OpAdd and OpSubtract are + and - in a value of the data of update or upsert, between a number column of
+	// the table and a number (orders.amount + 1000); a column stands there for its value on the row the
+	// statement changes. Added with Version 3.
+	OpAdd      = "+"
+	OpSubtract = "-"
+	OpAnd      = "&&"
+	OpOr       = "||"
+	OpNot      = "!"
+	OpEqual    = "==="
+	OpUnequal  = "!=="
+	OpLess     = "<"
+	OpAtMost   = "<="
+	OpMore     = ">"
+	OpAtLeast  = ">="
 )
 
 // Actions of a statement in this format.
@@ -57,7 +63,19 @@ const (
 	ActionFirst  = "first"
 	ActionCount  = "count"
 	ActionInsert = "insert"
+	ActionUpdate = "update"
+	ActionDelete = "delete"
+	ActionUpsert = "upsert"
 )
+
+// Writes reports an action that changes rows.
+func Writes(action string) bool {
+	switch action {
+	case ActionInsert, ActionUpdate, ActionDelete, ActionUpsert:
+		return true
+	}
+	return false
+}
 
 // Statement is one database statement: an action on one table.
 type Statement struct {
@@ -74,8 +92,11 @@ type Statement struct {
 	// Bounds is list(x) with x a value the compiler cannot type: a hole, a number or { page, limit } when
 	// it runs.
 	Bounds *Node `json:"bounds,omitempty"`
-	// Values is the data of an insert, in the order written.
+	// Values is the data of an insert, an update or an upsert, in the order written.
 	Values []Field `json:"values,omitempty"`
+	// Target is the columns an upsert compares its data by, in the order the table declares them: a
+	// .unique() column, or every column of one .unique("tên") group.
+	Target []string `json:"target,omitempty"`
 	// Holes names, per hole, where its value is written in the source; never the value.
 	Holes []Hole `json:"holes,omitempty"`
 }
@@ -156,7 +177,7 @@ func (s *Statement) check() error {
 		return err
 	}
 	switch s.Action {
-	case ActionList, ActionFirst, ActionCount, ActionInsert:
+	case ActionList, ActionFirst, ActionCount, ActionInsert, ActionUpdate, ActionDelete, ActionUpsert:
 	default:
 		return fmt.Errorf("hành động %q", s.Action)
 	}
@@ -167,6 +188,9 @@ func (s *Statement) check() error {
 	if s.Where != nil {
 		if err := s.Where.checkCondition(holes); err != nil {
 			return err
+		}
+		if Writes(s.Action) && s.Where.mentionsMatches() {
+			return fmt.Errorf("matches trong %s", s.Action)
 		}
 	}
 	for _, key := range s.Order {
@@ -181,25 +205,78 @@ func (s *Statement) check() error {
 			}
 		}
 	}
-	if s.Action == ActionInsert {
+	if Writes(s.Action) && (len(s.Order) != 0 || s.Limit != nil || s.Page != nil || s.Bounds != nil) {
+		return fmt.Errorf("%s có thứ tự hay giới hạn", s.Action)
+	}
+	switch s.Action {
+	case ActionInsert, ActionUpsert:
+		if s.Where != nil {
+			return fmt.Errorf("%s có điều kiện", s.Action)
+		}
+	case ActionUpdate, ActionDelete:
+		if s.Where == nil {
+			return fmt.Errorf("%s không có điều kiện", s.Action)
+		}
+	}
+	switch s.Action {
+	case ActionInsert, ActionUpdate, ActionUpsert:
 		if len(s.Values) == 0 {
-			return fmt.Errorf("insert không có dữ liệu")
+			return fmt.Errorf("%s không có dữ liệu", s.Action)
 		}
-		if s.Where != nil || len(s.Order) != 0 || s.Limit != nil || s.Page != nil || s.Bounds != nil {
-			return fmt.Errorf("insert có điều kiện hay giới hạn")
+	default:
+		if len(s.Values) != 0 {
+			return fmt.Errorf("%s có dữ liệu", s.Action)
 		}
-	} else if len(s.Values) != 0 {
-		return fmt.Errorf("%s có dữ liệu", s.Action)
+	}
+	if (s.Action == ActionUpsert) != (len(s.Target) != 0) {
+		return fmt.Errorf("đích so trùng chỉ của upsert, và upsert cần một")
 	}
 	for _, field := range s.Values {
 		if field.Column == "" || field.Value == nil {
-			return fmt.Errorf("dữ liệu insert thiếu cột hay giá trị")
+			return fmt.Errorf("dữ liệu %s thiếu cột hay giá trị", s.Action)
 		}
-		if err := field.Value.checkValue(holes, true); err != nil {
-			return err
+		check := field.Value.checkValue(holes, true)
+		if s.Action != ActionInsert {
+			check = field.Value.checkData(holes)
+		}
+		if check != nil {
+			return check
 		}
 	}
 	return nil
+}
+
+// checkData checks a node in the place of a value of update or upsert data: a value, a column of the
+// table, or + or - of two of them, with null only alone.
+func (n *Node) checkData(holes int) error {
+	if n == nil {
+		return fmt.Errorf("giá trị rỗng")
+	}
+	return n.checkOperand(holes, true)
+}
+
+func (n *Node) checkOperand(holes int, null bool) error {
+	switch n.Op {
+	case OpColumn:
+		if n.Column == "" {
+			return fmt.Errorf("cột không tên")
+		}
+		return n.arity(0)
+	case OpAdd, OpSubtract:
+		if err := n.arity(2); err != nil {
+			return err
+		}
+		for _, argument := range n.Args {
+			if argument == nil {
+				return fmt.Errorf("%s thiếu vế", n.Op)
+			}
+			if err := argument.checkOperand(holes, false); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return n.checkValue(holes, null)
 }
 
 // checkCondition checks a node in the place of a condition.
@@ -389,6 +466,8 @@ func (s *Statement) Columns() []string {
 	}
 	for _, field := range s.Values {
 		columns = append(columns, field.Column)
+		walk(field.Value)
 	}
+	columns = append(columns, s.Target...)
 	return columns
 }
