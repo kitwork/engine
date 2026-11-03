@@ -19,6 +19,9 @@ const (
 	changes BLOB NOT NULL
 ) STRICT`
 	changesFormat = 1
+	// barrierFormat is format 1 with Barrier among the operations: a commit holding one is written in it, so a
+	// reader of format 1 alone refuses it rather than skipping it.
+	barrierFormat = 2
 )
 
 // Operation is what one change did to a row, or a schema statement.
@@ -29,6 +32,9 @@ const (
 	Update    Operation = 2
 	Delete    Operation = 3
 	Statement Operation = 4
+	// Barrier is a commit of Maintain whose work moved the schema: the history did not follow that work, so replay
+	// never crosses it, and a restore after it starts from the anchor written at it. Statement says what moved.
+	Barrier Operation = 5
 )
 
 // Change is the net effect of one commit on one row: the row as it was before
@@ -70,8 +76,10 @@ func chainChecksum(previous []byte, revision uint64, at int64, changes []byte) [
 
 // encodeChanges writes format 1: the format byte, a table of the names the
 // changes use (tables, columns, identities), the columns of every table whose
-// rows the commit left, then each change.
+// rows the commit left, then each change. A commit holding a Barrier is
+// written in format 2, which is format 1 with that operation.
 func encodeChanges(changes []Change) ([]byte, error) {
+	format := byte(changesFormat)
 	names := map[string]uint64{}
 	var ordered []string
 	name := func(value string) uint64 {
@@ -114,7 +122,10 @@ func encodeChanges(changes []Change) ([]byte, error) {
 		body = binary.AppendUvarint(body, name(change.Table))
 		body = binary.AppendUvarint(body, name(change.By))
 		switch change.Operation {
-		case Statement:
+		case Statement, Barrier:
+			if change.Operation == Barrier {
+				format = barrierFormat
+			}
 			body = binary.AppendUvarint(body, uint64(len(change.Statement)))
 			body = append(body, change.Statement...)
 			continue
@@ -136,7 +147,7 @@ func encodeChanges(changes []Change) ([]byte, error) {
 			}
 		}
 	}
-	encoded := []byte{changesFormat}
+	encoded := []byte{format}
 	encoded = binary.AppendUvarint(encoded, uint64(len(ordered)))
 	for _, value := range ordered {
 		encoded = binary.AppendUvarint(encoded, uint64(len(value)))
@@ -238,7 +249,8 @@ func (reader *changesReader) values() []any {
 
 func decodeChanges(data []byte) ([]Change, error) {
 	reader := &changesReader{data: data}
-	if format := reader.take(1); reader.failed || format[0] != changesFormat {
+	format := reader.take(1)
+	if reader.failed || format[0] != changesFormat && format[0] != barrierFormat {
 		return nil, fmt.Errorf("%w: unknown changes format", ErrCorruptHistory)
 	}
 	nameCount := reader.uvarint()
@@ -285,6 +297,12 @@ func decodeChanges(data []byte) ([]Change, error) {
 		}
 		change := Change{Operation: Operation(operation[0]), Table: lookup(reader.uvarint()), By: lookup(reader.uvarint())}
 		switch change.Operation {
+		case Barrier:
+			if format[0] != barrierFormat {
+				reader.failed = true
+				break
+			}
+			change.Statement = string(reader.take(reader.uvarint()))
 		case Statement:
 			change.Statement = string(reader.take(reader.uvarint()))
 		case Insert, Update, Delete:
@@ -356,7 +374,16 @@ func (database *Database) Changes(ctx context.Context, after uint64, visit func(
 	if err := database.ensureOpen(); err != nil {
 		return err
 	}
-	return readHistory(ctx, database.readers, after, 0, func(row historyRow) error {
+	return ReadChanges(ctx, database.readers, after, visit)
+}
+
+// ReadChanges visits every commit after revision of the file querier reads, in order, without a Database: what the
+// full-text indexes fold in (engine/database/fulltext), on a connection of their own. Inside a read transaction it
+// sees exactly the commits that transaction sees.
+func ReadChanges(ctx context.Context, querier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}, after uint64, visit func(Commit) error) error {
+	return readHistory(ctx, querier, after, 0, func(row historyRow) error {
 		changes, err := decodeChanges(row.changes)
 		if err != nil {
 			return fmt.Errorf("revision %d: %w", row.revision, err)

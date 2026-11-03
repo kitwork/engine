@@ -9,42 +9,35 @@ import (
 	"strings"
 	"testing"
 
+	kitdbsqlite "github.com/kitwork/engine/kitdb/sqlite"
 	"github.com/kitwork/engine/search"
 )
 
-// trackedFile is a SQLite file with a table posts the way the engine tracks one (db.sqlite_columns.go in work): the
-// two tracking tables and the three triggers, title the searchable column.
-func trackedFile(t *testing.T) (string, *sql.DB) {
+// trackedFile is a SQLite file with a table posts whose history the engine keeps: every write through its one
+// writer (engine/kitdb/sqlite), title the searchable column. write runs one statement as one commit.
+func trackedFile(t *testing.T) (string, *kitdbsqlite.Database, func(statement string)) {
 	t.Helper()
+	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kitwork.db")
-	writer, err := sql.Open("sqlite", path)
+	database, err := kitdbsqlite.Open(ctx, path, kitdbsqlite.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	writer.SetMaxOpenConns(1)
-	t.Cleanup(func() { _ = writer.Close() })
-	note := func(row, condition string) string {
-		return `INSERT OR REPLACE INTO kitwork_search_changes (table_name, row_id, revision) SELECT 'posts', ` + row +
-			`, revision FROM kitwork_search_revisions WHERE table_name = 'posts'` + condition + `; `
+	t.Cleanup(func() { _ = database.Close() })
+	if _, err := database.Migrate(ctx, "test", `CREATE TABLE posts (id INTEGER PRIMARY KEY, title TEXT NOT NULL, stock INTEGER NOT NULL DEFAULT 0)`); err != nil {
+		t.Fatal(err)
 	}
-	bump := `UPDATE kitwork_search_revisions SET revision = revision + 1 WHERE table_name = 'posts'; `
-	for _, statement := range []string{
-		`PRAGMA journal_mode=WAL`,
-		`CREATE TABLE posts (id INTEGER PRIMARY KEY, title TEXT NOT NULL, stock INTEGER NOT NULL DEFAULT 0)`,
-		`INSERT INTO posts (id, title) VALUES (1, 'Cà phê sữa đá'), (2, 'Trà đào cam sả'), (3, 'Bánh mì thịt')`,
-		`CREATE TABLE kitwork_search_revisions (table_name TEXT PRIMARY KEY, revision INTEGER NOT NULL) WITHOUT ROWID`,
-		`CREATE TABLE kitwork_search_changes (table_name TEXT NOT NULL, row_id INTEGER NOT NULL, revision INTEGER NOT NULL, PRIMARY KEY (table_name, row_id)) WITHOUT ROWID`,
-		`INSERT INTO kitwork_search_revisions VALUES ('posts', 0)`,
-		`CREATE TRIGGER posts_insert AFTER INSERT ON posts BEGIN ` + bump + note("NEW.rowid", "") + `END`,
-		`CREATE TRIGGER posts_delete AFTER DELETE ON posts BEGIN ` + bump + note("OLD.rowid", "") + `END`,
-		`CREATE TRIGGER posts_update AFTER UPDATE OF title, id ON posts BEGIN ` + bump + note("NEW.rowid", "") +
-			note("OLD.rowid", " AND OLD.rowid <> NEW.rowid") + `END`,
-	} {
-		if _, err := writer.Exec(statement); err != nil {
+	write := func(statement string) {
+		t.Helper()
+		if _, err := database.Write(ctx, "test", func(transaction *kitdbsqlite.Transaction) error {
+			_, err := transaction.Exec(statement)
+			return err
+		}); err != nil {
 			t.Fatalf("%s: %v", statement, err)
 		}
 	}
-	return path, writer
+	write(`INSERT INTO posts (id, title) VALUES (1, 'Cà phê sữa đá'), (2, 'Trà đào cam sả'), (3, 'Bánh mì thịt')`)
+	return path, database, write
 }
 
 func openPosts(t *testing.T, path string) (*Table, func()) {
@@ -53,6 +46,7 @@ func openPosts(t *testing.T, path string) (*Table, func()) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(release) // a test that stops early still lets go of the file
 	table, err := Shared().Open(path, "posts", "test.posts", []Column{{Name: "title", Boost: 1}}, false)
 	if err != nil {
 		release()
@@ -78,14 +72,16 @@ func found(t *testing.T, table *Table, text string) string {
 
 // A tracked table's index holds what the app just wrote: a row added is found at the next read, a title changed is
 // found by its new words and no longer by its old ones, a row deleted is gone; a change of another column folds
-// nothing in. The index kept across a close folds in what was written while it was closed; revisions that began
-// again build it anew.
+// nothing in. The index kept across a close folds in what was written while it was closed; a change of the schema
+// builds it anew.
 //
-// CONTROL: with catchUp returning at once, "after an insert: banh xeo = "", want 4"; with fold keeping the deleted row,
-// "after a delete: tra dao = "2", want """; with reuse refusing a tracked index, "after the restart: ready false, 0 rows
-// read again, want the index used as it is".
+// CONTROL (03/11/2026, the changes read from kitwork_history): with catchUp returning at once, "after an insert: banh
+// xeo = "", want 4"; with fold keeping the deleted row, "after a delete: tra dao = "2", want """; with an update
+// counted whatever it changed, "a change of stock wrote the index again"; with reuse refusing a tracked index, "after
+// the restart: ready false, 0 rows read again, want the index used as it is"; with a Barrier read as any commit,
+// "after the schema changed: com tam = "11" with 0 rows read, want 11 with 5 (built again)".
 func TestTrackedTableFoldsWhatIsWritten(t *testing.T) {
-	path, writer := trackedFile(t)
+	path, database, write := trackedFile(t)
 	table, release := openPosts(t, path)
 	if !table.Tracked() {
 		t.Fatal("posts is not tracked")
@@ -104,27 +100,27 @@ func TestTrackedTableFoldsWhatIsWritten(t *testing.T) {
 	}
 	for _, step := range steps {
 		if step.statement != "" {
-			if _, err := writer.Exec(step.statement); err != nil {
-				t.Fatal(err)
-			}
+			write(step.statement)
 		}
 		if got := found(t, table, step.text); got != step.want {
 			t.Fatalf("after %s: %s = %q, want %q", step.name, step.text, got, step.want)
 		}
 	}
-	held := table.revision
-	if _, err := writer.Exec(`UPDATE posts SET stock = 5`); err != nil {
-		t.Fatal(err)
-	}
-	if found(t, table, "banh"); table.revision != held {
-		t.Fatalf("a change of stock moved the index from revision %d to %d", held, table.revision)
+	table.mutex.RLock()
+	index := table.index
+	table.mutex.RUnlock()
+	write(`UPDATE posts SET stock = 5`)
+	found(t, table, "banh")
+	table.mutex.RLock()
+	same := table.index == index
+	table.mutex.RUnlock()
+	if !same {
+		t.Fatal("a change of stock wrote the index again")
 	}
 	release()
 
 	// Written while closed: the index kept on disk is used as it is, then folds the change in.
-	if _, err := writer.Exec(`INSERT INTO posts (id, title) VALUES (10, 'Phở bò tái')`); err != nil {
-		t.Fatal(err)
-	}
+	write(`INSERT INTO posts (id, title) VALUES (10, 'Phở bò tái')`)
 	table, release = openPosts(t, path)
 	defer release()
 	if !table.Ready() || table.Built() != 0 {
@@ -133,15 +129,16 @@ func TestTrackedTableFoldsWhatIsWritten(t *testing.T) {
 	if got := found(t, table, "pho bo"); got != "10" {
 		t.Fatalf("after the restart: pho bo = %q, want 10", got)
 	}
-	// The revisions began again (the tracking tables were made anew): the index is built again, not folded.
-	if _, err := writer.Exec(`UPDATE kitwork_search_revisions SET revision = 0`); err != nil {
+	// The schema changed (a column added outside the history, a Barrier): the index is built again, not folded.
+	if _, err := database.Maintain(context.Background(), "test", func(connection *sql.Conn) error {
+		_, err := connection.ExecContext(context.Background(), `ALTER TABLE posts ADD COLUMN note TEXT`)
+		return err
+	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := writer.Exec(`INSERT INTO posts (id, title) VALUES (11, 'Cơm tấm sườn')`); err != nil {
-		t.Fatal(err)
-	}
+	write(`INSERT INTO posts (id, title) VALUES (11, 'Cơm tấm sườn')`)
 	if got := found(t, table, "com tam"); got != "11" || table.Built() != 5 {
-		t.Fatalf("after the revisions began again: com tam = %q with %d rows read, want 11 with 5 (built again)", got, table.Built())
+		t.Fatalf("after the schema changed: com tam = %q with %d rows read, want 11 with 5 (built again)", got, table.Built())
 	}
 }
 
@@ -149,7 +146,7 @@ func TestTrackedTableFoldsWhatIsWritten(t *testing.T) {
 //
 // CONTROL: with release keeping the container open, "the container answers after the last release: <nil>".
 func TestReleaseClosesTheContainer(t *testing.T) {
-	path, _ := trackedFile(t)
+	path, _, _ := trackedFile(t)
 	first, releaseFirst := openPosts(t, path)
 	_, releaseSecond := openPosts(t, path)
 	if got := found(t, first, "tra dao"); got != "2" {

@@ -510,7 +510,8 @@ func TestKitDBCopyKeepsWhatBootSynced(t *testing.T) {
 	}
 }
 
-// Each SQLite file is one transaction: a copy that fails after its first table leaves no table and no row.
+// Each SQLite file is one transaction: a copy that fails after its first table leaves no table and no row; the
+// file's history the writer made when it opened the file stays.
 //
 // CONTROL: with the transaction committed after each table (COMMIT, BEGIN IMMEDIATE after its rows), the
 // failure after the first left it: "kitwork_definitions holds 1 rows after a failed copy", and "a failed copy
@@ -540,7 +541,8 @@ func TestKitDBCopyIsOneTransaction(t *testing.T) {
 			}
 		}
 	}
-	if tables := fileRows(t, path, `SELECT name FROM sqlite_master WHERE type = 'table'`); len(tables) != 0 {
+	// the file's history (kitwork_history) is the writer's, there from when it opened the file (03/11/2026)
+	if tables := fileRows(t, path, `SELECT name FROM sqlite_master WHERE type = 'table' AND name != 'kitwork_history'`); len(tables) != 0 {
 		t.Errorf("a failed copy left the tables %v", tables)
 	}
 }

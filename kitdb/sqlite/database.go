@@ -142,7 +142,7 @@ func Open(ctx context.Context, path string, options Options) (*Database, error) 
 	database.writer, err = openWriter(ctx, dataSourceName(path,
 		"_pragma=page_size("+strconv.Itoa(options.PageSize)+")",
 		"_pragma=journal_mode(WAL)", "_pragma=synchronous(FULL)", "_pragma=foreign_keys(1)",
-	), options)
+	), options, database.Anchor)
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +152,13 @@ func Open(ctx context.Context, path string, options Options) (*Database, error) 
 	}
 	database.readers.SetMaxOpenConns(options.Readers)
 	database.readers.SetMaxIdleConns(options.Readers)
-	if created {
+	anchorNeeded := created
+	if !created {
+		if anchorNeeded, err = database.unanchored(ctx); err != nil {
+			return nil, err
+		}
+	}
+	if anchorNeeded {
 		if _, err := database.Anchor(ctx); err != nil {
 			return nil, err
 		}
@@ -231,6 +237,43 @@ func (database *Database) Migrate(ctx context.Context, by string, statements ...
 		}
 	}
 	return database.writer.submit(ctx, writerRequest{ctx: ctx, by: by, schema: statements})
+}
+
+// Maintain runs work on the writer's connection, between commits and outside
+// any transaction of the writer's: what the owner of the file changes in it
+// itself, a migration that adds a column or rebuilds a table, its own tables.
+// work may open and commit transactions of its own and must end outside one.
+// The history does not follow the rows work changes. When work moves the
+// schema, or changes rows of a table that is not bookkeeping (kitwork_*,
+// _kitwork_*, sqlite_*), Maintain commits a Barrier and writes an anchor at it
+// before the writer takes another request, and returns that revision; work
+// that changed nothing else commits nothing and returns the last revision. A
+// schema work leaves with what the history cannot record (a trigger, a
+// virtual table) fails Maintain and every later write.
+func (database *Database) Maintain(ctx context.Context, by string, work func(*sql.Conn) error) (uint64, error) {
+	if err := database.ensureOpen(); err != nil {
+		return 0, err
+	}
+	if ctx == nil || work == nil {
+		return 0, fmt.Errorf("kitdb: maintain needs a context and work")
+	}
+	return database.writer.submit(ctx, writerRequest{ctx: ctx, by: by, maintain: work})
+}
+
+// unanchored reports a file that needs an anchor when it opens: it has none (a
+// file the history starts following now), or a Barrier stands after the newest
+// one (the anchor Maintain writes did not get written).
+func (database *Database) unanchored(ctx context.Context) (bool, error) {
+	anchors, err := database.anchors()
+	if err != nil || len(anchors) == 0 {
+		return err == nil, err
+	}
+	// a commit holding a Barrier is the one written in barrierFormat; one that does not decode is for VerifyHistory
+	// and Restore to report
+	var barriers int64
+	err = database.readers.QueryRowContext(ctx, `SELECT count(*) FROM kitwork_history WHERE rev > ? AND substr(changes, 1, 1) = ?`,
+		int64(anchors[len(anchors)-1].revision), []byte{barrierFormat}).Scan(&barriers)
+	return barriers > 0, err
 }
 
 // Snapshot is one read transaction. Revision is the last commit it sees: rows

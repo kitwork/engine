@@ -15,12 +15,16 @@ import (
 )
 
 type writerRequest struct {
-	ctx    context.Context
-	by     string
-	run    func(*Transaction) error
-	schema []string
-	done   chan writerOutcome
+	ctx      context.Context
+	by       string
+	run      func(*Transaction) error
+	schema   []string
+	maintain func(*sql.Conn) error
+	done     chan writerOutcome
 }
+
+// alone reports a request that commits by itself, never gathered with others.
+func (request writerRequest) alone() bool { return request.schema != nil || request.maintain != nil }
 
 type writerOutcome struct {
 	revision uint64
@@ -64,9 +68,14 @@ type writer struct {
 	revision uint64
 	at       int64
 	checksum []byte
+
+	// anchor writes an anchor of the file (Database.Anchor); refused is why the history can no longer follow the
+	// file, after a Maintain left in it what the history cannot record: every later write fails with it.
+	anchor  func(context.Context) (uint64, error)
+	refused error
 }
 
-func openWriter(ctx context.Context, name string, options Options) (*writer, error) {
+func openWriter(ctx context.Context, name string, options Options, anchor func(context.Context) (uint64, error)) (*writer, error) {
 	pool, err := sql.Open("sqlite", name)
 	if err != nil {
 		return nil, err
@@ -81,7 +90,7 @@ func openWriter(ctx context.Context, name string, options Options) (*writer, err
 	}
 	w := &writer{
 		pool: pool, conn: conn, queue: make(chan writerRequest, options.Queue),
-		finished: make(chan struct{}), maximumBatch: options.MaximumBatch,
+		finished: make(chan struct{}), maximumBatch: options.MaximumBatch, anchor: anchor,
 	}
 	fail := func(err error) (*writer, error) {
 		_ = conn.Close()
@@ -264,7 +273,14 @@ func (w *writer) run() {
 			}
 			first = request
 		}
-		if first.schema != nil {
+		switch {
+		case w.refused != nil:
+			first.done <- writerOutcome{err: w.refused}
+			continue
+		case first.maintain != nil:
+			w.commitMaintain(first)
+			continue
+		case first.schema != nil:
 			w.commitSchema(first)
 			continue
 		}
@@ -276,7 +292,7 @@ func (w *writer) run() {
 				if !open {
 					break gather
 				}
-				if request.schema != nil {
+				if request.alone() {
 					pending = &request
 					break gather
 				}
@@ -390,6 +406,84 @@ func (w *writer) commitSchema(request writerRequest) {
 		_ = w.loadShapes(context.Background())
 	}
 	request.done <- writerOutcome{revision: revision, err: err}
+}
+
+// commitMaintain runs request.maintain on the writer's connection, outside any
+// transaction of the writer's. The rows it changes are not followed one by one:
+// when its work moved the schema or changed rows of a table that is not
+// bookkeeping, one commit marks it (Barrier) and an anchor is written at that
+// commit before the writer takes the next request, so a restore after it
+// starts from that anchor and replay never crosses the change. Work that
+// changed nothing else commits nothing.
+func (w *writer) commitMaintain(request writerRequest) {
+	ctx := context.Background()
+	before, err := w.schemaVersion(ctx)
+	if err == nil {
+		err = request.ctx.Err()
+	}
+	if err != nil {
+		request.done <- writerOutcome{revision: w.revision, err: err}
+		return
+	}
+	w.events, w.broken, w.by, w.hookErr = w.events[:0], nil, request.by, nil
+	workErr := w.runMaintain(request)
+	rows := ""
+	for _, change := range w.events {
+		if !bookkeeping(change.table) {
+			rows = change.table
+			break
+		}
+	}
+	w.events, w.hookErr = w.events[:0], nil
+	after, err := w.schemaVersion(ctx)
+	if err != nil || after == before && rows == "" {
+		request.done <- writerOutcome{revision: w.revision, err: errors.Join(workErr, err)}
+		return
+	}
+	moved := fmt.Sprintf("schema_version %d", after)
+	if after == before {
+		moved = fmt.Sprintf("rows of %s", rows)
+	}
+	if err = w.loadShapes(ctx); err == nil {
+		err = w.refuseUnsupportedObjects(ctx)
+	}
+	if errors.Is(err, ErrUnsupportedSchema) {
+		w.refused = fmt.Errorf("%w; the history no longer follows the file", err)
+	}
+	if err != nil {
+		request.done <- writerOutcome{revision: w.revision, err: errors.Join(workErr, err)}
+		return
+	}
+	err = w.exec("BEGIN IMMEDIATE")
+	revision, err := w.finish([]Change{{Operation: Barrier, Statement: moved, By: request.by}}, err)
+	if err == nil {
+		_, err = w.anchor(ctx)
+	}
+	request.done <- writerOutcome{revision: revision, err: errors.Join(workErr, err)}
+}
+
+func (w *writer) runMaintain(request writerRequest) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("kitdb: maintenance panicked: %v", recovered)
+		}
+	}()
+	return request.maintain(w.conn)
+}
+
+// bookkeeping reports a table of the file's owner or of SQLite itself, whose
+// rows Maintain may change without a Barrier: kitwork_* and _kitwork_* (the
+// engine's: the declared kinds of columns, the runs of jobs), sqlite_*.
+func bookkeeping(table string) bool {
+	name := strings.ToLower(table)
+	return strings.HasPrefix(name, "kitwork_") || strings.HasPrefix(name, "_kitwork_") || strings.HasPrefix(name, "sqlite_")
+}
+
+// schemaVersion is the file's schema cookie, which every change of its schema moves.
+func (w *writer) schemaVersion(ctx context.Context) (int64, error) {
+	var version int64
+	err := w.conn.QueryRowContext(ctx, "PRAGMA schema_version").Scan(&version)
+	return version, err
 }
 
 // finish writes the history row and commits, or rolls back on err. It returns

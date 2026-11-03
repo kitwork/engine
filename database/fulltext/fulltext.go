@@ -4,12 +4,15 @@
 // by the table, a document per row by rowid, the state {revision, columns} with it. The process has one Manager and
 // one container per file, whoever reads it: an app's matches and the database port's MATCH read the same index.
 //
-// A table is tracked or not. The engine tracks a table it declares with .searchable() columns
-// (db.sqlite_columns.go in work): triggers count every insert, delete and change of a searchable column in
-// kitwork_search_revisions and name the rowid in kitwork_search_changes. A tracked table's index is brought up to
-// date before each read by folding in the rows changed since its revision, so a row the app just wrote is found. A
-// table nobody tracks (a host database application.work declares) is built again when its signature moves (schema
-// version, rows, last rowid, revision of kitwork_history), looked at every Watch.
+// A table is tracked or not. A table of the app's (one application.work does not declare) in a file whose history
+// the engine keeps is tracked (03/11/2026, KITWORK_KITDB.md mục 4–5): every write goes through the file's one writer
+// (engine/kitdb/sqlite), which records each row it changed in kitwork_history in the same transaction. A tracked
+// table's index is brought up to date before each read by folding in the rows the commits after its revision changed
+// (an update that leaves the searchable columns as they were is not one), so a row the app just wrote is found; a
+// commit that changed the schema builds the index again. Before 03/11/2026 triggers counted the changes; an index
+// folded from them is built again. A table nobody tracks (a host database application.work declares, a file without
+// history) is built again when its signature moves (schema version, rows, last rowid, revision of kitwork_history),
+// looked at every Watch.
 //
 // The first build of a table runs in the background, one table at a time; a read waits for it up to Wait, then is
 // told how far it is (BuildingError). An index whose table has not moved since it was built is used as it is.
@@ -24,12 +27,14 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	kitdbsqlite "github.com/kitwork/engine/kitdb/sqlite"
 	"github.com/kitwork/engine/search"
 	_ "modernc.org/sqlite" // the "sqlite" database/sql driver
 )
@@ -62,6 +67,9 @@ type state struct {
 	Columns   []Column   `json:"columns"`
 	Signature *Signature `json:"signature,omitempty"`
 	Tracked   bool       `json:"tracked,omitempty"`
+	// History marks a tracked index whose revision is the file's kitwork_history: one without it counted the
+	// changes by triggers (before 03/11/2026) and is built again.
+	History bool `json:"history,omitempty"`
 }
 
 // Signature tells whether an untracked table is still what its index was built from.
@@ -212,8 +220,8 @@ func (manager *Manager) Open(path, table, label string, columns []Column, declar
 	if current != nil && (current.declared && !declared || reflect.DeepEqual(current.columns, columns)) {
 		manager.mutex.Unlock()
 		if !current.tracked && !current.declared {
-			// the engine may have begun to track the table since: its index then folds changes in
-			if tracked, err := entry.tracks(context.Background(), table); err == nil && tracked {
+			// the engine may have begun to keep the file's history since: its index then folds changes in
+			if tracked, err := entry.tracks(context.Background()); err == nil && tracked {
 				return manager.replace(entry, current, table, label, columns, declared)
 			}
 		}
@@ -232,10 +240,11 @@ func (manager *Manager) replace(entry *file, current *Table, table, label string
 	if err != nil {
 		return nil, fmt.Errorf("the search index of %s: %w", label, err)
 	}
-	// a file that cannot be read yet (not there) is not tracked: its build says why
-	tracked, _ := entry.tracks(context.Background(), table)
+	// a file that cannot be read yet (not there) is not tracked: its build says why; a table application.work declares
+	// is the host's, written by whoever writes it
+	tracked, _ := entry.tracks(context.Background())
 	created := &Table{manager: manager, file: entry, name: table, label: label, columns: columns, definition: definition,
-		declared: declared, tracked: tracked}
+		declared: declared, tracked: tracked && !declared}
 	manager.mutex.Lock()
 	if entry.users == 0 {
 		manager.mutex.Unlock()
@@ -355,12 +364,13 @@ func (manager *Manager) reuse(table *Table) error {
 		return err
 	}
 	var held state
-	if err := json.Unmarshal(encoded, &held); err != nil || !reflect.DeepEqual(held.Columns, table.columns) || held.Tracked != table.tracked {
+	if err := json.Unmarshal(encoded, &held); err != nil || !reflect.DeepEqual(held.Columns, table.columns) || held.Tracked != table.tracked ||
+		held.Tracked && !held.History {
 		_ = index.Close()
 		return fmt.Errorf("the index was built from other columns")
 	}
 	if table.tracked {
-		revision, err := table.file.revision(ctx, table.name)
+		revision, err := table.file.revision(ctx)
 		if err != nil || held.Revision > revision {
 			_ = index.Close()
 			return fmt.Errorf("the table's revision went back")
@@ -464,10 +474,10 @@ func (table *Table) build(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 	defer func() { _, _ = connection.ExecContext(context.WithoutCancel(ctx), "ROLLBACK") }()
-	held := state{Columns: table.columns, Tracked: table.tracked}
+	held := state{Columns: table.columns, Tracked: table.tracked, History: table.tracked}
 	var rows int64
 	if table.tracked {
-		revision, err := revisionOf(ctx, connection, table.name)
+		revision, err := revisionOf(ctx, connection)
 		if err != nil {
 			return 0, err
 		}
@@ -560,7 +570,7 @@ func (table *Table) catchUp(ctx context.Context) error {
 		table.manager.enqueue(table)
 		return nil
 	}
-	current, err := table.file.revision(ctx, table.name)
+	current, err := table.file.revision(ctx)
 	if err != nil || current == held {
 		return err
 	}
@@ -589,37 +599,27 @@ func (table *Table) fold(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	defer func() { _, _ = connection.ExecContext(context.WithoutCancel(ctx), "ROLLBACK") }()
-	current, err := revisionOf(ctx, connection, table.name)
+	current, err := revisionOf(ctx, connection)
 	if err != nil || current == held {
 		return false, err
 	}
-	var rows, changed int64
+	if current < held {
+		return true, nil
+	}
+	var rows int64
 	if err := connection.QueryRowContext(ctx, "SELECT count(*) FROM "+quote(table.name)).Scan(&rows); err != nil {
 		return false, err
 	}
-	if err := connection.QueryRowContext(ctx, "SELECT count(*) FROM kitwork_search_changes WHERE table_name = ? AND revision > ?",
-		table.name, held).Scan(&changed); err != nil {
-		return false, err
+	ids, rebuild, err := table.changedRows(ctx, connection, held, max(rows, 64)/foldShare)
+	if err != nil || rebuild {
+		return rebuild, err
 	}
-	if current < held || changed*foldShare > max(rows, 64) {
-		return true, nil
-	}
-	list, err := connection.QueryContext(ctx, "SELECT row_id FROM kitwork_search_changes WHERE table_name = ? AND revision > ? ORDER BY row_id",
-		table.name, held)
-	if err != nil {
-		return false, err
-	}
-	var ids []int64
-	for list.Next() {
-		var id int64
-		if err := list.Scan(&id); err != nil {
-			_ = list.Close()
-			return false, err
-		}
-		ids = append(ids, id)
-	}
-	if err := list.Close(); err != nil {
-		return false, err
+	if len(ids) == 0 {
+		// the commits changed no row of the index (another table, a stock count): nothing to write
+		table.mutex.Lock()
+		table.revision = current
+		table.mutex.Unlock()
+		return false, nil
 	}
 	present := map[int64]map[string]string{}
 	for start := 0; start < len(ids); start += 500 {
@@ -650,7 +650,7 @@ func (table *Table) fold(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if err := container.Fold(ctx, table.name, table.definition, state{Revision: current, Columns: table.columns, Tracked: true},
+	if err := container.Fold(ctx, table.name, table.definition, state{Revision: current, Columns: table.columns, Tracked: true, History: true},
 		search.BuildOptions{SkipLongTerms: true}, changes); err != nil {
 		return false, err
 	}
@@ -666,6 +666,58 @@ func (table *Table) fold(ctx context.Context) (bool, error) {
 		return false, table.manager.compact(ctx, table.file)
 	}
 	return false, nil
+}
+
+// errEnough stops reading the history once the index is to be built again.
+var errEnough = errors.New("enough")
+
+// changedRows reads, inside the connection's transaction, the commits after revision and gives the rowids of the
+// table they changed, in order, an update counted only when it changed a searchable column; rebuild when a commit
+// changed the schema (a Barrier, a statement of Migrate) or more than most rows changed.
+func (table *Table) changedRows(ctx context.Context, connection *sql.Conn, revision uint64, most int64) ([]int64, bool, error) {
+	seen := map[int64]bool{}
+	var ids []int64
+	rebuild := false
+	err := kitdbsqlite.ReadChanges(ctx, connection, revision, func(commit kitdbsqlite.Commit) error {
+		for _, change := range commit.Changes {
+			switch change.Operation {
+			case kitdbsqlite.Barrier, kitdbsqlite.Statement:
+				rebuild = true
+				return errEnough
+			}
+			if !strings.EqualFold(change.Table, table.name) || seen[change.RowID] ||
+				change.Operation == kitdbsqlite.Update && !table.textChanged(change) {
+				continue
+			}
+			seen[change.RowID] = true
+			ids = append(ids, change.RowID)
+			if int64(len(ids)) > most {
+				rebuild = true
+				return errEnough
+			}
+		}
+		return nil
+	})
+	if errors.Is(err, errEnough) {
+		err = nil
+	}
+	sort.Slice(ids, func(left, right int) bool { return ids[left] < ids[right] })
+	return ids, rebuild, err
+}
+
+// textChanged reports an update of a row that changed one of the index's columns: its value before and after differ.
+func (table *Table) textChanged(change kitdbsqlite.Change) bool {
+	if len(change.Before) != len(change.After) || len(change.Columns) != len(change.After) {
+		return true
+	}
+	for _, column := range table.columns {
+		for position, name := range change.Columns {
+			if strings.EqualFold(name, column.Name) && Text(change.Before[position]) != Text(change.After[position]) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // compact writes the container's live sections into a new file and moves every index of the file onto it.
@@ -810,11 +862,11 @@ func (entry *file) changed(ctx context.Context) (bool, error) {
 	return changed, err
 }
 
-// tracks reports a table the engine tracks: it has a row of kitwork_search_revisions.
-func (entry *file) tracks(ctx context.Context, table string) (bool, error) {
+// tracks reports a file whose history the engine keeps: it has kitwork_history.
+func (entry *file) tracks(ctx context.Context) (bool, error) {
 	tracked := false
 	err := entry.connection(ctx, func(connection *sql.Conn) error {
-		_, err := revisionOf(ctx, connection, table)
+		_, err := revisionOf(ctx, connection)
 		switch {
 		case err == nil:
 			tracked = true
@@ -827,32 +879,30 @@ func (entry *file) tracks(ctx context.Context, table string) (bool, error) {
 	return tracked, err
 }
 
-// revision is a tracked table's revision now.
-func (entry *file) revision(ctx context.Context, table string) (uint64, error) {
+// revision is the file's last committed revision now.
+func (entry *file) revision(ctx context.Context) (uint64, error) {
 	var revision uint64
 	err := entry.connection(ctx, func(connection *sql.Conn) error {
-		found, err := revisionOf(ctx, connection, table)
+		found, err := revisionOf(ctx, connection)
 		revision = found
 		return err
 	})
 	return revision, err
 }
 
-var errUntracked = errors.New("the table is not tracked")
+var errUntracked = errors.New("the file keeps no history")
 
-func revisionOf(ctx context.Context, connection *sql.Conn, table string) (uint64, error) {
+// revisionOf is the last revision of the file's kitwork_history, inside the connection's transaction when it has one.
+func revisionOf(ctx context.Context, connection *sql.Conn) (uint64, error) {
 	var exists int
-	if err := connection.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = 'kitwork_search_revisions'").Scan(&exists); err != nil {
+	if err := connection.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = 'kitwork_history'").Scan(&exists); err != nil {
 		return 0, err
 	}
 	if exists == 0 {
 		return 0, errUntracked
 	}
 	var revision int64
-	err := connection.QueryRowContext(ctx, "SELECT revision FROM kitwork_search_revisions WHERE table_name = ?", table).Scan(&revision)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, errUntracked
-	}
+	err := connection.QueryRowContext(ctx, "SELECT coalesce(max(rev), 0) FROM kitwork_history").Scan(&revision)
 	return uint64(max(revision, 0)), err
 }
 

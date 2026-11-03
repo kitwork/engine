@@ -213,6 +213,9 @@ func (replay *replayer) apply(ctx context.Context, changes []Change) error {
 				return err
 			}
 			clear(replay.columns)
+		case Barrier:
+			// the anchor Maintain writes at a Barrier starts every restore after it
+			return fmt.Errorf("%w: the file changed here outside the history (%s) and no anchor was written at it", ErrNoAnchor, change.Statement)
 		case Delete:
 			if _, err := replay.tx.ExecContext(ctx, `DELETE FROM `+quoteIdentifier(change.Table)+` WHERE _rowid_ = ?`, change.RowID); err != nil {
 				return err

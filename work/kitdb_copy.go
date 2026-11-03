@@ -2,6 +2,7 @@ package work
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/binary"
@@ -1149,8 +1150,7 @@ func (t *Tenant) writeKitDBCopy(target *kitDBCopyTarget, dryRun bool) (KitDBCopy
 	}
 
 	wrote := map[string][]kitDBCopyRow{}
-	database := queuestore.Immediate{Pool: pool, Gate: queuestore.FileGate(target.path)}
-	err = database.Write(func(db queuestore.SQL) error {
+	err = kitDBCopyWrite(target.path, func(db queuestore.SQL) error {
 		inside, err := readKitDBCopyHeld(db, target)
 		if err != nil {
 			return err
@@ -1234,6 +1234,35 @@ func (t *Tenant) writeKitDBCopy(target *kitDBCopyTarget, dryRun bool) (KitDBCopy
 		return file, fmt.Errorf("%s đã chép sang %s, nhưng đọc lại sau khi ghi không khớp: %w", target.source, target.relative, err)
 	}
 	return file, nil
+}
+
+// kitDBCopyWrite runs write in one transaction on the writer of the file at path (database_history.go), holding the
+// file's gate as every write of the runs does: what the copy writes is a Barrier of the file's history with an anchor
+// at it (Maintain), so a restore after the copy starts from what it wrote and never replays across it.
+func kitDBCopyWrite(path string, write func(db queuestore.SQL) error) error {
+	writer, release, err := acquireHistory(path)
+	if err != nil {
+		return err
+	}
+	defer release()
+	ctx := context.Background()
+	_, err = writer.Maintain(ctx, "kitwork migrate kitdb", func(conn *sql.Conn) error {
+		gate := queuestore.FileGate(path)
+		gate.Lock()
+		defer gate.Unlock()
+		if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+			return err
+		}
+		err := write(connRunner{ctx: ctx, conn: conn})
+		if err == nil {
+			_, err = conn.ExecContext(ctx, "COMMIT")
+		}
+		if err != nil {
+			_, _ = conn.ExecContext(context.WithoutCancel(ctx), "ROLLBACK")
+		}
+		return err
+	})
+	return err
 }
 
 // createKitDBCopyTable makes a table .shared/schema/ declares in the copy's transaction, as migrate() makes a

@@ -1,6 +1,7 @@
 package work
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/json"
@@ -1558,6 +1559,9 @@ func (t *SchemaTable) Create(args ...value.Value) value.Value {
 	if message := sqliteWriteRow(t.table, t.columns, row); message != "" {
 		return value.InvalidFailure(value.InvalidArgumentCode, message)
 	}
+	if t.keepsHistory() {
+		return sqliteReadResult(t.columns, coerceResult(t.columns, t.insertKept(row)))
+	}
 	return sqliteReadResult(t.columns, coerceResult(t.columns, t.source().Table(t.table).Create(value.New(row))))
 }
 
@@ -1714,30 +1718,66 @@ func (t *SchemaTable) ensureTable() error {
 	if tables == nil {
 		tables = map[string]map[string]*ColumnSpec{t.table: t.columns}
 	}
+	var pending []string
 	for _, name := range sortedTableNames(tables) {
-		cols := tables[name]
-		key := t.engine + ":" + t.sqliteFile() + "::" + name + "::" + schemaHash(cols)
-		if _, done := ensuredTables.Load(key); done {
-			continue
+		if _, done := ensuredTables.Load(t.ensuredKey(name, tables[name])); !done {
+			pending = append(pending, name)
 		}
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+	if t.keepsHistory() {
+		// a file whose history the engine keeps is migrated on its writer's connection: a change of the schema
+		// commits a Barrier and an anchor, so a restore never replays across it (database_history.go)
+		database, err := t.tenant.historyDatabase(t.sqliteFile())
+		if err != nil {
+			return err
+		}
+		ctx := context.Background()
+		_, err = database.Maintain(ctx, "engine", func(conn *sql.Conn) error {
+			return t.migrateTables(connRunner{ctx: ctx, conn: conn}, tables, pending)
+		})
+		return err
+	}
+	db := t.source().db()
+	if db == nil {
+		return fmt.Errorf("connection unavailable")
+	}
+	return t.migrateTables(db, tables, pending)
+}
+
+// keepsHistory reports a table of a file whose history the engine keeps: a file it declares tables on, the app's
+// .database/ or the host's of connection("tên") (database_history.go).
+func (t *SchemaTable) keepsHistory() bool { return t.engine != "kitdb" && t.sqlitePath != "" }
+
+// ensuredKey is what ensuredTables remembers a table of the file by: its schema hash with it.
+func (t *SchemaTable) ensuredKey(name string, cols map[string]*ColumnSpec) string {
+	return t.engine + ":" + t.sqliteFile() + "::" + name + "::" + schemaHash(cols)
+}
+
+// migrateTables brings each pending table of the file to its declaration on db.
+func (t *SchemaTable) migrateTables(db schemaRunner, tables map[string]map[string]*ColumnSpec, pending []string) error {
+	for _, name := range pending {
+		cols := tables[name]
 		// The host's database of connection("tên") applies no change that loses data: the statement fails
 		// naming it, and nothing applies (the app's KitDB refuses the same way).
 		if t.sqlitePath != "" {
-			if err := refuseDestructiveMigration(t.source().db(), t.dbName, name, cols); err != nil {
+			if err := refuseDestructiveMigration(db, t.dbName, name, cols); err != nil {
 				return err
 			}
 		}
 		// Do NOT cache on failure: a migration that could not apply (e.g. the ALTER did not take because
 		// another process held the database) must be RETRIED on the next request, not silently marked done.
-		if err := migrate(t.source().db(), name, cols, t.allowDrop); err != nil {
+		if err := migrate(db, name, cols, t.allowDrop); err != nil {
 			fmt.Printf("[db.migrate] ERROR table %q: %v — not applied; will retry next request\n", name, err)
 			return err
 		}
 		// the declared kinds, which the PostgreSQL wire port reads (db.sqlite_columns.go)
-		if err := recordColumnKinds(t.source().db(), name, cols); err != nil {
+		if err := recordColumnKinds(db, name, cols); err != nil {
 			return fmt.Errorf("kitwork_columns của bảng %s: %w", name, err)
 		}
-		ensuredTables.Store(key, true)
+		ensuredTables.Store(t.ensuredKey(name, cols), true)
 	}
 	return nil
 }
@@ -1950,7 +1990,7 @@ func indexSQL(table string, idx indexDef) string {
 	return fmt.Sprintf("CREATE%s INDEX IF NOT EXISTS %q ON %q (%s)%s", modifier, idx.name, table, strings.Join(cols, ", "), where)
 }
 
-func liveIndexColumns(db *sql.DB, name string) ([]string, error) {
+func liveIndexColumns(db schemaRunner, name string) ([]string, error) {
 	rows, err := db.Query(fmt.Sprintf("PRAGMA index_info(%q)", name))
 	if err != nil {
 		return nil, err
@@ -1969,7 +2009,7 @@ func liveIndexColumns(db *sql.DB, name string) ([]string, error) {
 }
 
 // liveIndexSQL returns the CREATE INDEX text SQLite stored for an index (empty if it does not exist).
-func liveIndexSQL(db *sql.DB, name string) (string, error) {
+func liveIndexSQL(db schemaRunner, name string) (string, error) {
 	var s sql.NullString
 	err := db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='index' AND name=?`, name).Scan(&s)
 	if err == sql.ErrNoRows {
@@ -1991,7 +2031,7 @@ func normIndexSQL(s string) string {
 // missing, and DROP+CREATE one whose definition (columns, order, UNIQUE, or partial WHERE) changed.
 // Indexes present on the table but not in the schema are LEFT ALONE (dropping an unknown/manual index
 // is not the schema's call — and an index holds no data, so leaving a stale one costs nothing but disk).
-func syncIndexes(db *sql.DB, table string, want []indexDef) error {
+func syncIndexes(db schemaRunner, table string, want []indexDef) error {
 	for _, idx := range want {
 		wantSQL := indexSQL(table, idx)
 		liveSQL, err := liveIndexSQL(db, idx.name)
@@ -2376,8 +2416,8 @@ func validateSchema(columns map[string]*ColumnSpec) error {
 // still shows the old columns, which surfaces as "table X has no column Y" on the next insert. Forcing
 // the DDL down into the main file makes it durable and visible to every reader. Best-effort: on a WAL-
 // less db (":memory:") the PRAGMA is a harmless no-op.
-func checkpointWAL(db *sql.DB) {
-	if db == nil {
+func checkpointWAL(db schemaRunner) {
+	if noRunner(db) {
 		return
 	}
 	_, _ = db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
@@ -2400,8 +2440,8 @@ func (e *destructiveMigrationError) Error() string {
 // refuseDestructiveMigration checks a table of a host's database of connection("tên") against the live file
 // before migrate() runs (KITWORK_DATABASE.md mục 6: what loses data never applies by itself). An addition
 // passes, to migrate as on the app's own database; a column dropped or retyped is the error.
-func refuseDestructiveMigration(db *sql.DB, name, table string, columns map[string]*ColumnSpec) error {
-	if db == nil {
+func refuseDestructiveMigration(db schemaRunner, name, table string, columns map[string]*ColumnSpec) error {
+	if noRunner(db) {
 		return fmt.Errorf("connection unavailable")
 	}
 	current, err := tableColumns(db, table)
@@ -2426,8 +2466,8 @@ func refuseDestructiveMigration(db *sql.DB, name, table string, columns map[stri
 	return &destructiveMigrationError{connection: strings.TrimPrefix(name, catalogDatabasePrefix), table: table, changes: changes}
 }
 
-func migrate(db *sql.DB, table string, columns map[string]*ColumnSpec, allowDrop bool) (err error) {
-	if db == nil {
+func migrate(db schemaRunner, table string, columns map[string]*ColumnSpec, allowDrop bool) (err error) {
+	if noRunner(db) {
 		return fmt.Errorf("connection unavailable")
 	}
 	if err := validateSchema(columns); err != nil {
@@ -2567,7 +2607,7 @@ func migrate(db *sql.DB, table string, columns map[string]*ColumnSpec, allowDrop
 // the data across (CASTing changed types), DROP the old, RENAME the new — all inside a transaction, so
 // a failure rolls back to the untouched original. With allowDrop=false, extra columns (in the DB, not
 // the schema) are PRESERVED in the new table; with allowDrop=true they are dropped.
-func rebuild(db *sql.DB, table string, columns map[string]*ColumnSpec, current map[string]string,
+func rebuild(db schemaRunner, table string, columns map[string]*ColumnSpec, current map[string]string,
 	allowDrop bool, extras, typeChanged []string) error {
 
 	tmp := table + "__kwrebuild"
@@ -2650,7 +2690,7 @@ func sameType(a, b string) bool { return strings.EqualFold(strings.TrimSpace(a),
 
 // tableColumns introspects the live table → column name to declared type (uppercased). PRAGMA
 // table_info works on both engines (SQLite file format).
-func tableColumns(db *sql.DB, table string) (map[string]string, error) {
+func tableColumns(db schemaRunner, table string) (map[string]string, error) {
 	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%q)", table))
 	if err != nil {
 		return nil, err
@@ -2674,7 +2714,7 @@ func tableColumns(db *sql.DB, table string) (map[string]string, error) {
 // the live table — SQLite lets a non-INTEGER primary key hold NULLs unless it was declared NOT NULL.
 // Such a table is rebuilt so the key becomes NOT NULL; the rebuild is safe because primary-key values
 // are never NULL, so the copy cannot violate the new constraint.
-func liveNullablePK(db *sql.DB, table string, columns map[string]*ColumnSpec) (bool, error) {
+func liveNullablePK(db schemaRunner, table string, columns map[string]*ColumnSpec) (bool, error) {
 	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%q)", table))
 	if err != nil {
 		return false, err
@@ -2696,7 +2736,7 @@ func liveNullablePK(db *sql.DB, table string, columns map[string]*ColumnSpec) (b
 
 // tableColumnsOrdered returns the LIVE column names in physical (cid) order — used to detect when the
 // table's layout no longer matches the schema's declared order.
-func tableColumnsOrdered(db *sql.DB, table string) ([]string, error) {
+func tableColumnsOrdered(db schemaRunner, table string) ([]string, error) {
 	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%q)", table))
 	if err != nil {
 		return nil, err
@@ -2770,12 +2810,12 @@ func sqlLiteral(v value.Value) string {
 	}
 }
 
-func ensureHistory(db *sql.DB) {
+func ensureHistory(db schemaRunner) {
 	db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q (
 		id TEXT PRIMARY KEY, table_name TEXT, action TEXT, statement TEXT, applied_at TEXT)`, migrationsTable))
 }
 
-func recordMigration(db *sql.DB, table, action, statement string) {
+func recordMigration(db schemaRunner, table, action, statement string) {
 	db.Exec(
 		fmt.Sprintf("INSERT INTO %q (id, table_name, action, statement, applied_at) VALUES (?, ?, ?, ?, ?)", migrationsTable),
 		id.Entity(), table, action, statement, time.Now().UTC().Format(time.RFC3339),
