@@ -1,21 +1,17 @@
 package work
 
 import (
-	"database/sql"
-	"fmt"
 	"path/filepath"
 	"sync"
 
-	kitdbengine "github.com/kitwork/engine/kitdb"
-	"github.com/kitwork/engine/kitdb/relational"
 	queuestore "github.com/kitwork/engine/utilities/queue"
 )
 
 // The runs of an app's background work live in its own database (KITWORK_QUEUE.md mục 2: "Các lần chạy lưu
 // trong kitwork_runs của database của app"): the table kitwork_runs of the SQLite file
 // .database/application/kitwork.db, the file connection().tables({ … }) of .shared/schema/ declares the app's
-// tables in (29/10/2026; before, the KitDB file application.kitdb beside it, which appRunsLeftBehind still
-// reads for the runs it holds). Never a connection of the host's own (app.postgresql({ alias: "system" })): a
+// tables in (29/10/2026; before, the KitDB file application.kitdb beside it, which boot no longer opens:
+// appKitDBNotCopied). Never a connection of the host's own (app.postgresql({ alias: "system" })): a
 // host's system database is often a server other apps and other machines share, and an app's runs are the
 // app's data. The config.work of a folder may choose a database of the host's catalogue the app declares
 // (queue.database(db), schedule.database(db): runs_database.go); that is the app's choice, made in its own files.
@@ -23,78 +19,6 @@ import (
 // Either way the file is reached as catalogRuns reaches a file of the catalogue: through the app's pool of it,
 // the one its statements use, and a write holds the file's gate (queuestore.FileGate): one writer at a time,
 // which is what makes a claim, a settle, a cancel and a replay one step each (utilities/queue).
-
-const runsResourceName = "kitwork:runs"
-
-// runsDatabase is the SQL face of the app's old KitDB file, application.kitdb, where the runs lived until
-// 29/10/2026, kept by the app runtime while the file stays open: boot reads it to say what it still holds
-// (appRunsLeftBehind), and nothing writes it any more.
-type runsDatabase struct {
-	mu     sync.Mutex
-	kernel *kitdbengine.DB
-	engine *relational.Engine
-	db     *sql.DB
-	closed bool
-}
-
-func (r *runsDatabase) Close() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.closed = true
-	r.detachLocked()
-}
-
-func (r *runsDatabase) detachLocked() {
-	if r.db != nil {
-		_ = r.db.Close()
-	}
-	if r.engine != nil {
-		_ = r.engine.Close()
-	}
-	r.kernel, r.engine, r.db = nil, nil, nil
-}
-
-// sqlFor gives the SQL face of kernel, attaching it when the file was opened again since (the manager closes
-// a file nobody uses; the next lease opens a new kernel).
-func (r *runsDatabase) sqlFor(kernel *kitdbengine.DB) (*sql.DB, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.closed {
-		return nil, fmt.Errorf("kitwork_runs: app đã đóng")
-	}
-	if r.kernel != kernel {
-		r.detachLocked()
-		engine, err := relational.Attach(kernel, relational.Options{})
-		if err != nil {
-			return nil, err
-		}
-		db, err := relational.OpenNativeSQL(engine)
-		if err != nil {
-			_ = engine.Close()
-			return nil, err
-		}
-		r.kernel, r.engine, r.db = kernel, engine, db
-	}
-	return r.db, nil
-}
-
-func (t *Tenant) runsResource() (*runsDatabase, error) {
-	if t == nil || t.appRuntime == nil {
-		return nil, fmt.Errorf("kitwork_runs: app runtime is unavailable")
-	}
-	if current, ok := t.appRuntime.Resource(runsResourceName).(*runsDatabase); ok && current != nil {
-		return current, nil
-	}
-	resource, _, err := t.appRuntime.InstallResource(runsResourceName, &runsDatabase{})
-	if err != nil {
-		return nil, err
-	}
-	current, ok := resource.(*runsDatabase)
-	if !ok {
-		return nil, fmt.Errorf("kitwork_runs: app resource has unexpected type %T", resource)
-	}
-	return current, nil
-}
 
 // appID is the key of t's app: its identity (the identity column of entity). Every domain of an app shares
 // one .shared/queue/, one .schedule/ and one database, so their runs are the identity's, not a domain's. A

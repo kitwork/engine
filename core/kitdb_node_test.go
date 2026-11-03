@@ -3,111 +3,14 @@ package core
 import (
 	"context"
 	"errors"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
 	kitdbengine "github.com/kitwork/engine/kitdb"
 	kitdbnode "github.com/kitwork/engine/kitdb/node"
 )
-
-// Two apps, each with a job and the KitDB file its runs were in until 29/10/2026,
-// app/.database/application/application.kitdb: boot of each app opens that file, through the host's one
-// bounded node manager, to say the runs left in it (work/runs_database.go, appRunsLeftBehind). With room for one
-// open database, the second app's boot evicts the first app's file. (Since 29–30/10/2026 the app's database and
-// its datastore are SQLite files; the old KitDB file at boot is what a tenant still opens through the manager.)
-func TestEngineOwnsOneBoundedKitDBNodeManager(t *testing.T) {
-	root := t.TempDir()
-	app := func(identity, domain string) {
-		files := map[string]string{
-			filepath.Join(identity, domain, "router.work"): `import * as router from "kitwork/router";
-router.get((context) => context.text("` + identity + `"));
-`,
-			filepath.Join(identity, ".shared", "queue", "ping.work"): `import * as queue from "kitwork/queue";
-export const ping = queue.job((context) => {});
-`,
-		}
-		for name, source := range files {
-			if err := os.MkdirAll(filepath.Dir(filepath.Join(root, name)), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(filepath.Join(root, name), []byte(source), 0o644); err != nil {
-				t.Fatal(err)
-			}
-		}
-		legacy := filepath.Join(root, identity, ".database", "application", "application.kitdb")
-		if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		database, err := kitdbengine.Open(legacy)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := database.Close(); err != nil {
-			t.Fatal(err)
-		}
-	}
-	app("alpha", "localhost")
-	app("beta", "second.localhost")
-
-	engine := New(root, 0, false, "")
-	if err := engine.SetKitDBNodeLimits(kitdbnode.Limits{
-		MaxOpenDatabases: 1, MaxPageCacheBytes: 64 << 10,
-		DefaultPageCacheBytes: 64 << 10, MaxConcurrentOpens: 1,
-	}); err != nil {
-		engine.Close()
-		t.Fatal(err)
-	}
-
-	if started := engine.StartAppSchedulers(); started != 2 {
-		engine.Close()
-		t.Fatalf("apps started = %d, want 2", started)
-	}
-	stats := engine.KitDBNodeStats()
-	if stats.ManagedDatabases != 1 || stats.IdleDatabases != 1 || stats.ActiveLeases != 0 ||
-		stats.ReservedPageCacheBytes != 64<<10 || stats.Evictions != 1 || stats.Opens != 2 {
-		engine.Close()
-		t.Fatalf("node stats after both boots = %#v", stats)
-	}
-	requestKitDBNodeRoute(t, engine, "localhost", "alpha")
-
-	// the apps boot in the order they are found (alpha, then beta): beta's file is the one kept open
-	firstPath := filepath.Join(root, "alpha", ".database", "application", "application.kitdb")
-	first, err := kitdbengine.Open(firstPath)
-	if err != nil {
-		engine.Close()
-		t.Fatalf("LRU did not release the first database: %v", err)
-	}
-	if err := first.Close(); err != nil {
-		engine.Close()
-		t.Fatal(err)
-	}
-	if err := engine.SetKitDBNodeLimits(kitdbnode.Limits{}); err == nil || !strings.Contains(err.Error(), "before loading") {
-		engine.Close()
-		t.Fatalf("late node limit change error = %v", err)
-	}
-
-	secondPath := filepath.Join(root, "beta", ".database", "application", "application.kitdb")
-	if _, err := kitdbengine.Open(secondPath); !errors.Is(err, kitdbengine.ErrWriterLocked) {
-		engine.Close()
-		t.Fatalf("active host manager did not retain second writer lock: %v", err)
-	}
-	engine.Close()
-	if stats := engine.KitDBNodeStats(); !stats.Closed || stats.ManagedDatabases != 0 {
-		t.Fatalf("closed engine node stats = %#v", stats)
-	}
-	second, err := kitdbengine.Open(secondPath)
-	if err != nil {
-		t.Fatalf("engine close left KitDB writer ownership behind: %v", err)
-	}
-	if err := second.Close(); err != nil {
-		t.Fatal(err)
-	}
-}
 
 func TestEngineSchedulesHostTrustedVerifiedKitDBBackup(t *testing.T) {
 	root := t.TempDir()
@@ -388,14 +291,5 @@ func TestEngineOwnsHostTrustedKitDBProductionSupervisor(t *testing.T) {
 	}
 	if err := reopened.Close(); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func requestKitDBNodeRoute(t *testing.T, engine *Engine, host, body string) {
-	t.Helper()
-	recorder := httptest.NewRecorder()
-	engine.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "http://"+host+"/", nil))
-	if recorder.Code != http.StatusOK || strings.TrimSpace(recorder.Body.String()) != body {
-		t.Fatalf("GET %s = %d %q, want 200 %q", host, recorder.Code, recorder.Body.String(), body)
 	}
 }

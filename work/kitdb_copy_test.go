@@ -701,14 +701,14 @@ export const billing = connection().tables({ invoices, drafts });
 	}
 }
 
-// Boot of an app whose application.kitdb was not copied says the runs left in it, and that `kitwork migrate
-// kitdb` copies them; once kitwork.db holds the mark of the copy, boot neither opens the KitDB file (here no
-// longer a KitDB file at all) nor says anything of it, and the worker claims and completes the pending run
-// the copy brought. kitwork.db was made by the first boot, its definitions synced: the copy keeps them.
+// Boot of an app whose application.kitdb was not copied says the file is no longer read and that `kitwork
+// migrate kitdb` copies the runs left in it, without opening it (KROW goes); once kitwork.db holds the mark of
+// the copy, boot neither opens the KitDB file (here no longer a KitDB file at all) nor says anything of it, and
+// the worker claims and completes the pending run the copy brought. kitwork.db was made by the first boot, its
+// definitions synced: the copy keeps them.
 //
-// CONTROL: with appRunsLeftBehind not looking for the mark, the boot after the copy said "[Queue]
-// .database/application/application.kitdb: không đọc được các lần chạy còn ở đó: kitdb node: open …: incomplete
-// main file".
+// CONTROL (03/11/2026): with appKitDBNotCopied not looking for the mark, "the boot after the copy said: [Queue]
+// .database/application/application.kitdb (KitDB cũ) không còn đọc: …".
 func TestKitDBCopyBootStopsReadingTheKitDBFile(t *testing.T) {
 	watch := watchQueue(t)
 	root := kitDBCopyRoot(t, map[string]string{
@@ -717,7 +717,7 @@ func TestKitDBCopyBootStopsReadingTheKitDBFile(t *testing.T) {
 	})
 	kitDBRunsFixture(t, root)
 	first := bootQueueApp(t, root)
-	said := "[Queue] .database/application/application.kitdb (KitDB cũ) còn 1 lần chạy chưa xong của job (pending, running, cancelling): chúng ở lại đó và không chạy, vì các lần chạy nay nằm ở .database/application/kitwork.db; đổi database không dời lần chạy: `kitwork migrate kitdb` chép chúng sang .database/application/kitwork.db"
+	said := "[Queue] .database/application/application.kitdb (KitDB cũ) không còn đọc: các lần chạy của job nay nằm ở .database/application/kitwork.db; lần chạy chưa xong trong file cũ ở lại đó và không chạy cho tới khi `kitwork migrate kitdb` chép chúng sang .database/application/kitwork.db"
 	if !strings.Contains(first.output, said) {
 		t.Fatalf("the boot before the copy did not say %q:\n%s", said, first.output)
 	}

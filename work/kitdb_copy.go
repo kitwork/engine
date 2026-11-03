@@ -89,7 +89,7 @@ func kitDBCopyMarked(t *Tenant, name, target, source string) bool {
 const kitDBApplicationSource = ".database/application/" + kitDBApplicationFile
 
 // applicationCopied reports whether the app's kitwork.db holds the mark of a copy from application.kitdb: what
-// that file held, the runs among it, is in kitwork.db, and boot no longer opens it (appRunsLeftBehind).
+// that file held, the runs among it, is in kitwork.db, and boot no longer opens it (appKitDBNotCopied).
 func applicationCopied(t *Tenant) bool {
 	return kitDBCopyMarked(t, appDatabaseName(""), appDatabasePath(t, ""), kitDBApplicationSource)
 }

@@ -394,9 +394,9 @@ func TestRunsDatabaseMovesWithALoadOfTheFolder(t *testing.T) {
 // not counted. An app whose own database was never made has none, and none is made for the count.
 //
 // CONTROL (24/10/2026): with sayLeftBehind returning at once, boot said nothing of the three runs; with
-// appRunsLeftBehind reading the app's file without looking whether it exists, the fresh app's
-// .database/application/ was made; with appRunsLeftBehind counting every status (WHERE kind = $1), boot
-// said "còn 5 lần chạy chưa xong của job" and "còn 3 … của lịch", the ended runs counted.
+// appSQLiteRunsLeftBehind (then appRunsLeftBehind) reading the app's file without looking whether it exists, the
+// fresh app's .database/application/ was made; with it counting every status (WHERE kind = $1), boot said "còn 5
+// lần chạy chưa xong của job" and "còn 3 … của lịch", the ended runs counted.
 func TestRunsLeftInTheAppsDatabaseAreSaid(t *testing.T) {
 	queueWatch, scheduleWatch := watchQueue(t), watchSchedule(t)
 	// the schedules' clock stands mid-hour: beat (every hour) never falls due while the test runs, so the

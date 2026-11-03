@@ -248,12 +248,12 @@ func placeName(place *runsPlace) string {
 	return "database " + place.name
 }
 
-// sayLeftBehind says how many runs of kind that had not ended stay where no worker reads them: the app's own
-// database (.database/application/kitwork.db) when queue.database or schedule.database put the runs in a
-// database of the catalogue, and the KitDB file the app's database was before 29/10/2026 (application.kitdb),
-// whatever the place, until `kitwork migrate kitdb` copies that file (kitdb_copy.go): once kitwork.db holds the
-// mark of the copy, the KitDB file is not opened and nothing is said of it. Neither file is made when it does
-// not exist.
+// sayLeftBehind says where runs of kind that had not ended stay with no worker reading them: how many the app's
+// own database (.database/application/kitwork.db) holds when queue.database or schedule.database put the runs in
+// a database of the catalogue, and, whatever the place, that the KitDB file the app's database was before
+// 29/10/2026 (application.kitdb) is no longer read until `kitwork migrate kitdb` copies it (kitdb_copy.go). Boot
+// does not open that file to count its runs (KROW goes, KITWORK_KITDB.md câu 13.4); once kitwork.db holds the
+// mark of the copy nothing is said of it. Neither file is made when it does not exist.
 func (t *Tenant) sayLeftBehind(kind string, place *runsPlace, label, call string) {
 	noun := "job"
 	if kind == scheduleKind {
@@ -269,13 +269,13 @@ func (t *Tenant) sayLeftBehind(kind string, place *runsPlace, label, call string
 				label, placeName(nil), count, noun, call, place.name)
 		}
 	}
-	count, err := t.appRunsLeftBehind(kind)
+	legacy, err := t.appKitDBNotCopied()
 	switch {
 	case err != nil:
-		fmt.Printf("%s .database/application/application.kitdb: không đọc được các lần chạy còn ở đó: %v\n", label, err)
-	case count > 0:
-		fmt.Printf("%s .database/application/application.kitdb (KitDB cũ) còn %d lần chạy chưa xong của %s (pending, running, cancelling): chúng ở lại đó và không chạy, vì các lần chạy nay nằm ở %s; đổi database không dời lần chạy: `kitwork migrate kitdb` chép chúng sang .database/application/kitwork.db\n",
-			label, count, noun, placeName(place))
+		fmt.Printf("%s .database/application/application.kitdb: %v\n", label, err)
+	case legacy:
+		fmt.Printf("%s .database/application/application.kitdb (KitDB cũ) không còn đọc: các lần chạy của %s nay nằm ở %s; lần chạy chưa xong trong file cũ ở lại đó và không chạy cho tới khi `kitwork migrate kitdb` chép chúng sang .database/application/kitwork.db\n",
+			label, noun, placeName(place))
 	}
 }
 
@@ -308,48 +308,15 @@ func (t *Tenant) appSQLiteRunsLeftBehind(kind string) (int, error) {
 	return count, err
 }
 
-// appRunsLeftBehind counts the runs of kind the app's own database holds that have not ended (pending,
-// running, cancelling), reading it without writing: a file that does not exist counts none and is not made,
-// and one without kitwork_runs counts none and is not given the table. A file `kitwork migrate kitdb` copied
-// counts none and is not opened: what it held is in kitwork.db (applicationCopied).
-func (t *Tenant) appRunsLeftBehind(kind string) (int, error) {
+// appKitDBNotCopied reports an application.kitdb, the app's database before 29/10/2026, that `kitwork migrate
+// kitdb` has not copied (applicationCopied): a file that does not exist is none, and it is never opened.
+func (t *Tenant) appKitDBNotCopied() (bool, error) {
 	path, _ := kitDBPath(t, kitDBApplicationName)
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
-			return 0, nil
+			return false, nil
 		}
-		return 0, err
+		return false, err
 	}
-	if applicationCopied(t) {
-		return 0, nil
-	}
-	resource, err := t.runsResource()
-	if err != nil {
-		return 0, err
-	}
-	managed, err := kitDBForRequest(t, kitDBApplicationName, nil).database()
-	if err != nil {
-		return 0, err
-	}
-	defer managed.Release()
-	catalog, err := managed.database.Catalog()
-	if err != nil {
-		return 0, err
-	}
-	held := false
-	for _, entry := range catalog.Structs {
-		held = held || entry.Name == "kitwork_runs"
-	}
-	if !held {
-		return 0, nil
-	}
-	db, err := resource.sqlFor(managed.database)
-	if err != nil {
-		return 0, err
-	}
-	managed.writeMu.RLock()
-	defer managed.writeMu.RUnlock()
-	var count int64
-	err = db.QueryRow(`SELECT COUNT(*) FROM kitwork_runs WHERE kind = $1 AND status IN ('pending', 'running', 'cancelling')`, kind).Scan(&count)
-	return int(count), err
+	return !applicationCopied(t), nil
 }
