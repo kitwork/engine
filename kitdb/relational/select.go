@@ -26,6 +26,21 @@ type boundOrder struct {
 	descending bool
 }
 
+type rowSelectBinding struct {
+	schema     kitdbsql.Schema
+	conditions []boundCondition
+	predicate  *boundPredicate
+}
+
+func bindRowSelect(schema kitdbsql.Schema, plan *kitdbsql.SelectStatement, parameters []any) (rowSelectBinding, error) {
+	conditions, err := bindConditions(schema, plan.Conditions, parameters)
+	if err != nil {
+		return rowSelectBinding{}, err
+	}
+	predicate, err := bindPredicate(schema, plan.Predicate, parameters)
+	return rowSelectBinding{schema: schema, conditions: conditions, predicate: predicate}, err
+}
+
 type boundedOrderedRow struct {
 	values        map[string]any
 	sequence      int
@@ -67,6 +82,17 @@ func (transaction *Transaction) executeSelect(
 	observe bool,
 	working *materializationWorkingSet,
 ) (Result, error) {
+	return transaction.executeSelectWithBinding(ctx, plan, parameters, observe, working, nil)
+}
+
+func (transaction *Transaction) executeSelectWithBinding(
+	ctx context.Context,
+	plan *kitdbsql.SelectStatement,
+	parameters []any,
+	observe bool,
+	working *materializationWorkingSet,
+	prepared *rowSelectBinding,
+) (Result, error) {
 	if err := transaction.ready(); err != nil {
 		return Result{}, err
 	}
@@ -87,18 +113,20 @@ func (transaction *Transaction) executeSelect(
 	if selectHasScalarExpressions(plan) {
 		return transaction.executeScalarExpressionSelect(ctx, plan, parameters, observe, working)
 	}
-	schema, err := transaction.schema(plan.Table)
-	if err != nil {
-		return Result{}, err
+	var binding rowSelectBinding
+	if prepared != nil {
+		binding = *prepared
+	} else {
+		schema, err := transaction.schema(plan.Table)
+		if err != nil {
+			return Result{}, err
+		}
+		binding, err = bindRowSelect(schema, plan, parameters)
+		if err != nil {
+			return Result{}, err
+		}
 	}
-	conditions, err := bindConditions(schema, plan.Conditions, parameters)
-	if err != nil {
-		return Result{}, err
-	}
-	predicate, err := bindPredicate(schema, plan.Predicate, parameters)
-	if err != nil {
-		return Result{}, err
-	}
+	schema, conditions, predicate := binding.schema, binding.conditions, binding.predicate
 	orders, err := bindOrders(schema, plan.Order)
 	if err != nil {
 		return Result{}, err
@@ -140,9 +168,9 @@ func (transaction *Transaction) executeSelect(
 		}
 	}
 	var columns []Column
-	var names []string
+	var projector boundProjection
 	if !countMode {
-		columns, names, err = bindProjection(schema, plan.Projection)
+		columns, projector, err = bindProjection(schema, plan.Projection)
 		if err != nil {
 			return Result{}, err
 		}
@@ -151,7 +179,7 @@ func (transaction *Transaction) executeSelect(
 	if sourceWorking != nil {
 		defer sourceWorking.close()
 	}
-	retainedFields := selectRetainedFields(names, orders)
+	retainedFields := selectRetainedFields(projector, orders)
 	rows, total, overflow, stats, err := transaction.readMatchingRows(
 		ctx, schema, generation, conditions, predicate, orders, plan.Offset, limit,
 		plan.HasLimit, countMode, plan.Distinct, observe, sourceWorking, retainedFields,
@@ -179,7 +207,7 @@ func (transaction *Transaction) executeSelect(
 	projected := make([][]any, 0, len(rows))
 	seen := make(map[string]struct{})
 	for _, row := range rows {
-		values := projectRow(schema, row, names)
+		values := projectRow(row, projector)
 		if plan.Distinct {
 			encoded, err := json.Marshal(values)
 			if err != nil {
@@ -399,11 +427,11 @@ func (transaction *Transaction) readMatchingRows(
 	return rows, matched, overflow, stats, nil
 }
 
-func selectRetainedFields(projected []string, orders []boundOrder) []string {
+func selectRetainedFields(projected boundProjection, orders []boundOrder) []string {
 	fields := make([]string, 0, len(projected)+len(orders))
 	for _, field := range projected {
-		if !containsFieldName(fields, field) {
-			fields = append(fields, field)
+		if !containsFieldName(fields, field.name) {
+			fields = append(fields, field.name)
 		}
 	}
 	for _, order := range orders {

@@ -46,6 +46,7 @@ func (db *DB) CheckpointContext(ctx context.Context) (uint64, error) {
 		if !full || resume != nil {
 			region := storagetrace.Start("kitdb.checkpoint.execute")
 			transaction, err := db.checkpointLocked()
+			storagetrace.CheckpointResult(db.path, transaction)
 			region.End()
 			db.commitMu.Unlock()
 			return transaction, err

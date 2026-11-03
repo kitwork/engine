@@ -34,9 +34,11 @@ func TestSQLStorageIOFaultMatrix(t *testing.T) {
 		{"compact-replace", "io", true, false, false},
 		{"compact-directory-sync", "io", true, false, true},
 		{"rotate-prepare", "io", false, false, false},
+		{"rotate-open-writer", "io", false, false, false},
 		{"rotate-replace", "io", false, false, false},
 		{"rotate-directory-sync", "io", false, false, true},
 		{"rotate-prepare", "io", true, false, false},
+		{"rotate-open-writer", "io", true, false, false},
 		{"rotate-replace", "io", true, false, false},
 		{"rotate-directory-sync", "io", true, false, true},
 	}

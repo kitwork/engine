@@ -172,6 +172,15 @@ func (main *mainImage) getFromBlocksWithStats(
 	firstBlock, blockCount int,
 	stats *CursorStats,
 ) ([]byte, bool, bool, error) {
+	return main.getFromBlocksWithReader(key, firstBlock, blockCount, stats, nil)
+}
+
+func (main *mainImage) getFromBlocksWithReader(
+	key []byte,
+	firstBlock, blockCount int,
+	stats *CursorStats,
+	reader *PointReader,
+) ([]byte, bool, bool, error) {
 	if blockCount == 0 {
 		return nil, false, false, nil
 	}
@@ -186,24 +195,43 @@ func (main *mainImage) getFromBlocksWithStats(
 	if len(directory.lastKey) != 0 && bytes.Compare(key, directory.lastKey) > 0 {
 		return nil, false, false, nil
 	}
-	stats.PageAccesses++
+	if stats != nil {
+		stats.PageAccesses++
+	}
 	page, found := main.cache.get(block)
 	if found {
-		stats.PageCacheHits++
+		if stats != nil {
+			stats.PageCacheHits++
+		}
 	} else {
-		if main.cache.enabled() {
-			stats.PageCacheMisses++
+		if stats != nil {
+			if main.cache.enabled() {
+				stats.PageCacheMisses++
+			} else {
+				stats.PageCacheBypasses++
+			}
+		}
+		usePrivate := reader != nil && (reader.warmed || !main.cache.enabled())
+		if usePrivate && directory.length <= pointReaderPageBytes && directory.records <= mainIndexBlockRecords {
+			if err := main.readPageInto(block, &reader.page); err != nil {
+				return nil, false, false, err
+			}
+			page = &reader.page
 		} else {
-			stats.PageCacheBypasses++
+			decoded, err := main.readPage(block)
+			if err != nil {
+				return nil, false, false, err
+			}
+			page = main.cache.addOrGet(decoded)
+			if reader != nil && main.cache.enabled() && decoded.weight <= main.cache.maximum {
+				reader.warmed = true
+			}
 		}
-		decoded, err := main.readPage(block)
-		if err != nil {
-			return nil, false, false, err
+		if stats != nil {
+			stats.PagesRead++
+			stats.PageBytesRead += uint64(directory.length)
+			stats.PageRecordsDecoded += uint64(directory.records)
 		}
-		stats.PagesRead++
-		stats.PageBytesRead += uint64(directory.length)
-		stats.PageRecordsDecoded += uint64(directory.records)
-		page = main.cache.addOrGet(decoded)
 	}
 	position := sort.Search(len(page.rows), func(index int) bool {
 		return bytes.Compare(page.key(index), key) >= 0

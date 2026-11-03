@@ -29,7 +29,7 @@ func queryCatalogView(ctx context.Context, source string, args []any, schema kit
 	}
 	count := len(plan.Projection) == 1 && plan.Projection[0].Count
 	var columns []Column
-	var names []string
+	var projector boundProjection
 	if count {
 		if plan.Projection[0].Name != "" && plan.Projection[0].Name != "*" {
 			return Result{}, pgwire.NewError("0A000", "catalog views only support COUNT(*)")
@@ -45,7 +45,7 @@ func queryCatalogView(ctx context.Context, source string, args []any, schema kit
 				return Result{}, pgwire.NewError("0A000", "catalog projections require fields or COUNT(*)")
 			}
 		}
-		columns, names, err = bindProjection(schema, plan.Projection)
+		columns, projector, err = bindProjection(schema, plan.Projection)
 		if err != nil {
 			return Result{}, err
 		}
@@ -111,7 +111,7 @@ func queryCatalogView(ctx context.Context, source string, args []any, schema kit
 	}
 	result := Result{Columns: columns, CommandTag: fmt.Sprintf("SELECT %d", end-start)}
 	for _, row := range rows[start:end] {
-		result.Rows = append(result.Rows, projectRow(schema, row, names))
+		result.Rows = append(result.Rows, projectRow(row, projector))
 	}
 	return result, nil
 }

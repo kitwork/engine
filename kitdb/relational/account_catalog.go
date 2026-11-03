@@ -104,7 +104,7 @@ func (node *PostgresNode) accountCatalogQuery(account managed.UserInfo, source s
 	}
 	count := len(plan.Projection) == 1 && plan.Projection[0].Count
 	var columns []Column
-	var names []string
+	var projector boundProjection
 	if count {
 		if plan.Projection[0].Name != "" && plan.Projection[0].Name != "*" {
 			return Result{}, true, pgwire.NewError("0A000", "account view only supports COUNT(*)")
@@ -115,7 +115,7 @@ func (node *PostgresNode) accountCatalogQuery(account managed.UserInfo, source s
 		}
 		columns = []Column{{Name: label, Kind: "bigint"}}
 	} else {
-		columns, names, err = bindProjection(schema, plan.Projection)
+		columns, projector, err = bindProjection(schema, plan.Projection)
 		if err != nil {
 			return Result{}, true, err
 		}
@@ -230,7 +230,7 @@ func (node *PostgresNode) accountCatalogQuery(account managed.UserInfo, source s
 	}
 	result := Result{Columns: columns, CommandTag: fmt.Sprintf("SELECT %d", end-start)}
 	for _, row := range rows[start:end] {
-		result.Rows = append(result.Rows, projectRow(schema, row, names))
+		result.Rows = append(result.Rows, projectRow(row, projector))
 	}
 	return result, true, nil
 }

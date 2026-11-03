@@ -734,12 +734,12 @@ func newDirectMaterialization(
 		}
 		return stream, nil
 	}
-	_, names, err := bindProjection(schema, plan.Projection)
+	_, projector, err := bindProjection(schema, plan.Projection)
 	if err != nil {
 		return nil, err
 	}
 	stream.project = func(row map[string]any) ([]any, error) {
-		return projectRow(schema, row, names), nil
+		return projectRow(row, projector), nil
 	}
 	return stream, nil
 }
@@ -962,7 +962,7 @@ func (transaction *Transaction) executeMaterializedRows(
 	if err != nil {
 		return Result{}, err
 	}
-	columns, names, err := bindProjection(schema, plan.Projection)
+	columns, projector, err := bindProjection(schema, plan.Projection)
 	if err != nil {
 		return Result{}, err
 	}
@@ -1017,7 +1017,7 @@ func (transaction *Transaction) executeMaterializedRows(
 	rows := make([][]any, 0, min(len(matched), limit))
 	seen := make(map[string]struct{})
 	for _, row := range matched {
-		projected := projectRow(schema, row, names)
+		projected := projectRow(row, projector)
 		if plan.Distinct {
 			identity, err := json.Marshal(projected)
 			if err != nil {

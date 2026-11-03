@@ -263,11 +263,7 @@ func (image *restoreImage) flush(ctx context.Context) error {
 		return err
 	}
 	if len(image.main.segments) < maxMainSegments {
-		result, err := appendIncrementalGeneration(image.path, image.main, image.overlay, image.transaction, image.checksum, logicalRecords)
-		if err != nil {
-			return err
-		}
-		newMain, err := openAppendedGeneration(image.path, image.main, result, 0)
+		newMain, err := appendIncrementalGeneration(image.path, image.main, image.overlay, image.transaction, image.checksum, logicalRecords)
 		if err != nil {
 			return err
 		}

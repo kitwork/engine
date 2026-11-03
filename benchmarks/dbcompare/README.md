@@ -1,5 +1,58 @@
 # Standalone SQL Comparison
 
+Follow-up: [Windows WAL publication cost](WAL_COST_2026-10-22.md) compares
+identical fixed checkpoint work and paced native SQL at 1/4/16 databases. The
+allocation cost is measured; high-load tail latency is not cleared for release.
+
+Next: [Windows handle attribution and fixed-work checkpoints](WINDOWS_REVIEW_2026-10-23.md)
+classifies handle growth with a runtime-only control and separates maintenance
+queue delay from checkpoint service, including a separate held-reader control.
+
+Optimization: [incremental checkpoint reader handoff](GENERATION_READER_2026-10-24.md)
+removes a redundant file open while retaining durability and worker limits.
+Four fixed-work Windows pairs improve; tail latency and stable qualification
+remain open.
+
+Next optimization: [WAL rotation writer handoff](WAL_ROTATION_2026-10-24.md)
+retains the prepared writer through publication. Six Windows pairs include
+checkpoint p95/p99 and worst samples; service-tail improvement remains unproven.
+
+Attribution: [read allocation and checkpoint tail latency](CHECKPOINT_ATTRIBUTION_2026-10-24.md)
+separates write-only, read-only and mixed work. Read-page allocation is the next
+bounded optimization candidate; this diagnostic campaign is not a speedup claim.
+
+Implementation: [bounded query-local point-read buffers](PRIVATE_READ_BUFFER_2026-10-24.md)
+reduce read/mixed allocation while preserving shared-cache warming. Windows A/B
+results retain the checkpoint-p99 tradeoff; no stable qualification is claimed.
+
+Follow-up: [checkpoint-tail traces and A/A controls](CHECKPOINT_TAIL_2026-10-24.md)
+match checkpoint identities and separate scheduler, lock and GC waits. New
+normal pairs do not consistently reproduce the earlier p99 regression; this
+does not clear tail latency or justify an additional production-code change.
+
+Holder attribution: [bounded snapshot/lock profiling](LOCK_HOLDER_2026-10-25.md)
+uses QPC on Windows and matches checkpoint writer waits with observed snapshot
+holds. The open-file phase is the next ownership-sensitive target; observer
+cost and ordinary-build p99 uncertainty are retained, not cleared for release.
+
+Rejected experiment: [generation-bound snapshot reopen](SNAPSHOT_READER_2026-10-25.md)
+Rejected default prototype: [optimistic primary SELECT](PRIMARY_SELECT_2026-10-25.md)
+Follow-up: [shared SELECT preparation](PREPARED_SELECT_2026-10-25.md) removes the fallback allocation tax and retains a bounded native primary-read path.
+passes ownership/recovery/race checks but does not improve mixed elapsed time
+reliably and has an unfavorable checkpoint-p99 batch. Default capture is restored;
+the prototype remains reproducible and two ownership regression tests are kept.
+
+Read cleanup: [forward secondary-index scan ownership](SECONDARY_READ_2026-10-26.md)
+measured duplicate-copy removal while preserving ownership and isolation. The
+prototype is now withdrawn pending [Windows WAL/tail qualification](SECONDARY_TAIL_2026-10-26.md),
+which recorded real baseline publication failures and verified recovery copies.
+Allocation savings alone did not clear mixed latency or release qualification.
+
+Native failure attribution: [Windows WAL publication phases](WAL_PHASE_2026-10-26.md)
+captures a real errno-5 refusal at `replace-target` before handle cleanup or
+old-WAL restoration. Source/target controls and ACK-copy verification pass;
+the refusing OS handle/condition remains unresolved, with no retry or bypass.
+
 This is a reproducible workload runner, not a Kitwork application. KitDB is
 opened through `kitdb/relational.OpenWithOptions` and queried through `Execute`.
 No ORM, `struct()` DSL, tenant, VM, HTTP server or PostgreSQL listener is involved.
@@ -227,6 +280,16 @@ and the slower timing cases retained alongside improvements.
 See [page latency qualification](PAGE_LATENCY_2026-10-22.md) for paired CPU-only
 decode/row/key measurements, separate CPU profiles, the row-view tradeoff and a
 rejected shared-bounds refinement. No general non-regression claim is made.
+See [query-bound projection](PROJECTION_2026-10-22.md) for prepared per-column
+conversion, paired SQL allocation/timing evidence, and the retained Windows
+WAL-publication failure that blocks whole-suite qualification.
+See [Windows WAL ownership investigation](WAL_OWNERSHIP_2026-10-22.md) for
+controlled source/target sharing, checkpoint recovery, retained kernel probes
+and later passing checks. The original failure's owner remains unknown.
+See [the Windows WAL publication fix](WAL_PUBLICATION_2026-10-22.md) for the
+reproduced compatible-reader defect, handle-based publication, post-rename
+failure policy and before/after regression evidence. Historical failure
+attribution remains a separate unresolved question.
 See [the 13M dictionary text follow-up](TEXT_ANALYTICS_13M_2026-09-04.md) for
 the separate opt-in real-data KitDB paths and remote read-only PostgreSQL
 baseline; those measurements are not produced by this synthetic runner.

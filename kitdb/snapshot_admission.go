@@ -31,32 +31,34 @@ func (db *DB) ReserveSnapshot(ctx context.Context) (*SnapshotReservation, error)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	db.mu.RLock()
+	span := db.profileRLock(lockSnapshotReserve)
 	if err := db.stateErrorLocked(); err != nil {
-		db.mu.RUnlock()
+		db.profileRUnlock(&span)
 		return nil, err
 	}
+	at := span.mark()
 	db.snapshotMu.Lock()
+	span.phase(0, at)
 	if db.snapshotOverlayBytes.Load() > db.snapshotMemoryLimit {
 		db.snapshotMu.Unlock()
-		db.mu.RUnlock()
+		db.profileRUnlock(&span)
 		return nil, ErrSnapshotMemory
 	}
 	if len(db.snapshotWaiters) == 0 && db.snapshotCapacityLocked(db.snapshotOverlayBytes.Load()) {
 		reservation := db.newSnapshotReservationLocked(db.snapshotOverlayBytes.Load())
 		db.snapshotMu.Unlock()
-		db.mu.RUnlock()
+		db.profileRUnlock(&span)
 		return reservation, nil
 	}
 	if len(db.snapshotWaiters) >= maximumSnapshotWaiters {
 		db.snapshotMu.Unlock()
-		db.mu.RUnlock()
+		db.profileRUnlock(&span)
 		return nil, ErrSnapshotAdmissionFull
 	}
 	waiter := &snapshotWaiter{ready: make(chan struct{})}
 	db.snapshotWaiters = append(db.snapshotWaiters, waiter)
 	db.snapshotMu.Unlock()
-	db.mu.RUnlock()
+	db.profileRUnlock(&span)
 	waitCtx, cancel := context.WithTimeout(ctx, snapshotAdmissionWait)
 	defer cancel()
 	select {
@@ -125,18 +127,20 @@ func (reservation *SnapshotReservation) Snapshot() (*Snapshot, error) {
 	}
 	db := reservation.owner
 	defer reservation.Close()
-	db.mu.RLock()
-	defer db.mu.RUnlock()
+	span := db.profileRLock(lockSnapshotCapture)
+	defer db.profileRUnlock(&span)
 	if err := db.stateErrorLocked(); err != nil {
 		return nil, err
 	}
+	at := span.mark()
 	db.snapshotMu.Lock()
+	span.phase(0, at)
 	defer db.snapshotMu.Unlock()
 	if _, found := db.snapshotReservations[reservation]; !found {
 		return nil, ErrSnapshotClosed
 	}
 	db.releaseSnapshotReservationLocked(reservation)
-	snapshot, err := db.captureSnapshotLocked()
+	snapshot, err := db.captureSnapshotLocked(&span)
 	db.grantSnapshotWaitersLocked()
 	return snapshot, err
 }

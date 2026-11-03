@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kitwork/engine/kitdb/internal/waldiag"
 )
 
 type lifecycleForensicRound struct {
@@ -46,6 +48,14 @@ func TestKitDBWALForensicCampaign(t *testing.T) {
 	encoder := json.NewEncoder(file)
 	if _, err := lifecycleFixtureRoot(t, root); err != nil {
 		t.Fatal(err)
+	}
+	if capture := os.Getenv("KITDB_WAL_DIAG_REPORT"); capture != "" {
+		if os.Getenv("KITDB_WAL_DIAG_ROOT") != root {
+			t.Fatal("WAL diagnostic root must match the fresh forensic root")
+		}
+		if err := waldiag.Prepare(root, capture); err != nil {
+			t.Fatal(err)
+		}
 	}
 	old := runtime.GOMAXPROCS(4)
 	defer runtime.GOMAXPROCS(old)

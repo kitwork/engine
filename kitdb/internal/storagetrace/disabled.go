@@ -7,3 +7,5 @@ type Region struct{}
 
 func Start(string) Region { return Region{} }
 func (Region) End()       {}
+
+func CheckpointResult(string, uint64) {}

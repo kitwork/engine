@@ -35,6 +35,7 @@ type DB struct {
 	historyMu      sync.Mutex
 	replicaMu      sync.Mutex
 	mu             sync.RWMutex
+	lockProfile    lockProfile
 	catalogLoadMu  sync.Mutex
 	sequenceMu     sync.Mutex
 	sequenceLeases map[string]sequenceLease

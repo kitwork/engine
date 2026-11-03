@@ -88,24 +88,43 @@ func (engine *Engine) BeginTransaction(ctx context.Context, options TransactionO
 			return nil, err
 		}
 	}
+	transaction, err := engine.captureTransactionLocked(ctx, options, nil, nil)
+	if err != nil {
+		engine.mu.RUnlock()
+	}
+	return transaction, err
+}
 
+// The caller holds engine.mu.RLock and transfers it to a returned transaction.
+// On failure it still owns that lock. An initial reservation/catalog may come
+// from autocommit preparation; only the first capture attempt may reuse them.
+func (engine *Engine) captureTransactionLocked(ctx context.Context, options TransactionOptions, initial *kitdbengine.SnapshotReservation, prepared *kitdbengine.CatalogSnapshot) (*Transaction, error) {
 	// Relational commits use writeMu too, so all three observations share one
 	// boundary. The version read must stay inside the gate: otherwise a DDL
 	// commit after Snapshot can make an already-consistent pair look invalid.
 	// Direct kernel frontends do not share writeMu, so retry a bounded number of
 	// times if one of them publishes catalog bytes during the capture.
 	for attempt := 0; attempt < maximumSnapshotCaptureRetries; attempt++ {
-		reservation, err := engine.database.ReserveSnapshot(ctx)
-		if err != nil {
-			engine.mu.RUnlock()
-			return nil, err
+		reservation := initial
+		initial = nil
+		var err error
+		if reservation == nil {
+			reservation, err = engine.database.ReserveSnapshot(ctx)
+			if err != nil {
+				return nil, err
+			}
 		}
 		engine.writeMu.Lock()
 		var catalog kitdbengine.CatalogSnapshot
 		err = ctx.Err()
 		if err == nil {
-			catalog, err = engine.database.Catalog()
+			if prepared != nil {
+				catalog = *prepared
+			} else {
+				catalog, err = engine.database.Catalog()
+			}
 		}
+		prepared = nil
 		var snapshot *kitdbengine.Snapshot
 		if err == nil {
 			snapshot, err = reservation.Snapshot()
@@ -120,7 +139,6 @@ func (engine *Engine) BeginTransaction(ctx context.Context, options TransactionO
 			if snapshot != nil {
 				_ = snapshot.Close()
 			}
-			engine.mu.RUnlock()
 			return nil, err
 		}
 		if snapshot.Transaction() >= catalog.Transaction && version.Revision == catalog.Revision {
@@ -132,11 +150,9 @@ func (engine *Engine) BeginTransaction(ctx context.Context, options TransactionO
 		}
 		_ = snapshot.Close()
 		if err := ctx.Err(); err != nil {
-			engine.mu.RUnlock()
 			return nil, err
 		}
 	}
-	engine.mu.RUnlock()
 	return nil, fmt.Errorf("kitdb: catalog and data snapshot boundaries disagree after %d attempts", maximumSnapshotCaptureRetries)
 }
 
@@ -464,7 +480,27 @@ func (transaction *Transaction) getWithStats(
 	key []byte,
 	stats *kitdbengine.CursorStats,
 ) ([]byte, bool, error) {
-	if stats == nil {
+	return transaction.getWithPointReader(key, stats, nil)
+}
+
+func (transaction *Transaction) pointReader() (*kitdbengine.PointReader, error) {
+	if transaction == nil {
+		return nil, fmt.Errorf("kitdb: relational transaction is closed")
+	}
+	transaction.mu.Lock()
+	defer transaction.mu.Unlock()
+	if transaction.done || transaction.snapshot == nil {
+		return nil, fmt.Errorf("kitdb: relational transaction is closed")
+	}
+	return transaction.snapshot.PointReader()
+}
+
+func (transaction *Transaction) getWithPointReader(
+	key []byte,
+	stats *kitdbengine.CursorStats,
+	reader *kitdbengine.PointReader,
+) ([]byte, bool, error) {
+	if stats == nil && reader == nil {
 		return transaction.Get(key)
 	}
 	if transaction == nil {
@@ -480,7 +516,9 @@ func (transaction *Transaction) getWithStats(
 	}
 	if mutation, found := transaction.overlay[string(key)]; found {
 		transaction.mu.Unlock()
-		stats.OverlayEntriesVisited++
+		if stats != nil {
+			stats.OverlayEntriesVisited++
+		}
 		if mutation.deleted {
 			return nil, false, nil
 		}
@@ -488,7 +526,18 @@ func (transaction *Transaction) getWithStats(
 	}
 	snapshot := transaction.snapshot
 	transaction.mu.Unlock()
-	value, found, observed, err := snapshot.GetWithStats(key)
+	if reader != nil && stats == nil {
+		return reader.Get(key)
+	}
+	var value []byte
+	var found bool
+	var observed kitdbengine.CursorStats
+	var err error
+	if reader != nil {
+		value, found, observed, err = reader.GetWithStats(key)
+	} else {
+		value, found, observed, err = snapshot.GetWithStats(key)
+	}
 	stats.Add(observed)
 	return value, found, err
 }

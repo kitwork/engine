@@ -52,12 +52,13 @@ func (db *DB) checkpointCursor() (HistoryCursor, error) {
 // checkpointLocked requires commitMu.
 func (db *DB) checkpointLocked() (uint64, error) {
 
-	db.mu.RLock()
+	span := db.profileRLock(lockCheckpointRead)
 	if err := db.stateErrorLocked(); err != nil {
-		db.mu.RUnlock()
+		db.profileRUnlock(&span)
 		return 0, err
 	}
 	transaction := db.lastTx
+	span.transaction(transaction)
 	boundaryChecksum := db.walChecksum
 	lastCommitTime := db.lastCommitTime
 	checkpointTransaction := db.checkpointTx
@@ -72,37 +73,32 @@ func (db *DB) checkpointLocked() (uint64, error) {
 		if useIncremental {
 			logicalRecords, err := countMergedRecords(main, overlay)
 			if err != nil {
-				db.mu.RUnlock()
+				db.profileRUnlock(&span)
 				return transaction, err
 			}
-			appendResult, err := appendIncrementalGeneration(db.path, main, overlay, transaction, boundaryChecksum, logicalRecords)
+			newMain, err := appendIncrementalGeneration(db.path, main, overlay, transaction, boundaryChecksum, logicalRecords)
 			if err != nil {
-				db.mu.RUnlock()
+				db.profileRUnlock(&span)
 				if errors.Is(err, ErrDurabilityUncertain) {
 					db.markUnavailable(err)
 				}
 				return transaction, err
 			}
-			if appendResult == nil {
-				db.mu.RUnlock()
+			if newMain == nil {
+				db.profileRUnlock(&span)
 				return transaction, fmt.Errorf("kitdb: generation checkpoint was not published")
 			}
-			newMain, err := openAppendedGeneration(db.path, main, appendResult, db.pageCacheBytes)
-			db.mu.RUnlock()
-			if err != nil {
-				db.markUnavailable(err)
-				return transaction, errors.Join(ErrUnavailable, err)
-			}
+			db.profileRUnlock(&span)
 			if err := db.installAppendedMain(newMain, transaction); err != nil {
 				return transaction, err
 			}
 		} else {
 			if main.formatVersion == mainFormatVersion && main.generation == math.MaxUint64 {
-				db.mu.RUnlock()
+				db.profileRUnlock(&span)
 				return transaction, fmt.Errorf("kitdb: generation ID overflow")
 			}
 			if db.activeSnapshotCount() != 0 {
-				db.mu.RUnlock()
+				db.profileRUnlock(&span)
 				return transaction, ErrSnapshotsActive
 			}
 			generation := uint64(1)
@@ -112,7 +108,7 @@ func (db *DB) checkpointLocked() (uint64, error) {
 			stagingPath, err := prepareCompactedGeneration(db.path, identity, transaction, boundaryChecksum, generation, func(emit func(key, value []byte) error) error {
 				return walkMergedRows(main, overlay, emit)
 			})
-			db.mu.RUnlock()
+			db.profileRUnlock(&span)
 			if err != nil {
 				return transaction, err
 			}
@@ -122,7 +118,7 @@ func (db *DB) checkpointLocked() (uint64, error) {
 			}
 		}
 	} else {
-		db.mu.RUnlock()
+		db.profileRUnlock(&span)
 	}
 
 	if walBaseTransaction == transaction {
@@ -200,19 +196,19 @@ func countMergedRecords(main *mainImage, overlay map[string]rowMutation) (uint64
 }
 
 func (db *DB) installAppendedMain(newMain *mainImage, transaction uint64) error {
-	db.mu.Lock()
+	span := db.profileLock(lockCheckpointInstall)
+	span.transaction(transaction)
 	if err := db.stateErrorLocked(); err != nil {
-		db.mu.Unlock()
+		db.profileUnlock(&span)
 		_ = newMain.close()
 		return err
 	}
 	oldMain := db.main
-	newMain.cache = oldMain.cache
 	db.main = newMain
 	db.overlay = make(map[string]rowMutation)
 	db.resetOverlayMemory()
 	db.checkpointTx = transaction
-	db.mu.Unlock()
+	db.profileUnlock(&span)
 	if err := oldMain.close(); err != nil {
 		return fmt.Errorf("kitdb: close previous generation reader: %w", err)
 	}
@@ -220,21 +216,22 @@ func (db *DB) installAppendedMain(newMain *mainImage, transaction uint64) error 
 }
 
 func (db *DB) publishCompactedMain(stagingPath string, transaction uint64) error {
-	db.mu.Lock()
+	span := db.profileLock(lockCheckpointCompact)
+	span.transaction(transaction)
 	if db.activeSnapshotCount() != 0 {
-		db.mu.Unlock()
+		db.profileUnlock(&span)
 		return ErrSnapshotsActive
 	}
 	oldMain := db.main
 	if err := oldMain.close(); err != nil {
 		restoreErr := db.restoreMainLocked(err)
-		db.mu.Unlock()
+		db.profileUnlock(&span)
 		return restoreErr
 	}
 	published, publishErr := publishPreparedMainSnapshot(stagingPath, db.path)
 	if !published {
 		restoreErr := db.restoreMainLocked(publishErr)
-		db.mu.Unlock()
+		db.profileUnlock(&span)
 		return restoreErr
 	}
 	newMain, openErr := readMainSnapshotWithCache(db.path, db.pageCacheBytes)
@@ -244,7 +241,7 @@ func (db *DB) publishCompactedMain(stagingPath string, transaction uint64) error
 		if db.fatal == nil {
 			db.fatal = fatal
 		}
-		db.mu.Unlock()
+		db.profileUnlock(&span)
 		return errors.Join(ErrUnavailable, fatal)
 	}
 	db.main = newMain
@@ -254,7 +251,7 @@ func (db *DB) publishCompactedMain(stagingPath string, transaction uint64) error
 	if publishErr != nil && db.fatal == nil {
 		db.fatal = publishErr
 	}
-	db.mu.Unlock()
+	db.profileUnlock(&span)
 	return publishErr
 }
 

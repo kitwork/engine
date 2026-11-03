@@ -665,6 +665,9 @@ func (engine *Engine) executePreparedPlanWithSequences(
 			}
 			return engine.executeSearchSelect(ctx, statement.Select, parameters)
 		}
+		if simplePrimarySelect(statement.Select) {
+			return engine.executeAutocommitSelect(ctx, statement, parameters)
+		}
 		transaction, err := engine.BeginTransaction(ctx, TransactionOptions{ReadOnly: true})
 		if err != nil {
 			return Result{}, err
@@ -1112,17 +1115,25 @@ func uniqueEntries(schema kitdbsql.Schema, row map[string]any, logicalRowKey []b
 	return entries, nil
 }
 
-func bindProjection(schema kitdbsql.Schema, projections []kitdbsql.Projection) ([]Column, []string, error) {
+type boundProjectionField struct {
+	name string
+	mode fieldReadMode
+}
+
+type boundProjection []boundProjectionField
+
+func bindProjection(schema kitdbsql.Schema, projections []kitdbsql.Projection) ([]Column, boundProjection, error) {
 	if len(projections) == 1 && projections[0].All {
 		columns := make([]Column, len(schema.Fields))
-		names := make([]string, len(schema.Fields))
+		fields := make(boundProjection, len(schema.Fields))
 		for index, field := range schema.Fields {
-			columns[index], names[index] = columnForField(field.Name, field), field.Name
+			columns[index] = columnForField(field.Name, field)
+			fields[index] = boundProjectionField{name: field.Name, mode: prepareFieldReadMode(field.Kind)}
 		}
-		return columns, names, nil
+		return columns, fields, nil
 	}
 	columns := make([]Column, len(projections))
-	names := make([]string, len(projections))
+	fields := make(boundProjection, len(projections))
 	for index, projection := range projections {
 		if projection.All || projection.Count {
 			return nil, nil, fmt.Errorf("kitdb SQL: invalid row projection")
@@ -1135,16 +1146,21 @@ func bindProjection(schema kitdbsql.Schema, projections []kitdbsql.Projection) (
 		if label == "" {
 			label = canonical
 		}
-		columns[index], names[index] = columnForField(label, field), canonical
+		columns[index] = columnForField(label, field)
+		fields[index] = boundProjectionField{name: canonical, mode: prepareFieldReadMode(field.Kind)}
 	}
-	return columns, names, nil
+	return columns, fields, nil
 }
 
-func projectRow(schema kitdbsql.Schema, row map[string]any, names []string) []any {
-	result := make([]any, len(names))
-	for index, name := range names {
-		_, field, _ := schema.FieldByName(name)
-		result[index] = readField(field, row[name])
+func projectRow(row map[string]any, projection boundProjection) []any {
+	result := make([]any, len(projection))
+	for index, field := range projection {
+		item := row[field.name]
+		if temporal, ok := item.(exactTemporal); ok {
+			result[index] = temporal.text
+		} else if item != nil {
+			result[index] = readFieldValue(field.mode, item)
+		}
 	}
 	return result
 }

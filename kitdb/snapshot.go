@@ -66,13 +66,15 @@ type Cursor struct {
 // database state lock. Commits and incremental checkpoints can continue while
 // the snapshot is read. At most 32 snapshots may be active per database.
 func (db *DB) Snapshot() (*Snapshot, error) {
-	db.mu.RLock()
-	defer db.mu.RUnlock()
+	span := db.profileRLock(lockSnapshot)
+	defer db.profileRUnlock(&span)
 	if err := db.stateErrorLocked(); err != nil {
 		return nil, err
 	}
 
+	at := span.mark()
 	db.snapshotMu.Lock()
+	span.phase(0, at)
 	defer db.snapshotMu.Unlock()
 	if db.snapshotPauseDone != nil {
 		return nil, ErrSnapshotsActive
@@ -80,26 +82,32 @@ func (db *DB) Snapshot() (*Snapshot, error) {
 	if len(db.snapshots)+len(db.snapshotReservations) >= maxActiveSnapshots {
 		return nil, ErrTooManySnapshots
 	}
-	return db.captureSnapshotLocked()
+	return db.captureSnapshotLocked(&span)
 }
 
 // Requires db.mu and snapshotMu; callers have accounted for their slot.
-func (db *DB) captureSnapshotLocked() (*Snapshot, error) {
+func (db *DB) captureSnapshotLocked(span *lockSpan) (*Snapshot, error) {
+	span.transaction(db.lastTx)
 	cost := db.snapshotOverlayBytes.Load()
 	if cost > db.snapshotMemoryLimit-db.snapshotBytes-db.snapshotReservedBytes {
 		return nil, ErrSnapshotMemory
 	}
+	at := span.mark()
 	file, err := os.Open(db.path)
+	span.phase(1, at)
 	if err != nil {
 		return nil, fmt.Errorf("kitdb: open snapshot generation: %w", err)
 	}
 	main := *db.main
 	main.file = file
+	at = span.mark()
+	overlay := cloneSnapshotOverlay(db.overlay)
+	span.phase(2, at)
 	snapshot := &Snapshot{
 		memoryBytes:      cost,
 		owner:            db,
 		main:             &main,
-		overlay:          cloneSnapshotOverlay(db.overlay),
+		overlay:          overlay,
 		databaseID:       db.ID(),
 		transaction:      db.lastTx,
 		boundaryChecksum: db.walChecksum,

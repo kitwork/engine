@@ -177,7 +177,11 @@ func TestTornNewerGenerationSlotFallsBackAndReplaysWAL(t *testing.T) {
 	db.mu.RLock()
 	logicalRecords, err := countMergedRecords(db.main, db.overlay)
 	if err == nil {
-		_, err = appendIncrementalGeneration(db.path, db.main, db.overlay, db.lastTx, db.walChecksum, logicalRecords)
+		var appended *mainImage
+		appended, err = appendIncrementalGeneration(db.path, db.main, db.overlay, db.lastTx, db.walChecksum, logicalRecords)
+		if appended != nil {
+			err = errors.Join(err, appended.close())
+		}
 	}
 	tornSlot := 1 - db.main.activeSlot
 	db.mu.RUnlock()

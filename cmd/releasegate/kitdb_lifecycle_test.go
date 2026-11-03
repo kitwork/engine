@@ -57,7 +57,7 @@ func TestLifecycleGatePlatformRequirements(t *testing.T) {
 		}
 		want := 8
 		if goos == "windows" {
-			want = 11 // Nine roots plus both real-denial recovery subcases.
+			want = 17 // Thirteen roots, two recovery cases, two native denial phases.
 		}
 		if len(step.RequiredTests) != want {
 			t.Fatalf("%s requirements=%d want=%d", goos, len(step.RequiredTests), want)
@@ -65,12 +65,20 @@ func TestLifecycleGatePlatformRequirements(t *testing.T) {
 		seen := make(map[testRequirement]bool)
 		for _, test := range step.RequiredTests {
 			root := strings.SplitN(test.Test, "/", 2)[0]
-			if seen[test] || test.Package != "github.com/kitwork/engine/kitdb/relational" || !matcher.MatchString(root) || matcher.MatchString(root+"Other") {
+			pkg := "github.com/kitwork/engine/kitdb/relational"
+			if strings.HasPrefix(root, "TestWindowsWALPublication") { pkg = "github.com/kitwork/engine/kitdb" }
+			if seen[test] || test.Package != pkg || !matcher.MatchString(root) || matcher.MatchString(root+"Other") {
 				t.Fatal("duplicate, unselected or unanchored test", test)
 			}
 			seen[test] = true
 		}
-		for _, diagnostic := range []string{"TestKitDBLifecycleCampaign", "TestKitDBMixedCampaign", "TestKitDBThreadAttribution", "TestKitDBWALForensicCampaign", "TestLifecycleWindowsLockCapture"} {
+		if hasArgument(step.Command, "./kitdb") != (goos == "windows") { t.Fatal("native WAL phase package selection", goos) }
+		if goos == "windows" {
+			for _, phase := range []string{"open-source", "replace-target"} {
+				if !seen[testRequirement{Package: "github.com/kitwork/engine/kitdb", Test: "TestWindowsWALPublicationPhases/"+phase}] { t.Fatal("missing native WAL phase", phase) }
+			}
+		}
+		for _, diagnostic := range []string{"TestKitDBLifecycleCampaign", "TestKitDBMixedCampaign", "TestKitDBThreadAttribution", "TestKitDBWALForensicCampaign", "TestLifecycleWindowsLockCapture", "TestWALCheckpointForensicCampaign"} {
 			if matcher.MatchString(diagnostic) {
 				t.Fatal("gate selected an opt-in diagnostic", diagnostic)
 			}

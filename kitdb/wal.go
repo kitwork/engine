@@ -209,10 +209,10 @@ func createWAL(path string, identity [16]byte, baseTx uint64, baseChecksum uint3
 			_ = os.Remove(stagingPath)
 		}
 	}()
-	if err := replaceFile(stagingPath, path); err != nil {
+	published, err = publishWALFile(stagingPath, path)
+	if err != nil {
 		return fmt.Errorf("kitdb: publish WAL: %w", err)
 	}
-	published = true
 	if err := syncDirectory(filepath.Dir(path)); err != nil {
 		return fmt.Errorf("kitdb: sync WAL directory entry: %w", err)
 	}
@@ -220,39 +220,61 @@ func createWAL(path string, identity [16]byte, baseTx uint64, baseChecksum uint3
 }
 
 func prepareWAL(path string, identity [16]byte, baseTx uint64, baseChecksum uint32) (string, error) {
-	if baseTx == 0 && baseChecksum != 0 {
-		return "", fmt.Errorf("kitdb: empty WAL base has a transaction checksum")
-	}
-	file, err := os.CreateTemp(filepath.Dir(path), ".kitdb-wal-*.tmp")
+	file, err := prepareWALFile(path, identity, baseTx, baseChecksum, os.CreateTemp)
 	if err != nil {
-		return "", fmt.Errorf("kitdb: create WAL staging: %w", err)
+		return "", err
+	}
+	closeRegion := storagetrace.Start("kitdb.wal.prepare.close")
+	closeErr := file.Close()
+	closeRegion.End()
+	if closeErr != nil {
+		_ = os.Remove(file.Name())
+		return "", fmt.Errorf("kitdb: close WAL staging: %w", closeErr)
+	}
+	return file.Name(), nil
+}
+
+// prepareWALFile transfers the synced staging file to its caller on success.
+// Rotation keeps a rename-compatible writer instead of reopening after publish.
+func prepareWALFile(path string, identity [16]byte, baseTx uint64, baseChecksum uint32, create func(string, string) (*os.File, error)) (*os.File, error) {
+	if baseTx == 0 && baseChecksum != 0 {
+		return nil, fmt.Errorf("kitdb: empty WAL base has a transaction checksum")
+	}
+	createRegion := storagetrace.Start("kitdb.wal.prepare.create")
+	file, err := create(filepath.Dir(path), ".kitdb-wal-*.tmp")
+	createRegion.End()
+	if err != nil {
+		return nil, fmt.Errorf("kitdb: create WAL staging: %w", err)
 	}
 	stagingPath := file.Name()
 	cleanup := true
 	defer func() {
-		_ = file.Close()
 		if cleanup {
+			_ = file.Close()
 			_ = os.Remove(stagingPath)
 		}
 	}()
-	if err := file.Chmod(0o600); err != nil {
-		return "", fmt.Errorf("kitdb: set WAL permissions: %w", err)
+	chmodRegion := storagetrace.Start("kitdb.wal.prepare.chmod")
+	chmodErr := file.Chmod(0o600)
+	chmodRegion.End()
+	if err := chmodErr; err != nil {
+		return nil, fmt.Errorf("kitdb: set WAL permissions: %w", err)
 	}
+	writeRegion := storagetrace.Start("kitdb.wal.prepare.header")
 	header := encodeWALHeader(identity, baseTx, baseChecksum)
-	if _, err := writeAll(file, header); err != nil {
-		return "", fmt.Errorf("kitdb: write WAL header: %w", err)
+	_, writeErr := writeAll(file, header)
+	writeRegion.End()
+	if err := writeErr; err != nil {
+		return nil, fmt.Errorf("kitdb: write WAL header: %w", err)
 	}
 	region := storagetrace.Start("kitdb.storage.wal_header_sync")
 	syncErr := file.Sync()
 	region.End()
 	if err := syncErr; err != nil {
-		return "", fmt.Errorf("kitdb: sync WAL header: %w", err)
-	}
-	if err := file.Close(); err != nil {
-		return "", fmt.Errorf("kitdb: close WAL staging: %w", err)
+		return nil, fmt.Errorf("kitdb: sync WAL header: %w", err)
 	}
 	cleanup = false
-	return stagingPath, nil
+	return file, nil
 }
 
 func encodeWALHeader(identity [16]byte, baseTx uint64, baseChecksum uint32) []byte {
@@ -314,52 +336,68 @@ func (db *DB) rotateWALLocked(baseTx uint64, baseChecksum uint32) error {
 		return err
 	}
 	path := databaseWALPath(db.path)
-	stagingPath, err := prepareWAL(path, db.identity, baseTx, baseChecksum)
+	if err := checkpointfault.Error(db.path, "rotate-open-writer"); err != nil {
+		return err
+	}
+	writerRegion := storagetrace.Start("kitdb.wal.rotate.prepare_writer")
+	file, err := prepareWALFile(path, db.identity, baseTx, baseChecksum, createWALRotationStaging)
+	writerRegion.End()
 	if err != nil {
 		return err
 	}
+	stagingPath := file.Name()
 	checkpointfault.Reach(db.path, "wal-staging-synced")
 	published := false
 	defer func() {
+		if file != nil {
+			_ = file.Close()
+		}
 		if !published {
 			_ = os.Remove(stagingPath)
 		}
 	}()
 
-	db.mu.Lock()
+	span := db.profileLock(lockWALDetach)
+	span.transaction(baseTx)
 	wal := db.wal
 	db.wal = nil
-	db.mu.Unlock()
+	db.profileUnlock(&span)
 	if wal == nil {
 		err := fmt.Errorf("kitdb: active WAL is unavailable during rotation")
 		db.markUnavailable(err)
 		return errors.Join(ErrUnavailable, err)
 	}
-	if err := wal.Close(); err != nil {
+	closeRegion := storagetrace.Start("kitdb.wal.rotate.close_active")
+	closeErr := wal.Close()
+	closeRegion.End()
+	if err := closeErr; err != nil {
 		return db.restoreWALAfterRotationFailure(path, fmt.Errorf("kitdb: close WAL for rotation: %w", err))
 	}
-	if err := storageReplace(db.path, "rotate-replace", stagingPath, path); err != nil {
-		return db.restoreWALAfterRotationFailure(path, fmt.Errorf("kitdb: publish rotated WAL: %w", err))
+	published, err = storagePublishWAL(db.path, "rotate-replace", stagingPath, path)
+	if err != nil {
+		publicationErr := fmt.Errorf("kitdb: publish rotated WAL: %w", err)
+		if published {
+			durableErr := errors.Join(ErrDurabilityUncertain, publicationErr)
+			db.markUnavailable(durableErr)
+			return durableErr
+		}
+		return db.restoreWALAfterRotationFailure(path, publicationErr)
 	}
 	checkpointfault.Reach(db.path, "wal-replaced")
-	published = true
 	if err := storageSyncDirectory(db.path, "rotate-directory-sync", filepath.Dir(path)); err != nil {
 		durableErr := errors.Join(ErrDurabilityUncertain, fmt.Errorf("kitdb: sync rotated WAL directory: %w", err))
 		db.markUnavailable(durableErr)
 		return durableErr
 	}
 
-	file, err := openWALForAppend(path)
-	if err != nil {
-		db.markUnavailable(err)
-		return errors.Join(ErrUnavailable, err)
-	}
-	db.mu.Lock()
+	span = db.profileLock(lockWALInstall)
+	span.transaction(baseTx)
 	db.wal = file
 	db.walEnd = walHeaderSize
 	db.walBaseTx = baseTx
 	db.walChecksum = baseChecksum
-	db.mu.Unlock()
+	db.profileUnlock(&span)
+	file = nil // Ownership moved to DB; failure paths above close the staging writer.
 	return nil
 }
 

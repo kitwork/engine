@@ -126,7 +126,7 @@ func (engine *Engine) openSelectRowStream(
 	if err != nil {
 		return nil, true, err
 	}
-	columns, names, err := bindProjection(schema, plan.Projection)
+	columns, projector, err := bindProjection(schema, plan.Projection)
 	if err != nil {
 		return nil, true, err
 	}
@@ -160,7 +160,7 @@ func (engine *Engine) openSelectRowStream(
 		rows:    rowChannel, cancel: cancel, done: done,
 	}
 	decoder := newProjectedRowDecoder(
-		schema, selectDecodeTags(schema, conditions, predicate, names),
+		schema, selectDecodeTags(schema, conditions, predicate, selectRetainedFields(projector, nil)),
 	)
 	if engine.queryCache != nil {
 		engine.queryCache.bypasses.Add(1)
@@ -211,7 +211,7 @@ func (engine *Engine) openSelectRowStream(
 					engine.maximumResultRows,
 				)
 			}
-			row := projectRow(schema, decoded.values, names)
+			row := projectRow(decoded.values, projector)
 			select {
 			case rowChannel <- row:
 				emitted++

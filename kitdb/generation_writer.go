@@ -177,7 +177,7 @@ func (writer *generationSegmentWriter) finish(generation, transaction uint64) (g
 	}, nil
 }
 
-func appendIncrementalGeneration(path string, main *mainImage, overlay map[string]rowMutation, transaction uint64, boundaryChecksum uint32, logicalRecords uint64) (*generationAppendResult, error) {
+func appendIncrementalGeneration(path string, main *mainImage, overlay map[string]rowMutation, transaction uint64, boundaryChecksum uint32, logicalRecords uint64) (appended *mainImage, returnErr error) {
 	defer storagetrace.Start("kitdb.checkpoint.append").End()
 	if main == nil || main.formatVersion != mainFormatVersion || len(overlay) == 0 {
 		return nil, fmt.Errorf("kitdb: incremental checkpoint requires a generation main file and mutations")
@@ -189,7 +189,13 @@ func appendIncrementalGeneration(path string, main *mainImage, overlay map[strin
 	if err != nil {
 		return nil, fmt.Errorf("kitdb: open generation main file for append: %w", err)
 	}
-	defer file.Close()
+	// The fully synced append handle becomes the new reader. On any failure,
+	// the previous image remains its own owner and this handle is released.
+	defer func() {
+		if appended == nil {
+			_ = file.Close()
+		}
+	}()
 	info, err := file.Stat()
 	if err != nil {
 		return nil, fmt.Errorf("kitdb: stat generation main file for append: %w", err)
@@ -257,29 +263,34 @@ func appendIncrementalGeneration(path string, main *mainImage, overlay map[strin
 		return nil, errors.Join(ErrDurabilityUncertain, fmt.Errorf("kitdb: sync generation slot: %w", err))
 	}
 	checkpointfault.Reach(path, "superblock-synced")
-	return &generationAppendResult{
+	appended, err = newAppendedGeneration(path, file, main, &generationAppendResult{
 		generation: generation, transaction: transaction,
 		boundaryChecksum: boundaryChecksum, logicalRecords: logicalRecords,
 		activeSlot: slotIndex, fileEnd: fileEnd, descriptor: descriptor,
 		blocks: segmentWriter.blocks,
-	}, nil
+	})
+	if err != nil {
+		// The durable slot has already been published; callers must stop using
+		// the previous live image if constructing its replacement fails.
+		return nil, errors.Join(ErrUnavailable, ErrDurabilityUncertain, err)
+	}
+	return appended, nil
 }
 
-func openAppendedGeneration(path string, previous *mainImage, result *generationAppendResult, pageCacheBytes int64) (*mainImage, error) {
+// newAppendedGeneration borrows file until successful construction transfers
+// ownership to the returned image. It never reopens the path after publication.
+func newAppendedGeneration(path string, file *os.File, previous *mainImage, result *generationAppendResult) (*mainImage, error) {
 	defer storagetrace.Start("kitdb.checkpoint.open_generation").End()
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("kitdb: open appended generation reader: %w", err)
-	}
+	statRegion := storagetrace.Start("kitdb.checkpoint.open_generation.stat")
 	info, err := file.Stat()
+	statRegion.End()
 	if err != nil {
-		_ = file.Close()
 		return nil, fmt.Errorf("kitdb: stat appended generation reader: %w", err)
 	}
 	if !info.Mode().IsRegular() || info.Size() < result.fileEnd {
-		_ = file.Close()
 		return nil, corruptFileAt(path, info.Size(), "appended generation file is incomplete")
 	}
+	defer storagetrace.Start("kitdb.checkpoint.open_generation.metadata").End()
 	blocks := make([]mainBlock, len(previous.blocks)+len(result.blocks))
 	copy(blocks, previous.blocks)
 	copy(blocks[len(previous.blocks):], result.blocks)
@@ -298,7 +309,7 @@ func openAppendedGeneration(path string, previous *mainImage, result *generation
 		recordEnd: result.fileEnd, dataBytes: previous.dataBytes + int64(result.descriptor.dataSize),
 		directoryBytes: previous.directoryBytes + int64(result.descriptor.directorySize),
 		generation:     result.generation, activeSlot: result.activeSlot, fileEnd: result.fileEnd,
-		segments: segments, blocks: blocks, cache: newRowPageCache(pageCacheBytes),
+		segments: segments, blocks: blocks, cache: previous.cache,
 	}, nil
 }
 

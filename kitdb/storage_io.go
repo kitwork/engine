@@ -39,6 +39,13 @@ func storageReplace(path, point, staging, target string) error {
 	return replaceFile(staging, target)
 }
 
+func storagePublishWAL(path, point, staging, target string) (bool, error) {
+	if err := checkpointfault.Error(path, point); err != nil {
+		return false, err
+	}
+	return publishWALFile(staging, target)
+}
+
 func storageSyncDirectory(path, point, directory string) error {
 	defer storagetrace.Start("kitdb.storage.directory_sync").End()
 	if err := checkpointfault.Error(path, point); err != nil {

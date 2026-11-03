@@ -25,15 +25,22 @@ make a real device fail `fsync`, or prove behavior under machine power loss.
 
 ## Cases
 
-`TestSQLStorageIOFaultMatrix` has 17 cases:
+`TestSQLStorageIOFaultMatrix` has 19 cases:
 
 - WAL write: actual incomplete prefix, and simulated no-space rejection.
 - WAL sync: complete frame written but no successful durability response.
 - Incremental manifest: partial write and pre-publication data-sync failure.
 - Alternate superblock: partial slot write and post-write sync failure.
 - Full compaction: partial manifest, staging sync, replace, directory sync.
-- WAL rotation: prepare, replace and post-replace directory-sync failures,
+- WAL rotation: prepare, writer-open preparation, replace and post-replace directory-sync failures,
   each after both incremental and full checkpoint publication.
+
+The `rotate-open-writer` injection fails before acquiring a replacement writer;
+it leaves the old WAL live. The prepared-writer path separately checks cleanup
+on header-write failure. Publication still keeps its post-rename Sync, and a
+post-publication failure must close the prepared writer without restoring stale
+WAL offsets. See the [Windows writer-handoff campaign](../../benchmarks/dbcompare/WAL_ROTATION_2026-10-24.md)
+for the current local evidence; the dated 17-case results below remain historical.
 
 One node manager owns the file; native SQL borrows an attached relational
 facade. Checkpoint faults run through the existing maintenance ticket. Full

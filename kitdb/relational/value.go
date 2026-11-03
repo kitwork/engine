@@ -238,6 +238,36 @@ func structuredValue(field kitdbsql.Field, item any) (string, error) {
 	return compact.String(), nil
 }
 
+type fieldReadMode uint8
+
+const (
+	fieldReadRaw fieldReadMode = iota
+	fieldReadInteger
+	fieldReadFloat
+	fieldReadBoolean
+	fieldReadJSON
+)
+
+func prepareFieldReadMode(kind string) fieldReadMode {
+	typeInfo, _ := kitdbsql.LookupKind(kind)
+	switch typeInfo.Family {
+	case kitdbsql.FamilyInteger, kitdbsql.FamilySystem:
+		return fieldReadInteger
+	case kitdbsql.FamilyFloat:
+		return fieldReadFloat
+	case kitdbsql.FamilyBoolean:
+		return fieldReadBoolean
+	}
+	switch kind {
+	case "bool":
+		return fieldReadBoolean
+	case "json", "jsonb", "array", "vector":
+		return fieldReadJSON
+	default:
+		return fieldReadRaw
+	}
+}
+
 func readField(field kitdbsql.Field, item any) any {
 	if item == nil {
 		return nil
@@ -245,31 +275,25 @@ func readField(field kitdbsql.Field, item any) any {
 	if temporal, ok := item.(exactTemporal); ok {
 		return temporal.text
 	}
-	typeInfo, found := kitdbsql.LookupKind(field.Kind)
-	if found {
-		switch typeInfo.Family {
-		case kitdbsql.FamilyInteger, kitdbsql.FamilySystem:
-			if integer, err := integerValue(item); err == nil {
-				return integer
-			}
-		case kitdbsql.FamilyFloat:
-			if number, err := floatValue(item); err == nil {
-				return number
-			}
-		case kitdbsql.FamilyBoolean:
-			truth, err := booleanValue(item)
-			if err == nil {
-				return truth
-			}
+	return readFieldValue(prepareFieldReadMode(field.Kind), item)
+}
+
+// Callers handle NULL and exactTemporal before selecting the prepared reader.
+func readFieldValue(mode fieldReadMode, item any) any {
+	switch mode {
+	case fieldReadInteger:
+		if integer, err := integerValue(item); err == nil {
+			return integer
 		}
-	}
-	switch field.Kind {
-	case "bool":
-		truth, err := booleanValue(item)
-		if err == nil {
+	case fieldReadFloat:
+		if number, err := floatValue(item); err == nil {
+			return number
+		}
+	case fieldReadBoolean:
+		if truth, err := booleanValue(item); err == nil {
 			return truth
 		}
-	case "json", "jsonb", "array", "vector":
+	case fieldReadJSON:
 		text, ok := item.(string)
 		if ok {
 			decoder := json.NewDecoder(strings.NewReader(text))

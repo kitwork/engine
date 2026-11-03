@@ -62,6 +62,44 @@ binding may attach snapshot-local function metadata to its expression nodes.
 `Checkpoint`, `Close`, and a later `Open` use the ordinary KitDB durability and
 recovery path. `Describe` returns SELECT result metadata without reading rows.
 
+Simple autocommit column projections with one non-null equality on a single
+primary field may read directly without opening a snapshot file. They still
+reserve the normal bounded snapshot admission slot. A monotonic transaction
+fence covers the catalog, physical row generation and caller-owned row bytes;
+an interleaved commit discards that attempt and captures a normal snapshot.
+The fallback consumes the same reservation and reuses schema/condition binding
+only when the captured catalog revision still matches. A changed revision
+forces fresh binding. No query-wide plan cache or shared reader is introduced.
+Explicit transactions, EXPLAIN, role-authorized reads and streaming keep their
+existing snapshot paths. This is a narrow embedded execution optimization,
+not a different isolation level or a wire-protocol latency guarantee.
+
+Forward row scans without transaction-local mutations use snapshot-local reusable
+page buffers. Secondary indexes, reverse scans and transactions with an overlay
+retain their ordinary cursor/merge/copy path. Index hydration keeps its existing
+query-local point reader. The secondary copy-elimination experiment was withdrawn
+pending [Windows publication/tail qualification](../../benchmarks/dbcompare/SECONDARY_TAIL_2026-10-26.md).
+No shared cache, file handle or isolation policy is added.
+
+Run the required primary/fallback and secondary-index correctness, ownership and allocation gate:
+
+```text
+go run ./cmd/releasegate --mode kitdb-read --report .artifacts/kitdb-read.json --timeout 15m
+```
+
+This runs normal/race/profile regression contracts, not latency benchmarks.
+See [the release-gate contract](../../cmd/releasegate/README.md#prepared-read-regression).
+
+The opt-in `TestSecondaryTailCampaign` runs four independent fixed-work epochs
+(16 databases, 128 writes and 512 point/index read iterations each), or one
+epoch for separate CPU/allocation/trace/lock attribution. It never runs
+implicitly through qualification gates. Set `KITDB_SECONDARY_TAIL=1` and a fresh
+`KITDB_TAIL_REPORT`; optional `KITDB_TAIL_ROOT` must be an absolute, nonexistent
+directory and retains fixtures on success or failure. Without it Go's temporary
+fixture cleanup still applies, so use an explicit root when investigating errors.
+Profile controls reuse `KITDB_TAIL_PROFILE`, `KITDB_TAIL_PREFIX` and the
+`kitdb_profile`-only `KITDB_LOCK_PROFILE`. These are test diagnostics, not app APIs.
+
 Arithmetic parameters with a numeric expression on the other side, such as
 `total + $1` or `$1 - total`, infer that expression's numeric kind. This also
 handles untyped text-format PostgreSQL parameters without guessing from their

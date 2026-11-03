@@ -40,6 +40,17 @@ recovery and the next write/checkpoint/reopen with abandoned staging untouched.
 Ordinary builds compile the internal probe to a no-op. These tagged exits are
 not production failpoints or physical power-loss evidence.
 
+On Windows, `go test -tags kitdbfault ./kitdb -run
+'^TestWindowsWAL(PublishedSyncFailure|PublicationCrash)$' -count=1` adds the
+handle-based WAL publication boundaries. A returned `wal-publish-sync` failure
+after rename must report durability uncertainty, refuse further reads/writes,
+drain the owner and recover every ACK on reopen; it must never restore old WAL
+offsets onto the replacement. Hard-exit children stop at `wal-publish-renamed`
+and `wal-publish-synced`, with retained history both off and on. These points
+use the **WAL path** (`<database>.wal`) as their explicit fault target, not the
+main database path. They compile to no-ops in ordinary builds and establish
+process-death recovery, not physical power-loss or arbitrary-filesystem safety.
+
 `go test ./kitdb/relational -run '^TestWriteCompositionConflictAndRecovery$'
 -count=10` additionally exits a child process without defers after committed
 INSERT SELECT/upsert operations and an uncommitted savepoint transaction.
@@ -234,3 +245,57 @@ It does not prove:
 Those claims require separate hardware power-cut campaigns, filesystem-specific
 qualification, and a future URL/token transport fault model. A green fault lab
 must never widen the durability claim beyond the environment actually tested.
+
+## Windows WAL Publication Diagnostics
+
+Windows publisher errors now include `phase=...` and `published=true/false`,
+while preserving the native errno and `os.LinkError` through `errors.Is/As`.
+`open-source` means opening the delete-capable publication handle on the already
+synced staging file; `replace-target` means its native rename failed;
+`fallback-replace` is the existing unsupported-API-only legacy branch;
+`sync-published` means rename already succeeded and durability remains uncertain.
+Path-resolution and source-close failures have separate labels. Earlier staging
+creation and later directory-sync errors retain their existing error paths.
+
+The `kitdb_waldiag` build tag adds failure-only observation before publication
+handle cleanup, staging removal and old-WAL restoration. Ordinary builds compile
+the observer to a zero-allocation no-op, even if its environment variables are
+set. Successful publication never invokes the observer. No retry or sharing
+bypass is added; post-publication errors still fail closed with durability
+uncertainty rather than restoring stale WAL offsets.
+
+The observer requires a host-created fixture marker, an explicit absolute root,
+and a fresh absolute report outside that root. It records path metadata (not WAL
+contents), the current publication handle's identity when available, and bounded
+Restart Manager resource users. The small fixture marker is read to validate
+configuration. These are trusted test controls, not tenant/app capabilities.
+The first report-file reservation wins and is never overwritten. Observation
+is not atomic with the failed OS call; resource users cannot prove blocking
+share flags or identify a filter driver. Native queries are synchronous, with
+at most three list retries and 256 users. No foreign handles are inspected and
+no shutdown, restart or security-policy change is performed.
+
+Run the controlled matrix from `engine/`:
+
+```powershell
+go test ./kitdb -run '^TestWindowsWALPublication(Phases|ResolutionPhase|FallbackRefusalPhase)$' -count=1
+go test -tags=kitdb_waldiag ./kitdb ./kitdb/internal/waldiag -run '^(TestWindowsWALPublicationCaptureBeforeCleanup|TestWALDiagnosticFixtureConfinement)$' -count=1
+go test '-tags=kitdbfault,kitdb_waldiag' ./kitdb -run '^TestWindowsWAL(PublishedSyncFailure|PublicationSyncCapture|PublicationCrash)$' -count=1
+```
+
+For the existing bounded real-workload forensic test, use fresh paths only:
+
+```powershell
+$env:KITDB_WAL_FORENSIC = '1'
+$env:KITDB_WAL_ROOT = [IO.Path]::GetFullPath('.artifacts/wal-fixture-fresh')
+$env:KITDB_WAL_REPORT = [IO.Path]::GetFullPath('.artifacts/wal-forensic-fresh.jsonl')
+$env:KITDB_WAL_DIAG_ROOT = $env:KITDB_WAL_ROOT
+$env:KITDB_WAL_DIAG_REPORT = [IO.Path]::GetFullPath('.artifacts/wal-before-cleanup-fresh.json')
+go test -tags=kitdb_waldiag ./kitdb/relational -run '^TestKitDBWALForensicCampaign$' -count=1 -timeout=12m
+```
+
+That campaign refuses existing fixture/report paths, retains failed originals,
+and verifies only copies against the ACK model. A successful recovery copy does
+not convert a publication failure into a passing campaign. Clear diagnostic
+environment settings after a manual run. The [2026-10-26 phase report](../benchmarks/dbcompare/WAL_PHASE_2026-10-26.md)
+records a real pre-cleanup `replace-target` denial, not a solved OS blocker.

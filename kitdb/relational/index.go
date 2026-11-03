@@ -624,13 +624,22 @@ func (transaction *Transaction) walkAccessRowsAdmitted(
 	admit func(key, value []byte) error,
 	visit func(key, encoded []byte) (bool, error),
 ) error {
+	var reader *kitdbengine.PointReader
+	if access.kind == rowAccessSecondary {
+		var err error
+		reader, err = transaction.pointReader()
+		if err != nil {
+			return err
+		}
+		defer reader.Close()
+	}
 	get := func(key []byte) ([]byte, bool, error) {
 		if admit != nil {
 			if err := admit(key, nil); err != nil {
 				return nil, false, err
 			}
 		}
-		value, found, err := transaction.Get(key)
+		value, found, err := transaction.getWithPointReader(key, nil, reader)
 		if err == nil && admit != nil {
 			err = admit(nil, value)
 		}
@@ -719,6 +728,15 @@ func (transaction *Transaction) walkAccessRowsObserved(
 	if stats == nil {
 		return transaction.walkAccessRows(access, visit)
 	}
+	var reader *kitdbengine.PointReader
+	if access.kind == rowAccessSecondary {
+		var err error
+		reader, err = transaction.pointReader()
+		if err != nil {
+			return err
+		}
+		defer reader.Close()
+	}
 	cursorStats := kitdbengine.CursorStats{}
 	defer func() {
 		stats.addCursorStats(cursorStats)
@@ -729,7 +747,7 @@ func (transaction *Transaction) walkAccessRowsObserved(
 	}
 	pointLookup := func(key []byte) ([]byte, bool, error) {
 		stats.PointLookups++
-		return transaction.getWithStats(key, &cursorStats)
+		return transaction.getWithPointReader(key, &cursorStats, reader)
 	}
 	resolveRowKey := func(logical []byte) ([]byte, error) {
 		if access.rowGeneration == 0 {
