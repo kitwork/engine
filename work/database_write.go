@@ -66,9 +66,6 @@ func (t *SchemaTable) write(fn func(writeExecutor) error) error {
 // runWrite runs an update, a delete or an upsert.
 func (m *ManagedDatabase) runWrite(prepared *preparedStatement, binder *statementBinder) value.Value {
 	s := prepared.statement
-	if m.proxy.engine == "kitdb" {
-		return value.InvalidFailure(value.UnsupportedCode, fmt.Sprintf("%s trên KitDB chưa có trong engine hôm nay: database của app là SQLite từ 29/10/2026", s.Action))
-	}
 	table, failure := m.table(s.Table)
 	if table == nil {
 		return failure

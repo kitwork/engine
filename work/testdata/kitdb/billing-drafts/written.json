@@ -1,0 +1,46 @@
+[
+  [
+    {
+      "code": "HD-1",
+      "id": "03gwep7dxm6vil4qkftahsj8our9n2bc1y5z"
+    }
+  ],
+  null,
+  [
+    {
+      "amount": "35000",
+      "createdAt": "2026-11-03T14:25:17Z",
+      "day": "2026-10-29",
+      "email": "a@example.com",
+      "id": "03gwep7jfuc2lyzdsvx8bhi5mk6a4oqnr1t9",
+      "item": "trà",
+      "note": "giao sáng"
+    },
+    {
+      "amount": "4.5",
+      "createdAt": "2026-11-03T14:25:17Z",
+      "day": "2026-10-29",
+      "email": "b@example.com",
+      "id": "03gwep7jk8ft9ozvhrixuyn4smbca1dl52q6",
+      "item": "trà"
+    },
+    {
+      "amount": "0.05",
+      "createdAt": "2026-11-03T14:25:17Z",
+      "day": "2026-10-28",
+      "email": "c@example.com",
+      "id": "03gwep7jnulykcq4v82brx56s1fo9mihatzd",
+      "item": "trà",
+      "note": "x"
+    },
+    {
+      "amount": "60000",
+      "createdAt": "2026-11-03T14:25:17Z",
+      "day": "2026-10-29",
+      "email": "d@example.com",
+      "id": "03gwep7jtma1ci6qrbyl8u5kfso49hd2znvx",
+      "item": "trà",
+      "note": "y"
+    }
+  ]
+]

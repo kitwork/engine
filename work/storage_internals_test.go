@@ -29,15 +29,6 @@ type storageInternals struct {
 	scope  *requestscope.Scope
 }
 
-// Kitdb binds named structs to a KitDB file of the site's .data/, with the options the engine's
-// internals take (recovery, token, access, drop, migrate).
-func (s *storageInternals) Kitdb(args ...value.Value) value.Value {
-	return newDbProxy(s.tenant, s.scope, "kitdb", args...)
-}
-
-// Open is Kitdb by its other name.
-func (s *storageInternals) Open(args ...value.Value) value.Value { return s.Kitdb(args...) }
-
 // Sqlite binds named structs to a SQLite file of the site's .data/.
 func (s *storageInternals) Sqlite(args ...value.Value) value.Value {
 	return newDbProxy(s.tenant, s.scope, "sqlite", args...)

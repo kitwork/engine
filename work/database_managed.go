@@ -21,7 +21,7 @@ import (
 // are checked against the live schema with the rules the compiler checked them with (the compiler read
 // the schema file, this reads what its builders made), and each literal against its column's kind. Every
 // run then binds the holes by column kind and runs it through the table's query (SchemaTable), on the
-// app's KitDB in .database/application/. A query lambda is never run.
+// app's SQLite file in .database/application/. A query lambda is never run.
 //
 // A route's top-level const holds the handle and every request of the route shares it, so the cache of
 // checked statements is a sync.Map and each statement builds its own query.

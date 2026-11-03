@@ -41,7 +41,7 @@ func (m *ManagedDatabase) transaction(args []value.Value) value.Value {
 	if lambda == nil {
 		return value.InvalidFailure(value.InvalidArgumentCode, "transaction nhận một hàm: db.transaction((database) => { … })")
 	}
-	if m.proxy.engine == "kitdb" || m.proxy.sqlitePath == "" {
+	if m.proxy.sqlitePath == "" {
 		return value.InvalidFailure(value.UnsupportedCode, "db.transaction chạy trên database có lịch sử (SQLite của app hay của host)")
 	}
 	// every table migrated first: a migration from inside the transaction would wait for it

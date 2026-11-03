@@ -85,6 +85,9 @@ func kitDBCopyMarked(t *Tenant, name, target, source string) bool {
 	return marked > 0
 }
 
+// kitDBApplicationFile is the file of the app's database inside .database/application/ before 29/10/2026.
+const kitDBApplicationFile = "application.kitdb"
+
 // kitDBApplicationSource is the KitDB file of the app's database as the mark of a copy names it.
 const kitDBApplicationSource = ".database/application/" + kitDBApplicationFile
 
@@ -308,8 +311,8 @@ func (t *Tenant) appSchemaOf(proxy *dbProxy) (string, bool) {
 		return "", false
 	}
 	schema := ""
-	if proxy.dbName != kitDBApplicationName {
-		rest, own := strings.CutPrefix(proxy.dbName, kitDBApplicationName+"/")
+	if proxy.dbName != applicationDatabaseName {
+		rest, own := strings.CutPrefix(proxy.dbName, applicationDatabaseName+"/")
 		if !own || rest == "" {
 			return "", false
 		}

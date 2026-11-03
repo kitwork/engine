@@ -105,11 +105,9 @@ func (m *ManagedDatabase) run(prepared *preparedStatement, holes []value.Value) 
 		table = frozen
 	}
 	if truth == bindOpen && predicate != nil {
-		if m.proxy.engine != "kitdb" {
-			// a decimal on SQLite is a scaled integer: what it is compared with is too (db.sqlite_decimal.go)
-			if message := sqliteWritePredicate(s.Table, prepared.columns, predicate); message != "" {
-				return value.InvalidFailure(value.InvalidArgumentCode, message)
-			}
+		// a decimal on SQLite is a scaled integer: what it is compared with is too (db.sqlite_decimal.go)
+		if message := sqliteWritePredicate(s.Table, prepared.columns, predicate); message != "" {
+			return value.InvalidFailure(value.InvalidArgumentCode, message)
 		}
 		table.builder().WherePredicate(*predicate)
 	}
@@ -335,7 +333,7 @@ func bindValue(column string, spec *ColumnSpec, item value.Value, site string) (
 	case "decimal":
 		switch {
 		case item.K == value.Number && !math.IsNaN(item.N) && !math.IsInf(item.N, 0):
-		case item.K == value.String && validKitDBDecimal(item.String()):
+		case item.K == value.String && validDecimalText(item.String()):
 		default:
 			return value.Value{}, wrong("số hay chuỗi thập phân")
 		}
@@ -481,4 +479,49 @@ func checkLiterals(s *statement.Statement, columns map[string]*ColumnSpec) value
 		}
 	}
 	return failure
+}
+
+// validDecimalText reports a decimal written as text: an optional sign, digits with an optional fraction, and an
+// optional exponent.
+func validDecimalText(text string) bool {
+	if text == "" {
+		return false
+	}
+	position := 0
+	if text[position] == '+' || text[position] == '-' {
+		position++
+		if position == len(text) {
+			return false
+		}
+	}
+	digits := 0
+	for position < len(text) && text[position] >= '0' && text[position] <= '9' {
+		position++
+		digits++
+	}
+	if position < len(text) && text[position] == '.' {
+		position++
+		for position < len(text) && text[position] >= '0' && text[position] <= '9' {
+			position++
+			digits++
+		}
+	}
+	if digits == 0 {
+		return false
+	}
+	if position < len(text) && (text[position] == 'e' || text[position] == 'E') {
+		position++
+		if position < len(text) && (text[position] == '+' || text[position] == '-') {
+			position++
+		}
+		exponentDigits := 0
+		for position < len(text) && text[position] >= '0' && text[position] <= '9' {
+			position++
+			exponentDigits++
+		}
+		if exponentDigits == 0 {
+			return false
+		}
+	}
+	return position == len(text)
 }

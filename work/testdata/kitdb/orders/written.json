@@ -1,0 +1,39 @@
+[
+  [
+    {
+      "amount": "35000",
+      "createdAt": "2026-11-03T14:25:17Z",
+      "day": "2026-10-29",
+      "email": "a@example.com",
+      "id": "03gwep6oa1qk4dc7bj8xvims2rtzlnh9y5uf",
+      "item": "trà",
+      "note": "giao sáng"
+    },
+    {
+      "amount": "4.5",
+      "createdAt": "2026-11-03T14:25:17Z",
+      "day": "2026-10-29",
+      "email": "b@example.com",
+      "id": "03gwep6ocl8b47zmnr9i1qvhxj2kfuyas5dt",
+      "item": "trà"
+    },
+    {
+      "amount": "0.05",
+      "createdAt": "2026-11-03T14:25:17Z",
+      "day": "2026-10-28",
+      "email": "c@example.com",
+      "id": "03gwep6ofysm5lc4qh72inbr9vt8azjxdk1u",
+      "item": "trà",
+      "note": "x"
+    },
+    {
+      "amount": "60000",
+      "createdAt": "2026-11-03T14:25:17Z",
+      "day": "2026-10-29",
+      "email": "d@example.com",
+      "id": "03gwep6ojbvcu4kaqltsnmfyxh7i9z8r5d12",
+      "item": "trà",
+      "note": "y"
+    }
+  ]
+]

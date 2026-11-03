@@ -16,7 +16,7 @@ import (
 	"github.com/kitwork/engine/value"
 )
 
-// A request's nested runs (compute.go: query-builder lambdas, transaction callbacks) draw on the
+// A request's nested runs (compute.go: query-builder lambdas, the function of db.transaction) draw on the
 // request VM's energy and call depth, and a failure that ends a run ends the request, whatever the
 // query builder does with the lambda's result (runtime/nesting.go). Each test has a control: the
 // same route with room to finish, which proves the fixture and makes the failure the budget's.
@@ -24,11 +24,9 @@ import (
 const nestingPreamble = `
 import * as router from "kitwork/router";
 import { internals } from "kitwork";
-// the query builder over a SQLite file of the site, and a KitDB of it with a transaction: the engine's
-// storage, through the test-only module (storage_internals_test.go)
+// the query builder over a SQLite file of the site: the engine's storage, through the test-only module
+// (storage_internals_test.go)
 const file = internals.file("app.db");
-const { kitdb, struct, id, text } = internals;
-const db = kitdb("nest.kitdb", { items: struct({ id: id(), name: text() }) });
 
 const burn = (n) => {
     let total = 0;
@@ -38,6 +36,57 @@ const burn = (n) => {
     return total;
 };
 `
+
+// The function of db.transaction runs as a VM nested in the request's (database_transaction.go): each round
+// burns about 144 000 inside it, the ceiling is 300 000, so the third round cannot finish. It replaces the
+// test of the KitDB record transaction's callback, gone with KROW (03/11/2026).
+//
+// CONTROL (03/11/2026): with the request's energy ceiling 10 000 000 the ten rounds run, "rounds:10".
+func TestTransactionSharesTheRequestEnergy(t *testing.T) {
+	saved := AllowLocal
+	AllowLocal = true // developing: a failure answers with its text, which the test reads
+	t.Cleanup(func() { AllowLocal = saved })
+	route := `import * as router from "kitwork/router";
+import { db } from "app/.shared/schema/shop.work";
+
+const burn = (n) => {
+    let total = 0;
+    for (let i = 0; i < n; i++) {
+        total = total + i;
+    }
+    return total;
+};
+
+router.get((context) => {
+    let rounds = 0;
+    for (let k = 0; k < 10; k++) {
+        db.transaction((database) => {
+            burn(4000);
+            return database.first((orders) => orders.email === "a@x.vn");
+        });
+        rounds = rounds + 1;
+    }
+    return context.text("rounds:" + rounds);
+});
+`
+	for _, test := range []struct {
+		energy uint64
+		check  func(string) bool
+		want   string
+	}{
+		{10_000_000, func(body string) bool { return strings.Contains(body, "rounds:10") }, "all ten transactions run"},
+		{300_000, func(body string) bool {
+			return !strings.Contains(body, "rounds:") && strings.Contains(body, "Energy Limit Exceeded")
+		}, "the request fails on its energy"},
+	} {
+		managed := newManagedApp(t, map[string]string{".shared/schema/shop.work": writeShopSchema, "shop.example/router.work": route})
+		tenant := managed.site("shop.example")
+		tenant.MaxEnergy = test.energy
+		if _, body := managedGet(tenant, "/"); !test.check(body) {
+			t.Fatalf("energy %d: %q, want %s", test.energy, body, test.want)
+		}
+	}
+}
 
 func newNestingTenant(t *testing.T, routes string, maxEnergy uint64) *Tenant {
 	t.Helper()
@@ -94,36 +143,6 @@ router.get((ctx) => {
 	body := serveNesting(t, newNestingTenant(t, routes, 300_000), context.Background())
 	if strings.Contains(body, "rounds:") || !strings.Contains(body, "Energy Limit Exceeded") {
 		t.Fatalf("the lambdas together exceed the request's energy; the request must fail on it: %q", body)
-	}
-}
-
-// A transaction callback and the query lambda inside it, nested two deep: each round spends about
-// 144 000 across both, the ceiling is 300 000, so the third round cannot finish. The inner lambda
-// draws on the callback, the callback on the request.
-func TestNestedTransactionsShareTheRequestEnergy(t *testing.T) {
-	routes := `
-router.get((ctx) => {
-    let rounds = 0;
-    for (let k = 0; k < 10; k++) {
-        db.transaction((tx) => {
-            burn(2000);
-            tx.items.where(row => {
-                burn(2000);
-                return row.id == 1;
-            });
-        });
-        rounds = rounds + 1;
-    }
-    return ctx.text("rounds:" + rounds);
-});
-`
-	if body := serveNesting(t, newNestingTenant(t, routes, 10_000_000), context.Background()); !strings.Contains(body, "rounds:10") {
-		t.Fatalf("control: with room, all ten transactions run: %q", body)
-	}
-
-	body := serveNesting(t, newNestingTenant(t, routes, 300_000), context.Background())
-	if strings.Contains(body, "rounds:") || !strings.Contains(body, "Energy Limit Exceeded") {
-		t.Fatalf("the nested callbacks together exceed the request's energy; the request must fail on it: %q", body)
 	}
 }
 

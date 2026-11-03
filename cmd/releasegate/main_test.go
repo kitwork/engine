@@ -4,14 +4,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/kitwork/engine/compiler"
-	"github.com/kitwork/engine/kitdb"
 	kitruntime "github.com/kitwork/engine/runtime"
-	"github.com/kitwork/engine/work"
 )
 
 func TestReleasePlanModes(t *testing.T) {
@@ -23,47 +20,32 @@ func TestReleasePlanModes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	kitDBVerify, err := releasePlan("kitdb-verify")
-	if err != nil {
-		t.Fatal(err)
-	}
-	kitDBRelease, err := releasePlan("kitdb-release")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(verify) < 11 || len(release) <= len(verify) ||
-		len(kitDBVerify) < 8 || len(kitDBRelease) <= len(kitDBVerify) {
+	if len(verify) < 8 || len(release) <= len(verify) {
 		t.Fatalf("plan sizes: verify=%d release=%d", len(verify), len(release))
+	}
+	for _, mode := range []string{"kitdb-verify", "kitdb-release", "kitdb-auth", "kitdb-lifecycle", "kitdb-read"} {
+		if _, err := releasePlan(mode); err == nil {
+			t.Fatalf("%s is a mode still; KitDB's modes went with KROW (03/11/2026)", mode)
+		}
 	}
 
 	required := map[string]bool{
-		"KitDB 1.x compatibility contract":  false,
-		"VM compatibility archive":          false,
-		"VM fault gauntlet":                 false,
-		"Language/inspector contracts":      false,
-		"KitDB database journey":            false,
-		"KitDB standalone commerce journey": false,
-		"KitDB commerce hard-crash matrix":  false,
-		"KitDB durability/recovery":         false,
-		"KitDB projection recovery":         false,
-		"Focused race":                      false,
-		"Compiler-to-VM fuzz":               false,
-		"VM determinism fuzz":               false,
-		"VM pool soak":                      false,
-		"VM value-pressure campaign":        false,
-		"Memory retention campaign":         false,
-		"Restart/recovery campaign":         false,
-		"Concurrent cache campaign":         false,
-		"KitDB kernel race":                 false,
-		"KitDB search race":                 false,
-		"KitDB relational race":             false,
-		"KitDB replica hard-crash matrix":   false,
-		"KitDB catalog hard-crash matrix":   false,
-		"KitDB import hard-crash matrix":    false,
-		"KitDB index hard-crash matrix":     false,
-		"KitDB analytics hard-crash matrix": false,
-		"KitDB canary smoke":                false,
-		"KitDB replica hard-crash soak":     false,
+		"VM compatibility archive":     false,
+		"VM fault gauntlet":            false,
+		"Language/inspector contracts": false,
+		"VM/compiler contracts":        false,
+		"Diagnostics/lifecycle":        false,
+		"Build":                        false,
+		"Full tests":                   false,
+		"Vet":                          false,
+		"Focused race":                 false,
+		"Compiler-to-VM fuzz":          false,
+		"VM determinism fuzz":          false,
+		"VM pool soak":                 false,
+		"VM value-pressure campaign":   false,
+		"Memory retention campaign":    false,
+		"Restart/recovery campaign":    false,
+		"Concurrent cache campaign":    false,
 	}
 	for _, step := range release {
 		if _, ok := required[step.Name]; ok {
@@ -79,43 +61,6 @@ func TestReleasePlanModes(t *testing.T) {
 			if step.Env["KITWORK_VALUE_PRESSURE_REPORT"] != ".artifacts/value-pressure.json" {
 				t.Fatal("value-pressure campaign omitted its bounded JSON evidence path")
 			}
-		}
-		if step.Name == "KitDB database journey" {
-			if step.Env["KITDB_RELEASE_REPORT"] != ".artifacts/kitdb-database-gate.json" {
-				t.Fatal("KitDB database journey omitted its bounded JSON evidence path")
-			}
-			if !containsArgument(step.Command, "^(TestKitDBDatabaseReleaseGate|TestKitDBPostgresCopyInWithLibPQIsAtomic)$") {
-				t.Fatal("KitDB database journey omitted the composed frontend-to-restore oracle")
-			}
-		}
-		if step.Name == "KitDB standalone commerce journey" {
-			assertCommerceGate(t, step)
-		}
-		if step.Name == "KitDB commerce hard-crash matrix" &&
-			(!containsArgument(step.Command, "^TestKitDBCommerceNativeJourney$") ||
-				step.Env["CGO_ENABLED"] != "0" || step.Env["KITDB_COMMERCE_REPORT"] != "") {
-			t.Fatal("commerce campaign omitted native coverage or overwrites single-run evidence")
-		}
-		if step.Name == "KitDB durability/recovery" {
-			if !containsArgument(step.Command, "./kitdb") || !containsArgument(step.Command, "./work") {
-				t.Fatal("KitDB recovery gate omitted kernel or relational crash evidence")
-			}
-			if !containsArgument(step.Command, "^(TestRecoveryTruncatesEveryIncompleteTail|TestCheckpointRecoveryTruncatesIncompleteWALTail|TestBackupAnchorCapturesWALOverlayAndRemainsStandalone|TestRestoreToTransactionFromInsideHistorySegment|TestKitDBAdditiveIndexBuildSurvivesCrashAndInterleavedWrites|TestKitDBPhysicalIndexGenerationReplacesAndCleansAfterHardCrash|TestKitDBPostgresResumableImportHardCrashMatrix)$") {
-				t.Fatal("KitDB recovery gate omitted a reviewed crash/backup boundary")
-			}
-		}
-		if step.Name == "KitDB projection recovery" &&
-			(!containsArgument(step.Command, "./kitdb/relational") ||
-				!containsArgument(step.Command, "^(TestColumnarIncrementalProcessExitDuringBuild|TestProjectionSnapshotFreshnessCorruptionAndCancellation|TestAnalyticsRefreshUpgradesBlockDirectoryWithoutRewritingKCOL)$")) {
-			t.Fatal("KitDB projection recovery gate omitted publication, corruption, or metadata-upgrade evidence")
-		}
-		if step.Name == "KitDB search race" &&
-			(!containsArgument(step.Command, "-race") || !containsArgument(step.Command, "./search")) {
-			t.Fatal("KitDB search race omitted race detection or the standalone search engine")
-		}
-		if step.Name == "KitDB 1.x compatibility contract" &&
-			!containsArgument(step.Command, "^(TestKitDBV1CompatibilityProfile|TestKitDBV1FrozenMainFixture|TestKitDBV1RelationalCompatibilityProfile|TestOperatorVersionReportsKitDBV1Contract)$") {
-			t.Fatal("KitDB compatibility gate omitted the frozen 1.0 main-file fixture")
 		}
 		if step.Name == "Focused race" &&
 			(!containsArgument(step.Command, "./conformance") ||
@@ -140,20 +85,6 @@ func TestReleasePlanModes(t *testing.T) {
 			if step.Env["KITWORK_CONTENTION_REPORT"] != ".artifacts/cache-contention-campaign.json" {
 				t.Fatal("contention campaign omitted its bounded JSON evidence path")
 			}
-		}
-		if step.Name == "KitDB replica hard-crash soak" {
-			if step.Env["KITDB_REPLICA_SOAK_ITERATIONS"] != "128" ||
-				step.Env["KITDB_REPLICA_SOAK_SEED"] != "20260828" {
-				t.Fatal("KitDB replica soak omitted its bounded reproducible campaign")
-			}
-		}
-		if step.Name == "KitDB canary smoke" &&
-			!containsArgument(step.Command, "--json=.artifacts/kitdb-canary-smoke.json") {
-			t.Fatal("KitDB canary smoke omitted its JSON evidence")
-		}
-		if strings.Contains(step.Name, "hard-crash matrix") &&
-			!containsArgument(step.Command, "-count=10") {
-			t.Fatalf("%s is not repeated ten times", step.Name)
 		}
 		if step.Name == "VM/compiler contracts" &&
 			!containsArgument(step.Command, "TestVMContract|TestCompilerV4") {
@@ -180,63 +111,8 @@ func TestReleasePlanModes(t *testing.T) {
 			t.Fatalf("release plan omitted %s", name)
 		}
 	}
-	for _, expectation := range []struct {
-		plan []gateStep
-		name string
-	}{
-		{kitDBVerify, "KitDB projection recovery"},
-		{kitDBVerify, "KitDB search suite"},
-		{kitDBVerify, "KitDB standalone commerce journey"},
-		{kitDBRelease, "KitDB standalone commerce journey"},
-		{kitDBRelease, "KitDB commerce hard-crash matrix"},
-		{kitDBRelease, "KitDB projection recovery"},
-		{kitDBRelease, "KitDB search race"},
-		{kitDBRelease, "KitDB analytics hard-crash matrix"},
-	} {
-		if !containsStep(expectation.plan, expectation.name) {
-			t.Fatalf("KitDB plan omitted %s", expectation.name)
-		}
-	}
-	searchSuite, ok := findStep(kitDBVerify, "KitDB search suite")
-	if !ok || !containsArgument(searchSuite.Command, "./search") {
-		t.Fatal("KitDB search suite omitted the standalone search engine")
-	}
-	staticAnalysis, ok := findStep(kitDBVerify, "KitDB static analysis")
-	if !ok || !containsArgument(staticAnalysis.Command, "./search") {
-		t.Fatal("KitDB static analysis omitted the standalone search engine")
-	}
-	for _, name := range []string{"KitDB operator suite", "KitDB command build", "KitDB static analysis"} {
-		step, ok := findStep(kitDBVerify, name)
-		if !ok || !containsArgument(step.Command, "./cmd/kitdbdist") {
-			t.Fatalf("%s omitted distribution tooling", name)
-		}
-	}
 	if _, err := releasePlan("unknown"); err == nil {
 		t.Fatal("unknown release mode was accepted")
-	}
-}
-
-func assertCommerceGate(t *testing.T, step gateStep) {
-	t.Helper()
-	if !containsArgument(step.Command, "./cmd/kitdbdist") ||
-		!containsArgument(step.Command, "^TestKitDBCommerceNativeJourney$") ||
-		!containsArgument(step.Command, "-count=1") || !containsArgument(step.Command, "-timeout=5m") ||
-		step.Env["KITDB_COMMERCE_REPORT"] != ".artifacts/kitdb-commerce-gate.json" || step.Env["CGO_ENABLED"] != "0" {
-		t.Fatalf("incomplete standalone commerce gate: %+v", step)
-	}
-}
-
-func TestKitDBCommerceGateCannotBeOmitted(t *testing.T) {
-	for _, mode := range []string{"verify", "release", "kitdb-verify", "kitdb-release"} {
-		plan, err := releasePlan(mode)
-		if err != nil {
-			t.Fatal(err)
-		}
-		step, found := findStep(plan, "KitDB standalone commerce journey")
-		if !found {
-			t.Fatalf("%s omitted commerce journey", mode)
-		}
-		assertCommerceGate(t, step)
 	}
 }
 
@@ -249,9 +125,7 @@ func TestCompatibilityReportMatchesRuntime(t *testing.T) {
 		report.CompilerSchemaVersion != compiler.CompilerSchemaVersion ||
 		report.InstructionSetChecksum == "" ||
 		report.CompilerFingerprint != compiler.Fingerprint() ||
-		report.RuntimeLimits != kitruntime.Limits() ||
-		report.KitDBKernel != kitdb.CurrentCompatibility() ||
-		report.KitDBRelational != work.CurrentKitDBRelationalCompatibility() {
+		report.RuntimeLimits != kitruntime.Limits() {
 		t.Fatalf("compatibility report = %+v", report)
 	}
 }

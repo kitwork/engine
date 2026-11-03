@@ -1,11 +1,10 @@
 package work
 
 import (
-	"context"
 	"crypto/sha256"
 	"database/sql"
-	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -18,7 +17,6 @@ import (
 
 	"github.com/kitwork/engine/app"
 	kitdbengine "github.com/kitwork/engine/kitdb"
-	"github.com/kitwork/engine/kitdb/relational"
 	"github.com/kitwork/engine/storage"
 	queuestore "github.com/kitwork/engine/utilities/queue"
 	"github.com/kitwork/engine/value"
@@ -82,149 +80,86 @@ func copyKitDB(t *testing.T, root string, dryRun bool) (KitDBCopyReport, error) 
 	return tenant.CopyKitDB(KitDBCopyOptions{DryRun: dryRun})
 }
 
-// writeKitDBRows writes rows into the table of acme's application.kitdb as the ORM of KitDB wrote them, the
-// tables declared as .shared/schema/ declares them, and gives each row as written (its id, its createdAt).
-func writeKitDBRows(t *testing.T, root, table string, rows ...map[string]value.Value) []map[string]value.Value {
+// kitDBFixture puts the KitDB files of a fixture of testdata/kitdb/ in acme's .database/ and gives, for each
+// table it wrote rows into, the rows as written (their ids, their createdAt). The files were written by the engine
+// as it was before KROW went (engine f210bef8), the ORM of KitDB writing the tables .shared/schema/ declares and
+// KitDB's SQL the runs (queuestore), so a copy reads the format an app's old file has, not one this test makes.
+// The fixtures: orders (kitDBCopyOrders), runs (a job's run pending, one completed, one with a key, a schedule's
+// run; the job's definition and the schedule's state), orders-runs (both), decimal (two orders a copy rounds),
+// billing-drafts (invoices HD-1, drafts empty, orders), billing-schema (invoices of .schema("billing") and orders),
+// schedule-sau (the state of TestKitDBCopyResumesTheSchedules), datastore (storage.kitdb).
+func kitDBFixture(t *testing.T, root, name string) [][]map[string]value.Value {
 	t.Helper()
-	runtime := app.NewRuntime("acme")
-	tenant := NewAppTenantWithRuntimeLayout(root, "acme", RootLayoutMultiTenant, runtime)
-	defer func() {
-		tenant.Close()
-		runtime.Close()
-	}()
-	if err := tenant.prepareProgram(); err != nil {
-		t.Fatal(err)
+	source := filepath.Join("testdata", "kitdb", name)
+	for _, folder := range []string{"application", "storage"} {
+		entries, err := os.ReadDir(filepath.Join(source, folder))
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		target := filepath.Join(root, "acme", ".database", folder)
+		if err := os.MkdirAll(target, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for _, entry := range entries {
+			data, err := os.ReadFile(filepath.Join(source, folder, entry.Name()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(target, entry.Name()), data, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
-	declared, _, _, err := tenant.kitDBCopyDeclarations()
+	data, err := os.ReadFile(filepath.Join(source, "written.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	tables := map[string]value.Value{}
-	for name, each := range declared {
-		tables[name] = value.Value{K: value.Proxy, V: bindStructDef(name, nil, each.columns)}
+	var texts [][]map[string]string
+	if err := json.Unmarshal(data, &texts); err != nil {
+		t.Fatal(err)
 	}
-	declaration := declareDbProxy(tenant, nil, "kitdb", value.New(kitDBApplicationName), value.New(tables),
-		value.New(map[string]value.Value{"migrate": value.New(true)}))
-	proxy, ok := declaration.V.(*dbProxy)
-	if !ok {
-		t.Fatalf("the KitDB declaration = %v", declaration.Text())
-	}
-	var written []map[string]value.Value
-	if len(rows) == 0 {
-		// no row: the table is made in the file by a first statement, as an app made it
-		handle, failure := proxy.table(table)
-		if handle == nil {
-			t.Fatalf("table %s: %s", table, failure.Text())
+	written := make([][]map[string]value.Value, len(texts))
+	for index, call := range texts {
+		for _, text := range call {
+			row := map[string]value.Value{}
+			for key, field := range text {
+				row[key] = value.New(field)
+			}
+			written[index] = append(written[index], row)
 		}
-		if count := handle.Count(); count.Failed() || count.N != 0 {
-			t.Fatalf("count of %s = %s", table, count.Text())
-		}
-	}
-	for _, row := range rows {
-		handle, failure := proxy.table(table)
-		if handle == nil {
-			t.Fatalf("table %s: %s", table, failure.Text())
-		}
-		created := handle.Create(value.New(row))
-		if created.Failed() || created.K != value.Map {
-			t.Fatalf("create in KitDB: %s", created.Text())
-		}
-		written = append(written, created.Map())
 	}
 	return written
 }
 
-// kitDBRuns is acme's application.kitdb as the runs were kept in it before 29/10/2026: queuestore's tables
-// made and written by KitDB's SQL, one write at a time.
-type kitDBRuns struct {
-	engine *relational.Engine
-	db     *sql.DB
-}
-
-func (r *kitDBRuns) Read(fn func(db queuestore.SQL) error) error  { return fn(r.db) }
-func (r *kitDBRuns) Write(fn func(db queuestore.SQL) error) error { return fn(r.db) }
-
-func (r *kitDBRuns) close() {
-	r.db.Close()
-	r.engine.Close()
-}
-
-func openKitDBRuns(t *testing.T, root string) *kitDBRuns {
-	t.Helper()
-	path := filepath.Join(root, "acme", ".database", "application", kitDBApplicationFile)
-	engine, err := relational.OpenWithContext(context.Background(), path, relational.Options{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	db, err := relational.OpenNativeSQL(engine)
-	if err != nil {
-		engine.Close()
-		t.Fatal(err)
-	}
-	if err := queuestore.InitSchema(db); err != nil {
-		t.Fatal(err)
-	}
-	return &kitDBRuns{engine: engine, db: db}
-}
-
-// kitDBRunsFixture writes runs of both kinds into acme's application.kitdb: a job's run pending, one
-// completed, one with a key, a schedule's run; the job's definition and the schedule's state.
-func kitDBRunsFixture(t *testing.T, root string) {
-	t.Helper()
-	runs := openKitDBRuns(t, root)
-	defer runs.close()
-	at := time.Date(2026, 10, 28, 8, 0, 0, 0, time.UTC)
-	jobs := queuestore.New(runs, queueKind)
-	if _, _, err := jobs.Enqueue(queuestore.NewRun{Name: "camOn", Data: `{"orderId":1}`, MaxAttempts: 3, Timeout: 30 * time.Second, Available: at}, at); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := jobs.Enqueue(queuestore.NewRun{Name: "camOn", Data: `{"orderId":2}`, Key: "order:2", MaxAttempts: 1, Available: at}, at); err != nil {
-		t.Fatal(err)
-	}
-	claims, _, err := jobs.Claim(at, time.Minute, 1, nil)
-	if err != nil || len(claims) != 1 {
-		t.Fatalf("claim = %v %v", claims, err)
-	}
-	if won, err := jobs.Complete(claims[0].ID, claims[0].Token, "xong", at.Add(time.Second)); !won || err != nil {
-		t.Fatalf("complete = %v %v", won, err)
-	}
-	if _, err := jobs.Sync([]queuestore.Definition{{Name: "camOn", Source: ".shared/queue/camOn.work", Retry: 2, Timeout: "30s", TimeoutMS: 30000, ContentHash: "abc"}}, queuestore.Withheld{}, at); err != nil {
-		t.Fatal(err)
-	}
-	schedules := queuestore.New(runs, scheduleKind)
-	if err := schedules.SyncSchedules([]queuestore.ScheduleState{{Name: "beat", Rule: `every("1h")`, DeclaredAt: at, LastAt: at}}, nil, at); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := schedules.Dispatch(at.Add(time.Hour), queuestore.NewRun{Name: "beat", Data: `{}`, Key: queuestore.Stamp(at.Add(time.Hour)), MaxAttempts: 1, Available: at}, true, at.Add(time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // The engine's tables of the runs, made by KitDB's SQL (relational, queuestore.InitSchema), read through the
-// ORM's decoders (decodeKitDBCatalog, decodeKitDBRow) row for row as KitDB's SQL reads them: the digest of
-// kitwork_runs, kitwork_definitions and kitwork_schedules is the same either way.
+// ORM's decoders (decodeKitDBCatalog, decodeKitDBRow) row for row as KitDB's SQL read them when the fixture was
+// written (testdata/kitdb/runs/sql.json): the digest of kitwork_runs, kitwork_definitions and kitwork_schedules is
+// the same either way.
 //
 // CONTROL: with readKitDBCopyStructs keeping no row (the scan's append left out), "kitwork_runs: the ORM read
-// 0 rows, KitDB's SQL 3".
+// 0 rows (digest …), KitDB's SQL 3 (digest …)" (03/11/2026, on the fixture).
 func TestKitDBCopyReadsTheQueueTables(t *testing.T) {
 	root := kitDBCopyRoot(t, map[string]string{".shared/schema/shop.work": kitDBCopyShop})
-	kitDBRunsFixture(t, root)
+	kitDBFixture(t, root, "runs")
 	engine, err := kitDBCopyEngineTables(queuestore.Schema)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// what KitDB's SQL reads, in the canonical form
-	bySQL := map[string][]kitDBCopyRow{}
-	runs := openKitDBRuns(t, root)
-	for _, name := range []string{"kitwork_runs", "kitwork_definitions", "kitwork_schedules"} {
-		read, err := readKitDBCopyRows(runs.db, engine[name], false)
-		if err != nil {
-			runs.close()
-			t.Fatalf("%s by KitDB's SQL: %v", name, err)
-		}
-		bySQL[name] = read
+	// what KitDB's SQL read
+	data, err := os.ReadFile(filepath.Join("testdata", "kitdb", "runs", "sql.json"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	runs.close()
+	var bySQL map[string]struct {
+		Rows   int      `json:"rows"`
+		Digest [32]byte `json:"digest"`
+	}
+	if err := json.Unmarshal(data, &bySQL); err != nil {
+		t.Fatal(err)
+	}
 
 	source, err := openKitDBCopySource(filepath.Join(root, "acme", ".database", "application", kitDBApplicationFile))
 	if err != nil {
@@ -246,12 +181,12 @@ func TestKitDBCopyReadsTheQueueTables(t *testing.T) {
 			t.Fatalf("%s: %v", table.name, problems)
 		}
 		want := bySQL[table.name]
-		if len(table.rows) != len(want) || table.digest(table.rows) != table.digest(want) {
-			t.Errorf("%s: the ORM read %d rows, KitDB's SQL %d; differ at %v", table.name, len(table.rows), len(want), kitDBCopyDifferent(want, table.rows, 5))
+		if len(table.rows) != want.Rows || table.digest(table.rows) != want.Digest {
+			t.Errorf("%s: the ORM read %d rows (digest %x), KitDB's SQL %d (digest %x)", table.name, len(table.rows), table.digest(table.rows), want.Rows, want.Digest)
 		}
 	}
-	if seen != 3 || len(bySQL["kitwork_runs"]) != 3 {
-		t.Fatalf("the engine's tables read = %d, runs = %d; want 3 and 3", seen, len(bySQL["kitwork_runs"]))
+	if seen != 3 || bySQL["kitwork_runs"].Rows != 3 {
+		t.Fatalf("the engine's tables read = %d, runs = %d; want 3 and 3", seen, bySQL["kitwork_runs"].Rows)
 	}
 }
 
@@ -315,8 +250,7 @@ router.get((context) => {
 });
 `,
 	})
-	written := writeKitDBRows(t, root, "orders", kitDBCopyOrders()...)
-	kitDBRunsFixture(t, root)
+	written := kitDBFixture(t, root, "orders-runs")[0]
 
 	planned, err := copyKitDB(t, root, true)
 	if err != nil {
@@ -393,10 +327,8 @@ router.get((context) => {
 // orders, khoá …, cột amount: có nhiều chữ số sau dấu phẩy hơn 2 …\"", only the row past 15 digits refused.
 func TestKitDBCopyRefusesADecimalItWouldRound(t *testing.T) {
 	root := kitDBCopyRoot(t, map[string]string{".shared/schema/shop.work": kitDBCopyShop})
-	written := writeKitDBRows(t, root, "orders",
-		map[string]value.Value{"email": value.New("a@example.com"), "item": value.New("trà"), "amount": value.New("12.345"), "day": value.New("2026-10-29")},
-		map[string]value.Value{"email": value.New("b@example.com"), "item": value.New("trà"), "amount": value.New("12345678901234.5"), "day": value.New("2026-10-29")},
-	)
+	// two orders: amount "12.345" and "12345678901234.5"
+	written := kitDBFixture(t, root, "decimal")[0]
 	_, err := copyKitDB(t, root, false)
 	if err == nil {
 		t.Fatalf("copy = %v, want refused", err)
@@ -458,8 +390,7 @@ func kitDBCopyOrdersTable(t *testing.T, root string) string {
 // khác; các khoá khác nhau: o1, want refused".
 func TestKitDBCopyRefusesATargetWithRows(t *testing.T) {
 	root := kitDBCopyRoot(t, map[string]string{".shared/schema/shop.work": kitDBCopyShop})
-	writeKitDBRows(t, root, "orders", kitDBCopyOrders()...)
-	kitDBRunsFixture(t, root)
+	kitDBFixture(t, root, "orders-runs")
 	kitDBCopyTargetWith(t, root, kitDBCopyOrdersTable(t, root),
 		`INSERT INTO orders (id, email, item, amount, day, "createdAt") VALUES ('o1', 'z@example.com', 'trà', 100, '2026-10-30', '2026-10-30T01:00:00Z')`)
 	_, err := copyKitDB(t, root, false)
@@ -484,7 +415,7 @@ func TestKitDBCopyRefusesATargetWithRows(t *testing.T) {
 // dữ liệu mới", and the same of kitwork_schedules.
 func TestKitDBCopyKeepsWhatBootSynced(t *testing.T) {
 	root := kitDBCopyRoot(t, map[string]string{".shared/schema/shop.work": kitDBCopyShop})
-	kitDBRunsFixture(t, root)
+	kitDBFixture(t, root, "runs")
 	statements := append([]string(nil), queuestore.Schema...)
 	statements = append(statements,
 		`INSERT INTO kitwork_definitions (kind, name, source, retry, timeout, timeout_ms, content_hash, updated_at) VALUES ('queue', 'camOn', '.shared/queue/camOn.work', 0, NULL, 0, 'synced', '2026-10-30T00:00:00.000Z')`,
@@ -518,8 +449,7 @@ func TestKitDBCopyKeepsWhatBootSynced(t *testing.T) {
 // left the tables [kitwork_runs kitwork_definitions kitwork_schedules orders _kitwork_migrations kitwork_copies]".
 func TestKitDBCopyIsOneTransaction(t *testing.T) {
 	root := kitDBCopyRoot(t, map[string]string{".shared/schema/shop.work": kitDBCopyShop})
-	writeKitDBRows(t, root, "orders", kitDBCopyOrders()...)
-	kitDBRunsFixture(t, root)
+	kitDBFixture(t, root, "orders-runs")
 	var first string
 	kitDBCopyInserted = func(_ queuestore.SQL, table string) error {
 		if first == "" {
@@ -554,7 +484,7 @@ func TestKitDBCopyIsOneTransaction(t *testing.T) {
 // after a copy that read back a changed value".
 func TestKitDBCopyCatchesAChangedValue(t *testing.T) {
 	root := kitDBCopyRoot(t, map[string]string{".shared/schema/shop.work": kitDBCopyShop})
-	written := writeKitDBRows(t, root, "orders", kitDBCopyOrders()...)
+	written := kitDBFixture(t, root, "orders")[0]
 	changed := written[1]["id"].String()
 	kitDBCopyInserted = func(db queuestore.SQL, table string) error {
 		if table != "orders" {
@@ -609,8 +539,7 @@ func kitDBCopyFolderSums(t *testing.T, folder string) map[string]string {
 // inside the app" (its bytes were the same after: the sums alone do not see it).
 func TestKitDBCopyLeavesTheSourceAlone(t *testing.T) {
 	root := kitDBCopyRoot(t, map[string]string{".shared/schema/shop.work": kitDBCopyShop})
-	writeKitDBRows(t, root, "orders", kitDBCopyOrders()...)
-	kitDBRunsFixture(t, root)
+	kitDBFixture(t, root, "orders-runs")
 	folder := filepath.Dir(kitDBCopyApplication(root))
 	before := kitDBCopyFolderSums(t, folder)
 	opened := 0
@@ -648,7 +577,7 @@ func TestKitDBCopyLeavesTheSourceAlone(t *testing.T) {
 // <nil>, want refused".
 func TestKitDBCopyRefusesASourceBeingWritten(t *testing.T) {
 	root := kitDBCopyRoot(t, map[string]string{".shared/schema/shop.work": kitDBCopyShop})
-	writeKitDBRows(t, root, "orders", kitDBCopyOrders()...)
+	kitDBFixture(t, root, "orders")
 	kitDBCopyCopied = func(source string) {
 		file, err := os.OpenFile(source+".wal", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 		if err != nil {
@@ -682,9 +611,7 @@ const drafts = table({ id: id(), code: text() });
 export const billing = connection().tables({ invoices, drafts });
 `
 	root := kitDBCopyRoot(t, map[string]string{".shared/schema/shop.work": kitDBCopyShop, ".shared/schema/billing.work": billing})
-	writeKitDBRows(t, root, "invoices", map[string]value.Value{"code": value.New("HD-1")})
-	writeKitDBRows(t, root, "drafts")
-	writeKitDBRows(t, root, "orders", kitDBCopyOrders()...)
+	kitDBFixture(t, root, "billing-drafts") // invoices HD-1, drafts empty, orders
 	// billing.work goes: invoices holds a row no file declares, drafts none
 	if err := os.Remove(filepath.Join(root, "acme", ".shared", "schema", "billing.work")); err != nil {
 		t.Fatal(err)
@@ -715,7 +642,7 @@ func TestKitDBCopyBootStopsReadingTheKitDBFile(t *testing.T) {
 		".shared/schema/shop.work": kitDBCopyShop,
 		".shared/queue/camOn.work": camOnSchedulesJob,
 	})
-	kitDBRunsFixture(t, root)
+	kitDBFixture(t, root, "runs")
 	first := bootQueueApp(t, root)
 	said := "[Queue] .database/application/application.kitdb (KitDB cũ) không còn đọc: các lần chạy của job nay nằm ở .database/application/kitwork.db; lần chạy chưa xong trong file cũ ở lại đó và không chạy cho tới khi `kitwork migrate kitdb` chép chúng sang .database/application/kitwork.db"
 	if !strings.Contains(first.output, said) {
@@ -756,7 +683,6 @@ func TestKitDBCopyBootStopsReadingTheKitDBFile(t *testing.T) {
 // CONTROL: with kitwork_schedules left out of the copy, boot at 09:00 chose the once() again: "next of sau
 // after the copy = 2026-10-23T10:00:00Z, want none".
 func TestKitDBCopyResumesTheSchedules(t *testing.T) {
-	schedules := watchSchedule(t)
 	clock := setClock(t, instant(t, "2026-10-23T03:10:00Z"))
 	files := func() map[string]string {
 		return map[string]string{
@@ -769,26 +695,10 @@ router.get((context) => context.json({ list: schedule.list() }));
 `,
 		}
 	}
-	// the state as the engine kept it: synced at 03:10 (once at 04:00), run at a boot at 05:00
-	earlier := newQueueApp(t, files())
-	earlier.close()
-	clock.set(instant(t, "2026-10-23T05:00:00Z"))
-	ran := bootQueueApp(t, earlier.root)
-	schedules.until(t, runOf(t, ran, "sau", "2026-10-23T04:00:00Z").ID, "completed")
-	states, err := ran.app.scheduleStore().ScheduleStates()
-	ran.close()
-	if err != nil || !states["sau"].LastAt.Equal(states["sau"].OnceAt) {
-		t.Fatalf("the state of sau = %+v %v, want its once handled", states["sau"], err)
-	}
-
-	// the same app whose database is still application.kitdb, holding that state
+	// the same app whose database is still application.kitdb, holding the state the engine kept: synced at 03:10
+	// (once at 04:00), run at a boot at 05:00 (testdata/kitdb/schedule-sau, made by that sequence)
 	root := kitDBCopyRoot(t, files())
-	runs := openKitDBRuns(t, root)
-	if err := queuestore.New(runs, scheduleKind).SyncSchedules([]queuestore.ScheduleState{states["sau"]}, nil, instant(t, "2026-10-23T05:00:00Z")); err != nil {
-		runs.close()
-		t.Fatal(err)
-	}
-	runs.close()
+	kitDBFixture(t, root, "schedule-sau")
 	if _, err := copyKitDB(t, root, false); err != nil {
 		t.Fatalf("copy: %v", err)
 	}
@@ -814,10 +724,6 @@ router.get((context) => context.json({ list: schedule.list() }));
 // want {1800000060123 true}", and the same of old.
 func TestKitDBCopyMovesTheDatastore(t *testing.T) {
 	root := kitDBCopyRoot(t, map[string]string{".shared/schema/shop.work": kitDBCopyShop})
-	path := filepath.Join(root, "acme", ".database", "storage", datastoreLegacyFile)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
 	encode := func(item value.Value) []byte {
 		data, err := storage.Encode(item, 1<<20)
 		if err != nil {
@@ -833,27 +739,8 @@ func TestKitDBCopyMovesTheDatastore(t *testing.T) {
 		otp:  encode(value.New("123456")),
 		old:  encode(value.New("654321")),
 	}
-	expiries := map[string]int64{flag: 0, otp: 1_800_000_060_123_456_789, old: 1_000_000_000_000_000_000}
-	database, err := kitdbengine.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tx, err := database.Begin()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for key, data := range values {
-		record := binary.BigEndian.AppendUint64(nil, uint64(expiries[key]))
-		if err := tx.Put([]byte("storage:"+key), append(record, data...)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := tx.Commit(); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.Close(); err != nil {
-		t.Fatal(err)
-	}
+	// written with these expiries, in nanoseconds: flag 0, otp 1_800_000_060_123_456_789, old 1e18
+	kitDBFixture(t, root, "datastore")
 
 	report, err := copyKitDB(t, root, false)
 	if err != nil {
@@ -893,7 +780,7 @@ func TestKitDBCopyMovesTheDatastore(t *testing.T) {
 // <nil>, want refused".
 func TestKitDBCopyRefusesAColumnNoFileDeclares(t *testing.T) {
 	root := kitDBCopyRoot(t, map[string]string{".shared/schema/shop.work": kitDBCopyShop})
-	writeKitDBRows(t, root, "orders", kitDBCopyOrders()...)
+	kitDBFixture(t, root, "orders")
 	shop := filepath.Join(root, "acme", ".shared", "schema", "shop.work")
 	if err := os.WriteFile(shop, []byte(strings.Replace(kitDBCopyShop, "  note: text().nullable(),\n", "", 1)), 0o644); err != nil {
 		t.Fatal(err)
@@ -925,8 +812,7 @@ const invoices = table({ id: id(), code: text() });
 export const billing = connection().schema("billing").tables({ invoices });
 `
 	root := kitDBCopyRoot(t, map[string]string{".shared/schema/shop.work": kitDBCopyShop, ".shared/schema/billing.work": billing})
-	writeKitDBRows(t, root, "invoices", map[string]value.Value{"code": value.New("HD-1")})
-	writeKitDBRows(t, root, "orders", kitDBCopyOrders()...)
+	kitDBFixture(t, root, "billing-schema") // invoices HD-1, orders
 	kitDBCopyTargetWith(t, root, kitDBCopyOrdersTable(t, root),
 		`INSERT INTO orders (id, email, item, amount, day, "createdAt") VALUES ('o1', 'z@example.com', 'trà', 100, '2026-10-30', '2026-10-30T01:00:00Z')`)
 	_, err := copyKitDB(t, root, false)

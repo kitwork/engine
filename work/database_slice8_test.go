@@ -324,9 +324,9 @@ router.get((ctx) => {
 	}
 }
 
-// crmApp is an app whose .shared/schema/crm.work connects to the database at address (a KitDB served over
-// the PostgreSQL wire protocol, which lib/pq speaks to as to any Postgres), with the password given, and
-// whose route queries it with a value from the request.
+// crmApp is an app whose .shared/schema/crm.work connects to the database at address (a SQLite file served
+// over the PostgreSQL wire protocol, startPostgresTestServer, which lib/pq speaks to as to any Postgres), with
+// the password given, and whose route queries it with a value from the request.
 func crmApp(t *testing.T, address, password string) map[string]string {
 	t.Helper()
 	connection := &url.URL{Scheme: "postgres", User: url.UserPassword("kitdb", password), Host: address, Path: "/transactions"}
@@ -363,12 +363,7 @@ router.get((context) => {
 // trị]) binds every value (an injection in the value matches nothing), gives the rows by column name, and
 // dials through the SSRF guard of kitwork/http. Its errors never hold the address or the password.
 func TestConnectQueryBindsValuesThroughTheGuard(t *testing.T) {
-	_, address, _ := startKitDBPostgresTransactionTest(t, 0)
-	seed := openKitDBPostgresDatabaseTestClient(t, address, "transactions", "transaction-secret")
-	defer seed.Close()
-	if _, err := seed.Exec(`INSERT INTO products (id, sku, title, price) VALUES ('a', 'CAF', 'Cà phê', 35000), ('b', 'TEA', 'Trà', 20000)`); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+	address := startPostgresTestServer(t, "transaction-secret", `INSERT INTO products (id, sku, title, price) VALUES ('a', 'CAF', 'Cà phê', 35000), ('b', 'TEA', 'Trà', 20000)`)
 
 	// the guard first: the database is on this machine, which an app's code does not reach
 	tenant, _, err := bootApp(t, crmApp(t, address, "transaction-secret"), "shop.example")

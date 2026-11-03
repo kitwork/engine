@@ -191,12 +191,7 @@ func TestConnectCarriesNothingOfTheHost(t *testing.T) {
 // End to end: the host's environment holds the database's password, the app's URL none. The server never
 // receives it, so the login is refused (DENIED); written by the URL, the same login is let in.
 func TestConnectSendsNoPasswordOfTheHost(t *testing.T) {
-	_, address, _ := startKitDBPostgresTransactionTest(t, 0)
-	seed := openKitDBPostgresDatabaseTestClient(t, address, "transactions", "transaction-secret")
-	defer seed.Close()
-	if _, err := seed.Exec(`INSERT INTO products (id, sku, title, price) VALUES ('a', 'CAF', 'Cà phê', 35000)`); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+	address := startPostgresTestServer(t, "transaction-secret", `INSERT INTO products (id, sku, title, price) VALUES ('a', 'CAF', 'Cà phê', 35000)`)
 	restore := loopback.Open()
 	defer restore()
 	t.Setenv("PGPASSWORD", "transaction-secret")

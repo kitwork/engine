@@ -112,37 +112,10 @@ router.get((ctx) => {
 });
 `
 	body := serveNesting(t, newNestingTenant(t, routes, 10_000_000), context.Background())
-	for _, want := range []string{`"code":"FAIL"`, `"message":"điều kiện hỏng"`, `"at":"router.work:20:9"`, `"kept":null`} {
+	for _, want := range []string{`"code":"FAIL"`, `"message":"điều kiện hỏng"`, `"at":"router.work:18:9"`, `"kept":null`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("%s lacks %s", body, want)
 		}
-	}
-}
-
-// The same on a KitDB table, whose terminals read the builder's plan rather than run it: the chain keeps
-// the predicate's failure (SchemaTable.failWith). CONTROL: a predicate that works lists the row.
-func TestKitDBQueryLambdaFailureIsTheQuerysFailure(t *testing.T) {
-	serve := safeRouterWorkSite(t, map[string]string{
-		"": `import * as router from "kitwork/router";
-import { internals } from "kitwork";
-const { kitdb, struct, text } = internals;
-const items = struct({ id: text().key(), label: text() });
-const db = kitdb("lambda-failure.kitdb", { items });
-router.get((ctx) => {
-  if (db.items.count() == 0) db.items.create({ id: "a", label: "một" });
-  const failed = safe(() => db.items.where((row) => {
-    fail("điều kiện hỏng");
-    return row.id == "a";
-  }).list());
-  const kept = safe(() => db.items.where((row) => row.id == "a").list());
-  return ctx.json({ code: failed.error.code, message: failed.error.message, kept: kept.error, rows: kept.value.length });
-});
-`,
-	})
-	got := serve("/")
-	body := strings.TrimSpace(got.Body.String())
-	if got.Code != http.StatusOK || body != `{"code":"FAIL","kept":null,"message":"điều kiện hỏng","rows":1}` {
-		t.Fatalf("GET / = %d %s", got.Code, body)
 	}
 }
 

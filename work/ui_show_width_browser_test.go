@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -198,12 +199,12 @@ func TestBrowserWidthShowWarnsWhereItStaysHidden(t *testing.T) {
 		t.Errorf("what the page warns of is what stays hidden from medium:\n warned %q\n hidden %q", warned, wide)
 	}
 	for _, id := range []string{"link", "input", "text", "heading"} {
-		if !containsString(warned, id) {
+		if !slices.Contains(warned, id) {
 			t.Errorf("%s stays hidden from medium and is not warned of: warned %q", id, warned)
 		}
 	}
 	for _, id := range []string{"box", "grid", "image", "icon", "badge", "button", "link-row", "link-icon", "text-lines"} {
-		if containsString(wide, id) {
+		if slices.Contains(wide, id) {
 			t.Errorf("%s has a display of its own and stays hidden at 1100px: hidden %q", id, wide)
 		}
 	}

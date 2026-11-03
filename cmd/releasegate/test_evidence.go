@@ -3,18 +3,21 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 )
+
+// testRequirement is one test a step's go test -json must show passed.
+type testRequirement struct {
+	Package string `json:"package"`
+	Test    string `json:"test"`
+}
 
 type testEvidence struct {
 	testRequirement
@@ -22,21 +25,6 @@ type testEvidence struct {
 	Passed  int    `json:"passed"`
 	Failed  int    `json:"failed"`
 	Skipped int    `json:"skipped"`
-}
-
-type crashEvidence struct {
-	SchemaVersion int                 `json:"schema_version"`
-	OS            string              `json:"os"`
-	Arch          string              `json:"arch"`
-	BinarySHA256  string              `json:"binary_sha256"`
-	ChildRace     bool                `json:"child_race"`
-	Cases         []crashCaseEvidence `json:"cases"`
-	Success       bool                `json:"success"`
-}
-
-type crashCaseEvidence struct {
-	Name    string `json:"name"`
-	Success bool   `json:"success"`
 }
 
 func unrunStep(step gateStep, status, reason string) stepResult {
@@ -80,21 +68,6 @@ func runGateStep(ctx context.Context, root string, step gateStep) stepResult {
 		result.Error = "required tests need go test -json evidence"
 		return result
 	}
-	var artifact string
-	if step.CrashReport != "" {
-		var err error
-		artifact, err = confinedReportPath(root, step.CrashReport)
-		if err == nil {
-			err = os.Remove(artifact)
-			if errors.Is(err, os.ErrNotExist) {
-				err = nil
-			}
-		}
-		if err != nil {
-			result.Error = "prepare fresh crash evidence: " + err.Error()
-			return result
-		}
-	}
 	observer := newTestObserver(step.RequiredTests)
 	command := exec.CommandContext(ctx, step.Command[0], step.Command[1:]...)
 	command.Dir = root
@@ -127,13 +100,6 @@ func runGateStep(ctx context.Context, root string, step gateStep) stepResult {
 		}
 		return result
 	}
-	if artifact != "" {
-		result.Crash, err = readCrashEvidence(artifact, step.Env["KITDB_PROCESS_CRASH_RACE"] == "1")
-		if err != nil {
-			result.Error = "invalid crash evidence: " + err.Error()
-			return result
-		}
-	}
 	result.Success, result.Status = true, "passed"
 	return result
 }
@@ -145,53 +111,6 @@ func hasArgument(command []string, value string) bool {
 		}
 	}
 	return false
-}
-
-func confinedReportPath(root, name string) (string, error) {
-	clean := filepath.Clean(name)
-	if filepath.IsAbs(clean) || filepath.VolumeName(clean) != "" || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-		return "", errors.New("evidence path must stay inside engine root")
-	}
-	return filepath.Join(root, clean), nil
-}
-
-func readCrashEvidence(path string, race bool) (*crashEvidence, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	info, err := f.Stat()
-	if err != nil {
-		return nil, err
-	}
-	if info.Size() > 64<<10 {
-		return nil, errors.New("crash evidence exceeds 64 KiB")
-	}
-	decoder := json.NewDecoder(io.LimitReader(f, 64<<10))
-	decoder.DisallowUnknownFields()
-	var report crashEvidence
-	if err := decoder.Decode(&report); err != nil {
-		return nil, err
-	}
-	var extra any
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		return nil, errors.New("trailing crash evidence")
-	}
-	digest, err := hex.DecodeString(report.BinarySHA256)
-	if err != nil || len(digest) != 32 || report.SchemaVersion != 1 || !report.Success || report.OS != runtime.GOOS || report.Arch != runtime.GOARCH || report.ChildRace != race {
-		return nil, errors.New("hash, schema, platform, race mode or success mismatch")
-	}
-	want := crashCaseTests()
-	if len(report.Cases) != len(want) {
-		return nil, errors.New("missing crash cases")
-	}
-	for i, name := range want {
-		if report.Cases[i].Name != strings.TrimPrefix(name, "TestStandaloneRestrictedWriteCrashRecovery/") || !report.Cases[i].Success {
-			return nil, fmt.Errorf("crash case %s did not pass", name)
-		}
-	}
-	return &report, nil
 }
 
 // Only required tests are retained. Output is streamed with a bounded line

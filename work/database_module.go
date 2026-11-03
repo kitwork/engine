@@ -193,13 +193,24 @@ func (c *ConnectionDeclaration) tables(args []value.Value) value.Value {
 	return value.Value{K: value.Proxy, V: newManagedDatabase(own)}
 }
 
+// applicationDatabaseName is the name of the app's database, connection().tables({ … }) of .shared/schema/
+// (KITWORK_DATABASE.md mục 1). Its file is in the app's folder, app/.database/application/
+// (apps/<identity>/.database/application/ for a host of many apps), never in a site's .data/. A proxy built by
+// name cannot name it: newDbProxy refuses a name that starts with @ once databaseRel has read it ("./@application"
+// is "@application").
+const applicationDatabaseName = "@application"
+
+// engineTable reports a table the engine keeps in the app's file for itself (kitwork_runs and
+// kitwork_definitions, the runs of its background work: queue_runs.go).
+func engineTable(name string) bool { return strings.HasPrefix(strings.ToLower(name), "kitwork_") }
+
 // appDatabaseName is the name a schema of the app's database is registered under: @application for public,
 // @application/billing for .schema("billing"). @ marks a name as the engine's, which no site file takes.
 func appDatabaseName(schema string) string {
 	if schema == "" {
-		return kitDBApplicationName
+		return applicationDatabaseName
 	}
-	return kitDBApplicationName + "/" + schema
+	return applicationDatabaseName + "/" + schema
 }
 
 // appDatabasePath is the SQLite file a schema of the app's database lives in (KITWORK_KITDB.md mục 3,
@@ -211,7 +222,7 @@ func appDatabasePath(t *Tenant, schema string) string {
 
 // catalogSchema declares the tables of connection("tên") on the database the host declared under that
 // name in app.databases. The statements are the same as on the app's own database; a SQLite file of the
-// host runs them, with additive migration as the app's KitDB has: at the first statement, a change that
+// host runs them, with additive migration as the app's own database has: at the first statement, a change that
 // loses data (a column dropped or retyped) fails the statement and the file is left as it is
 // (SchemaTable.ensureTable, refuseDestructiveMigration). A name the host did not declare is refused listing
 // the names there are. Every app on the host may name every entry: the catalogue is the host's.
@@ -228,7 +239,7 @@ func (c *ConnectionDeclaration) catalogSchema(tables value.Value) value.Value {
 	if entry.Type != "sqlite" {
 		// no other way reaches it either: the app never sees the host's URL, and connect() refuses an
 		// address in private or local space
-		return value.InvalidFailure(value.UnsupportedCode, fmt.Sprintf(`connection("%s") trên %s chưa có trong engine hôm nay: bảng, cột và migration của connection() hôm nay chỉ chạy trên KitDB và SQLite, nên app chưa có đường nào tới database này; host khai tên %s bằng { sqlite: đường_dẫn } thì chạy`, c.name, connectorName(entry.Type), c.name))
+		return value.InvalidFailure(value.UnsupportedCode, fmt.Sprintf(`connection("%s") trên %s chưa có trong engine hôm nay: bảng, cột và migration của connection() hôm nay chỉ chạy trên SQLite, nên app chưa có đường nào tới database này; host khai tên %s bằng { sqlite: đường_dẫn } thì chạy`, c.name, connectorName(entry.Type), c.name))
 	}
 	proxy := declareDbProxy(c.tenant, nil, "sqlite", value.New(catalogDatabaseName(c.name)), tables)
 	if proxy.K != value.Proxy {

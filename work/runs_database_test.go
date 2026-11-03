@@ -545,7 +545,7 @@ func TestRunsDatabaseRefusedAsItRuns(t *testing.T) {
 	if want := `[Schedule] .schedule/config.work:3:10: schedule.database(…): database khai bằng connect(…) là database ngoài, engine không tạo bảng ở đó`; !strings.Contains(said, want) {
 		t.Errorf("a database of connect(…) said %q, want %q", said, want)
 	}
-	application := value.Value{K: value.Proxy, V: &ManagedDatabase{proxy: &dbProxy{engine: "kitdb", dbName: kitDBApplicationName}}}
+	application := value.Value{K: value.Proxy, V: &ManagedDatabase{proxy: &dbProxy{engine: "sqlite", dbName: applicationDatabaseName}}}
 	said = captureOutput(t, func() {
 		if place, refused := readRunsDatabase(folderSetting{word: "database", args: []value.Value{application}}, "queue", "[Queue]", ".shared/queue/config.work:3:7"); place != nil || refused {
 			t.Errorf("connection() gave %v, refused %v, want the app's database", place, refused)

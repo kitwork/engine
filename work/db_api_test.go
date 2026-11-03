@@ -120,48 +120,6 @@ router.get((context) => context.json({ ok: true }));`
 	}
 }
 
-// /_db/query reads a KitDB database too, through the remote SQL engine, with bound arguments. (This was
-// checked inside the Hrana test until the Hrana server went, 29/10/2026.)
-func TestDataAPIQueryReadsKitDB(t *testing.T) {
-	tmp := t.TempDir()
-	dir := filepath.Join(tmp, "test", "localhost")
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	router := `import * as router from "kitwork/router";
-import { internals } from "kitwork";
-const { kitdb, struct, id, text, int } = internals;
-const products = struct({ id: id(), sku: text().notNull().unique(), price: int().default(0) });
-const db = kitdb("remote.kitdb", { products }, { token: "remote-secret", access: "readwrite" });
-router.get((context) => {
-  db.products.create({ sku: "KIT-1", price: 125 });
-  return context.json({ count: db.products.count() });
-});`
-	if err := os.WriteFile(filepath.Join(dir, UIRouterFileName), []byte(router), 0644); err != nil {
-		t.Fatal(err)
-	}
-	tenant := NewTenant(tmp, "localhost")
-	defer tenant.Close()
-	if err := tenant.Run(); err != nil {
-		t.Fatal(err)
-	}
-	rec := httptest.NewRecorder()
-	tenant.Serve(rec, httptest.NewRequest(http.MethodGet, "http://localhost/", nil))
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"count":1`) {
-		t.Fatalf("seed = %d %s", rec.Code, rec.Body.String())
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "http://localhost/_db/query", strings.NewReader(
-		`{"db":"remote.kitdb","sql":"SELECT sku, price FROM products WHERE sku = ?","args":["KIT-1"]}`,
-	))
-	req.Header.Set("Authorization", "Bearer remote-secret")
-	rec = httptest.NewRecorder()
-	tenant.Serve(rec, req)
-	if body := rec.Body.String(); rec.Code != http.StatusOK || !strings.Contains(body, `"sku":"KIT-1"`) || !strings.Contains(body, `"price":125`) {
-		t.Fatalf("KitDB data API = %d %s", rec.Code, body)
-	}
-}
-
 // The libSQL server (Hrana over HTTP) went on 29/10/2026: a database's only port to the outside is the
 // PostgreSQL wire (KITWORK_KITDB.md 13.5). Its paths are a site's paths again. With a database declared
 // served, the way the Hrana tests declared one ({ token }), and its token sent, GET /v2 and

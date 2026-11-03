@@ -114,3 +114,13 @@ func (n *Napas) Generate() (value.Value, error) {
 	}
 	return value.New(n.core.Payload()), nil
 }
+
+// codedError is an error that names the code of its failure (value.FailureOfError).
+type codedError struct {
+	code string
+	err  error
+}
+
+func (e codedError) Error() string       { return e.err.Error() }
+func (e codedError) Unwrap() error       { return e.err }
+func (e codedError) FailureCode() string { return e.code }

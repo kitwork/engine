@@ -8,8 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
-	"math"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,7 +19,6 @@ import (
 
 	"github.com/kitwork/engine/database/statement"
 	"github.com/kitwork/engine/id"
-	kitdbengine "github.com/kitwork/engine/kitdb"
 	kitdbsql "github.com/kitwork/engine/kitdb/sql"
 	kitdbsqlite "github.com/kitwork/engine/kitdb/sqlite"
 	requestscope "github.com/kitwork/engine/request"
@@ -29,7 +28,7 @@ import (
 
 // The schema'd database machinery: a schema maps table names to column specs (ColumnSpec, StructDef); the
 // engine migrates each table to match on first use and hands back a validated query on it (SchemaTable),
-// over SQLite or KitDB. The spec's handle runs on it: connection().tables({ … }) of an app's
+// over SQLite (KitDB's ORM went with KROW, 03/11/2026). The spec's handle runs on it: connection().tables({ … }) of an app's
 // .shared/schema/ is a dbProxy, and every translated statement runs on one of its SchemaTables
 // (ManagedDatabase, database_managed.go). App code wrote this surface itself until 22/10/2026
 // (database.sqlite/kitdb with the older column builders, db.<table>.where(…)); those spellings are errors
@@ -624,28 +623,17 @@ func coerceRowInPlace(columns map[string]*ColumnSpec, row value.Value) {
 // ---- defineDb("app.db", { vouchers, categories }) → a Proxy whose db.<table> is schema-aware ----
 
 type dbProxy struct {
-	tenant           *Tenant
-	scope            *requestscope.Scope
-	engine           string // "sqlite" | "kitdb"
-	dbName           string
-	sqlitePath       string                             // the host's SQLite file of connection("tên") (app.databases); "" for a file of the site's .data/
-	databaseID       string                             // expected durable identity for node-catalog managed databases
-	allowDrop        bool                               // opt-in via sqlite("app.db", schema, { drop: true }) — enables destructive migration
-	migrate          bool                               // KitDB-only opt-in for planner-approved, non-destructive schema migration
-	retainHistory    bool                               // KitDB-only opt-in for durable recovery/replication history
-	recoverySet      bool                               // explicit recovery:false must not be overridden by searchable projections
-	historyRetention kitdbengine.HistoryRetentionPolicy // process-local bounds; durable pins still win
-	sourceDeclared   bool                               // created by tenant source rather than node-owned SQL lifecycle
-	tables           map[string]map[string]*ColumnSpec
-	structs          map[string]*StructDef
-	declaredTables   []string
-	schemaMu         sync.RWMutex
-	catalogOnce      sync.Once
-	catalogErr       error
-	catalogPending   bool
-	catalogTx        uint64
-	catalogRev       string
-	transaction      *kitDBRecordTransaction
+	tenant         *Tenant
+	scope          *requestscope.Scope
+	engine         string // "sqlite"
+	dbName         string
+	sqlitePath     string // the host's SQLite file of connection("tên") (app.databases); "" for a file of the site's .data/
+	allowDrop      bool   // opt-in via sqlite("app.db", schema, { drop: true }) — enables destructive migration
+	migrate        bool   // opt-in for planner-approved, non-destructive schema migration
+	tables         map[string]map[string]*ColumnSpec
+	structs        map[string]*StructDef
+	declaredTables []string
+	schemaMu       sync.RWMutex
 }
 
 // newDbProxy parses sqlite("app.db", { …schema }, { drop: true }): args[0]=file, args[1]=schema,
@@ -653,35 +641,46 @@ type dbProxy struct {
 // schema removed AND rebuilding for type changes (CAST may lose data). Without it, both are refused
 // and the data is left untouched.
 func newDbProxy(tenant *Tenant, scope *requestscope.Scope, engine string, args ...value.Value) value.Value {
-	// a name starting with @ is the engine's own (kitDBApplicationName: the app's database in
+	// a name starting with @ is the engine's own (applicationDatabaseName: the app's database in
 	// .database/application/), which only connection().tables({ … }) declares. The name is checked as a
-	// read opens it, after kitDBRel: "./@application", "/@application", "x/../@application" are the app's
+	// read opens it, after databaseRel: "./@application", "/@application", "x/../@application" are the app's
 	// database too (22/10/2026; the raw name alone was checked, so they opened it with this declaration's
 	// schema and options, drop and token among them)
-	if len(args) > 0 && args[0].K == value.String && strings.HasPrefix(kitDBRel(args[0].String()), "@") {
+	if len(args) > 0 && args[0].K == value.String && strings.HasPrefix(databaseRel(args[0].String()), "@") {
 		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db: tên %q dành cho database của app; database của app khai export const db = connection().tables({ … }) trong .shared/schema/", args[0].String()))
 	}
 	return declareDbProxy(tenant, scope, engine, args...)
 }
 
+// databaseRel is a database name of the site as a path inside its .data/, with / and nothing that climbs out
+// of it: a name that tries to is its last element; "" is app.db.
+func databaseRel(relative string) string {
+	relative = strings.TrimSpace(strings.ReplaceAll(relative, "\\", "/"))
+	relative = strings.TrimPrefix(relative, "/")
+	if relative == "" {
+		return "app.db"
+	}
+	clean := filepath.ToSlash(filepath.Clean(relative))
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || strings.Contains(clean, ":") {
+		base := filepath.Base(clean)
+		if base == "." || base == ".." || base == "/" || base == "" {
+			return "app.db"
+		}
+		return base
+	}
+	return clean
+}
+
 func declareDbProxy(tenant *Tenant, scope *requestscope.Scope, engine string, args ...value.Value) value.Value {
-	if engine != "sqlite" && engine != "kitdb" {
+	if engine != "sqlite" {
 		return value.InvalidFailure(value.InvalidArgumentCode, "db: unsupported storage engine")
 	}
-	defaultName := "app.db"
-	if engine == "kitdb" {
-		defaultName = kitDBDefaultFile
-	}
 	p := &dbProxy{
-		tenant: tenant, scope: scope, engine: engine, dbName: defaultName,
+		tenant: tenant, scope: scope, engine: engine, dbName: "app.db",
 		tables: map[string]map[string]*ColumnSpec{}, structs: map[string]*StructDef{},
-		sourceDeclared: true,
 	}
 	if len(args) > 0 && args[0].K == value.String {
 		p.dbName = args[0].String()
-	}
-	if engine == "kitdb" && strings.EqualFold(kitDBRel(p.dbName), kitDBNodeCatalogFile) {
-		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db: KitDB database name %q is reserved for the node catalog", p.dbName))
 	}
 	if len(args) > 1 && args[1].K == value.Map {
 		for tableName, tableVal := range args[1].Map() {
@@ -693,9 +692,6 @@ func declareDbProxy(tenant *Tenant, scope *requestscope.Scope, engine string, ar
 					cols[colName] = spec
 				}
 			} else if tableVal.K == value.Map {
-				if engine == "kitdb" {
-					return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db: KitDB struct %q must be declared with struct({ ... })", tableName))
-				}
 				for colName, colVal := range tableVal.Map() {
 					if spec, ok := colVal.V.(*ColumnSpec); ok {
 						cols[colName] = spec
@@ -727,18 +723,7 @@ func declareDbProxy(tenant *Tenant, scope *requestscope.Scope, engine string, ar
 		if m, ok := opts["migrate"]; ok && m.K == value.Bool && m.N != 0 {
 			p.migrate = true
 		}
-		if recovery, ok := opts["recovery"]; ok {
-			retain, policy, err := parseKitDBRecoveryOption(recovery)
-			if err != nil {
-				return value.InvalidFailure(value.InvalidArgumentCode, "db: recovery: "+err.Error())
-			}
-			p.recoverySet = true
-			p.retainHistory = retain
-			p.historyRetention = policy
-		}
-		// A token explicitly exposes this database outside the app. The registry
-		// retains the backend and normalized schema so a KitDB file can never be
-		// opened by the SQLite driver merely because both are served the same way.
+		// A token explicitly exposes this database outside the app.
 		if tok, ok := opts["token"]; ok && !tok.IsNil() && tok.String() != "" {
 			access := ""
 			if a, ok := opts["access"]; ok && a.K == value.String {
@@ -747,124 +732,8 @@ func declareDbProxy(tenant *Tenant, scope *requestscope.Scope, engine string, ar
 			registerServe(p, tok.String(), access)
 		}
 	}
-	p.enableSearchHistoryByDefault()
 	registerSchema(p)
 	return value.Value{K: value.Proxy, V: p}
-}
-
-// Search is a rebuildable projection, but incremental restart-safe catch-up
-// requires the source commit history. Enable it automatically for KitDB unless
-// the application deliberately opted out with recovery:false.
-func (p *dbProxy) enableSearchHistoryByDefault() {
-	if p == nil || p.engine != "kitdb" || p.recoverySet || p.retainHistory {
-		return
-	}
-	for _, columns := range p.tables {
-		for _, column := range columns {
-			if column != nil && column.searchable {
-				p.retainHistory = true
-				return
-			}
-		}
-	}
-}
-
-func parseKitDBRecoveryOption(
-	option value.Value,
-) (bool, kitdbengine.HistoryRetentionPolicy, error) {
-	switch option.K {
-	case value.Bool:
-		return option.N != 0, kitdbengine.HistoryRetentionPolicy{}, nil
-	case value.Map:
-		settings := option.Map()
-		for name := range settings {
-			if name != "maxAge" && name != "maxBytes" {
-				return false, kitdbengine.HistoryRetentionPolicy{}, fmt.Errorf(
-					"unknown option %q; use maxAge or maxBytes", name,
-				)
-			}
-		}
-		policy := kitdbengine.HistoryRetentionPolicy{}
-		if raw, found := settings["maxAge"]; found {
-			var duration time.Duration
-			var err error
-			switch raw.K {
-			case value.Duration:
-				duration = time.Duration(int64(raw.N))
-			case value.String:
-				duration, err = ParseDuration(raw.String())
-			default:
-				err = fmt.Errorf("maxAge must be a duration such as \"7d\"")
-			}
-			if err != nil {
-				return false, kitdbengine.HistoryRetentionPolicy{}, err
-			}
-			if duration <= 0 {
-				return false, kitdbengine.HistoryRetentionPolicy{}, fmt.Errorf("maxAge must be positive")
-			}
-			policy.MaxAge = duration
-		}
-		if raw, found := settings["maxBytes"]; found {
-			bytes, err := parseRetentionBytes(raw)
-			if err != nil {
-				return false, kitdbengine.HistoryRetentionPolicy{}, err
-			}
-			policy.MaxBytes = bytes
-		}
-		if !policy.Enabled() {
-			return false, kitdbengine.HistoryRetentionPolicy{}, fmt.Errorf(
-				"object requires maxAge or maxBytes",
-			)
-		}
-		if err := policy.Validate(); err != nil {
-			return false, kitdbengine.HistoryRetentionPolicy{}, err
-		}
-		return true, policy, nil
-	default:
-		return false, kitdbengine.HistoryRetentionPolicy{}, fmt.Errorf(
-			"must be true, false, or an object with maxAge/maxBytes",
-		)
-	}
-}
-
-func parseRetentionBytes(raw value.Value) (int64, error) {
-	if raw.K == value.Number {
-		if math.IsNaN(raw.N) || math.IsInf(raw.N, 0) || raw.N <= 0 ||
-			math.Trunc(raw.N) != raw.N || raw.N > math.MaxInt64 {
-			return 0, fmt.Errorf("maxBytes must be a positive whole number")
-		}
-		return int64(raw.N), nil
-	}
-	if raw.K != value.String {
-		return 0, fmt.Errorf("maxBytes must be bytes or a size such as \"2gb\"")
-	}
-	size := strings.TrimSpace(strings.ToLower(raw.String()))
-	index := 0
-	for index < len(size) && size[index] >= '0' && size[index] <= '9' {
-		index++
-	}
-	if index == 0 {
-		return 0, fmt.Errorf("maxBytes must be bytes or a size such as \"2gb\"")
-	}
-	number, err := strconv.ParseInt(size[:index], 10, 64)
-	if err != nil || number <= 0 {
-		return 0, fmt.Errorf("maxBytes must be positive")
-	}
-	multipliers := map[string]int64{
-		"": 1, "b": 1,
-		"kb": 1 << 10, "kib": 1 << 10,
-		"mb": 1 << 20, "mib": 1 << 20,
-		"gb": 1 << 30, "gib": 1 << 30,
-		"tb": 1 << 40, "tib": 1 << 40,
-	}
-	multiplier, found := multipliers[strings.TrimSpace(size[index:])]
-	if !found {
-		return 0, fmt.Errorf("maxBytes has an unknown size unit")
-	}
-	if number > math.MaxInt64/multiplier {
-		return 0, fmt.Errorf("maxBytes is too large")
-	}
-	return number * multiplier, nil
 }
 
 // resolveForeignKeys fills source declarations by pointer identity and catalog
@@ -904,7 +773,7 @@ func (p *dbProxy) resolveForeignKeysLocked() {
 					spec.fk.target = targetTable[spec.fk.column]
 					if spec.fk.target == nil {
 						if targetDefinition := p.structs[spec.fk.table]; targetDefinition != nil {
-							if field, found := kitDBField(targetDefinition, spec.fk.column); found {
+							if field, found := structField(targetDefinition, spec.fk.column); found {
 								spec.fk.column = field.Name
 								spec.fk.target = targetTable[field.Name]
 							}
@@ -925,7 +794,7 @@ func (p *dbProxy) resolveForeignKeysLocked() {
 					}
 					if spec.fk.targetFieldID == "" {
 						if target := p.structs[l[0]]; target != nil {
-							if field, found := kitDBField(target, l[1]); found {
+							if field, found := structField(target, l[1]); found {
 								spec.fk.targetFieldID = field.ID
 							}
 						}
@@ -943,23 +812,10 @@ func (p *dbProxy) resolveForeignKeysLocked() {
 
 // schemaSnapshot returns immutable outer-map snapshots. Struct definitions and
 // column specs are immutable after publication, so readers can safely retain
-// their pointers while a later DDL commit publishes another definition.
+// their pointers.
 func (p *dbProxy) schemaSnapshot() (map[string]map[string]*ColumnSpec, map[string]*StructDef) {
-	tables, definitions, _, _ := p.schemaSnapshotWithCatalog()
-	return tables, definitions
-}
-
-// schemaSnapshotWithCatalog binds an immutable schema-map snapshot to the
-// catalog revision that published it. Record transactions use this boundary
-// to avoid pairing a kernel snapshot with schema from another DDL commit.
-func (p *dbProxy) schemaSnapshotWithCatalog() (
-	map[string]map[string]*ColumnSpec,
-	map[string]*StructDef,
-	uint64,
-	string,
-) {
 	if p == nil {
-		return nil, nil, 0, ""
+		return nil, nil
 	}
 	p.schemaMu.RLock()
 	defer p.schemaMu.RUnlock()
@@ -971,7 +827,7 @@ func (p *dbProxy) schemaSnapshotWithCatalog() (
 	for name, definition := range p.structs {
 		definitions[name] = definition
 	}
-	return tables, definitions, p.catalogTx, p.catalogRev
+	return tables, definitions
 }
 
 // registerSchema records a declared schema so a preflight (kitwork check) can preview its migration
@@ -991,22 +847,17 @@ func registerSchema(p *dbProxy) {
 	schemaRegMu.Unlock()
 }
 
-// ---- serve registry: which tenant dbs are exposed over /_db/query or the PostgreSQL wire, and how ----
+// ---- serve registry: which tenant dbs are exposed over /_db/query, and how ----
 //
-// Populated by a proxy declared with { token, access } (the removed kitdb(…, { token, access }); the
-// engine's tests build one through the Go API, and app code opens a KitDB to the outside with the
-// host's app.database(path, { port })). The /_db handler and the KitDB PostgreSQL wire
-// (kitdb_postgres.go) consult this registry instead of environment variables: exposure is a declared
+// Populated by a proxy declared with { token, access } (the engine's tests build one through the Go API).
+// The /_db handler consults this registry instead of environment variables: exposure is a declared
 // application capability, not the side effect of a secret existing.
 
 type serveConfig struct {
-	token             string
-	access            string // "readonly" | "readwrite"
-	engine            string
-	database          *dbProxy
-	capabilityStorage string // source declaration that owns auth; never persisted as a token
-	logicalName       string // PostgreSQL name for a managed database; storage remains stable
-	dropping          bool
+	token    string
+	access   string // "readonly" | "readwrite"
+	engine   string
+	database *dbProxy
 }
 
 var (
@@ -1030,40 +881,8 @@ func serveDBKey(t *Tenant, dbName string) string {
 // registerServe records an exposed db. Access defaults to the SAFE option: only an explicit
 // "readwrite" grants writes; anything else (including empty) is read-only.
 func registerServe(database *dbProxy, token, access string) {
-	capabilityStorage := ""
-	if database != nil {
-		capabilityStorage = database.dbName
-	}
-	registerServeFromCapability(database, token, access, capabilityStorage)
-}
-
-func registerServeFromCapability(database *dbProxy, token, access, capabilityStorage string) {
-	registerServeWithLogicalName(database, token, access, capabilityStorage, "")
-}
-
-func registerManagedServeFromCapability(
-	database *dbProxy,
-	token string,
-	access string,
-	capabilityStorage string,
-	logicalName string,
-) {
-	registerServeWithLogicalName(database, token, access, capabilityStorage, logicalName)
-}
-
-func registerServeWithLogicalName(
-	database *dbProxy,
-	token string,
-	access string,
-	capabilityStorage string,
-	logicalName string,
-) {
 	if database == nil || database.tenant == nil || token == "" {
 		return
-	}
-	capabilityStorage = strings.TrimSpace(capabilityStorage)
-	if capabilityStorage == "" {
-		capabilityStorage = database.dbName
 	}
 	if strings.ToLower(strings.TrimSpace(access)) != "readwrite" {
 		access = "readonly"
@@ -1073,34 +892,8 @@ func registerServeWithLogicalName(
 	serveRegMu.Lock()
 	serveReg[serveDBKey(database.tenant, database.dbName)] = serveConfig{
 		token: token, access: access, engine: database.engine, database: database,
-		capabilityStorage: capabilityStorage, logicalName: strings.TrimSpace(logicalName),
 	}
 	serveRegMu.Unlock()
-}
-
-// effectiveServeConfigLocked resolves node-managed databases through the
-// current source declaration. Managed entries never become an independent
-// credential authority merely because they outlive the generation that
-// registered them.
-func effectiveServeConfigLocked(t *Tenant, config serveConfig) (serveConfig, bool) {
-	if config.database == nil {
-		return serveConfig{}, false
-	}
-	if config.database.sourceDeclared {
-		return config, true
-	}
-	capabilityStorage := strings.TrimSpace(config.capabilityStorage)
-	if capabilityStorage == "" {
-		return serveConfig{}, false
-	}
-	capability, found := serveReg[serveDBKey(t, capabilityStorage)]
-	if !found || capability.database == nil || !capability.database.sourceDeclared ||
-		capability.dropping || capability.engine != config.engine || capability.token == "" {
-		return serveConfig{}, false
-	}
-	config.token = capability.token
-	config.access = capability.access
-	return config, true
 }
 
 // resolveServe finds the exposure for (tenant, dbName). An empty dbName resolves to the tenant's single
@@ -1113,13 +906,6 @@ func resolveServe(t *Tenant, dbName string) (string, serveConfig, bool) {
 	defer serveRegMu.Unlock()
 	if dbName != "" {
 		c, ok := serveReg[serveDBKey(t, dbName)]
-		if ok && c.dropping {
-			return "", serveConfig{}, false
-		}
-		if !ok {
-			return "", serveConfig{}, false
-		}
-		c, ok = effectiveServeConfigLocked(t, c)
 		if !ok {
 			return "", serveConfig{}, false
 		}
@@ -1130,11 +916,7 @@ func resolveServe(t *Tenant, dbName string) (string, serveConfig, bool) {
 	var outCfg serveConfig
 	found := 0
 	for key, cfg := range serveReg {
-		if !strings.HasPrefix(key, prefix) || cfg.dropping {
-			continue
-		}
-		cfg, available := effectiveServeConfigLocked(t, cfg)
-		if !available {
+		if !strings.HasPrefix(key, prefix) {
 			continue
 		}
 		outName = strings.TrimPrefix(key, prefix)
@@ -1145,109 +927,6 @@ func resolveServe(t *Tenant, dbName string) (string, serveConfig, bool) {
 		return "", serveConfig{}, false
 	}
 	return outName, outCfg, true
-}
-
-func beginDropServe(t *Tenant, dbName string, database *dbProxy) (serveConfig, bool, error) {
-	if t == nil || database == nil {
-		return serveConfig{}, false, fmt.Errorf("kitdb: database capability is unavailable")
-	}
-	key := serveDBKey(t, dbName)
-	serveRegMu.Lock()
-	defer serveRegMu.Unlock()
-	config, found := serveReg[key]
-	if !found || config.database != database || config.engine != "kitdb" {
-		return serveConfig{}, false, nil
-	}
-	if config.dropping {
-		return serveConfig{}, true, fmt.Errorf("kitdb: database %q is already being dropped", dbName)
-	}
-	config.dropping = true
-	serveReg[key] = config
-	return config, true, nil
-}
-
-func cancelDropServe(t *Tenant, dbName string, database *dbProxy) {
-	if t == nil || database == nil {
-		return
-	}
-	key := serveDBKey(t, dbName)
-	serveRegMu.Lock()
-	config, found := serveReg[key]
-	if found && config.database == database && config.dropping {
-		config.dropping = false
-		serveReg[key] = config
-	}
-	serveRegMu.Unlock()
-}
-
-func finishDropServe(t *Tenant, dbName string, database *dbProxy) {
-	if t == nil || database == nil {
-		return
-	}
-	key := serveDBKey(t, dbName)
-	serveRegMu.Lock()
-	config, found := serveReg[key]
-	if found && config.database == database && config.dropping {
-		delete(serveReg, key)
-	}
-	serveRegMu.Unlock()
-
-	schemaKey := tenantScopeKey(t) + "|kitdb|" + dbName
-	schemaRegMu.Lock()
-	if schemaReg[schemaKey] == database {
-		delete(schemaReg, schemaKey)
-	}
-	schemaRegMu.Unlock()
-}
-
-func removeManagedServe(t *Tenant, dbName string) {
-	if t == nil {
-		return
-	}
-	key := serveDBKey(t, dbName)
-	serveRegMu.Lock()
-	config, found := serveReg[key]
-	if found && config.database != nil && !config.database.sourceDeclared {
-		delete(serveReg, key)
-	}
-	serveRegMu.Unlock()
-
-	schemaKey := tenantScopeKey(t) + "|kitdb|" + dbName
-	schemaRegMu.Lock()
-	if database := schemaReg[schemaKey]; database != nil && !database.sourceDeclared {
-		delete(schemaReg, schemaKey)
-	}
-	schemaRegMu.Unlock()
-}
-
-type namedServeConfig struct {
-	name   string
-	config serveConfig
-}
-
-// listServes returns a detached, deterministic view of one tenant's declared
-// remote databases. Callers must still authorize every returned config; this
-// helper does not turn registry membership into permission.
-func listServes(t *Tenant, engine string) []namedServeConfig {
-	if t == nil {
-		return nil
-	}
-	prefix := tenantScopeKey(t) + "|"
-	serveRegMu.Lock()
-	entries := make([]namedServeConfig, 0)
-	for key, config := range serveReg {
-		if !strings.HasPrefix(key, prefix) || engine != "" && config.engine != engine {
-			continue
-		}
-		entries = append(entries, namedServeConfig{
-			name: strings.TrimPrefix(key, prefix), config: config,
-		})
-	}
-	serveRegMu.Unlock()
-	sort.Slice(entries, func(first, second int) bool {
-		return entries[first].name < entries[second].name
-	})
-	return entries
 }
 
 // OnGet is the whole point: db.vouchers routes here. A known table → a schema-aware handle; an unknown
@@ -1263,9 +942,6 @@ func (p *dbProxy) OnGet(key string) value.Value {
 // table is a fresh query on one table of the database: every statement builds its own, so statements
 // running at once share nothing but the schema.
 func (p *dbProxy) table(key string) (*SchemaTable, value.Value) {
-	if err := p.refreshKitDBCatalogDefinitions(); err != nil {
-		return nil, kitDBError(err)
-	}
 	tables, definitions := p.schemaSnapshot()
 	cols, ok := tables[key]
 	if !ok {
@@ -1274,7 +950,7 @@ func (p *dbProxy) table(key string) (*SchemaTable, value.Value) {
 	return &SchemaTable{
 		tenant: p.tenant, scope: p.scope, engine: p.engine, dbName: p.dbName, sqlitePath: p.sqlitePath,
 		allowDrop: p.allowDrop, migrate: p.migrate, table: key, columns: cols, siblings: tables,
-		definition: definitions[key], definitions: definitions, transaction: p.transaction,
+		definition: definitions[key], definitions: definitions,
 	}, value.Value{}
 }
 
@@ -1282,51 +958,31 @@ func (p *dbProxy) table(key string) (*SchemaTable, value.Value) {
 // would fail the v.V.(ProxyHandler) assertion, so nothing would resolve). db itself is not compared
 // or called; a bare-property access that arrives as an invoke is routed to the table lookup.
 func (p *dbProxy) OnCompare(_ string, _ value.Value) value.Value { return value.Value{K: value.Nil} }
-func (p *dbProxy) OnInvoke(method string, args ...value.Value) value.Value {
-	if method == "transaction" && p.engine == "kitdb" {
-		return p.kitDBTransaction(args...)
-	}
+func (p *dbProxy) OnInvoke(method string, _ ...value.Value) value.Value {
 	return p.OnGet(method)
 }
 
 // ---- SchemaTable: the schema-aware wrapper around the ordinary query builder ----
 
 type SchemaTable struct {
-	tenant          *Tenant
-	scope           *requestscope.Scope
-	engine          string // "sqlite" | "kitdb"
-	dbName          string
-	sqlitePath      string // the host's SQLite file of connection("tên"); "" for a file of the site's .data/
-	allowDrop       bool
-	migrate         bool
-	table           string
-	columns         map[string]*ColumnSpec
-	siblings        map[string]map[string]*ColumnSpec // every table in this db (for FK targets to exist)
-	definition      *StructDef
-	definitions     map[string]*StructDef
-	transaction     *kitDBRecordTransaction
-	referential     *kitDBReferentialActionContext
-	catalogRequired bool
+	tenant      *Tenant
+	scope       *requestscope.Scope
+	engine      string // "sqlite"
+	dbName      string
+	sqlitePath  string // the host's SQLite file of connection("tên"); "" for a file of the site's .data/
+	allowDrop   bool
+	migrate     bool
+	table       string
+	columns     map[string]*ColumnSpec
+	siblings    map[string]map[string]*ColumnSpec // every table in this db (for FK targets to exist)
+	definition  *StructDef
+	definitions map[string]*StructDef
 	// frozenDB is the connection of a copy of the file as it was at a moment (at(), database_at.go): the table
 	// reads it, never migrates it, never writes it.
 	frozenDB *sql.DB
 	// historyTx is the writer's transaction of db.transaction (database_transaction.go): the table reads and
 	// writes through it.
 	historyTx *kitdbsqlite.Transaction
-
-	// Physical index state is loaded from the same durable snapshot as lifecycle
-	// metadata. The planner uses indexGenerations, while writes may additionally
-	// maintain a source generation until an online replacement cuts over.
-	inactiveIndexes  map[string]struct{}
-	indexGenerations map[string]uint64
-	writeIndexes     []kitDBPhysicalIndex
-	indexEpoch       uint64
-	rowGeneration    uint64
-	writeRows        []kitDBPhysicalRow
-	rowEpoch         uint64
-	readyTransaction uint64
-	statistics       *kitDBStatistics
-	statisticsState  string
 
 	q       *query.Query
 	failed  bool
@@ -1360,12 +1016,8 @@ func (t *SchemaTable) failVal() value.Value {
 	return value.InvalidFailure(value.InvalidArgumentCode, t.failMsg)
 }
 
-// source builds the SQL blueprint for SQLite. KitDB does not expose an
-// SQL source; it consumes builder state through ExecutionPlan instead.
+// source builds the SQL blueprint for SQLite.
 func (t *SchemaTable) source() *SQLite {
-	if t.engine == "kitdb" {
-		return nil
-	}
 	if t.frozenDB != nil {
 		return &SQLite{Database: &Database{tenant: t.tenant, requestScope: t.scope, sqlDB: t.frozenDB}}
 	}
@@ -1386,9 +1038,7 @@ func (t *SchemaTable) sqliteFile() string {
 
 func (t *SchemaTable) builder() *query.Query {
 	if t.q == nil {
-		if t.engine == "kitdb" {
-			t.q = query.New(nil, tenantLambdaExecutor{tenant: t.tenant, requestScope: t.scope}).Table(t.table)
-		} else if t.historyTx != nil {
+		if t.historyTx != nil {
 			t.q = query.New(transactionExecutor{tx: t.historyTx}, tenantLambdaExecutor{tenant: t.tenant, requestScope: t.scope}).Table(t.table)
 		} else {
 			t.q = t.source().Table(t.table)
@@ -1496,12 +1146,6 @@ func (t *SchemaTable) List(args ...value.Value) value.Value {
 	if v, ok := t.ready(); !ok {
 		return v
 	}
-	if t.engine == "kitdb" {
-		if t.searchActive {
-			return t.runSearch()
-		}
-		return t.kitDBList(args...)
-	}
 	if t.searchActive {
 		return t.runSearch()
 	}
@@ -1516,9 +1160,6 @@ func (t *SchemaTable) First(args ...value.Value) value.Value {
 	if v, ok := t.ready(); !ok {
 		return v
 	}
-	if t.engine == "kitdb" {
-		return t.kitDBFirst(args...)
-	}
 	return sqliteReadResult(t.columns, coerceResult(t.columns, t.builder().First(args...)))
 }
 
@@ -1526,9 +1167,6 @@ func (t *SchemaTable) First(args ...value.Value) value.Value {
 func (t *SchemaTable) Find(args ...value.Value) value.Value {
 	if v, ok := t.ready(); !ok {
 		return v
-	}
-	if t.engine == "kitdb" {
-		return t.kitDBFind(args...)
 	}
 	return sqliteReadResult(t.columns, coerceResult(t.columns, t.builder().Find(args...)))
 }
@@ -1538,9 +1176,6 @@ func (t *SchemaTable) Count(args ...value.Value) value.Value {
 	if v, ok := t.ready(); !ok {
 		return v
 	}
-	if t.engine == "kitdb" {
-		return t.kitDBCount(args...)
-	}
 	return t.builder().Count(args...)
 }
 
@@ -1548,9 +1183,6 @@ func (t *SchemaTable) Count(args ...value.Value) value.Value {
 func (t *SchemaTable) Exists(args ...value.Value) value.Value {
 	if v, ok := t.ready(); !ok {
 		return v
-	}
-	if t.engine == "kitdb" {
-		return t.kitDBExists(args...)
 	}
 	return t.builder().Exists(args...)
 }
@@ -1567,9 +1199,6 @@ func (t *SchemaTable) Create(args ...value.Value) value.Value {
 	row, errMsg := fillRow(t.columns, args[0].Map())
 	if errMsg != "" {
 		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db.create: table %q %s", t.table, errMsg))
-	}
-	if t.engine == "kitdb" {
-		return t.kitDBCreate(row)
 	}
 	if message := sqliteWriteRow(t.table, t.columns, row); message != "" {
 		return value.InvalidFailure(value.InvalidArgumentCode, message)
@@ -1648,9 +1277,6 @@ func (t *SchemaTable) Update(args ...value.Value) value.Value {
 	if v, ok := t.ready(); !ok {
 		return v
 	}
-	if t.engine == "kitdb" {
-		return t.kitDBUpdate(args...)
-	}
 	if len(args) > 0 && args[0].K == value.Map {
 		row, errMsg := coerceWriteRow(t.columns, args[0].Map())
 		if errMsg != "" {
@@ -1674,9 +1300,6 @@ func (t *SchemaTable) Delete(_ ...value.Value) value.Value {
 	if v, ok := t.ready(); !ok {
 		return v
 	}
-	if t.engine == "kitdb" {
-		return t.kitDBDelete()
-	}
 	result := t.builder().Remove()
 	return result
 }
@@ -1691,9 +1314,6 @@ func (t *SchemaTable) Remove(args ...value.Value) value.Value { return t.Delete(
 func (t *SchemaTable) Plan(_ ...value.Value) value.Value {
 	if t.failed {
 		return t.failVal()
-	}
-	if t.engine == "kitdb" {
-		return t.kitDBPlan()
 	}
 	db := t.source().db()
 	if db == nil {
@@ -1722,9 +1342,6 @@ func (t *SchemaTable) Plan(_ ...value.Value) value.Value {
 // what makes it react to schema changes: edit the schema (add a column) and the key changes, so a
 // hot-reload re-runs migrate() and ALTERs the live table — not just first boot.
 func (t *SchemaTable) ensureTable() error {
-	if t.engine == "kitdb" {
-		return t.ensureKitDBStruct()
-	}
 	// Migrate EVERY table in this database, not just the one being queried, so a foreign key's target
 	// table exists before any insert (SQLite allows creating a child before its parent, but the parent
 	// must exist by insert time). Ordering does not matter for CREATE, so a plain name order is fine.
@@ -1765,7 +1382,7 @@ func (t *SchemaTable) ensureTable() error {
 // keepsHistory reports a table of a file whose history the engine keeps: a file it declares tables on, the app's
 // .database/ or the host's of connection("tên") (database_history.go).
 func (t *SchemaTable) keepsHistory() bool {
-	return t.engine != "kitdb" && t.sqlitePath != "" && t.frozenDB == nil
+	return t.sqlitePath != "" && t.frozenDB == nil
 }
 
 // ensuredKey is what ensuredTables remembers a table of the file by: its schema hash with it.
@@ -2144,19 +1761,6 @@ func (s planStep) describe() string {
 			return fmt.Sprintf("add field %s %s requires explicit migration ({ migrate: true })", s.Column, s.To)
 		}
 		return fmt.Sprintf("add column %s %s", s.Column, s.To)
-	case "field_add":
-		if !s.WillApply {
-			if s.Destructive {
-				return fmt.Sprintf("add field %s %s REFUSED (existing rows cannot be backfilled safely)", s.Column, s.To)
-			}
-			return fmt.Sprintf("add field %s %s requires explicit migration ({ migrate: true })", s.Column, s.To)
-		}
-		return fmt.Sprintf("add field %s %s", s.Column, s.To)
-	case "rename":
-		if !s.WillApply {
-			return fmt.Sprintf("rename field %s→%s requires explicit migration ({ migrate: true })", s.From, s.To)
-		}
-		return fmt.Sprintf("rename field %s→%s", s.From, s.To)
 	case "retype":
 		if s.WillApply {
 			return fmt.Sprintf("retype %s %s→%s (rebuild + CAST)", s.Column, s.From, s.To)
@@ -2167,49 +1771,6 @@ func (s planStep) describe() string {
 			return fmt.Sprintf("drop column %s", s.Column)
 		}
 		return fmt.Sprintf("extra column %s REFUSED (dropping it loses data; kitwork migrate is not in this engine yet)", s.Column)
-	case "primary":
-		if s.WillApply {
-			return fmt.Sprintf("change primary-key role for %s (empty struct)", s.Column)
-		}
-		return fmt.Sprintf("change primary-key role for %s REFUSED", s.Column)
-	case "field_type":
-		if s.WillApply {
-			return fmt.Sprintf("change field type %s %s→%s (bounded rewrite + cast)", s.Column, s.From, s.To)
-		}
-		return fmt.Sprintf("change field type %s %s→%s REFUSED", s.Column, s.From, s.To)
-	case "remove":
-		if s.WillApply {
-			return fmt.Sprintf("remove field %s (bounded rewrite)", s.Column)
-		}
-		return fmt.Sprintf("remove field %s REFUSED (data would be discarded)", s.Column)
-	case "reference":
-		if s.WillApply {
-			return fmt.Sprintf("change reference for %s (empty struct)", s.Column)
-		}
-		return fmt.Sprintf("change reference for %s REFUSED (%s→%s)", s.Column, s.From, s.To)
-	case "constraint":
-		if !s.WillApply {
-			return fmt.Sprintf("change constraints for %s requires explicit migration ({ migrate: true })", s.Column)
-		}
-		return fmt.Sprintf("change constraints for %s", s.Column)
-	case "index":
-		if !s.WillApply {
-			return fmt.Sprintf("rebuild indexes for %s requires explicit migration ({ migrate: true })", s.Column)
-		}
-		return fmt.Sprintf("rebuild indexes for %s", s.Column)
-	case "index_build":
-		return fmt.Sprintf("continue resumable indexes for %s after %s", s.Column, s.From)
-	case "index_cleanup":
-		return fmt.Sprintf("clean retired indexes for %s (%s of %s)", s.Column, s.From, s.To)
-	case "metadata":
-		if !s.WillApply {
-			return fmt.Sprintf("update schema metadata for %s requires explicit migration ({ migrate: true })", s.Column)
-		}
-		return fmt.Sprintf("update schema metadata for %s", s.Column)
-	case "catalog_upgrade":
-		return "upgrade KitDB schema catalog to stable field tags"
-	case "change":
-		return fmt.Sprintf("schema %s→%s requires explicit migration", shortSchemaHash(s.From), shortSchemaHash(s.To))
 	case "error":
 		return "inspection failed: " + s.From
 	}
@@ -2272,41 +1833,7 @@ func MigrationPlansFor(t *Tenant) []TablePlan {
 
 	var plans []TablePlan
 	for _, p := range proxies {
-		tables, definitions := p.schemaSnapshot()
-		if p.engine == "kitdb" {
-			path, _ := kitDBPath(p.tenant, kitDBRel(p.dbName))
-			_, statErr := os.Stat(path)
-			var managed *managedKitDB
-			var openErr error
-			if statErr == nil {
-				openErr = p.refreshKitDBCatalogDefinitions()
-				if openErr == nil {
-					managed, openErr = kitDBForRequest(p.tenant, p.dbName, nil).database()
-				}
-			}
-			for _, name := range p.declaredTables {
-				steps := []planStep{{Action: "create", WillApply: true}}
-				switch {
-				case statErr != nil && !os.IsNotExist(statErr):
-					steps = []planStep{{Action: "error", From: statErr.Error()}}
-				case openErr != nil:
-					steps = []planStep{{Action: "error", From: openErr.Error()}}
-				case managed != nil:
-					definition := definitions[name]
-					planned, err := planKitDBCatalog(managed.database, definition, p.migrate)
-					if err != nil {
-						steps = []planStep{{Action: "error", From: err.Error()}}
-					} else {
-						steps = planned
-					}
-				}
-				plans = append(plans, TablePlan{Engine: p.engine, DB: p.dbName, Table: name, Steps: steps})
-			}
-			if managed != nil {
-				managed.Release()
-			}
-			continue
-		}
+		tables, _ := p.schemaSnapshot()
 		// Introspect the live DB only if it already exists — never create a file during a preflight.
 		live := map[string]map[string]string{}
 		table := &SchemaTable{tenant: p.tenant, engine: p.engine, dbName: p.dbName, sqlitePath: p.sqlitePath}

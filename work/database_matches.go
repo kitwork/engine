@@ -109,9 +109,6 @@ func (m *ManagedDatabase) runMatches(prepared *preparedStatement, binder *statem
 		}
 		return value.New([]value.Value{})
 	}
-	if m.proxy.engine == "kitdb" {
-		return value.InvalidFailure(value.UnsupportedCode, "matches chạy trên database SQLite của app; database KitDB không có")
-	}
 	searchable := matchesColumns(prepared.columns)
 	if len(searchable) == 0 {
 		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("bảng %s không có cột .searchable(): dịch lại", s.Table))

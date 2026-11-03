@@ -1,0 +1,3 @@
+# KitDB files the engine wrote while it had KROW: bytes as they are, never line endings
+*.kitdb binary
+*.wal binary

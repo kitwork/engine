@@ -64,10 +64,10 @@ func readRunsDatabase(setting folderSetting, module, label, where string) (runs 
 		if setting.args[0].K != value.Proxy || handle.proxy == nil {
 			break
 		}
-		if handle.proxy.engine == "kitdb" || handle.proxy.dbName == kitDBApplicationName {
+		if handle.proxy.dbName == applicationDatabaseName {
 			return nil, false
 		}
-		if schema, ownSchema := strings.CutPrefix(handle.proxy.dbName, kitDBApplicationName+"/"); ownSchema && handle.proxy.sqlitePath != "" {
+		if schema, ownSchema := strings.CutPrefix(handle.proxy.dbName, applicationDatabaseName+"/"); ownSchema && handle.proxy.sqlitePath != "" {
 			return &runsPlace{name: schema, path: handle.proxy.sqlitePath}, false
 		}
 		if handle.proxy.sqlitePath != "" {
@@ -311,7 +311,7 @@ func (t *Tenant) appSQLiteRunsLeftBehind(kind string) (int, error) {
 // appKitDBNotCopied reports an application.kitdb, the app's database before 29/10/2026, that `kitwork migrate
 // kitdb` has not copied (applicationCopied): a file that does not exist is none, and it is never opened.
 func (t *Tenant) appKitDBNotCopied() (bool, error) {
-	path, _ := kitDBPath(t, kitDBApplicationName)
+	path := t.resolveApp(".database", "application", kitDBApplicationFile)
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
 			return false, nil

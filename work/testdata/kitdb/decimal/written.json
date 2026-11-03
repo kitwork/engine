@@ -1,0 +1,20 @@
+[
+  [
+    {
+      "amount": "12.345",
+      "createdAt": "2026-11-03T14:25:17Z",
+      "day": "2026-10-29",
+      "email": "a@example.com",
+      "id": "03gwep78v2cyhjrno15liqutzk4xdba9mfs6",
+      "item": "trà"
+    },
+    {
+      "amount": "12345678901234.5",
+      "createdAt": "2026-11-03T14:25:17Z",
+      "day": "2026-10-29",
+      "email": "b@example.com",
+      "id": "03gwep78ym4k5ho1dfz2tuclranjxqb6iv9s",
+      "item": "trà"
+    }
+  ]
+]

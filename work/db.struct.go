@@ -48,9 +48,8 @@ type StructDef struct {
 	// catalog rather than from a source declaration. Such a definition follows
 	// the catalog and never reconciles it: a reader that snapshotted it before a
 	// concurrent DDL committed must not plan the struct back to what it saw.
-	catalogOwned   bool
-	constraintErr  string
-	compiledChecks []compiledStructCheck
+	catalogOwned  bool
+	constraintErr string
 }
 
 // StructFieldDef is the deterministic field representation shared by storage,
@@ -373,9 +372,6 @@ func bindStructDefWithID(name, id string, source *StructDef, columns map[string]
 	}
 	definition.NextFieldTag = uint32(len(definition.Fields) + 1)
 	refreshStructHash(definition)
-	if err := prepareStructCheckConstraints(definition); err != nil && definition.constraintErr == "" {
-		definition.constraintErr = err.Error()
-	}
 	return definition
 }
 
@@ -979,14 +975,6 @@ func validSchemaID(id string) bool {
 	return err == nil && len(decoded) == 16
 }
 
-func (definition *StructDef) primaryField() (StructFieldDef, bool) {
-	fields := definition.primaryFields()
-	if len(fields) == 0 {
-		return StructFieldDef{}, false
-	}
-	return fields[0], true
-}
-
 func (definition *StructDef) primaryFields() []StructFieldDef {
 	if definition == nil {
 		return nil
@@ -1005,4 +993,27 @@ func (definition *StructDef) primaryFields() []StructFieldDef {
 		return leftOrder < rightOrder
 	})
 	return fields
+}
+
+// structField finds a field of a definition by its name or one of its aliases.
+func structField(definition *StructDef, name string) (StructFieldDef, bool) {
+	if definition != nil {
+		if index, found := definition.byName[name]; found {
+			return definition.Fields[index], true
+		}
+		if index, found := definition.byAlias[name]; found {
+			return definition.Fields[index], true
+		}
+		for _, field := range definition.Fields {
+			if field.Name == name {
+				return field, true
+			}
+			for _, alias := range field.Aliases {
+				if alias == name {
+					return field, true
+				}
+			}
+		}
+	}
+	return StructFieldDef{}, false
 }

@@ -319,7 +319,7 @@ router.get((context) => context.json({ orders: db.list((orders) => orders.amount
 	var proxy *dbProxy
 	schemaRegMu.Lock()
 	for key, registered := range schemaReg {
-		if strings.HasPrefix(key, tenantScopeKey(again.site)+"|sqlite|"+kitDBApplicationName) {
+		if strings.HasPrefix(key, tenantScopeKey(again.site)+"|sqlite|"+applicationDatabaseName) {
 			proxy = registered
 		}
 	}

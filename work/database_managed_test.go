@@ -1,12 +1,9 @@
 package work
 
 import (
-	"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"math"
-	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -23,7 +20,6 @@ import (
 	"github.com/kitwork/engine/app"
 	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/database/statement"
-	"github.com/kitwork/engine/utilities/query"
 	"github.com/kitwork/engine/value"
 )
 
@@ -324,75 +320,6 @@ func TestManagedDatabaseDecimalCompareAndOrder(t *testing.T) {
 	}
 	if got := result["ordered"]; !reflect.DeepEqual(got, []any{35000.0, 35000.0, 100.5, 5.0}) {
 		t.Errorf("desc(amount): %v, want [35000 35000 100.5 5]", got)
-	}
-}
-
-// A decimal compares digit by digit, whatever its exponent: "1e999999" is past every amount and
-// "1e-999999" short of every one above zero, and a comparison with either costs what its text is long,
-// never 10^999999 built in memory (big.Rat took about 19 ms and 400 KB a comparison, so one such value
-// in a filter or a row made every scan pay that for each row it read).
-func TestKitDBDecimalCompare(t *testing.T) {
-	for _, test := range []struct {
-		left, right string
-		want        int
-	}{
-		{"35000", "35000.00", 0}, {"35000", "5", 1}, {"5", "35000", -1}, {"100.5", "100.50", 0},
-		{"0.05", "0.5", -1}, {".5", "0.5", 0}, {"5.", "5", 0}, {"1e3", "1000", 0}, {"1E+3", "999.999", 1},
-		{"-0", "0", 0}, {"+5", "5", 0}, {"0012.3400", "12.34", 0}, {"-5", "-35000", 1}, {"-0.1", "0", -1},
-		{"1e999999", "35000", 1}, {"1e-999999", "0", 1}, {"1e-999999", "0.0001", -1}, {"-1e999999", "-5", -1},
-		{"1e0000000000000000000003", "1000", 0},
-	} {
-		if got := kitDBCompareKind("decimal", value.New(test.left), value.New(test.right)); got != test.want {
-			t.Errorf("%s against %s: %d, want %d", test.left, test.right, got, test.want)
-		}
-		if got := kitDBCompareKind("decimal", value.New(test.right), value.New(test.left)); got != -test.want {
-			t.Errorf("%s against %s: %d, want %d", test.right, test.left, got, -test.want)
-		}
-	}
-	// a number of the VM compares as the text a write stores it as
-	if got := kitDBCompareKind("decimal", value.New(0.1), value.New("0.10")); got != 0 {
-		t.Errorf("0.1 against \"0.10\": %d, want 0", got)
-	}
-	// a text that does not read as a decimal compares as text
-	if got := kitDBCompareKind("decimal", value.New("abc"), value.New("abd")); got != -1 {
-		t.Errorf("abc against abd: %d, want -1 (as text)", got)
-	}
-
-	var before, after runtime.MemStats
-	runtime.ReadMemStats(&before)
-	for index := 0; index < 20; index++ {
-		kitDBCompareKind("decimal", value.New("1e999999"), value.New("35000"))
-		kitDBCompareKind("decimal", value.New("1e-999999"), value.New("0.0001"))
-	}
-	runtime.ReadMemStats(&after)
-	// big.Rat allocated some 3 MB a comparison; the bound leaves room for what other goroutines allocate
-	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > 1<<20 {
-		t.Fatalf("40 comparisons with an exponent of a million allocated %d bytes, want under 1 MiB", allocated)
-	}
-
-	// the flat conditions of the older query builder, IN and BETWEEN compare a decimal the same way
-	table := &SchemaTable{table: "orders", columns: map[string]*ColumnSpec{"amount": {kind: "decimal"}}}
-	row := map[string]value.Value{"amount": value.New("35000.00")}
-	for _, condition := range []query.Condition{
-		{Column: "amount", Operator: "=", Value: value.New(35000)},
-		{Column: "amount", Operator: ">", Value: value.New(5)},
-		{Column: "amount", Operator: ">=", Value: value.New("35000")},
-		{Column: "amount", Operator: "<", Value: value.New(100000)},
-		{Column: "amount", Operator: "<=", Value: value.New("3.5e4")},
-		{Column: "amount", Operator: "<>", Value: value.New(5)},
-	} {
-		if matched, err := table.kitDBConditionMatches(row, condition); err != nil || !matched {
-			t.Errorf("35000.00 %s %v: %v %v, want a match", condition.Operator, condition.Value, matched, err)
-		}
-	}
-	if truth, err := kitDBEvaluateIn(value.New("35000.00"), "decimal", value.New([]value.Value{value.New(1), value.New(35000)})); err != nil || truth != kitDBTrue {
-		t.Errorf("35000.00 in [1, 35000]: %v %v, want true", truth, err)
-	}
-	if truth, err := kitDBEvaluateBetween(value.New("35000.00"), "decimal", value.New([]value.Value{value.New(5), value.New(100000)})); err != nil || truth != kitDBTrue {
-		t.Errorf("35000.00 between 5 and 100000: %v %v, want true", truth, err)
-	}
-	if truth, err := kitDBEvaluateBetween(value.New("5"), "decimal", value.New([]value.Value{value.New(10), value.New(100)})); err != nil || truth != kitDBFalse {
-		t.Errorf("5 between 10 and 100: %v %v, want false", truth, err)
 	}
 }
 
@@ -813,7 +740,7 @@ export const db = connection().tables({ users, orders });
 		t.Fatal(err)
 	}
 	schemaRegMu.Lock()
-	proxy := schemaReg[tenantScopeKey(tenant)+"|sqlite|"+kitDBApplicationName]
+	proxy := schemaReg[tenantScopeKey(tenant)+"|sqlite|"+applicationDatabaseName]
 	schemaRegMu.Unlock()
 	if proxy == nil {
 		t.Fatal("the schema file's database is not registered")
@@ -937,95 +864,30 @@ func withoutIDs(item any) any {
 	return fmt.Sprint(item)
 }
 
-// A read keeps the rows it gives back through kitDBRowCollector, the one way readKitDBRows has: an order
-// no index covers keeps the best rows of the scan in batches, so the rows and their order are a full
-// sort's and the comparisons stay O(N log K), not the O(N·K log K) of a sort after every row; rows in the
-// scan's order before the page are skipped, never kept.
-func TestKitDBOrderedScanSortsInBatches(t *testing.T) {
-	random := rand.New(rand.NewSource(7))
-	rows := make([]kitDBStoredRow, 5000)
-	for index := range rows {
-		rows[index] = kitDBStoredRow{
-			key:    []byte(fmt.Sprintf("row-%05d", index)),
-			values: map[string]value.Value{"amount": value.New(random.Intn(300))},
-		}
-	}
-	compared := 0
-	less := func(left, right kitDBStoredRow) bool {
-		compared++
-		if comparison := kitDBCompareValues(left.values["amount"], right.values["amount"]); comparison != 0 {
-			return comparison > 0
-		}
-		return bytes.Compare(left.key, right.key) < 0
-	}
-	// the page of 900 rows after the first 100
-	collector := newKitDBRowCollector(900, 100, less)
-	for _, row := range rows {
-		if done, err := collector.add(row); done || err != nil {
-			t.Fatalf("an ordered read stopped at a row: %v %v", done, err)
-		}
-	}
-	got := collector.result()
-	batched := compared
-	reference := append([]kitDBStoredRow(nil), rows...)
-	sort.SliceStable(reference, func(left, right int) bool { return less(reference[left], reference[right]) })
-	if len(got) != 900 {
-		t.Fatalf("%d rows kept, want 900", len(got))
-	}
-	for index := range got {
-		if !bytes.Equal(got[index].key, reference[100+index].key) {
-			t.Fatalf("row %d is %s, a full sort gives %s", index, got[index].key, reference[100+index].key)
-		}
-	}
-	// a full sort of the 5000 rows makes about 5000·log2(5000) comparisons; the batches stay within a few
-	// of that, where a sort after every row made tens of millions
-	if bound := int(5000 * math.Log2(2000) * 4); batched > bound {
-		t.Fatalf("%d comparisons, want at most %d", batched, bound)
-	}
-
-	// in the scan's order: the rows past the offset, the read done at the limit, nothing kept before
-	collector = newKitDBRowCollector(3, 4990, nil)
-	stopped := -1
-	for index, row := range rows {
-		if done, _ := collector.add(row); done {
-			stopped = index
-			break
-		}
-	}
-	got = collector.result()
-	if stopped != 4992 || len(got) != 3 || string(got[0].key) != "row-04990" || cap(collector.rows) > 4 {
-		t.Fatalf("offset 4990, limit 3: stopped at %d with %d rows (first %s, room for %d), want rows 4990-4992 and room for a few",
-			stopped, len(got), got[0].key, cap(collector.rows))
-	}
-	if empty := newKitDBRowCollector(10, 5, nil).result(); empty == nil || len(empty) != 0 {
-		t.Fatalf("a read of no rows gave %#v, want an empty list", empty)
-	}
-}
-
 // The name of the app's database is the engine's: a site-local proxy built by name (newDbProxy, what the
-// removed kitdb("…") built and the engine's internals still build) cannot open it, however the name is
-// written (a read opens a name as kitDBRel reads it, so "./@application" is "@application"). It would
-// otherwise open the app's database with its own schema and options, drop and token among them.
-func TestKitDBApplicationNameIsReserved(t *testing.T) {
+// removed sqlite("…") and kitdb("…") built and the engine's internals still build) cannot open it, however
+// the name is written (a read opens a name as databaseRel reads it, so "./@application" is "@application").
+// It would otherwise open the app's database with its own schema and options, drop and token among them.
+func TestApplicationDatabaseNameIsReserved(t *testing.T) {
 	shop := newManagedApp(t, map[string]string{"shop.example/router.work": `import * as router from "kitwork/router";`})
 	tenant := shop.site("shop.example")
 	legacy := &storageInternals{tenant: tenant}
 	users := goStruct(t, goColumn{name: "id", builder: "id"}, goColumn{name: "email", builder: "text"})
 	for _, name := range []string{"@application", "/@application", "./@application", `\@application`, "x/../@application", " @application", "@other"} {
-		declared := legacy.Kitdb(value.New(name), value.New(map[string]value.Value{"users": users}),
+		declared := legacy.Sqlite(value.New(name), value.New(map[string]value.Value{"users": users}),
 			value.New(map[string]value.Value{"drop": value.New(true)}))
 		code, message := failureOf(declared)
 		want := fmt.Sprintf("db: tên %q dành cho database của app; database của app khai export const db = connection().tables({ … }) trong .shared/schema/", name)
 		if code != value.InvalidArgumentCode || message != want {
-			t.Errorf("kitdb(%q): %s %q, want INVALID_ARGUMENT %q", name, code, message, want)
+			t.Errorf("sqlite(%q): %s %q, want INVALID_ARGUMENT %q", name, code, message, want)
 		}
 	}
 	if _, err := os.Stat(filepath.Join(shop.root, "acme", ".database")); !os.IsNotExist(err) {
 		t.Fatalf("the app's .database/ was made (%v)", err)
 	}
 	// a name that only holds @ further in is a file of the site
-	if declared := legacy.Kitdb(value.New("notes/@archive"), value.New(map[string]value.Value{"users": users})); declared.K != value.Proxy {
-		t.Fatalf("kitdb(\"notes/@archive\"): %v, want a database of the site", declared)
+	if declared := legacy.Sqlite(value.New("notes/@archive"), value.New(map[string]value.Value{"users": users})); declared.K != value.Proxy {
+		t.Fatalf("sqlite(\"notes/@archive\"): %v, want a database of the site", declared)
 	}
 }
 
