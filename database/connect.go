@@ -7,13 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	_ "github.com/kitwork/engine/kitdb/kitsql"
 )
 
 type Config struct {
 	Alias    string `json:"alias" yaml:"alias"` // system, default, analytics, ...
-	Type     string `json:"type" yaml:"type"`   // postgres, kitsql, mysql, sqlite
+	Type     string `json:"type" yaml:"type"`   // postgres, mysql, sqlite
 	URL      string `json:"url" yaml:"url"`     // a full DSN/URL from app.connect(alias, "postgres://…"); wins over the fields
 	User     string `json:"user" yaml:"user"`
 	Password string `json:"password" yaml:"password"`

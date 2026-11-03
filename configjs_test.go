@@ -323,7 +323,7 @@ app
   .mysql("legacy", { host: "mysql.internal", port: 3306, user: "reader", name: "archive" })
   .sqlite("local", "./local.sqlite")
   .redis("cache", "rediss://cache.internal:6380")
-  .connect("remote-kitdb", "kitsql://kitdb:secret@kitdb.internal/shop")
+  .connect("archive", "mysql://reader:secret@mysql.internal/archive")
   .connect("warehouse", { driver: "postgresql", host: "warehouse.internal", name: "events" })
   .web(8080);`)
 	raw, err := evalConfigJS(file)
@@ -356,8 +356,8 @@ app
 	if got := byAlias["cache"]; got.Type != "redis" || got.URL != "rediss://cache.internal:6380" {
 		t.Fatalf("redis = %+v", got)
 	}
-	if got := byAlias["remote-kitdb"]; got.Type != "kitsql" || got.URL != "kitsql://kitdb:secret@kitdb.internal/shop" {
-		t.Fatalf("kitsql = %+v", got)
+	if got := byAlias["archive"]; got.Type != "mysql" || got.URL != "mysql://reader:secret@mysql.internal/archive" {
+		t.Fatalf("a connection by URL = %+v", got)
 	}
 	if got := byAlias["warehouse"]; got.Type != "postgres" || got.Host != "warehouse.internal" {
 		t.Fatalf("generic connection = %+v", got)

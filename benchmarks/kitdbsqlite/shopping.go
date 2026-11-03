@@ -12,7 +12,7 @@ import (
 )
 
 // column is one field of shopping, in the position of its KitDB definition, with the canonical encoding the
-// PostgreSQL import used for its checksum (kitdb/migrate/postgres/stream.go).
+// PostgreSQL import used for its checksum (kitdb/migrate/postgres/stream.go, removed 03/11/2026).
 type column struct {
 	name     string
 	kind     string // integer | text | bool | decimal | array | jsonb

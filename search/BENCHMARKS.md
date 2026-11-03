@@ -195,14 +195,14 @@ artifact and then removed because enabled and disabled latency ranges
 overlapped. Synthetic pruning alone is not an adoption gate; a format or
 algorithm change must also improve the representative KitDB workload.
 
-The [2026-09-05 posting traversal/Varint experiment](../benchmarks/dbcompare/POSTING_TRAVERSAL_13M_2026-09-05.md)
+The 2026-09-05 posting traversal/Varint experiment (`benchmarks/dbcompare/POSTING_TRAVERSAL_13M_2026-09-05.md`, removed with benchmarks/dbcompare on 03/11/2026; in the history before it)
 also was not promoted: hot-cache 13M results varied substantially and the
 candidate's apparent multi-field gain at GOMAXPROCS=16 did not reproduce
 consistently at GOMAXPROCS=2. The retained work is the six-query fingerprinted
 benchmark, differential/decoder tests, and two malformed-payload safety checks,
 not a claimed speedup. No search format or ranking semantics changed.
 
-The [deterministic work follow-up](../benchmarks/dbcompare/POSTING_WORK_13M_2026-09-05.md)
+The deterministic work follow-up (`benchmarks/dbcompare/POSTING_WORK_13M_2026-09-05.md`, likewise)
 adds opt-in `searchwork` diagnostics. On the same logitech query, lead jumping
 reduces Advance calls by 4.97% but leaves decoded blocks/postings/Varints and
 reader requests unchanged. Of 5,654,921 warm ranking Varints, 3,075,873 describe

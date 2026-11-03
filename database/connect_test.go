@@ -25,14 +25,3 @@ func TestConfigConnectRejectsUnlinkedConnectorClearly(t *testing.T) {
 		t.Fatalf("unlinked connector error = %v", err)
 	}
 }
-
-func TestConfigBuildDSNAcceptsKitSQLURL(t *testing.T) {
-	config := Config{Type: "kitsql", URL: "kitsql://kitdb:secret@db.example/shop"}
-	dsn, err := config.BuildDSN()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if dsn != config.URL {
-		t.Fatalf("DSN = %q", dsn)
-	}
-}
