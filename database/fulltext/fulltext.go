@@ -678,7 +678,14 @@ func (table *Table) changedRows(ctx context.Context, connection *sql.Conn, revis
 	seen := map[int64]bool{}
 	var ids []int64
 	rebuild := false
+	next := revision + 1
 	err := kitdbsqlite.ReadChanges(ctx, connection, revision, func(commit kitdbsqlite.Commit) error {
+		// a revision missing after the index's is one the history's retention took out: what it changed is not known
+		if commit.Revision != next {
+			rebuild = true
+			return errEnough
+		}
+		next++
 		for _, change := range commit.Changes {
 			switch change.Operation {
 			case kitdbsqlite.Barrier, kitdbsqlite.Statement:

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -522,6 +523,40 @@ func (b *ServerBuilder) Policy(values ...value.Value) *ServerBuilder {
 			b.err = fmt.Sprintf("app.policy: %s is not a policy of this engine; it has tenantConnections", key)
 			return b
 		}
+	}
+	return b
+}
+
+// History is how long the history of the apps' databases is kept (KITWORK_KITDB.md câu 13.6):
+//
+//	app.history({ days: 90 });   // at() reaches 90 days back; without it, 30
+//
+// Every file whose history the engine keeps is anchored once a day of commits is in no anchor, and what no moment of
+// the days kept needs goes: older anchors, older commits.
+func (b *ServerBuilder) History(values ...value.Value) *ServerBuilder {
+	if len(values) != 1 || !values[0].IsMap() {
+		b.err = "app.history expects one object: app.history({ days: 90 })"
+		return b
+	}
+	if _, declared := b.config["history_days"]; declared {
+		b.err = "app.history is declared twice"
+		return b
+	}
+	for key, item := range values[0].Map() {
+		switch key {
+		case "days":
+			if item.K != value.Number || item.N != math.Trunc(item.N) || item.N < 1 || item.N > 36500 {
+				b.err = "app.history: days is a whole number of days from 1 to 36500"
+				return b
+			}
+			b.config["history_days"] = item
+		default:
+			b.err = fmt.Sprintf("app.history: %s is not a setting of the history; it has days", key)
+			return b
+		}
+	}
+	if _, declared := b.config["history_days"]; !declared {
+		b.err = "app.history needs days: app.history({ days: 90 })"
 	}
 	return b
 }

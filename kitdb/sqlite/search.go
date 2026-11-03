@@ -293,10 +293,17 @@ func (s *searchable) catchUpLocked(snapshot *Snapshot) error {
 		return nil
 	}
 	rebuild := false
+	next := latest + 1
 	err := readHistory(ctx, snapshot.tx, latest, 0, func(row historyRow) error {
 		if row.revision > revision {
 			return errStopHistory
 		}
+		// a revision missing after the index's is one Retain took out: what it changed is no longer known
+		if row.revision != next {
+			rebuild = true
+			return errStopHistory
+		}
+		next++
 		changes, err := decodeChanges(row.changes)
 		if err != nil {
 			return fmt.Errorf("revision %d: %w", row.revision, err)

@@ -24,9 +24,9 @@ type anchor struct {
 }
 
 // Anchor writes a full copy of the database as of the latest commit
-// (VACUUM INTO on a reader) and returns its revision. Restore starts from
-// the newest anchor at or before the moment it is asked for, so anchors bound
-// how much history a restore replays.
+// (VACUUM INTO on a reader), its history down to that one commit, and returns
+// its revision. Restore starts from the newest anchor at or before the moment
+// it is asked for, so anchors bound how much history a restore replays.
 func (database *Database) Anchor(ctx context.Context) (uint64, error) {
 	if err := database.ensureOpen(); err != nil {
 		return 0, err
@@ -46,13 +46,21 @@ func (database *Database) Anchor(ctx context.Context) (uint64, error) {
 		_ = os.Remove(temporary)
 		return 0, err
 	}
-	copied, err := sql.Open("sqlite", dataSourceName(temporary, "mode=ro"))
+	// The copy keeps its last commit, the link a restore chains from, and none of the history before it: what Retain
+	// takes out of the file, an anchor must not keep on.
+	copied, err := sql.Open("sqlite", dataSourceName(temporary, "_pragma=journal_mode(DELETE)"))
 	if err != nil {
 		_ = os.Remove(temporary)
 		return 0, err
 	}
-	var revision, at int64
-	err = copied.QueryRowContext(ctx, `SELECT coalesce(max(rev), 0), coalesce(max(at), 0) FROM kitwork_history`).Scan(&revision, &at)
+	copied.SetMaxOpenConns(1)
+	var revision, at, commits int64
+	err = copied.QueryRowContext(ctx, `SELECT coalesce(max(rev), 0), coalesce(max(at), 0), count(*) FROM kitwork_history`).Scan(&revision, &at, &commits)
+	if err == nil && commits > 1 {
+		if _, err = copied.ExecContext(ctx, `DELETE FROM kitwork_history WHERE rev < ?`, revision); err == nil {
+			_, err = copied.ExecContext(ctx, `VACUUM`)
+		}
+	}
 	_ = copied.Close()
 	if err != nil {
 		_ = os.Remove(temporary)
@@ -97,7 +105,8 @@ func (database *Database) anchors() ([]anchor, error) {
 // Restore writes to target the database as it was at moment: the newest anchor
 // at or before it, then every later commit whose moment is not after it. The
 // replayed history is checked link by link against the anchor's own last
-// checksum. It returns the restored revision. target must not exist.
+// checksum. It returns the restored revision. target must not exist. A moment
+// before the history Retain kept is ErrPruned.
 func (database *Database) Restore(ctx context.Context, moment time.Time, target string) (uint64, error) {
 	if err := database.ensureOpen(); err != nil {
 		return 0, err
@@ -105,11 +114,14 @@ func (database *Database) Restore(ctx context.Context, moment time.Time, target 
 	if _, err := os.Stat(target); err == nil {
 		return 0, fmt.Errorf("kitdb: restore target %q exists", target)
 	}
+	through := moment.UTC().UnixNano()
+	if err := database.prunedBefore(ctx, through); err != nil {
+		return 0, err
+	}
 	anchors, err := database.anchors()
 	if err != nil {
 		return 0, err
 	}
-	through := moment.UTC().UnixNano()
 	var start *anchor
 	for position := range anchors {
 		if anchors[position].at <= through {

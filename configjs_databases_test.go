@@ -135,14 +135,17 @@ func TestDatabaseManifestReachesTheEngine(t *testing.T) {
 	t.Cleanup(func() {
 		database.SetCatalog(nil)
 		work.SetTenantConnections(true)
+		work.SetHistoryDays(0)
 	})
 	for _, path := range []string{"check", "run"} {
 		database.SetCatalog(nil)
 		work.SetTenantConnections(true)
+		work.SetHistoryDays(0)
 		root := t.TempDir()
 		body := fmt.Sprintf(`app.root(%q);
 app.databases({ warehouse: { sqlite: "./data/warehouse.db" } });
-app.policy({ tenantConnections: false });`, filepath.ToSlash(root))
+app.policy({ tenantConnections: false });
+app.history({ days: 90 });`, filepath.ToSlash(root))
 		if path == "run" {
 			body += "\n" + `app.mysql({ alias: "system", host: "127.0.0.1", port: 3306, user: "root", password: "", name: "kitwork" });`
 		}
@@ -168,6 +171,9 @@ app.policy({ tenantConnections: false });`, filepath.ToSlash(root))
 		}
 		if work.TenantConnections() {
 			t.Errorf("%s: app.policy({ tenantConnections: false }) did not reach the engine: connect() is still allowed", path)
+		}
+		if days := work.HistoryDays(); days != 90 {
+			t.Errorf("%s: app.history({ days: 90 }) did not reach the engine: the history keeps %d days", path, days)
 		}
 	}
 }

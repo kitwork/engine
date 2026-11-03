@@ -397,9 +397,13 @@ func ReadChanges(ctx context.Context, querier interface {
 	})
 }
 
-// RevisionAt is the last revision committed at or before moment, 0 for a moment before the first.
+// RevisionAt is the last revision committed at or before moment, 0 for a moment before the first. A moment before
+// the history Retain kept is ErrPruned: the revision it names is no longer known.
 func (database *Database) RevisionAt(ctx context.Context, moment time.Time) (uint64, error) {
 	if err := database.ensureOpen(); err != nil {
+		return 0, err
+	}
+	if err := database.prunedBefore(ctx, moment.UTC().UnixNano()); err != nil {
 		return 0, err
 	}
 	var revision int64

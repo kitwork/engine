@@ -483,11 +483,12 @@ func MigrateKitDB(options KitDBCopyOptions, configFile ...string) ([]KitDBCopyRe
 
 // applyDatabaseManifest hands the engine what application.work says an app's .shared/schema/ may reach
 // (KITWORK_DATABASE.md mục 1): the app.databases catalogue, which connection("tên") picks from, and
-// app.policy({ tenantConnections }), which turns connect() off. Run and Check both call it, so a check sees
-// the databases the server would.
+// app.policy({ tenantConnections }), which turns connect() off, and app.history({ days }), how long the history
+// of the apps' databases keeps. Run and Check both call it, so a check sees the databases the server would.
 func applyDatabaseManifest(cfg *Config) {
 	database.SetCatalog(cfg.DatabaseCatalog)
 	work.SetTenantConnections(cfg.TenantConnections)
+	work.SetHistoryDays(cfg.HistoryDays)
 }
 
 // ProfileReport is the static bytecode report returned by Profile.

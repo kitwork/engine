@@ -19,7 +19,8 @@ import (
 // database was at a moment. The file is restored from its history (the newest anchor at or before the moment, then
 // every commit not after it) into <file>.at/<revision>.db once, and the statement reads that copy, read-only; the
 // next statement at a moment of the same revision reads the same copy. The newest atKept copies are kept. A moment
-// before the file's history began has no copy, and one before the table was made has no table: the error says so.
+// before the file's history began has no copy, one before what the retention kept (app.history({ days })) has no
+// history left, and one before the table was made has no table: the error says so.
 
 const atKept = 8
 
@@ -52,6 +53,15 @@ func (t *SchemaTable) atTable(moment time.Time) (*SchemaTable, func(), value.Val
 	}
 	ctx := t.writeContext()
 	target, err := atFile(ctx, database, moment)
+	if errors.Is(err, kitdbsqlite.ErrPruned) {
+		kept, _, keptErr := database.KeptFrom(ctx)
+		if keptErr != nil {
+			return nil, nil, value.InvalidFailure(value.DatabaseCode, keptErr.Error())
+		}
+		return nil, nil, value.InvalidFailure(value.InvalidArgumentCode,
+			fmt.Sprintf("at(%s): lịch sử của database chỉ còn từ %s; engine giữ %d ngày (app.history({ days }) trong application.work, mặc định %d)",
+				moment.Format(time.RFC3339), kept.In(moment.Location()).Format(time.RFC3339), HistoryDays(), historyDaysDefault))
+	}
 	if errors.Is(err, kitdbsqlite.ErrNoAnchor) {
 		return nil, nil, value.InvalidFailure(value.InvalidArgumentCode,
 			fmt.Sprintf("at(%s): database chưa giữ lịch sử từ lúc đó (%v)", moment.Format(time.RFC3339), err))
@@ -104,6 +114,24 @@ func atFile(ctx context.Context, database *kitdbsqlite.Database, moment time.Tim
 	}
 	pruneAtFiles(directory, target)
 	return target, nil
+}
+
+// dropAtFilesBefore takes out of directory the copies of revisions before revision: the history no longer reaches
+// them, so no at() reads them again, and what the retention let go of does not stay on in a copy.
+func dropAtFilesBefore(directory string, revision uint64) {
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		var copied uint64
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".db") {
+			continue
+		}
+		if _, err := fmt.Sscanf(entry.Name(), "%020d.db", &copied); err == nil && copied < revision {
+			_ = os.Remove(filepath.Join(directory, entry.Name()))
+		}
+	}
 }
 
 // pruneAtFiles keeps the newest atKept copies of directory, and the one just made.

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	kitdbsqlite "github.com/kitwork/engine/kitdb/sqlite"
 	"github.com/kitwork/engine/search"
@@ -139,6 +140,41 @@ func TestTrackedTableFoldsWhatIsWritten(t *testing.T) {
 	write(`INSERT INTO posts (id, title) VALUES (11, 'Cơm tấm sườn')`)
 	if got := found(t, table, "com tam"); got != "11" || table.Built() != 5 {
 		t.Fatalf("after the schema changed: com tam = %q with %d rows read, want 11 with 5 (built again)", got, table.Built())
+	}
+}
+
+// An index kept on disk whose revision is older than the history the retention kept cannot fold in the commits taken
+// out of it: it is built again from the rows, and finds what they wrote.
+//
+// CONTROL (03/11/2026): with the index folding in what the history still holds, "banh xeo = "", want 4".
+func TestTrackedTableRebuildsOverHistoryTheRetentionTookOut(t *testing.T) {
+	path, database, write := trackedFile(t)
+	table, release := openPosts(t, path)
+	if got := found(t, table, "ca phe"); got != "1" {
+		t.Fatalf("ca phe = %q, want 1", got)
+	}
+	release()
+	write(`INSERT INTO posts (id, title) VALUES (4, 'Bánh xèo miền Tây')`)
+	write(`INSERT INTO posts (id, title) VALUES (5, 'Phở bò tái')`)
+	var last kitdbsqlite.Commit
+	if err := database.Changes(context.Background(), 0, func(commit kitdbsqlite.Commit) error {
+		last = commit
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	day := 24 * time.Hour
+	kept, err := database.Retain(context.Background(), last.At.Add(day+time.Hour), kitdbsqlite.Retention{Keep: day, Every: day})
+	if err != nil || kept != last.Revision {
+		t.Fatalf("Retain kept from revision %d (%v), want %d", kept, err, last.Revision)
+	}
+	table, release = openPosts(t, path)
+	defer release()
+	if got := found(t, table, "banh xeo"); got != "4" {
+		t.Fatalf("banh xeo = %q, want 4", got)
+	}
+	if got := found(t, table, "pho bo"); got != "5" {
+		t.Fatalf("pho bo = %q, want 5", got)
 	}
 }
 

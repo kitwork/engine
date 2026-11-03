@@ -47,6 +47,9 @@ type Config struct {
 	// TenantConnections is app.policy({ tenantConnections }): whether app code may connect({ … }); true
 	// unless the manifest says false.
 	TenantConnections bool `json:"-" yaml:"-"`
+	// HistoryDays is app.history({ days }): how many days the history of the apps' databases keeps; 0 when the
+	// manifest does not say, which the engine reads as 30.
+	HistoryDays int `json:"-" yaml:"-"`
 	// SharedEnvironment is what app.shareEnvironment shares with apps, values of the host; nil when it
 	// shares nothing. Never written into the configuration map: it holds secrets.
 	SharedEnvironment *work.SharedEnvironment `json:"-" yaml:"-"`
@@ -275,6 +278,13 @@ func ParseConfig(raw map[string]interface{}) (*Config, error) {
 			return nil, fmt.Errorf("app.policy: tenantConnections is true or false")
 		}
 		cfg.TenantConnections = allowed
+	}
+	if value, ok := raw["history_days"]; ok {
+		days, isNumber := value.(float64)
+		if !isNumber || days != float64(int(days)) || days < 1 {
+			return nil, fmt.Errorf("app.history: days is a whole number of days from 1 to 36500")
+		}
+		cfg.HistoryDays = int(days)
 	}
 	if value, ok := raw["gateway"]; ok {
 		targets, err := parseGatewayTargets(value)

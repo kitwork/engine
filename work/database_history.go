@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	kitdbsqlite "github.com/kitwork/engine/kitdb/sqlite"
 	"github.com/kitwork/engine/utilities/query"
@@ -30,10 +32,63 @@ import (
 // historyResourceName is the app resource holding the files whose history the app's statements write.
 const historyResourceName = "history"
 
+// The history keeps what app.history({ days }) of application.work says (KITWORK_KITDB.md câu 13.6, 03/11/2026),
+// historyDaysDefault days when it says nothing: each writer anchors its file once a day of commits is in no anchor, and
+// takes out what no moment of the days kept needs (older anchors, older commits, the copies at() made of them), when
+// it opens and every historyRetainEvery after.
+const historyDaysDefault = 30
+
+var historyDays atomic.Int64
+
+// historyRetainEvery is how often an open writer applies the retention.
+var historyRetainEvery = time.Hour
+
+// SetHistoryDays is app.history({ days }) of the host's manifest, set at boot; 0 keeps the default.
+func SetHistoryDays(days int) { historyDays.Store(int64(days)) }
+
+// HistoryDays is how many days the history of the apps' databases keeps on this host.
+func HistoryDays() int { return int(historyRetention().Keep / (24 * time.Hour)) }
+
+func historyRetention() kitdbsqlite.Retention {
+	days := historyDays.Load()
+	if days <= 0 {
+		days = historyDaysDefault
+	}
+	return kitdbsqlite.Retention{Keep: time.Duration(days) * 24 * time.Hour, Every: 24 * time.Hour}
+}
+
 // historyWriter is the writer of one file and how many apps hold it.
 type historyWriter struct {
 	database *kitdbsqlite.Database
 	users    int
+	// stop ends the retention of the file, done says it ended
+	stop context.CancelFunc
+	done chan struct{}
+}
+
+// keep applies the retention now and every historyRetainEvery, until stop.
+func (entry *historyWriter) keep(ctx context.Context) {
+	defer close(entry.done)
+	ticker := time.NewTicker(historyRetainEvery)
+	defer ticker.Stop()
+	for {
+		entry.retain(ctx, time.Now())
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (entry *historyWriter) retain(ctx context.Context, now time.Time) {
+	kept, err := entry.database.Retain(ctx, now, historyRetention())
+	if kept > 0 {
+		dropAtFilesBefore(entry.database.Path()+".at", kept)
+	}
+	if err != nil && ctx.Err() == nil && !errors.Is(err, kitdbsqlite.ErrClosed) {
+		fmt.Printf("[database] the history of %s: %v\n", filepath.Base(entry.database.Path()), err)
+	}
 }
 
 var historyWriters = struct {
@@ -62,8 +117,10 @@ func acquireHistory(path string) (*kitdbsqlite.Database, func(), error) {
 		if err != nil {
 			return nil, nil, historyRefusal(absolute, err)
 		}
-		entry = &historyWriter{database: database}
+		ctx, stop := context.WithCancel(context.Background())
+		entry = &historyWriter{database: database, stop: stop, done: make(chan struct{})}
 		historyWriters.files[absolute] = entry
+		go entry.keep(ctx)
 	}
 	entry.users++
 	var once sync.Once
@@ -79,6 +136,8 @@ func releaseHistory(path string, entry *historyWriter) {
 	}
 	historyWriters.Unlock()
 	if last {
+		entry.stop()
+		<-entry.done
 		_ = entry.database.Close()
 	}
 }

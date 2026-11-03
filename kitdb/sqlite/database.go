@@ -49,6 +49,8 @@ var (
 	ErrCorruptHistory = errors.New("kitdb: history is corrupt")
 	// ErrNoAnchor means no anchor is old enough for the requested moment.
 	ErrNoAnchor = errors.New("kitdb: no anchor at or before the moment")
+	// ErrPruned means the moment is before the history Retain kept.
+	ErrPruned = errors.New("kitdb: the history no longer reaches the moment")
 )
 
 // Options bound one Database. Zero values take the defaults.
