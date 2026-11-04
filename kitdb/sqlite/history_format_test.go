@@ -36,8 +36,12 @@ func TestColumnsFormatRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if encoded[0] != columnsFormat {
-		t.Fatalf("format byte %d, want %d", encoded[0], columnsFormat)
+	if encoded[0] != columnsBarrierFormat {
+		t.Fatalf("format byte %d of a commit holding a Barrier, want %d", encoded[0], columnsBarrierFormat)
+	}
+	plain, err := encodeColumns(changes[:4])
+	if err != nil || plain[0] != columnsFormat {
+		t.Fatalf("format byte of a commit with no Barrier: % x (%v), want %d", plain[:1], err, columnsFormat)
 	}
 	decoded, err := decodeChanges(encoded)
 	if err != nil {
@@ -262,5 +266,60 @@ func TestSearchChangesReadUpdates(t *testing.T) {
 	}
 	if changes, ok := s.searchChanges(update(ColumnUpdate{Position: 1, Old: "cà phê", New: "trà"})); ok {
 		t.Fatalf("an update without the body kept whole folded: %v %v", changes, ok)
+	}
+}
+
+// The writer writes format 3: an update of a searchable column of Options.Search keeps the table's other searchable
+// columns whole, so the index folds it from the history; an update of another column keeps that column alone.
+//
+// CONTROL (04/11/2026): with Options.Search's columns not kept whole, "the updates hold [[title changed] [price
+// changed]], want [title changed, body kept] then [price changed]".
+func TestWriterWritesColumnsFormat(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "kitwork.db")
+	database, err := Open(ctx, path, Options{Search: []SearchTable{{Table: "notes", Columns: []SearchColumn{{Name: "title"}, {Name: "body"}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if _, err := database.Migrate(ctx, "boot", `CREATE TABLE notes (id INTEGER PRIMARY KEY, title TEXT, body TEXT, price INTEGER)`); err != nil {
+		t.Fatal(err)
+	}
+	write := func(query string) {
+		t.Helper()
+		if _, err := database.Write(ctx, "t", func(tx *Transaction) error {
+			_, err := tx.Exec(query)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(`INSERT INTO notes VALUES (1, 'cà phê', 'nóng', 35000)`)
+	start := database.Revision()
+	write(`UPDATE notes SET title = 'trà' WHERE id = 1`)
+	write(`UPDATE notes SET price = 36000 WHERE id = 1`)
+	var updates [][]string
+	if err := database.Changes(ctx, start, func(commit Commit) error {
+		for _, change := range commit.Changes {
+			var entries []string
+			for _, update := range change.Updates {
+				state := "kept"
+				if !sameValue(update.Old, update.New) {
+					state = "changed"
+				}
+				entries = append(entries, change.Columns[update.Position]+" "+state)
+			}
+			updates = append(updates, entries)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(updates) != 2 || strings.Join(updates[0], ", ") != "title changed, body kept" || strings.Join(updates[1], ", ") != "price changed" {
+		t.Fatalf("the updates hold %v, want [title changed, body kept] then [price changed]", updates)
+	}
+	var format []byte
+	if err := database.readers.QueryRow(`SELECT substr(changes, 1, 1) FROM kitwork_history ORDER BY rev DESC LIMIT 1`).Scan(&format); err != nil || len(format) != 1 || format[0] != columnsFormat {
+		t.Fatalf("the last commit's format byte % x (%v), want %d", format, err, columnsFormat)
 	}
 }

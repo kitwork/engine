@@ -77,6 +77,10 @@ type writer struct {
 	// file, after a Maintain left in it what the history cannot record: every later write fails with it.
 	anchor  func(context.Context) (uint64, error)
 	refused error
+
+	// whole is, by table, the columns an update keeps whole in format 3 when one of them changes: the searchable
+	// columns of Options.Search, whose index is built from the history's values.
+	whole map[string]map[string]bool
 }
 
 func openWriter(ctx context.Context, name string, options Options, anchor func(context.Context) (uint64, error)) (*writer, error) {
@@ -95,6 +99,15 @@ func openWriter(ctx context.Context, name string, options Options, anchor func(c
 	w := &writer{
 		pool: pool, conn: conn, queue: make(chan writerRequest, options.Queue),
 		finished: make(chan struct{}), maximumBatch: options.MaximumBatch, anchor: anchor,
+		whole: map[string]map[string]bool{},
+	}
+	for _, table := range options.Search {
+		if w.whole[table.Table] == nil {
+			w.whole[table.Table] = map[string]bool{}
+		}
+		for _, column := range table.Columns {
+			w.whole[table.Table][column.Name] = true
+		}
 	}
 	fail := func(err error) (*writer, error) {
 		_ = conn.Close()
@@ -519,7 +532,7 @@ func (w *writer) finish(changes []Change, err error) (uint64, error) {
 	var checksum []byte
 	if err == nil && len(changes) > 0 {
 		var encoded []byte
-		encoded, err = encodeChanges(changes)
+		encoded, err = encodeColumns(changes)
 		if err == nil {
 			revision = w.revision + 1
 			at = time.Now().UTC().UnixNano()
@@ -625,6 +638,12 @@ func (w *writer) netChanges(ctx context.Context, leading []Change) ([]Change, er
 		switch {
 		case entry.existed && exists:
 			change.Operation, change.Columns = Update, columns[key.table]
+			updates, err := w.columnUpdates(key.table, change.Columns, entry.before, values)
+			if err != nil {
+				return nil, err
+			}
+			// format 3: an update is the columns it changed, and its whole images are rebuilt by who reads them
+			change.Updates, change.Before, change.After = updates, nil, nil
 		case entry.existed:
 			change.Operation, change.After, change.Columns = Delete, nil, columns[key.table]
 		case exists:
@@ -635,6 +654,30 @@ func (w *writer) netChanges(ctx context.Context, leading []Change) ([]Change, er
 		changes = append(changes, change)
 	}
 	return changes, nil
+}
+
+// columnUpdates is an update of table in format 3: each column whose value before (the pre-update hook) and after
+// (read back at commit) differ, with both, and, when one of the table's columns kept whole changed, every one of them.
+// An update that changed nothing (SET x = x) has none, and is still a change of the history, as in format 1.
+func (w *writer) columnUpdates(table string, columns []string, before, after []any) ([]ColumnUpdate, error) {
+	if len(before) != len(after) || len(after) != len(columns) {
+		return nil, fmt.Errorf("kitdb: update of %q read %d values before and %d after for %d columns", table, len(before), len(after), len(columns))
+	}
+	whole := w.whole[table]
+	keepWhole := false
+	for position, column := range columns {
+		if whole[column] && !sameValue(before[position], after[position]) {
+			keepWhole = true
+			break
+		}
+	}
+	var updates []ColumnUpdate
+	for position, column := range columns {
+		if !sameValue(before[position], after[position]) || keepWhole && whole[column] {
+			updates = append(updates, ColumnUpdate{Position: position, Old: before[position], New: after[position]})
+		}
+	}
+	return updates, nil
 }
 
 func quoteIdentifier(name string) string {

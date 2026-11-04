@@ -24,7 +24,35 @@ func historyOf(t *testing.T, path string) ([]string, map[uint64]time.Time) {
 	defer db.Close()
 	var lines []string
 	moments := map[uint64]time.Time{}
-	err = kitdbsqlite.ReadChanges(context.Background(), db, 0, func(commit kitdbsqlite.Commit) error {
+	var commits []kitdbsqlite.Commit
+	if err := kitdbsqlite.ReadChanges(context.Background(), db, 0, func(commit kitdbsqlite.Commit) error {
+		commits = append(commits, commit)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// an update of format 3 keeps only its changed columns: its images are rebuilt as history() rebuilds them
+	type located struct{ commit, change int }
+	byTable := map[string][]kitdbsqlite.Change{}
+	where := map[string][]located{}
+	for commitIndex, commit := range commits {
+		for changeIndex, change := range commit.Changes {
+			switch change.Operation {
+			case kitdbsqlite.Insert, kitdbsqlite.Update, kitdbsqlite.Delete:
+				byTable[change.Table] = append(byTable[change.Table], change)
+				where[change.Table] = append(where[change.Table], located{commitIndex, changeIndex})
+			}
+		}
+	}
+	for table, changes := range byTable {
+		if err := kitdbsqlite.WholeImages(changes, table, liveRows(context.Background(), db)); err != nil {
+			t.Fatal(err)
+		}
+		for position, at := range where[table] {
+			commits[at.commit].Changes[at.change] = changes[position]
+		}
+	}
+	for _, commit := range commits {
 		moments[commit.Revision] = commit.At
 		var parts []string
 		for _, change := range commit.Changes {
@@ -49,10 +77,6 @@ func historyOf(t *testing.T, path string) ([]string, map[uint64]time.Time) {
 			}
 		}
 		lines = append(lines, strings.Join(parts, ", "))
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 	return lines, moments
 }

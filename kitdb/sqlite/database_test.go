@@ -679,7 +679,7 @@ func TestConcurrentReadsSeeWholeRevisions(t *testing.T) {
 
 // TestTextHoldingNULIsRefused: a text argument holding the NUL character is refused before it runs, and nothing is
 // written; the same bytes as a BLOB are kept whole. The reason, pinned: a TEXT value that does hold a NUL (written
-// past Exec, here by Maintain) comes back in the history's Before cut at it, because the pre-update hook reads TEXT
+// past Exec, here by Maintain) comes back in the history cut at it, as an update's old value, because the pre-update hook reads TEXT
 // up to its first NUL (modernc.org/sqlite pre_update_hook.go, libc.GoString). If that ever stops being true, the
 // last check fails and the refusal can be reconsidered.
 //
@@ -735,9 +735,12 @@ func TestTextHoldingNULIsRefused(t *testing.T) {
 	var cut any
 	if err := database.Changes(ctx, before, func(commit Commit) error {
 		for _, change := range commit.Changes {
-			for position, column := range change.Columns {
-				if change.Table == "notes" && change.RowID == 3 && column == "title" {
-					cut = change.Before[position]
+			if change.Table != "notes" || change.RowID != 3 {
+				continue
+			}
+			for _, update := range change.Updates {
+				if change.Columns[update.Position] == "title" {
+					cut = update.Old
 				}
 			}
 		}
@@ -746,6 +749,6 @@ func TestTextHoldingNULIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cut != "x" {
-		t.Fatalf("the Before of a TEXT holding NUL is %q, want it cut at the NUL (\"x\"): the hook may read TEXT whole now", cut)
+		t.Fatalf("the old value of a TEXT holding NUL is %q, want it cut at the NUL (\"x\"): the hook may read TEXT whole now", cut)
 	}
 }

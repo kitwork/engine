@@ -273,11 +273,12 @@ func (database *Database) unanchored(ctx context.Context) (bool, error) {
 	if err != nil || len(anchors) == 0 {
 		return err == nil, err
 	}
-	// a commit holding a Barrier is the one written in barrierFormat; one that does not decode is for VerifyHistory
+	// a commit holding a Barrier is the one written in barrierFormat or columnsBarrierFormat; one that does not decode
+	// is for VerifyHistory
 	// and Restore to report
 	var barriers int64
-	err = database.readers.QueryRowContext(ctx, `SELECT count(*) FROM kitwork_history WHERE rev > ? AND substr(changes, 1, 1) = ?`,
-		int64(anchors[len(anchors)-1].revision), []byte{barrierFormat}).Scan(&barriers)
+	err = database.readers.QueryRowContext(ctx, `SELECT count(*) FROM kitwork_history WHERE rev > ? AND substr(changes, 1, 1) IN (?, ?)`,
+		int64(anchors[len(anchors)-1].revision), []byte{barrierFormat}, []byte{columnsBarrierFormat}).Scan(&barriers)
 	return barriers > 0, err
 }
 
