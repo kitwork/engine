@@ -22,6 +22,14 @@ const (
 	// barrierFormat is format 1 with Barrier among the operations: a commit holding one is written in it, so a
 	// reader of format 1 alone refuses it rather than skipping it.
 	barrierFormat = 2
+	// columnsFormat is format 3 (KITWORK_KITDB.md mục 5, 04/11/2026): an update keeps only the columns it changed,
+	// each with its old and new value, and the new values of the columns kept whole (a searchable column) when one of
+	// them changed; an insert keeps its image after, a delete its image before, as in format 1.
+	columnsFormat = 3
+
+	// the kinds of an update's column entry in format 3
+	columnChanged = 1 // the old value, then the new
+	columnKept    = 2 // the new value alone: the column did not change, it is kept whole for its table's readers
 )
 
 // Operation is what one change did to a row, or a schema statement.
@@ -44,7 +52,12 @@ const (
 //
 // After is read back from the table when the commit closes and is exact;
 // Columns names its values. Before comes from SQLite's pre-update hook, whose
-// TEXT values stop at the first NUL character; replay never needs Before.
+// TEXT values stop at the first NUL character, which TEXT never holds.
+//
+// Updates is an update's columns: in format 3 the ones it changed, and the
+// ones kept whole when one of those changed (Old equal to New), with Before
+// and After nil; read from format 1, every column, with Before and After
+// whole. A reader of an update reads Updates alone, whatever the format.
 type Change struct {
 	Operation Operation
 	Table     string
@@ -52,8 +65,16 @@ type Change struct {
 	Columns   []string
 	Before    []any
 	After     []any
+	Updates   []ColumnUpdate
 	Statement string
 	By        string
+}
+
+// ColumnUpdate is one column of an update: its position in Columns, the value
+// the row held before the commit and the value the commit left.
+type ColumnUpdate struct {
+	Position int
+	Old, New any
 }
 
 // Commit is one revision of the history.
@@ -158,29 +179,163 @@ func encodeChanges(changes []Change) ([]byte, error) {
 	return append(encoded, body...), nil
 }
 
+// encodeColumns writes format 3: format 1's name table and columns of every table the commit changed, then each
+// change, an update as its column entries alone (columnChanged with the old and the new value, columnKept with the new
+// value alone), in the order of their positions.
+func encodeColumns(changes []Change) ([]byte, error) {
+	names := map[string]uint64{}
+	var ordered []string
+	name := func(value string) uint64 {
+		if index, known := names[value]; known {
+			return index
+		}
+		names[value] = uint64(len(ordered))
+		ordered = append(ordered, value)
+		return names[value]
+	}
+	var tables []string
+	columns := map[string][]string{}
+	for _, change := range changes {
+		if change.Operation != Insert && change.Operation != Update && change.Operation != Delete {
+			continue
+		}
+		known, seen := columns[change.Table]
+		if !seen {
+			columns[change.Table] = change.Columns
+			tables = append(tables, change.Table)
+		} else if len(known) != len(change.Columns) {
+			return nil, fmt.Errorf("kitdb: table %q changed its columns inside one commit", change.Table)
+		}
+		switch change.Operation {
+		case Insert:
+			if len(change.After) != len(change.Columns) {
+				return nil, fmt.Errorf("kitdb: insert into %q names %d columns for %d values", change.Table, len(change.Columns), len(change.After))
+			}
+		case Delete:
+			if len(change.Before) != len(change.Columns) {
+				return nil, fmt.Errorf("kitdb: delete from %q names %d columns for %d values", change.Table, len(change.Columns), len(change.Before))
+			}
+		case Update:
+			last := -1
+			for _, update := range change.Updates {
+				if update.Position <= last || update.Position >= len(change.Columns) {
+					return nil, fmt.Errorf("kitdb: update of %q has column %d out of order or past its %d columns", change.Table, update.Position, len(change.Columns))
+				}
+				last = update.Position
+			}
+		}
+	}
+	var body []byte
+	body = binary.AppendUvarint(body, uint64(len(tables)))
+	for _, table := range tables {
+		body = binary.AppendUvarint(body, name(table))
+		body = binary.AppendUvarint(body, uint64(len(columns[table])))
+		for _, column := range columns[table] {
+			body = binary.AppendUvarint(body, name(column))
+		}
+	}
+	body = binary.AppendUvarint(body, uint64(len(changes)))
+	var err error
+	for _, change := range changes {
+		body = append(body, byte(change.Operation))
+		body = binary.AppendUvarint(body, name(change.Table))
+		body = binary.AppendUvarint(body, name(change.By))
+		switch change.Operation {
+		case Statement, Barrier:
+			body = binary.AppendUvarint(body, uint64(len(change.Statement)))
+			body = append(body, change.Statement...)
+		case Insert:
+			body = binary.AppendVarint(body, change.RowID)
+			body, err = appendValues(body, change.After)
+		case Delete:
+			body = binary.AppendVarint(body, change.RowID)
+			body, err = appendValues(body, change.Before)
+		case Update:
+			body = binary.AppendVarint(body, change.RowID)
+			body = binary.AppendUvarint(body, uint64(len(change.Updates)))
+			for _, update := range change.Updates {
+				if err != nil {
+					break
+				}
+				body = binary.AppendUvarint(body, uint64(update.Position))
+				if sameValue(update.Old, update.New) {
+					body = append(body, columnKept)
+				} else {
+					body = append(body, columnChanged)
+					body, err = appendValue(body, update.Old)
+				}
+				if err == nil {
+					body, err = appendValue(body, update.New)
+				}
+			}
+		default:
+			return nil, fmt.Errorf("kitdb: unknown change operation %d", change.Operation)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	encoded := []byte{columnsFormat}
+	encoded = binary.AppendUvarint(encoded, uint64(len(ordered)))
+	for _, value := range ordered {
+		encoded = binary.AppendUvarint(encoded, uint64(len(value)))
+		encoded = append(encoded, value...)
+	}
+	return append(encoded, body...), nil
+}
+
+// sameValue reports two values of a row the same: the same type and the same bytes, as SQLite stores them.
+func sameValue(left, right any) bool {
+	switch typed := left.(type) {
+	case nil:
+		return right == nil
+	case int64:
+		other, ok := right.(int64)
+		return ok && typed == other
+	case float64:
+		other, ok := right.(float64)
+		return ok && math.Float64bits(typed) == math.Float64bits(other)
+	case string:
+		other, ok := right.(string)
+		return ok && typed == other
+	case []byte:
+		other, ok := right.([]byte)
+		return ok && string(typed) == string(other)
+	}
+	return false
+}
+
 func appendValues(buffer []byte, values []any) ([]byte, error) {
 	buffer = binary.AppendUvarint(buffer, uint64(len(values)))
 	for _, value := range values {
-		switch typed := value.(type) {
-		case nil:
-			buffer = append(buffer, 0)
-		case int64:
-			buffer = append(buffer, 1)
-			buffer = binary.AppendVarint(buffer, typed)
-		case float64:
-			buffer = append(buffer, 2)
-			buffer = binary.LittleEndian.AppendUint64(buffer, math.Float64bits(typed))
-		case string:
-			buffer = append(buffer, 3)
-			buffer = binary.AppendUvarint(buffer, uint64(len(typed)))
-			buffer = append(buffer, typed...)
-		case []byte:
-			buffer = append(buffer, 4)
-			buffer = binary.AppendUvarint(buffer, uint64(len(typed)))
-			buffer = append(buffer, typed...)
-		default:
-			return nil, fmt.Errorf("kitdb: value of type %T cannot enter the history", value)
+		var err error
+		if buffer, err = appendValue(buffer, value); err != nil {
+			return nil, err
 		}
+	}
+	return buffer, nil
+}
+
+func appendValue(buffer []byte, value any) ([]byte, error) {
+	switch typed := value.(type) {
+	case nil:
+		buffer = append(buffer, 0)
+	case int64:
+		buffer = append(buffer, 1)
+		buffer = binary.AppendVarint(buffer, typed)
+	case float64:
+		buffer = append(buffer, 2)
+		buffer = binary.LittleEndian.AppendUint64(buffer, math.Float64bits(typed))
+	case string:
+		buffer = append(buffer, 3)
+		buffer = binary.AppendUvarint(buffer, uint64(len(typed)))
+		buffer = append(buffer, typed...)
+	case []byte:
+		buffer = append(buffer, 4)
+		buffer = binary.AppendUvarint(buffer, uint64(len(typed)))
+		buffer = append(buffer, typed...)
+	default:
+		return nil, fmt.Errorf("kitdb: value of type %T cannot enter the history", value)
 	}
 	return buffer, nil
 }
@@ -228,31 +383,43 @@ func (reader *changesReader) values() []any {
 	}
 	values := make([]any, count)
 	for position := range values {
-		tag := reader.take(1)
+		values[position] = reader.value()
 		if reader.failed {
 			return nil
-		}
-		switch tag[0] {
-		case 0:
-		case 1:
-			values[position] = reader.varint()
-		case 2:
-			values[position] = math.Float64frombits(binary.LittleEndian.Uint64(reader.take(8)))
-		case 3:
-			values[position] = string(reader.take(reader.uvarint()))
-		case 4:
-			values[position] = append([]byte{}, reader.take(reader.uvarint())...)
-		default:
-			reader.failed = true
 		}
 	}
 	return values
 }
 
+func (reader *changesReader) value() any {
+	tag := reader.take(1)
+	if reader.failed {
+		return nil
+	}
+	switch tag[0] {
+	case 0:
+		return nil
+	case 1:
+		return reader.varint()
+	case 2:
+		bits := reader.take(8)
+		if reader.failed {
+			return nil
+		}
+		return math.Float64frombits(binary.LittleEndian.Uint64(bits))
+	case 3:
+		return string(reader.take(reader.uvarint()))
+	case 4:
+		return append([]byte{}, reader.take(reader.uvarint())...)
+	}
+	reader.failed = true
+	return nil
+}
+
 func decodeChanges(data []byte) ([]Change, error) {
 	reader := &changesReader{data: data}
 	format := reader.take(1)
-	if reader.failed || format[0] != changesFormat && format[0] != barrierFormat {
+	if reader.failed || format[0] != changesFormat && format[0] != barrierFormat && format[0] != columnsFormat {
 		return nil, fmt.Errorf("%w: unknown changes format", ErrCorruptHistory)
 	}
 	nameCount := reader.uvarint()
@@ -298,16 +465,63 @@ func decodeChanges(data []byte) ([]Change, error) {
 			break
 		}
 		change := Change{Operation: Operation(operation[0]), Table: lookup(reader.uvarint()), By: lookup(reader.uvarint())}
-		switch change.Operation {
-		case Barrier:
-			if format[0] != barrierFormat {
+		switch {
+		case change.Operation == Barrier:
+			if format[0] == changesFormat {
 				reader.failed = true
 				break
 			}
 			change.Statement = string(reader.take(reader.uvarint()))
-		case Statement:
+		case change.Operation == Statement:
 			change.Statement = string(reader.take(reader.uvarint()))
-		case Insert, Update, Delete:
+		case format[0] == columnsFormat && (change.Operation == Insert || change.Operation == Update || change.Operation == Delete):
+			change.RowID = reader.varint()
+			change.Columns = columns[change.Table]
+			if change.Columns == nil {
+				reader.failed = true
+				break
+			}
+			switch change.Operation {
+			case Insert:
+				change.After = reader.values()
+				reader.failed = reader.failed || len(change.After) != len(change.Columns)
+			case Delete:
+				change.Before = reader.values()
+				reader.failed = reader.failed || len(change.Before) != len(change.Columns)
+			case Update:
+				count := reader.uvarint()
+				if count > uint64(len(change.Columns)) {
+					reader.failed = true
+					break
+				}
+				change.Updates = make([]ColumnUpdate, 0, count)
+				last := -1
+				for range count {
+					position := reader.uvarint()
+					kind := reader.take(1)
+					if reader.failed || position >= uint64(len(change.Columns)) || int(position) <= last {
+						reader.failed = true
+						break
+					}
+					update := ColumnUpdate{Position: int(position)}
+					switch kind[0] {
+					case columnChanged:
+						update.Old = reader.value()
+						update.New = reader.value()
+					case columnKept:
+						update.New = reader.value()
+						update.Old = update.New
+					default:
+						reader.failed = true
+					}
+					if reader.failed {
+						break
+					}
+					last = update.Position
+					change.Updates = append(change.Updates, update)
+				}
+			}
+		case change.Operation == Insert || change.Operation == Update || change.Operation == Delete:
 			change.RowID = reader.varint()
 			if change.Operation != Insert {
 				change.Before = reader.values()
@@ -320,6 +534,17 @@ func decodeChanges(data []byte) ([]Change, error) {
 				change.Columns = columns[change.Table]
 				if len(change.Columns) != len(change.After) {
 					reader.failed = true
+				}
+			}
+			// an update of format 1 is every column, so a reader of updates reads Updates alone
+			if change.Operation == Update && !reader.failed {
+				if len(change.Before) != len(change.After) {
+					reader.failed = true
+					break
+				}
+				change.Updates = make([]ColumnUpdate, len(change.After))
+				for position := range change.After {
+					change.Updates[position] = ColumnUpdate{Position: position, Old: change.Before[position], New: change.After[position]}
 				}
 			}
 		default:
