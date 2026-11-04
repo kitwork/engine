@@ -6,6 +6,7 @@
 //	kitdbsqlite query <main.db> <query>             one read-only SQLite query
 //	kitdbsqlite decimal                             what a decimal kept as TEXT does in SQLite
 //	kitdbsqlite idlayout <directory> <rows>         what id() and uuid() cost as a table's key
+//	kitdbsqlite anchor <directory>                  what an anchor of the history costs: a whole copy or the pages changed
 //
 // The commands that read the KitDB file (copy, bench, refresh, execute, measure, definition) went with KROW on
 // 03/11/2026 (docs/KITWORK_KITDB.md câu 13.4); the copy they made of shopping is .database/shopping/kitwork.db.
@@ -23,12 +24,12 @@ func must(err error) {
 }
 
 func main() {
-	arguments := map[string]int{"verify": 1, "query": 2, "decimal": 0, "idlayout": 2}
+	arguments := map[string]int{"verify": 1, "query": 2, "decimal": 0, "idlayout": 2, "anchor": 1}
 	if len(os.Args) < 2 {
 		os.Args = append(os.Args, "")
 	}
 	if count, known := arguments[os.Args[1]]; !known || len(os.Args) != count+2 {
-		fmt.Fprintln(os.Stderr, "usage: kitdbsqlite verify|query|decimal|idlayout …")
+		fmt.Fprintln(os.Stderr, "usage: kitdbsqlite verify|query|decimal|idlayout|anchor …")
 		os.Exit(2)
 	}
 	switch os.Args[1] {
@@ -40,5 +41,7 @@ func main() {
 		cmdDecimal()
 	case "idlayout":
 		cmdIDLayout(os.Args[2], os.Args[3])
+	case "anchor":
+		cmdAnchor(os.Args[2])
 	}
 }
