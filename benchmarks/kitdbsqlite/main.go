@@ -8,6 +8,7 @@
 //	kitdbsqlite idlayout <directory> <rows>         what id() and uuid() cost as a table's key
 //	kitdbsqlite anchor <directory>                  what an anchor of the history costs: a whole copy or the pages changed
 //	kitdbsqlite at <directory>                      at() going backward from the live file against the restore it runs today
+//	kitdbsqlite changeset <directory>               SQLite's changesets of the same writes against kitwork_history
 //
 // The commands that read the KitDB file (copy, bench, refresh, execute, measure, definition) went with KROW on
 // 03/11/2026 (docs/KITWORK_KITDB.md câu 13.4); the copy they made of shopping is .database/shopping/kitwork.db.
@@ -25,12 +26,12 @@ func must(err error) {
 }
 
 func main() {
-	arguments := map[string]int{"verify": 1, "query": 2, "decimal": 0, "idlayout": 2, "anchor": 1, "at": 1}
+	arguments := map[string]int{"verify": 1, "query": 2, "decimal": 0, "idlayout": 2, "anchor": 1, "at": 1, "changeset": 1}
 	if len(os.Args) < 2 {
 		os.Args = append(os.Args, "")
 	}
 	if count, known := arguments[os.Args[1]]; !known || len(os.Args) != count+2 {
-		fmt.Fprintln(os.Stderr, "usage: kitdbsqlite verify|query|decimal|idlayout|anchor|at …")
+		fmt.Fprintln(os.Stderr, "usage: kitdbsqlite verify|query|decimal|idlayout|anchor|at|changeset …")
 		os.Exit(2)
 	}
 	switch os.Args[1] {
@@ -46,5 +47,7 @@ func main() {
 		cmdAnchor(os.Args[2])
 	case "at":
 		cmdAt(os.Args[2])
+	case "changeset":
+		cmdChangeset(os.Args[2])
 	}
 }

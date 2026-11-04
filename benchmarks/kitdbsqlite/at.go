@@ -45,30 +45,7 @@ func cmdAt(directory string) {
 	for position, column := range shoppingColumns {
 		columns[position] = quoted(column.name)
 	}
-	list := strings.Join(columns, ", ")
-	random := rand.New(rand.NewPCG(4, 12))
-	hot := make([]int64, 10000)
-	for position := range hot {
-		hot[position] = random.Int64N(rowCount) + 1
-	}
-	update := `UPDATE shopping SET "stock" = "stock" - 1, "sold" = "sold" + 1 WHERE rowid = ?`
-	insert := `INSERT INTO shopping (` + list + `) SELECT ` + strings.Replace(list, `"id"`, `?`, 1) + ` FROM shopping WHERE rowid = ?`
-	var writes []queuedWrite
-	for range 150000 {
-		writes = append(writes, queuedWrite{update, []any{random.Int64N(rowCount) + 1}})
-	}
-	for range 100000 {
-		writes = append(writes, queuedWrite{update, []any{hot[random.IntN(len(hot))]}})
-	}
-	inserted := int64(2_000_000_000_000)
-	for range 30000 {
-		inserted++
-		writes = append(writes, queuedWrite{insert, []any{inserted, random.Int64N(rowCount) + 1}})
-	}
-	for range 20000 {
-		writes = append(writes, queuedWrite{`DELETE FROM shopping WHERE rowid = ?`, []any{random.Int64N(rowCount) + 1}})
-	}
-	random.Shuffle(len(writes), func(i, j int) { writes[i], writes[j] = writes[j], writes[i] })
+	writes := atWorkload(columns, rowCount)
 	start = time.Now()
 	runEach(ctx, database, writes)
 	fmt.Printf("%d writes in random order (150,000 random updates, 100,000 on 10,000 hot rows, 30,000 inserts, 20,000 deletes): %.0f writes/s\n",
@@ -146,6 +123,36 @@ func cmdAt(directory string) {
 	fmt.Println("point: one read by key, the mean of the sampled keys; page: 50 shopee rows by id through the overlay as written (once);")
 	fmt.Println("page/arm: the same with ORDER BY and LIMIT on each side; count: count and sums of lazada;")
 	fmt.Println("today: at() as the engine runs it, the restore of the file; restored: the same reads on the restored copy.")
+}
+
+// atWorkload is the writes of at and changeset, the same every run: 150,000 updates of random rows, 100,000 on 10,000
+// hot rows, 30,000 inserts copying a random row under a new id, 20,000 deletes of random rows, in random order.
+func atWorkload(columns []string, rowCount int64) []queuedWrite {
+	list := strings.Join(columns, ", ")
+	random := rand.New(rand.NewPCG(4, 12))
+	hot := make([]int64, 10000)
+	for position := range hot {
+		hot[position] = random.Int64N(rowCount) + 1
+	}
+	update := `UPDATE shopping SET "stock" = "stock" - 1, "sold" = "sold" + 1 WHERE rowid = ?`
+	insert := `INSERT INTO shopping (` + list + `) SELECT ` + strings.Replace(list, `"id"`, `?`, 1) + ` FROM shopping WHERE rowid = ?`
+	var writes []queuedWrite
+	for range 150000 {
+		writes = append(writes, queuedWrite{update, []any{random.Int64N(rowCount) + 1}})
+	}
+	for range 100000 {
+		writes = append(writes, queuedWrite{update, []any{hot[random.IntN(len(hot))]}})
+	}
+	inserted := int64(2_000_000_000_000)
+	for range 30000 {
+		inserted++
+		writes = append(writes, queuedWrite{insert, []any{inserted, random.Int64N(rowCount) + 1}})
+	}
+	for range 20000 {
+		writes = append(writes, queuedWrite{`DELETE FROM shopping WHERE rowid = ?`, []any{random.Int64N(rowCount) + 1}})
+	}
+	random.Shuffle(len(writes), func(i, j int) { writes[i], writes[j] = writes[j], writes[i] })
+	return writes
 }
 
 type queuedWrite struct {
