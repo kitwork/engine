@@ -18,11 +18,11 @@ import (
 )
 
 // cmdAt measures at() going backward (docs/KITWORK_KITDB.md mục 5, "hướng lùi" of the Kitwork repository) against
-// the restore it runs today. Backward, a read at a past revision r reads the live file in one read transaction and,
-// for every row a commit after r changed, the row as it was at r: the Before of the first change after r, or no row
-// when that change inserted it. The statement runs on the live rows the history after r did not touch, together
-// with those rows (two temporary tables of the read connection). Today at() restores the file into a copy as it was
-// at r (the anchor, then every commit up to r) and reads the copy.
+// the restore it runs today. Backward, a read at a past revision r reads, in one read transaction of the live file, the
+// relation kitdb.PastRelation builds, as the engine's at() does: the live rows the history after r did not touch, the
+// rows deleted since whole from the history, and the rows still there joined to the old values of the columns changed
+// since. Today at() restores the file into a copy as it was at r (the anchor, then every commit up to r) and reads the
+// copy; it still does for a moment it cannot reach going backward.
 //
 // directory holds work.db, a copy of .database/shopping/kitwork.db, written to; the anchor Open writes and one
 // restored copy at a time are written beside it. Evidence for KITWORK_KITDB.md mục 5 (04/11/2026).
@@ -87,16 +87,15 @@ func cmdAt(directory string) {
 		must(reader.QueryRow(`SELECT at FROM kitwork_history WHERE rev = ?`, int64(revision)+1).Scan(&at))
 		return time.Unix(0, at-1)
 	}
-	fmt.Printf("%-12s %8s %9s %9s %9s %9s %11s %11s %9s %11s  %s\n", "changes after", "rows", "history", "overlay",
-		"point", "page", "page/arm", "count", "today", "restored", "same")
+	fmt.Printf("%-12s %8s %10s %9s %9s %11s %9s %11s  %s\n", "changes after", "rows", "setup", "point", "page", "count",
+		"today", "restored", "same")
 	for _, wanted := range []int{0, 1000, 10000, 100000, total} {
 		revision, after := last, 0
 		for position := len(commits) - 1; position >= 0 && after < wanted; position-- {
 			after += commits[position].changes
 			revision = commits[position].revision - 1
 		}
-		back := atBackward(ctx, reader, revision, columns, wanted == 0)
-		results := back.results
+		back := atBackward(ctx, reader, revision)
 		restoreTime, restoredTime, same := "", "", "—"
 		if wanted != 0 {
 			target := filepath.Join(directory, "at.db")
@@ -110,30 +109,24 @@ func cmdAt(directory string) {
 			restoreTime = duration(time.Since(start))
 			copyReader := openSQLite(target, "&mode=ro&_pragma=cache_size(-262144)")
 			start = time.Now()
-			plain := atQueries(copyReader, "shopping", "", back.keys)
+			plain := atQueries(copyReader, "shopping", back.keys)
 			restoredTime = duration(time.Since(start))
 			must(copyReader.Close())
 			removeDatabase(target)
 			same = "yes"
 			for name, digest := range plain {
-				if results[name] != digest {
+				if back.results[name] != digest {
 					same = "NO: " + name
 				}
 			}
 		}
-		page := "—"
-		if back.page != 0 {
-			page = duration(back.page)
-		}
-		fmt.Printf("%-12d %8d %9s %9s %9s %9s %11s %11s %9s %11s  %s\n", after, back.rows, duration(back.history),
-			duration(back.overlay), duration(back.point), page, duration(back.pageByArm), duration(back.count),
-			restoreTime, restoredTime, same)
+		fmt.Printf("%-12d %8d %10s %9s %9s %11s %9s %11s  %s\n", after, back.rows, duration(back.setup), duration(back.point),
+			duration(back.page), duration(back.count), restoreTime, restoredTime, same)
 	}
 	fmt.Println()
-	fmt.Println("history: reading and decoding the commits after the moment; overlay: the two temporary tables;")
-	fmt.Println("point: one read by key, the mean of the sampled keys; page: 50 shopee rows by id through the overlay as written (once);")
-	fmt.Println("page/arm: the same with ORDER BY and LIMIT on each side; count: count and sums of lazada;")
-	fmt.Println("today: at() as the engine runs it, the restore of the file; restored: the same reads on the restored copy.")
+	fmt.Println("setup: kitdb.PastRelation, the history after the moment read and the temporary tables and view built;")
+	fmt.Println("point: one read by key through the view, the mean of the sampled keys; page: 50 shopee rows by id;")
+	fmt.Println("count: count and sums of lazada; today: the restore of the file; restored: the same reads on the copy.")
 }
 
 // atWorkload is the writes of at and changeset, the same every run: 150,000 updates of random rows, 100,000 on 10,000
@@ -201,23 +194,25 @@ func runEach(ctx context.Context, database *kitdb.Database, writes []queuedWrite
 }
 
 type backwardRead struct {
-	rows                                            int
-	history, overlay, point, page, pageByArm, count time.Duration
-	results                                         map[string]string
-	keys                                            [][2]any
+	rows                      int
+	setup, point, page, count time.Duration
+	results                   map[string]string
+	keys                      [][2]any
 }
 
-// atBackward reads shopping as it was at revision through the history after it, in one read transaction.
-func atBackward(ctx context.Context, reader *sql.DB, revision uint64, columns []string, naive bool) backwardRead {
+// atBackward reads shopping as it was at revision through the relation the engine's at() reads, kitdb.PastRelation,
+// in one read transaction.
+func atBackward(ctx context.Context, reader *sql.DB, revision uint64) backwardRead {
 	var read backwardRead
 	tx, err := reader.BeginTx(ctx, nil)
 	must(err)
-	defer tx.Rollback() // the temporary tables go with it
-
+	defer tx.Rollback() // the temporary tables and view go with it
 	start := time.Now()
-	changed := map[int64]bool{}
-	before := map[int64][]any{}
-	var updated, deleted, inserted [][2]any
+	relation, err := kitdb.PastRelation(ctx, tx, "shopping", revision, 100_000_000)
+	must(err)
+	read.setup = time.Since(start)
+
+	// the keys read by point: rows changed after the moment (updated, deleted, inserted) and rows nobody touched
 	key := func(names []string, values []any) [2]any {
 		var merchant, id any
 		for position, name := range names {
@@ -230,75 +225,45 @@ func atBackward(ctx context.Context, reader *sql.DB, revision uint64, columns []
 		}
 		return [2]any{merchant, id}
 	}
-	// every change of shopping after the moment, oldest first; an update of history format 3 keeps only the columns it
-	// changed, so the rows are rebuilt walking back from the live rows (kitdb.WholeImages), as the engine's at() does
-	var own []kitdb.Change
+	changed := map[int64]bool{}
+	var updated []int64
+	var deleted, inserted [][2]any
 	must(kitdb.ReadChanges(ctx, tx, revision, func(commit kitdb.Commit) error {
 		for _, change := range commit.Changes {
-			if change.Operation == kitdb.Statement || change.Operation == kitdb.Barrier {
-				return fmt.Errorf("revision %d changed the schema: at() restores across it", commit.Revision)
+			if change.Table != "shopping" || changed[change.RowID] {
+				continue
 			}
-			if change.Table == "shopping" {
-				own = append(own, change)
+			changed[change.RowID] = true
+			switch change.Operation {
+			case kitdb.Insert:
+				if len(inserted) < 20 {
+					inserted = append(inserted, key(change.Columns, change.After))
+				}
+			case kitdb.Delete:
+				if len(deleted) < 20 {
+					deleted = append(deleted, key(change.Columns, change.Before))
+				}
+			case kitdb.Update:
+				if len(updated) < 20 {
+					updated = append(updated, change.RowID)
+				}
 			}
 		}
 		return nil
 	}))
-	must(kitdb.WholeImages(own, "shopping", liveShopping(ctx, tx)))
-	for _, change := range own {
-		if changed[change.RowID] {
-			continue // only the first change after the moment says what the row was at it
-		}
-		changed[change.RowID] = true
-		switch change.Operation {
-		case kitdb.Insert:
-			if len(inserted) < 20 {
-				inserted = append(inserted, key(change.Columns, change.After))
-			}
-		case kitdb.Update:
-			before[change.RowID] = change.Before
-			if len(updated) < 20 {
-				updated = append(updated, key(change.Columns, change.Before))
-			}
-		case kitdb.Delete:
-			before[change.RowID] = change.Before
-			if len(deleted) < 20 {
-				deleted = append(deleted, key(change.Columns, change.Before))
-			}
-		}
-	}
-	read.history = time.Since(start)
 	read.rows = len(changed)
-
-	start = time.Now()
-	_, err = tx.ExecContext(ctx, `CREATE TEMP TABLE at_changed (rid INTEGER PRIMARY KEY)`)
-	must(err)
-	_, err = tx.ExecContext(ctx, `CREATE TEMP TABLE at_before (rid INTEGER PRIMARY KEY, `+strings.Join(columns, ", ")+`)`)
-	must(err)
-	changedInsert, err := tx.PrepareContext(ctx, `INSERT INTO temp.at_changed (rid) VALUES (?)`)
-	must(err)
-	for rowID := range changed {
-		_, err := changedInsert.ExecContext(ctx, rowID)
-		must(err)
+	// an update keeps only the columns it changed; the workload never changes a key, so the table holds it
+	for _, rowID := range updated {
+		var merchant string
+		var id int64
+		if tx.QueryRowContext(ctx, `SELECT "merchant", "id" FROM main.shopping WHERE rowid = ?`, rowID).Scan(&merchant, &id) == nil {
+			read.keys = append(read.keys, [2]any{merchant, id})
+		}
 	}
-	must(changedInsert.Close())
-	marks := strings.TrimSuffix(strings.Repeat("?, ", len(columns)+1), ", ")
-	beforeInsert, err := tx.PrepareContext(ctx, `INSERT INTO temp.at_before VALUES (`+marks+`)`)
-	must(err)
-	for rowID, values := range before {
-		_, err := beforeInsert.ExecContext(ctx, append([]any{rowID}, values...)...)
-		must(err)
-	}
-	must(beforeInsert.Close())
-	_, err = tx.ExecContext(ctx, `CREATE INDEX temp.at_before_key ON at_before ("merchant", "id")`)
-	must(err)
-	read.overlay = time.Since(start)
-
-	// The keys read by point: rows changed after the moment, deleted, inserted, and rows nobody touched.
-	read.keys = append(append(append(read.keys, updated...), deleted...), inserted...)
+	read.keys = append(append(read.keys, deleted...), inserted...)
 	random := rand.New(rand.NewPCG(uint64(revision), 7))
 	var rowCount int64
-	must(tx.QueryRowContext(ctx, `SELECT max(rowid) FROM shopping`).Scan(&rowCount))
+	must(tx.QueryRowContext(ctx, `SELECT max(rowid) FROM main.shopping`).Scan(&rowCount))
 	for untouched := 0; untouched < 20; {
 		rowID := random.Int64N(rowCount) + 1
 		if changed[rowID] {
@@ -306,123 +271,54 @@ func atBackward(ctx context.Context, reader *sql.DB, revision uint64, columns []
 		}
 		var merchant string
 		var id int64
-		if err := tx.QueryRowContext(ctx, `SELECT "merchant", "id" FROM shopping WHERE rowid = ?`, rowID).Scan(&merchant, &id); err != nil {
+		if tx.QueryRowContext(ctx, `SELECT "merchant", "id" FROM main.shopping WHERE rowid = ?`, rowID).Scan(&merchant, &id) != nil {
 			continue
 		}
 		read.keys = append(read.keys, [2]any{merchant, id})
 		untouched++
 	}
-
-	overlay := `WITH shopping_at AS (SELECT ` + strings.Join(columns, ", ") + ` FROM main.shopping WHERE _rowid_ NOT IN (SELECT rid FROM temp.at_changed)
-		UNION ALL SELECT ` + strings.Join(columns, ", ") + ` FROM temp.at_before) `
-	read.results = atQueries(tx, "shopping_at", overlay, read.keys)
-	read.point, read.page, read.pageByArm, read.count = atTimings(tx, overlay, read.keys, naive)
+	read.results = atQueries(tx, relation, read.keys)
+	read.point, read.page, read.count = atTimings(tx, relation, read.keys)
 	return read
-}
-
-// pageByArmQuery is the page read through the overlay as an engine would write it: ORDER BY and LIMIT on the live
-// rows and on the rows as they were, then on both.
-const pageByArmQuery = `SELECT * FROM (SELECT * FROM (SELECT "merchant", "id", "name", "price", "stock" FROM main.shopping
-	WHERE "merchant" = 'shopee' AND _rowid_ NOT IN (SELECT rid FROM temp.at_changed) ORDER BY "id" LIMIT 50)
-	UNION ALL SELECT * FROM (SELECT "merchant", "id", "name", "price", "stock" FROM temp.at_before
-	WHERE "merchant" = 'shopee' ORDER BY "id" LIMIT 50)) ORDER BY "id" LIMIT 50`
-
-// liveShopping reads rows of a table as they are now on tx, by rowid, five hundred at a time.
-func liveShopping(ctx context.Context, tx *sql.Tx) kitdb.LiveRows {
-	return func(table string, rowIDs []int64) ([]string, map[int64][]any, error) {
-		var columns []string
-		found := make(map[int64][]any, len(rowIDs))
-		for first := 0; first < len(rowIDs); first += 500 {
-			part := rowIDs[first:min(first+500, len(rowIDs))]
-			arguments := make([]any, len(part))
-			for position, rowID := range part {
-				arguments[position] = rowID
-			}
-			rows, err := tx.QueryContext(ctx, `SELECT _rowid_, * FROM main."`+table+`" WHERE _rowid_ IN (`+
-				strings.TrimSuffix(strings.Repeat("?, ", len(part)), ", ")+`)`, arguments...)
-			if err != nil {
-				return nil, nil, err
-			}
-			names, err := rows.Columns()
-			if err != nil {
-				rows.Close()
-				return nil, nil, err
-			}
-			columns = names[1:]
-			for rows.Next() {
-				values := make([]any, len(names))
-				pointers := make([]any, len(names))
-				for position := range values {
-					pointers[position] = &values[position]
-				}
-				if err := rows.Scan(pointers...); err != nil {
-					rows.Close()
-					return nil, nil, err
-				}
-				rowID, _ := values[0].(int64)
-				found[rowID] = values[1:]
-			}
-			err = rows.Err()
-			rows.Close()
-			if err != nil {
-				return nil, nil, err
-			}
-		}
-		return columns, found, nil
-	}
 }
 
 type querier interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
-// atQueries runs the reads on table (prefixed by with) and returns the digest of each one's rows.
-func atQueries(db querier, table, with string, keys [][2]any) map[string]string {
+// atQueries runs the reads on table and returns the digest of each one's rows.
+func atQueries(db querier, table string, keys [][2]any) map[string]string {
 	results := map[string]string{}
 	point := sha256.New()
 	for _, key := range keys {
-		fmt.Fprint(point, queryRows(db, with+`SELECT * FROM `+table+` WHERE "merchant" = ? AND "id" = ?`, key[0], key[1]))
+		fmt.Fprint(point, queryRows(db, `SELECT * FROM `+table+` WHERE "merchant" = ? AND "id" = ?`, key[0], key[1]))
 	}
 	results["point"] = hex.EncodeToString(point.Sum(nil))
-	if with != "" {
-		results["page"] = digestOf(queryRows(db, pageByArmQuery))
-	} else {
-		results["page"] = digestOf(queryRows(db, `SELECT "merchant", "id", "name", "price", "stock" FROM `+table+
-			` WHERE "merchant" = 'shopee' ORDER BY "id" LIMIT 50`))
-	}
-	results["count"] = digestOf(queryRows(db, with+`SELECT count(*), sum("stock"), sum("sold") FROM `+table+` WHERE "merchant" = 'lazada'`))
+	results["page"] = digestOf(queryRows(db, `SELECT "merchant", "id", "name", "price", "stock" FROM `+table+
+		` WHERE "merchant" = 'shopee' ORDER BY "id" LIMIT 50`))
+	results["count"] = digestOf(queryRows(db, `SELECT count(*), sum("stock"), sum("sold") FROM `+table+` WHERE "merchant" = 'lazada'`))
 	return results
 }
 
-// atTimings times each read through the overlay: point as the mean over keys, page as written and with ORDER BY and
-// LIMIT on each side, as an engine writing the statement would.
-func atTimings(db querier, overlay string, keys [][2]any, naive bool) (point, page, pageByArm, count time.Duration) {
+// atTimings times each read on table: point as the mean over keys, page over twenty runs and count over five, since
+// Windows' clock moves in steps of about half a millisecond.
+func atTimings(db querier, table string, keys [][2]any) (point, page, count time.Duration) {
 	start := time.Now()
 	for _, key := range keys {
-		queryRows(db, overlay+`SELECT * FROM shopping_at WHERE "merchant" = ? AND "id" = ?`, key[0], key[1])
+		queryRows(db, `SELECT * FROM `+table+` WHERE "merchant" = ? AND "id" = ?`, key[0], key[1])
 	}
 	point = time.Since(start) / time.Duration(max(len(keys), 1))
-	// Windows' clock moves in steps of about half a millisecond: a fast read is timed over many runs.
 	start = time.Now()
-	byArm := queryRows(db, pageByArmQuery)
-	for range 19 {
-		queryRows(db, pageByArmQuery)
+	for range 20 {
+		queryRows(db, `SELECT "merchant", "id", "name", "price", "stock" FROM `+table+` WHERE "merchant" = 'shopee' ORDER BY "id" LIMIT 50`)
 	}
-	pageByArm = time.Since(start) / 20
-	if naive { // through the overlay as written: SQLite reads and sorts every shopee row
-		start = time.Now()
-		paged := queryRows(db, overlay+`SELECT "merchant", "id", "name", "price", "stock" FROM shopping_at WHERE "merchant" = 'shopee' ORDER BY "id" LIMIT 50`)
-		page = time.Since(start)
-		if digestOf(paged) != digestOf(byArm) {
-			panic("the page read on each side differs from the page through the overlay")
-		}
-	}
+	page = time.Since(start) / 20
 	start = time.Now()
 	for range 5 {
-		queryRows(db, overlay+`SELECT count(*), sum("stock"), sum("sold") FROM shopping_at WHERE "merchant" = 'lazada'`)
+		queryRows(db, `SELECT count(*), sum("stock"), sum("sold") FROM `+table+` WHERE "merchant" = 'lazada'`)
 	}
 	count = time.Since(start) / 5
-	return point, page, pageByArm, count
+	return point, page, count
 }
 
 func queryRows(db querier, query string, arguments ...any) string {
