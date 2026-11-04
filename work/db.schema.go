@@ -977,9 +977,9 @@ type SchemaTable struct {
 	siblings    map[string]map[string]*ColumnSpec // every table in this db (for FK targets to exist)
 	definition  *StructDef
 	definitions map[string]*StructDef
-	// frozenDB is the connection of a copy of the file as it was at a moment (at(), database_at.go): the table
-	// reads it, never migrates it, never writes it.
-	frozenDB *sql.DB
+	// past is what the table reads as it was at a moment (at(), database_at.go): the live file going backward, or a
+	// copy restored from the history. The table never migrates it, never writes it.
+	past *pastTable
 	// historyTx is the writer's transaction of db.transaction (database_transaction.go): the table reads and
 	// writes through it.
 	historyTx *kitdbsqlite.Transaction
@@ -1018,9 +1018,6 @@ func (t *SchemaTable) failVal() value.Value {
 
 // source builds the SQL blueprint for SQLite.
 func (t *SchemaTable) source() *SQLite {
-	if t.frozenDB != nil {
-		return &SQLite{Database: &Database{tenant: t.tenant, requestScope: t.scope, sqlDB: t.frozenDB}}
-	}
 	if t.sqlitePath != "" {
 		return hostSQLite(t.tenant, t.dbName, t.sqlitePath, t.scope)
 	}
@@ -1038,7 +1035,9 @@ func (t *SchemaTable) sqliteFile() string {
 
 func (t *SchemaTable) builder() *query.Query {
 	if t.q == nil {
-		if t.historyTx != nil {
+		if t.past != nil {
+			t.q = query.New(t.past.executor, tenantLambdaExecutor{tenant: t.tenant, requestScope: t.scope}).Table(t.past.relation)
+		} else if t.historyTx != nil {
 			t.q = query.New(transactionExecutor{tx: t.historyTx}, tenantLambdaExecutor{tenant: t.tenant, requestScope: t.scope}).Table(t.table)
 		} else {
 			t.q = t.source().Table(t.table)
@@ -1055,7 +1054,7 @@ func (t *SchemaTable) ready() (value.Value, bool) {
 	if t.failed {
 		return t.failVal(), false
 	}
-	if t.frozenDB != nil {
+	if t.past != nil {
 		return value.Value{}, true
 	}
 	if err := t.ensureTable(); err != nil {
@@ -1382,7 +1381,7 @@ func (t *SchemaTable) ensureTable() error {
 // keepsHistory reports a table of a file whose history the engine keeps: a file it declares tables on, the app's
 // .database/ or the host's of connection("tên") (database_history.go).
 func (t *SchemaTable) keepsHistory() bool {
-	return t.sqlitePath != "" && t.frozenDB == nil
+	return t.sqlitePath != "" && t.past == nil
 }
 
 // ensuredKey is what ensuredTables remembers a table of the file by: its schema hash with it.

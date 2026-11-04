@@ -17,8 +17,9 @@ import (
 // said; a later moment reads as before; history() holds the kept commits alone.
 //
 // CONTROL (03/11/2026): with ErrPruned said as any failure of at(), "at the first insert = … want the error that says
-// how long the history keeps"; with the copies of at() left behind, "the copy at() made of revision 2 is still on
-// disk".
+// how long the history keeps"; with the copies of at() left behind, "the copy at() made of revision 0 is still on
+// disk". Since 04/11/2026 at() goes backward and makes a copy only of a moment a change of the schema stands after,
+// here the one before the tables were made.
 func TestManagedDatabaseHistoryRetention(t *testing.T) {
 	SetHistoryDays(1)
 	t.Cleanup(func() { SetHistoryDays(0) })
@@ -40,8 +41,12 @@ func TestManagedDatabaseHistoryRetention(t *testing.T) {
 		return "/?do=at&at=" + url.QueryEscape(moments[revision].Format(time.RFC3339Nano))
 	}
 	getJSON(t, tenant, at(2), &answer)
-	if _, err := os.Stat(filepath.Join(path+".at", "00000000000000000002.db")); err != nil {
-		t.Fatalf("at() of revision 2 made no copy: %v", err)
+	if _, err := os.Stat(path + ".at"); err == nil {
+		t.Fatal("at() of revision 2 made a copy, want it read going backward")
+	}
+	getJSON(t, tenant, "/?do=before&at="+url.QueryEscape(moments[1].Add(-time.Nanosecond).Format(time.RFC3339Nano)), &answer)
+	if _, err := os.Stat(filepath.Join(path+".at", "00000000000000000000.db")); err != nil {
+		t.Fatalf("at() before the tables made no copy: %v", err)
 	}
 
 	absolute, _ := filepath.Abs(path)
@@ -64,8 +69,8 @@ func TestManagedDatabaseHistoryRetention(t *testing.T) {
 		!strings.Contains(refused.Error.Message, "engine giữ 1 ngày (app.history({ days }) trong application.work, mặc định 30)") {
 		t.Fatalf("at the first insert = %+v, want the error that says how long the history keeps", refused)
 	}
-	if _, err := os.Stat(filepath.Join(path+".at", "00000000000000000002.db")); err == nil {
-		t.Fatal("the copy at() made of revision 2 is still on disk")
+	if _, err := os.Stat(filepath.Join(path+".at", "00000000000000000000.db")); err == nil {
+		t.Fatal("the copy at() made of revision 0 is still on disk")
 	}
 	var read struct {
 		Rows  []map[string]any `json:"rows"`

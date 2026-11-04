@@ -1,8 +1,10 @@
 package work
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -12,6 +14,7 @@ import (
 
 const historyShopRoute = `import * as router from "kitwork/router";
 import { db } from "app/.shared/schema/shop.work";
+import { desc } from "kitwork/database";
 
 router.post((context) => {
   const request = context.request;
@@ -41,17 +44,27 @@ router.get((context) => {
   if (action === "at") {
     return context.json({ rows: db.at(moment).list((orders) => orders), count: db.at(moment).count((orders) => orders) });
   }
+  if (action === "page") {
+    return context.json({
+      first: db.at(moment).orderBy((orders) => desc(orders.amount)).list(1).map((row) => row.email),
+      second: db.at(moment).orderBy((orders) => desc(orders.amount)).list({ page: 2, limit: 1 }).map((row) => row.email),
+    });
+  }
   return context.json(db.list((orders) => orders));
 });
 `
 
 // history() gives the changes of the rows its condition keeps, oldest first, { at, before, after, by }, a row since
-// deleted included; at(moment) reads the database as it was then, from a copy restored from the history
+// deleted included; at(moment) reads the database as it was then, going backward from the live file with no copy
+// made, a page in an order and its second page included; a moment before the table was made, which the schema's
+// change stands between, is read from a copy restored from the history and says the table was not there
 // (KITWORK_DATABASE.md mục 2, "Thời điểm và lịch sử"; KITWORK_KITDB.md mục 5).
 //
 // CONTROL (03/11/2026): with the condition run on the after image alone, the deleted row's delete is gone, "history of
 // b@x.vn = [insert], want insert, delete"; with at() reading the live file, "at revision 4: a@x.vn 36000 (1), want
-// a@x.vn 36000, b@x.vn 40000 (2)".
+// a@x.vn 36000, b@x.vn 40000 (2)". CONTROL (04/11/2026): with every at() read from a restored copy, "at() of the
+// revisions after the tables restored copies"; with a row's last change after the moment taken for what it was, the
+// order inserted and deleted since comes back, "at revision 3: a@x.vn 36000, b@x.vn 40000 (2), want a@x.vn 36000 (1)".
 func TestManagedDatabaseHistoryAndAt(t *testing.T) {
 	managed := newManagedApp(t, map[string]string{".shared/schema/shop.work": writeShopSchema, "shop.example/router.work": historyShopRoute})
 	tenant := managed.site("shop.example")
@@ -115,6 +128,19 @@ func TestManagedDatabaseHistoryAndAt(t *testing.T) {
 		if got := at(revision); got != want {
 			t.Fatalf("at revision %d: %s, want %s", revision, got, want)
 		}
+	}
+	for revision, want := range map[uint64]string{2: "[a@x.vn] []", 4: "[b@x.vn] [a@x.vn]", 5: "[a@x.vn] []"} {
+		var page struct {
+			First  []string `json:"first"`
+			Second []string `json:"second"`
+		}
+		getJSON(t, tenant, "/?do=page&at="+url.QueryEscape(moments[revision].Format(time.RFC3339Nano)), &page)
+		if got := fmt.Sprint(page.First, " ", page.Second); got != want {
+			t.Fatalf("at revision %d the largest amount first, a page of one: %s, want %s", revision, got, want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(managed.root, "acme", ".database", "application", "kitwork.db.at")); err == nil {
+		t.Fatal("at() of the revisions after the tables restored copies, want them read going backward")
 	}
 	var refused struct {
 		OK    bool `json:"ok"`
