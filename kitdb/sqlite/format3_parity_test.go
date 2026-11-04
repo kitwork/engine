@@ -15,8 +15,9 @@ import (
 
 // TestFormatThreeMatchesTheRowsAtEveryRevision runs a random workload through the writer, which writes format 3, and
 // keeps the table as it is after every commit. Then, at every revision, what each reader rebuilds from the history is
-// the table as it was: history()'s images before and after every change (WholeImages), the rows going backward from
-// the live table (the first change after the revision), and the restore of the file (every thirtieth revision). The
+// the table as it was: history()'s images before and after every change (WholeImages), the relation going backward
+// that PastRelation builds on the live file, whose page in id order must merge its sides, and the restore of the file
+// (every thirtieth revision). The
 // searchable columns of Options.Search fold into the index, which every fiftieth request is searched against an index
 // rebuilt from the rows. The workload inserts, updates some columns (to NULL, to the value they had, two statements on
 // one row in one request), deletes, swaps a UNIQUE code between two rows in one request, and moves a row to a new
@@ -25,7 +26,10 @@ import (
 // CONTROL (04/11/2026): with WholeImages leaving an update's old values out, "revision 6, change of row 3: before
 // [3 c82 …] after [3 c82 …], want [3 c3 …]"; with replay reading each updated row only when its change runs, the swap
 // of codes fails, "restore of revision 31: replay revision 17: … update of row 4 of \"products\", which the restored
-// copy does not hold as the history says".
+// copy does not hold as the history says"; with PastRelation's CASE not cast to the declared type, "revision 11: a page
+// in id order through kitwork_at does not merge its sides, the view is not flattened: CO-ROUTINE kitwork_at; …"; with
+// a column's value taken from the last change after the moment instead of the first, "going backward to revision 3:
+// 2 rows, want 2 as they were".
 func TestFormatThreeMatchesTheRowsAtEveryRevision(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kitwork.db")
@@ -189,30 +193,32 @@ func TestFormatThreeMatchesTheRowsAtEveryRevision(t *testing.T) {
 				change.Before, change.After, before, after)
 		}
 	}
-	// going backward: at every revision, the live rows the history after it did not touch, and the first change's before
+	// going backward: at every revision, the relation PastRelation builds on the live file reads the table as it was,
+	// and an ORDER BY with a LIMIT through it merges both sides (the view is flattened)
 	last := database.Revision()
+	past, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?mode=ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer past.Close()
+	merged := 0
 	for revision := range last {
 		if _, taken := snapshots[revision]; !taken {
 			continue // before the table was made
 		}
-		rows := map[int64][]any{}
-		for id, row := range snapshots[last] {
-			rows[id] = row
-		}
-		seen := map[int64]bool{}
-		for index, change := range changes {
-			if revisions[index] <= revision || seen[change.RowID] {
-				continue
-			}
-			seen[change.RowID] = true
-			delete(rows, change.RowID)
-			if change.Operation != Insert {
-				rows[change.RowID] = change.Before
-			}
-		}
+		rows, relation, plan := readPast(t, past, revision)
 		if !reflect.DeepEqual(rows, snapshots[revision]) {
 			t.Fatalf("going backward to revision %d: %d rows, want %d as they were", revision, len(rows), len(snapshots[revision]))
 		}
+		if relation == "kitwork_at" {
+			if !strings.Contains(plan, "MERGE") {
+				t.Fatalf("revision %d: a page in id order through kitwork_at does not merge its sides, the view is not flattened: %s", revision, plan)
+			}
+			merged++
+		}
+	}
+	if merged == 0 {
+		t.Fatal("no revision read through kitwork_at")
 	}
 	// the restore of the file
 	for revision := uint64(1); revision <= last; revision += 30 {
@@ -254,6 +260,59 @@ func TestFormatThreeMatchesTheRowsAtEveryRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("%d requests, %d revisions, %d changes of products", 400, last, len(changes))
+}
+
+// readPast reads products as it was at revision through PastRelation on a connection of its own, by id (the rowid),
+// with the relation it read and the plan of a page in id order through it.
+func readPast(t *testing.T, db *sql.DB, revision uint64) (map[int64][]any, string, string) {
+	t.Helper()
+	ctx := context.Background()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, "BEGIN"); err != nil {
+		t.Fatal(err)
+	}
+	defer conn.ExecContext(ctx, "ROLLBACK")
+	relation, err := PastRelation(ctx, conn, "products", revision, 1_000_000)
+	if err != nil {
+		t.Fatalf("revision %d: %v", revision, err)
+	}
+	rows := map[int64][]any{}
+	result, err := conn.QueryContext(ctx, `SELECT * FROM `+relation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names, _ := result.Columns()
+	for result.Next() {
+		values := make([]any, len(names))
+		pointers := make([]any, len(names))
+		for position := range values {
+			pointers[position] = &values[position]
+		}
+		if err := result.Scan(pointers...); err != nil {
+			t.Fatal(err)
+		}
+		rows[values[0].(int64)] = values
+	}
+	result.Close()
+	var plan []string
+	steps, err := conn.QueryContext(ctx, `EXPLAIN QUERY PLAN SELECT * FROM `+relation+` WHERE code > 'c' ORDER BY id LIMIT 5`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for steps.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := steps.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+	steps.Close()
+	return rows, relation, strings.Join(plan, "; ")
 }
 
 func nilIfEmpty(values []any) []any {

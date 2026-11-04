@@ -111,154 +111,17 @@ func (t *SchemaTable) atBackward(ctx context.Context, revision uint64) (*SchemaT
 	return &past, release, nil
 }
 
-// pastRelation builds, inside the read transaction it opens on conn, what atBackward reads, and names it: the table
-// itself when no commit after revision changed it, the temporary view kitwork_at otherwise.
+// pastRelation opens the read transaction on conn and builds in it what atBackward reads (kitdbsqlite.PastRelation):
+// the table itself when no commit after revision changed it, the temporary view kitwork_at otherwise.
 func (t *SchemaTable) pastRelation(ctx context.Context, conn *sql.Conn, revision uint64) (string, error) {
 	if _, err := conn.ExecContext(ctx, "BEGIN"); err != nil {
 		return "", err
 	}
-	var names, types []string
-	rows, err := conn.QueryContext(ctx, `SELECT name, type, hidden FROM pragma_table_xinfo(?) ORDER BY cid`, t.table)
-	if err != nil {
-		return "", err
+	relation, err := kitdbsqlite.PastRelation(ctx, conn, t.table, revision, atBackwardRows)
+	if errors.Is(err, kitdbsqlite.ErrPastUnreachable) || errors.Is(err, kitdbsqlite.ErrCorruptHistory) {
+		return "", errAtRestored
 	}
-	for rows.Next() {
-		var name, kind string
-		var hidden int
-		if err := rows.Scan(&name, &kind, &hidden); err != nil {
-			rows.Close()
-			return "", err
-		}
-		if hidden != 0 {
-			rows.Close()
-			return "", errAtRestored // a generated column is not in the history's images
-		}
-		names, types = append(names, name), append(types, kind)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return "", err
-	}
-	if len(names) == 0 {
-		return "", errAtRestored // the table is not in the file now
-	}
-	position := make(map[string]int, len(names))
-	for index, name := range names {
-		position[name] = index
-	}
-	// every change of the table after the moment, oldest first: format 3 keeps only an update's changed columns, so
-	// what a row was then is rebuilt walking back from the row as it is now (kitdbsqlite.WholeImages)
-	changed := map[int64]bool{}
-	var own []kitdbsqlite.Change
-	err = kitdbsqlite.ReadChanges(ctx, conn, revision, func(commit kitdbsqlite.Commit) error {
-		for _, change := range commit.Changes {
-			if change.Operation == kitdbsqlite.Statement || change.Operation == kitdbsqlite.Barrier {
-				return errAtRestored
-			}
-			if change.Table != t.table {
-				continue
-			}
-			changed[change.RowID] = true
-			if len(changed) > atBackwardRows {
-				return errAtRestored
-			}
-			own = append(own, change)
-		}
-		return nil
-	})
-	if err != nil {
-		return "", err
-	}
-	if err := kitdbsqlite.WholeImages(own, t.table, liveRows(ctx, conn)); err != nil {
-		if errors.Is(err, kitdbsqlite.ErrCorruptHistory) {
-			return "", errAtRestored
-		}
-		return "", err
-	}
-	// only a row's first change after the moment says what it was then
-	var before [][]any
-	seen := map[int64]bool{}
-	for _, change := range own {
-		if seen[change.RowID] {
-			continue
-		}
-		seen[change.RowID] = true
-		if change.Operation == kitdbsqlite.Insert {
-			continue // the row was not there yet
-		}
-		if len(change.Columns) != len(names) || len(change.Before) != len(names) {
-			return "", errAtRestored // a row deleted before deletes carried their columns (03/11/2026)
-		}
-		row := make([]any, len(names))
-		for index, column := range change.Columns {
-			at, known := position[column]
-			if !known {
-				return "", errAtRestored
-			}
-			row[at] = change.Before[index]
-		}
-		before = append(before, row)
-	}
-	if len(changed) == 0 {
-		return t.table, nil
-	}
-	columns := make([]string, len(names))
-	declared := make([]string, len(names))
-	for index, name := range names {
-		columns[index] = quoteIdentifier(name)
-		declared[index] = columns[index] + " " + types[index]
-	}
-	list := strings.Join(columns, ", ")
-	statements := []string{
-		`CREATE TEMP TABLE kitwork_at_changed (rid INTEGER PRIMARY KEY)`,
-		`CREATE TEMP TABLE kitwork_at_before (` + strings.Join(declared, ", ") + `)`,
-	}
-	for _, statement := range statements {
-		if _, err := conn.ExecContext(ctx, statement); err != nil {
-			return "", err
-		}
-	}
-	insertChanged, err := conn.PrepareContext(ctx, `INSERT INTO temp.kitwork_at_changed (rid) VALUES (?)`)
-	if err != nil {
-		return "", err
-	}
-	defer insertChanged.Close()
-	for rowID := range changed {
-		if _, err := insertChanged.ExecContext(ctx, rowID); err != nil {
-			return "", err
-		}
-	}
-	insertBefore, err := conn.PrepareContext(ctx, `INSERT INTO temp.kitwork_at_before (`+list+`) VALUES (`+
-		strings.TrimSuffix(strings.Repeat("?, ", len(names)), ", ")+`)`)
-	if err != nil {
-		return "", err
-	}
-	defer insertBefore.Close()
-	for _, row := range before {
-		if _, err := insertBefore.ExecContext(ctx, row...); err != nil {
-			return "", err
-		}
-	}
-	// the rows as they were get the table's indexes, so a read by key or in key order finds them as on the table
-	indexes, err := pastIndexes(ctx, conn, t.table)
-	if err != nil {
-		return "", err
-	}
-	for number, keys := range indexes {
-		quoted := make([]string, len(keys))
-		for index, key := range keys {
-			quoted[index] = quoteIdentifier(key)
-		}
-		if _, err := conn.ExecContext(ctx, fmt.Sprintf(`CREATE INDEX temp.kitwork_at_index_%d ON kitwork_at_before (%s)`,
-			number, strings.Join(quoted, ", "))); err != nil {
-			return "", err
-		}
-	}
-	if _, err := conn.ExecContext(ctx, `CREATE TEMP VIEW kitwork_at AS SELECT `+list+` FROM main.`+quoteIdentifier(t.table)+
-		` WHERE _rowid_ NOT IN (SELECT rid FROM temp.kitwork_at_changed) UNION ALL SELECT `+list+` FROM temp.kitwork_at_before`); err != nil {
-		return "", err
-	}
-	return "kitwork_at", nil
+	return relation, err
 }
 
 // liveRows reads rows of a table as they are now on querier, by rowid, five hundred at a time: what
@@ -312,53 +175,6 @@ func liveRows(ctx context.Context, querier interface {
 // quoteIdentifier is name as an SQL identifier.
 func quoteIdentifier(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
-}
-
-// pastIndexes lists the key columns of each index of table, one on an expression left out.
-func pastIndexes(ctx context.Context, conn *sql.Conn, table string) ([][]string, error) {
-	rows, err := conn.QueryContext(ctx, `SELECT name FROM pragma_index_list(?)`, table)
-	if err != nil {
-		return nil, err
-	}
-	var names []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		names = append(names, name)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	var indexes [][]string
-	for _, name := range names {
-		keys, err := conn.QueryContext(ctx, `SELECT coalesce(name, '') FROM pragma_index_xinfo(?) WHERE key = 1 ORDER BY seqno`, name)
-		if err != nil {
-			return nil, err
-		}
-		var columns []string
-		expression := false
-		for keys.Next() {
-			var column string
-			if err := keys.Scan(&column); err != nil {
-				keys.Close()
-				return nil, err
-			}
-			expression = expression || column == ""
-			columns = append(columns, column)
-		}
-		keys.Close()
-		if err := keys.Err(); err != nil {
-			return nil, err
-		}
-		if !expression && len(columns) > 0 {
-			indexes = append(indexes, columns)
-		}
-	}
-	return indexes, nil
 }
 
 // pastTable is what a table as it was at a moment reads through: the relation the statement names, on the
