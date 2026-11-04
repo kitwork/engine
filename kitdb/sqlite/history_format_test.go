@@ -1,8 +1,11 @@
 package sqlite
 
 import (
+	"context"
+	"database/sql"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -173,4 +176,66 @@ func FuzzDecodeChanges(f *testing.F) {
 			}
 		}
 	})
+}
+
+// A commit of format 3 replays as the commit left its rows: an update's row is read as it was before the commit and
+// written whole with its changed columns set, so two rows that swap a unique value in one commit replay, the first
+// row's INSERT OR REPLACE taking the second away before the second's own image is written back.
+//
+// CONTROL (04/11/2026): with each update's row read only when its change runs, "replay: … update of row 2 of
+// \"codes\", which the restored copy does not hold as the history says".
+func TestReplayOfFormatThreeUpdates(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(t.TempDir(), "copy.db")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec(`CREATE TABLE codes (id INTEGER PRIMARY KEY, code TEXT UNIQUE, note TEXT);
+		INSERT INTO codes VALUES (1, 'a', 'one'), (2, 'b', 'two'), (3, 'c', 'three')`); err != nil {
+		t.Fatal(err)
+	}
+	columns := []string{"id", "code", "note"}
+	encoded, err := encodeColumns([]Change{
+		{Operation: Update, Table: "codes", RowID: 1, Columns: columns, Updates: []ColumnUpdate{{Position: 1, Old: "a", New: "b"}}},
+		{Operation: Update, Table: "codes", RowID: 2, Columns: columns, Updates: []ColumnUpdate{{Position: 1, Old: "b", New: "a"}}},
+		{Operation: Update, Table: "codes", RowID: 3, Columns: columns, Updates: []ColumnUpdate{{Position: 2, Old: "three", New: "drei"}}},
+		{Operation: Insert, Table: "codes", RowID: 4, Columns: columns, After: []any{int64(4), "d", "four"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes, err := decodeChanges(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay := &replayer{target: db, tx: tx, columns: map[string][]string{}}
+	if err := replay.apply(ctx, changes); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.Query(`SELECT id, code, note FROM codes ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var id int
+		var code, note string
+		if err := rows.Scan(&id, &code, &note); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, fmt.Sprintf("%d %s %s", id, code, note))
+	}
+	if want := "1 b one, 2 a two, 3 c drei, 4 d four"; strings.Join(got, ", ") != want {
+		t.Fatalf("after the replay: %s, want %s", strings.Join(got, ", "), want)
+	}
 }

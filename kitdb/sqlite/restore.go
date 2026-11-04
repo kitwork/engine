@@ -217,8 +217,88 @@ func (replay *replayer) tableColumns(ctx context.Context, table string) ([]strin
 	return columns, nil
 }
 
-func (replay *replayer) apply(ctx context.Context, changes []Change) error {
+// afterImages is the row each update of format 3 left, by its table and rowid: format 3 keeps only the columns an
+// update changed, so its row as the commit left it is the row as it was before the commit with those columns set.
+// Every row is read before any change of the commit runs: a commit that moved a unique value from one row to another
+// has the first row's INSERT OR REPLACE delete the second, whose own image is then already in hand.
+func (replay *replayer) afterImages(ctx context.Context, changes []Change) (map[rowKey][]any, error) {
+	wanted := map[string][]int64{}
+	var tables []string
 	for _, change := range changes {
+		if change.Operation != Update || change.After != nil {
+			continue // format 1 keeps the whole row after
+		}
+		if _, seen := wanted[change.Table]; !seen {
+			tables = append(tables, change.Table)
+		}
+		wanted[change.Table] = append(wanted[change.Table], change.RowID)
+	}
+	images := map[rowKey][]any{}
+	for _, table := range tables {
+		rowIDs := wanted[table]
+		for start := 0; start < len(rowIDs); start += 500 {
+			part := rowIDs[start:min(start+500, len(rowIDs))]
+			arguments := make([]any, len(part))
+			for position, rowID := range part {
+				arguments[position] = rowID
+			}
+			marks := strings.TrimSuffix(strings.Repeat("?, ", len(part)), ", ")
+			rows, err := replay.tx.QueryContext(ctx, `SELECT _rowid_, * FROM `+quoteIdentifier(table)+` WHERE _rowid_ IN (`+marks+`)`, arguments...)
+			if err != nil {
+				return nil, err
+			}
+			names, err := rows.Columns()
+			if err != nil {
+				rows.Close()
+				return nil, err
+			}
+			for rows.Next() {
+				values := make([]any, len(names))
+				pointers := make([]any, len(names))
+				for position := range values {
+					pointers[position] = &values[position]
+				}
+				if err := rows.Scan(pointers...); err != nil {
+					rows.Close()
+					return nil, err
+				}
+				rowID, _ := values[0].(int64)
+				images[rowKey{table, rowID}] = values[1:]
+			}
+			err = rows.Err()
+			rows.Close()
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	for _, change := range changes {
+		if change.Operation != Update || change.After != nil {
+			continue
+		}
+		image, found := images[rowKey{change.Table, change.RowID}]
+		if !found || len(image) != len(change.Columns) {
+			return nil, fmt.Errorf("%w: update of row %d of %q, which the restored copy does not hold as the history says",
+				ErrCorruptHistory, change.RowID, change.Table)
+		}
+		after := append([]any(nil), image...)
+		for _, update := range change.Updates {
+			after[update.Position] = update.New
+		}
+		images[rowKey{change.Table, change.RowID}] = after
+	}
+	return images, nil
+}
+
+func (replay *replayer) apply(ctx context.Context, changes []Change) error {
+	images, err := replay.afterImages(ctx, changes)
+	if err != nil {
+		return err
+	}
+	for _, change := range changes {
+		if change.Operation == Update && change.After == nil {
+			change.After = images[rowKey{change.Table, change.RowID}]
+		}
 		switch change.Operation {
 		case Statement:
 			if _, err := replay.tx.ExecContext(ctx, change.Statement); err != nil {
