@@ -19,14 +19,6 @@ type physicalKeySegmentIterator struct {
 	started      bool
 }
 
-func newPhysicalKeySegmentIteratorFrom(
-	main *mainImage,
-	firstBlock, blockCount int,
-	start []byte,
-) *physicalKeySegmentIterator {
-	return newPhysicalKeySegmentIteratorRange(main, firstBlock, blockCount, start, nil)
-}
-
 func newPhysicalKeySegmentIteratorRange(main *mainImage, firstBlock, blockCount int, start, end []byte) *physicalKeySegmentIterator {
 	lo, hi := main.blockRange(firstBlock, blockCount, start, end)
 	return &physicalKeySegmentIterator{
@@ -107,10 +99,6 @@ type generationKeyMergeIterator struct {
 	items      generationMergeHeap
 	output     []byte
 	initialErr error
-}
-
-func newGenerationKeyMergeIteratorFrom(main *mainImage, start []byte) *generationKeyMergeIterator {
-	return newGenerationKeyMergeIteratorRange(main, start, nil)
 }
 
 func newGenerationKeyMergeIteratorRange(main *mainImage, start, end []byte) *generationKeyMergeIterator {
@@ -196,10 +184,6 @@ type mainKeyIterator struct {
 	pendingErr error
 }
 
-func newMainKeyIteratorFrom(main *mainImage, start []byte) *mainKeyIterator {
-	return newMainKeyIteratorRange(main, start, nil)
-}
-
 func newMainKeyIteratorRange(main *mainImage, start, end []byte) *mainKeyIterator {
 	iterator := &mainKeyIterator{main: main, validate: len(start) == 0 && len(end) == 0}
 	if main.formatVersion == mainFormatVersion {
@@ -265,10 +249,6 @@ type logicalKeyIterator struct {
 	initialized bool
 	pendingErr  error
 	output      []byte
-}
-
-func newLogicalKeyIterator(main *mainImage, overlay map[string]rowMutation, start []byte) *logicalKeyIterator {
-	return newLogicalKeyIteratorRange(main, overlay, start, nil)
 }
 
 func newLogicalKeyIteratorRange(main *mainImage, overlay map[string]rowMutation, start, end []byte) *logicalKeyIterator {

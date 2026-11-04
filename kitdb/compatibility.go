@@ -26,7 +26,6 @@ type DurableCompatibility struct {
 	History          uint16       `json:"history"`
 	HistoryPins      uint16       `json:"history_pins"`
 	ReplicaProtocol  uint16       `json:"replica_protocol"`
-	ReplicaWire      uint16       `json:"replica_wire"`
 }
 
 // KernelLimits records the hard transaction boundaries that applications may
@@ -67,7 +66,6 @@ func CurrentCompatibility() CompatibilityProfile {
 			History:          historyFormatVersion,
 			HistoryPins:      historyPinsFormatVersion,
 			ReplicaProtocol:  ReplicaProtocolVersion,
-			ReplicaWire:      ReplicaWireVersion,
 		},
 		Limits: KernelLimits{
 			KeyBytes:              maxKeySize,

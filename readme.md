@@ -409,9 +409,9 @@ public.
 An app's databases are declared in one folder, `.shared/schema/` of the app, and imported where they
 are used (`docs/KITWORK_DATABASE.md` in the Kitwork repository is the spec):
 
-- `connection().schema({ orders })`: the app's own database, KitDB in the app's folder
-  (`.database/application/`), one for every site of the app.
-- `connection("warehouse").schema({ stocks })`: a database the host named in the manifest's
+- `connection().tables({ orders })`: the app's own database, a SQLite file in the app's folder
+  (`.database/application/kitwork.db`), one for every site of the app.
+- `connection("warehouse").tables({ stocks })`: a database the host named in the manifest's
   `databases({ … })`; today a SQLite file of the host.
 - `connect({ postgresql: environment.CRM_URL })`: a database outside the app, someone else's; it has only
   `query(sql, [values])`, its values bound by the driver, and it dials through the same guard as
@@ -426,17 +426,18 @@ a value from outside the lambda is a parameter, never part of the SQL. The older
 `database.kitdb(…)`, `database.entity()`, `ctx.database`, `router.connection`, the string forms of the
 query builder) were removed on 22/10/2026: each is now an error that says what to write instead.
 
-KitDB is an embedded relational database written in Go and incubated in this repository, with its
-own storage, write-ahead log, checkpoints, verified backup and point-in-time recovery, one writer
-per database, a loopback-only cleartext PostgreSQL wire profile so ordinary tools can connect, and
-a 1.0 release contract still at release-candidate stage. The app's `database` surface opens one file
-or a managed root of them; `kitdb/README.md` says exactly what is supported and what is not.
+KitDB is the layer above those SQLite files (`docs/KITWORK_KITDB.md` in the Kitwork repository): one
+writer per file for the process, which records each change in `kitwork_history` in the same
+transaction, so a read can ask for a past moment (`at()`) and a table for its changes (`history()`);
+full-text `matches`; and the host's read-only PostgreSQL wire port (`app.database`). KROW, KitDB's own
+storage engine before 29/10/2026, went on 03–04/11/2026; `kitdb/` keeps its kernel only to read an old
+`.kitdb` file for `kitwork migrate kitdb` (`kitdb/README.md`).
 
 ## Background work
 
 Durable schedules (`.schedule/`) and jobs (`.shared/queue/`) exist in the engine today. Each due
 time of a schedule and each send of a job is a run stored in `kitwork_runs` of the application's own
-KitDB file before it runs, never in a database of the host, with deduplication keys, retries with
+database (`.database/application/kitwork.db`) before it runs, never in a database of the host, with deduplication keys, retries with
 backoff, a time limit per attempt and replay of failed jobs; a retried handler runs again, so it must
 be idempotent. `docs/KITWORK_SCHEDULE.md` and `docs/KITWORK_QUEUE.md` in the Kitwork repository say
 how an author declares them. `routine.go(fn)` of `kitwork/routine` runs work after the answer and
@@ -579,7 +580,7 @@ arguments before they start.
   `where(fn)` on their runs, a schedule's default zone from the app's `router.timezone(…)`, and the
   rules KITWORK_SCHEDULE.md leaves open (missed due times, overlap) are the engine's own for now.
 - Clustering. `CLUSTER.MD` and `backbone.md` are designs. Nothing coordinates two engine processes
-  today: one process holds an app's KitDB file, and with it the app's runs.
+  today: one process holds the writer of an app's database file, and with it the app's runs.
 - Desktop and mobile. The manifest declares them; the desktop declaration is validated at boot and
   the mobile one by the native build tooling. A separate shell, not in this repository, opens the
   window.
@@ -654,8 +655,7 @@ rotation and screenshots.
 - `docs/APP.md`: every manifest method.
 - `docs/PUBLISHING.md`: RSS, sitemaps and typed responses.
 - `docs/RELEASE.md` and `docs/DIAGNOSTICS.md`: how a release is qualified and observed.
-- `kitdb/README.md`, `kitdb/RELEASE_1_0.md`, `kitdb/VISION.md`: the database, the exact claim it
-  makes, and where it is going.
+- `kitdb/README.md`: what is left of KROW, the reader of an old `.kitdb` file.
 - `CONTRIBUTING.md`: the rules that catch people, and why.
 
 The Kitwork repository holds the `.ui` specification (`docs/KITWORK_UI.md`), the type definitions

@@ -177,22 +177,6 @@ func (db *DB) SequenceByName(name string) (Sequence, error) {
 	return db.catalog.sequences[id], nil
 }
 
-func (db *DB) SequenceByID(id string) (Sequence, error) {
-	if err := db.ensureCatalogLoaded(); err != nil {
-		return Sequence{}, err
-	}
-	db.mu.RLock()
-	defer db.mu.RUnlock()
-	if err := db.stateErrorLocked(); err != nil {
-		return Sequence{}, err
-	}
-	sequence, found := db.catalog.sequences[id]
-	if !found {
-		return Sequence{}, fmt.Errorf("%w: ID %q", ErrSequenceNotFound, id)
-	}
-	return sequence, nil
-}
-
 // CreateSequence stages both records, allowing table and owned sequences to
 // publish in one frame. CommitSequenceChanges serializes publication with the
 // allocator. Callers must roll back after any staging error.
@@ -246,14 +230,6 @@ func (tx *Tx) CommitSequenceChanges() (uint64, error) {
 		}
 	}
 	return transaction, err
-}
-
-func (db *DB) NextSequenceByID(ctx context.Context, id string) (Sequence, int64, error) {
-	sequence, err := db.SequenceByID(id)
-	if err != nil {
-		return Sequence{}, 0, err
-	}
-	return db.reserveSequence(ctx, sequence.Name, nil, true, false, id)
 }
 
 // CreateSequence atomically publishes its definition and initial counter.

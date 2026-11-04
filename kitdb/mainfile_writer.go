@@ -10,8 +10,6 @@ import (
 	"io"
 	"math"
 	"os"
-	"path/filepath"
-	"sort"
 )
 
 const mainDirectoryEntryHeaderSize = 32
@@ -30,16 +28,6 @@ type mainSnapshotWriter struct {
 	blocks      []mainBlock
 	current     *pendingMainPage
 	previousKey []byte
-}
-
-func newMainSnapshotWriter(path string, file *os.File) (*mainSnapshotWriter, error) {
-	if _, err := writeAll(file, make([]byte, mainHeaderSize)); err != nil {
-		return nil, fmt.Errorf("kitdb: reserve main-file header: %w", err)
-	}
-	return &mainSnapshotWriter{
-		path: path, file: file, writer: bufio.NewWriterSize(file, 256<<10),
-		position: mainHeaderSize,
-	}, nil
 }
 
 func (writer *mainSnapshotWriter) append(key, value []byte) error {
@@ -168,66 +156,4 @@ func (writer *mainSnapshotWriter) finish(identity [16]byte, transaction uint64, 
 		return fmt.Errorf("kitdb: write main-file trailer: %w", err)
 	}
 	return nil
-}
-
-func prepareMainSnapshot(path string, identity [16]byte, transaction uint64, boundaryChecksum uint32, walk func(emit func(key, value []byte) error) error) (stagingPath string, returnErr error) {
-	if transaction == 0 && boundaryChecksum != 0 {
-		return "", fmt.Errorf("kitdb: empty main snapshot has a transaction checksum")
-	}
-	directory := filepath.Dir(path)
-	staging, err := os.CreateTemp(directory, ".kitdb-main-*.tmp")
-	if err != nil {
-		return "", fmt.Errorf("kitdb: create main-file staging: %w", err)
-	}
-	stagingPath = staging.Name()
-	ready := false
-	defer func() {
-		_ = staging.Close()
-		if !ready {
-			_ = os.Remove(stagingPath)
-		}
-	}()
-	if err := staging.Chmod(0o600); err != nil {
-		return "", fmt.Errorf("kitdb: set main-file permissions: %w", err)
-	}
-	writer, err := newMainSnapshotWriter(path, staging)
-	if err != nil {
-		return "", err
-	}
-	if err := walk(writer.append); err != nil {
-		return "", err
-	}
-	if err := writer.finish(identity, transaction, boundaryChecksum); err != nil {
-		return "", err
-	}
-	if err := staging.Sync(); err != nil {
-		return "", fmt.Errorf("kitdb: sync main-file staging: %w", err)
-	}
-	if err := staging.Close(); err != nil {
-		return "", fmt.Errorf("kitdb: close main-file staging: %w", err)
-	}
-	ready = true
-	return stagingPath, nil
-}
-
-func writeMainSnapshot(path string, identity [16]byte, transaction uint64, boundaryChecksum uint32, state map[string][]byte) error {
-	keys := make([]string, 0, len(state))
-	for key := range state {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	stagingPath, err := prepareMainSnapshot(path, identity, transaction, boundaryChecksum, func(emit func(key, value []byte) error) error {
-		for _, key := range keys {
-			if err := emit([]byte(key), state[key]); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	defer os.Remove(stagingPath)
-	_, err = publishPreparedMainSnapshot(stagingPath, path)
-	return err
 }

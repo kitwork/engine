@@ -671,17 +671,6 @@ func inspectHistorySegmentFrames(path string, expected historySegmentExpectation
 	}, nil
 }
 
-func walkCompleteWAL(path string, file *os.File, size int64, header walHeader, visit func(uint64, []operation) error) (uint64, uint32, error) {
-	var frameVisitor historyFrameVisitor
-	if visit != nil {
-		frameVisitor = func(transaction uint64, _ uint32, _ int64, operations []operation) error {
-			return visit(transaction, operations)
-		}
-	}
-	lastTx, lastChecksum, _, err := walkCompleteWALFrames(path, file, size, header, frameVisitor)
-	return lastTx, lastChecksum, err
-}
-
 func walkCompleteWALFrames(path string, file *os.File, size int64, header walHeader, visit historyFrameVisitor) (uint64, uint32, int64, error) {
 	lastTx := header.baseTx
 	lastChecksum := header.baseChecksum

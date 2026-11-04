@@ -23,10 +23,6 @@ func (main *mainImage) iteratorFrom(start []byte) *mainRowIterator {
 	return main.rangeIterator(start, nil, false)
 }
 
-func (main *mainImage) reverseIteratorFrom(end []byte) *mainRowIterator {
-	return main.rangeIterator(nil, end, true)
-}
-
 func (main *mainImage) rangeIterator(start, end []byte, reverse bool) *mainRowIterator {
 	iterator := &mainRowIterator{main: main, validate: len(start) == 0 && len(end) == 0}
 	if reverse && main.formatVersion == mainFormatVersion {
@@ -99,10 +95,6 @@ type physicalSegmentIterator struct {
 	reusable     *rowPage
 	seek         []byte
 	started      bool
-}
-
-func newPhysicalSegmentIterator(main *mainImage, firstBlock, blockCount int) *physicalSegmentIterator {
-	return newPhysicalSegmentIteratorFrom(main, firstBlock, blockCount, nil)
 }
 
 func newPhysicalSegmentIteratorFrom(main *mainImage, firstBlock, blockCount int, start []byte) *physicalSegmentIterator {
@@ -222,14 +214,6 @@ type reversePhysicalSegmentIterator struct {
 	page         *rowPage
 	seek         []byte
 	started      bool
-}
-
-func newReversePhysicalSegmentIteratorFrom(
-	main *mainImage,
-	firstBlock, blockCount int,
-	end []byte,
-) *reversePhysicalSegmentIterator {
-	return newReversePhysicalSegmentIteratorRange(main, firstBlock, blockCount, nil, end)
 }
 
 func newReversePhysicalSegmentIteratorRange(main *mainImage, firstBlock, blockCount int, start, end []byte) *reversePhysicalSegmentIterator {
@@ -392,14 +376,6 @@ type generationMergeIterator struct {
 	outputValue []byte
 }
 
-func newGenerationMergeIterator(main *mainImage) *generationMergeIterator {
-	return newGenerationMergeIteratorFrom(main, nil)
-}
-
-func newGenerationMergeIteratorFrom(main *mainImage, start []byte) *generationMergeIterator {
-	return newGenerationMergeIteratorRange(main, start, nil)
-}
-
 func newGenerationMergeIteratorRange(main *mainImage, start, end []byte) *generationMergeIterator {
 	iterator := &generationMergeIterator{cursors: make([]generationCursor, len(main.segments))}
 	for segmentIndex, segment := range main.segments {
@@ -486,10 +462,6 @@ type reverseGenerationMergeIterator struct {
 	cursors    []reverseGenerationCursor
 	items      generationMergeHeap
 	initialErr error
-}
-
-func newReverseGenerationMergeIteratorFrom(main *mainImage, end []byte) *reverseGenerationMergeIterator {
-	return newReverseGenerationMergeIteratorRange(main, nil, end)
 }
 
 func newReverseGenerationMergeIteratorRange(main *mainImage, start, end []byte) *reverseGenerationMergeIterator {

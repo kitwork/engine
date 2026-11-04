@@ -18,8 +18,7 @@ func TestKitDBV1CompatibilityProfile(t *testing.T) {
 		profile.Durable.TransactionFrame != 1 ||
 		profile.Durable.History != 1 ||
 		profile.Durable.HistoryPins != 1 ||
-		profile.Durable.ReplicaProtocol != 1 ||
-		profile.Durable.ReplicaWire != 1 {
+		profile.Durable.ReplicaProtocol != 1 {
 		t.Fatalf("durable compatibility = %#v", profile.Durable)
 	}
 	if profile.Limits != (KernelLimits{

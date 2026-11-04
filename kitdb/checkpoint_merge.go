@@ -10,15 +10,6 @@ import (
 	"github.com/kitwork/engine/kitdb/internal/checkpointfault"
 )
 
-func prepareMergedMainSnapshot(path string, identity [16]byte, transaction uint64, boundaryChecksum uint32, main *mainImage, overlay map[string]rowMutation) (stagingPath string, returnErr error) {
-	if main == nil || main.file == nil {
-		return "", fmt.Errorf("kitdb: main snapshot is unavailable")
-	}
-	return prepareMainSnapshot(path, identity, transaction, boundaryChecksum, func(emit func(key, value []byte) error) error {
-		return walkMergedRows(main, overlay, emit)
-	})
-}
-
 func publishPreparedMainSnapshot(stagingPath, path string) (bool, error) {
 	if err := storageReplace(path, "compact-replace", stagingPath, path); err != nil {
 		return false, fmt.Errorf("kitdb: publish main file: %w", err)
@@ -62,11 +53,6 @@ type logicalRowIterator struct {
 	outputValue []byte
 }
 
-// Only callback-scoped scans may reuse page and merge-output storage.
-func newScanRowIterator(main *mainImage, overlay map[string]rowMutation, start []byte) *logicalRowIterator {
-	return newScanRowIteratorRange(main, overlay, start, nil)
-}
-
 func newScanRowIteratorRange(main *mainImage, overlay map[string]rowMutation, start, end []byte) *logicalRowIterator {
 	iterator := newDirectionalLogicalRowIterator(main, overlay, start, end, false)
 	iterator.borrowed = true
@@ -100,10 +86,6 @@ func (iterator *logicalRowIterator) currentMain() ([]byte, []byte) {
 
 func newLogicalRowIterator(main *mainImage, overlay map[string]rowMutation, start []byte) *logicalRowIterator {
 	return newDirectionalLogicalRowIterator(main, overlay, start, nil, false)
-}
-
-func newReverseLogicalRowIterator(main *mainImage, overlay map[string]rowMutation, end []byte) *logicalRowIterator {
-	return newDirectionalLogicalRowIterator(main, overlay, nil, end, true)
 }
 
 func newDirectionalLogicalRowIterator(
