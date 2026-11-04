@@ -128,7 +128,15 @@ var (
 	_ pgwire.Session                  = (*Session)(nil)
 	_ pgwire.DescribeSession          = (*Session)(nil)
 	_ pgwire.TransactionStatusSession = (*Session)(nil)
+	_ pgwire.QueryAdmissionSession    = (*Session)(nil)
 )
+
+// QueryAdmission is the share of the port's statements running at once that this session waits in: its user's, as
+// PostgreSQL bounds a role. Every session waited in one share before (04/11/2026), so one account's long statements,
+// a recursive CTE that reads no table and runs until the port's QueryTimeout, held the port for every other account.
+func (session *Session) QueryAdmission() pgwire.QueryAdmission {
+	return pgwire.QueryAdmission{Key: "user " + session.options.User, Weight: 1}
+}
 
 // Open attaches every schema file of target read-only to one new SQLite connection. A missing file is an error naming
 // the database; nothing is ever created.
