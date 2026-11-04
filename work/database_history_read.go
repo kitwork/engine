@@ -2,6 +2,7 @@ package work
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"sort"
 	"strings"
@@ -57,9 +58,16 @@ func (m *ManagedDatabase) runHistory(prepared *preparedStatement, binder *statem
 		return value.InvalidFailure(value.UnavailableCode, "history(): connection unavailable")
 	}
 	ctx := table.writeContext()
+	// the history and the rows as they are now in one read: format 3 keeps only an update's changed columns, and its
+	// images are rebuilt walking back from the row as it is now (kitdbsqlite.WholeImages)
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return query.DatabaseFailure("history()", err)
+	}
+	defer tx.Rollback()
 	var changes []kitdbsqlite.Change
 	var moments []int64
-	err := kitdbsqlite.ReadChanges(ctx, db, 0, func(commit kitdbsqlite.Commit) error {
+	err = kitdbsqlite.ReadChanges(ctx, tx, 0, func(commit kitdbsqlite.Commit) error {
 		for _, change := range commit.Changes {
 			switch change.Operation {
 			case kitdbsqlite.Insert, kitdbsqlite.Update, kitdbsqlite.Delete:
@@ -72,6 +80,9 @@ func (m *ManagedDatabase) runHistory(prepared *preparedStatement, binder *statem
 		return nil
 	})
 	if err != nil {
+		return query.DatabaseFailure("history()", err)
+	}
+	if err := kitdbsqlite.WholeImages(changes, table.table, liveRows(ctx, tx)); err != nil {
 		return query.DatabaseFailure("history()", err)
 	}
 	images := make([][2]map[string]any, len(changes))

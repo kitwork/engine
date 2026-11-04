@@ -146,41 +146,58 @@ func (t *SchemaTable) pastRelation(ctx context.Context, conn *sql.Conn, revision
 	for index, name := range names {
 		position[name] = index
 	}
+	// every change of the table after the moment, oldest first: format 3 keeps only an update's changed columns, so
+	// what a row was then is rebuilt walking back from the row as it is now (kitdbsqlite.WholeImages)
 	changed := map[int64]bool{}
-	var before [][]any
+	var own []kitdbsqlite.Change
 	err = kitdbsqlite.ReadChanges(ctx, conn, revision, func(commit kitdbsqlite.Commit) error {
 		for _, change := range commit.Changes {
 			if change.Operation == kitdbsqlite.Statement || change.Operation == kitdbsqlite.Barrier {
 				return errAtRestored
 			}
-			// only a row's first change after the moment says what it was then
-			if change.Table != t.table || changed[change.RowID] {
+			if change.Table != t.table {
 				continue
 			}
 			changed[change.RowID] = true
 			if len(changed) > atBackwardRows {
 				return errAtRestored
 			}
-			if change.Operation == kitdbsqlite.Insert {
-				continue // the row was not there yet
-			}
-			if len(change.Columns) != len(names) || len(change.Before) != len(names) {
-				return errAtRestored // a row deleted before deletes carried their columns (03/11/2026)
-			}
-			row := make([]any, len(names))
-			for index, column := range change.Columns {
-				at, known := position[column]
-				if !known {
-					return errAtRestored
-				}
-				row[at] = change.Before[index]
-			}
-			before = append(before, row)
+			own = append(own, change)
 		}
 		return nil
 	})
 	if err != nil {
 		return "", err
+	}
+	if err := kitdbsqlite.WholeImages(own, t.table, liveRows(ctx, conn)); err != nil {
+		if errors.Is(err, kitdbsqlite.ErrCorruptHistory) {
+			return "", errAtRestored
+		}
+		return "", err
+	}
+	// only a row's first change after the moment says what it was then
+	var before [][]any
+	seen := map[int64]bool{}
+	for _, change := range own {
+		if seen[change.RowID] {
+			continue
+		}
+		seen[change.RowID] = true
+		if change.Operation == kitdbsqlite.Insert {
+			continue // the row was not there yet
+		}
+		if len(change.Columns) != len(names) || len(change.Before) != len(names) {
+			return "", errAtRestored // a row deleted before deletes carried their columns (03/11/2026)
+		}
+		row := make([]any, len(names))
+		for index, column := range change.Columns {
+			at, known := position[column]
+			if !known {
+				return "", errAtRestored
+			}
+			row[at] = change.Before[index]
+		}
+		before = append(before, row)
 	}
 	if len(changed) == 0 {
 		return t.table, nil
@@ -242,6 +259,54 @@ func (t *SchemaTable) pastRelation(ctx context.Context, conn *sql.Conn, revision
 		return "", err
 	}
 	return "kitwork_at", nil
+}
+
+// liveRows reads rows of a table as they are now on querier, by rowid, five hundred at a time: what
+// kitdbsqlite.WholeImages walks a row back from.
+func liveRows(ctx context.Context, querier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}) kitdbsqlite.LiveRows {
+	return func(table string, rowIDs []int64) ([]string, map[int64][]any, error) {
+		var columns []string
+		found := make(map[int64][]any, len(rowIDs))
+		for start := 0; start < len(rowIDs); start += 500 {
+			part := rowIDs[start:min(start+500, len(rowIDs))]
+			arguments := make([]any, len(part))
+			for position, rowID := range part {
+				arguments[position] = rowID
+			}
+			rows, err := querier.QueryContext(ctx, `SELECT _rowid_, * FROM main.`+quoteIdentifier(table)+` WHERE _rowid_ IN (`+
+				strings.TrimSuffix(strings.Repeat("?, ", len(part)), ", ")+`)`, arguments...)
+			if err != nil {
+				return nil, nil, err
+			}
+			names, err := rows.Columns()
+			if err != nil {
+				rows.Close()
+				return nil, nil, err
+			}
+			columns = names[1:]
+			for rows.Next() {
+				values := make([]any, len(names))
+				pointers := make([]any, len(names))
+				for position := range values {
+					pointers[position] = &values[position]
+				}
+				if err := rows.Scan(pointers...); err != nil {
+					rows.Close()
+					return nil, nil, err
+				}
+				rowID, _ := values[0].(int64)
+				found[rowID] = values[1:]
+			}
+			err = rows.Err()
+			rows.Close()
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+		return columns, found, nil
+	}
 }
 
 // quoteIdentifier is name as an SQL identifier.
