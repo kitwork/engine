@@ -32,7 +32,7 @@ func TestGatewayOnlyEngineDispatchesWithoutTenantResolution(t *testing.T) {
 	engine := NewGatewayHost("")
 	defer engine.Close()
 	engine.SetGateway(dispatcher)
-	if engine.searchManager != nil || engine.kitDBNodeManager != nil {
+	if engine.searchManager != nil {
 		t.Fatal("gateway-only host initialized web runtime managers")
 	}
 

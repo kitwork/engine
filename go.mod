@@ -17,7 +17,6 @@ require (
 	github.com/tdewolff/minify/v2 v2.24.13
 	golang.org/x/crypto v0.52.0
 	golang.org/x/net v0.54.0
-	golang.org/x/sys v0.45.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	modernc.org/sqlite v1.51.0
 )
@@ -38,6 +37,7 @@ require (
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	github.com/tdewolff/parse/v2 v2.8.12 // indirect
 	golang.org/x/image v0.39.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 	modernc.org/libc v1.72.3 // indirect

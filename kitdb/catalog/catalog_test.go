@@ -18,7 +18,6 @@ import (
 	"testing"
 
 	"github.com/kitwork/engine/kitdb"
-	"github.com/kitwork/engine/kitdb/managed"
 	"github.com/kitwork/engine/kitdb/pgwire"
 	"github.com/lib/pq/scram"
 )
@@ -825,42 +824,38 @@ func TestConcurrentCommands(t *testing.T) {
 	}
 }
 
-// kitdbFixture makes a KitDB managed root at directory with kitdb/managed's own API: databases shop and blog, an
-// administrator "admin", and the accounts the import maps. It returns the open root (its lock held) and the path of
-// .catalog/data.kitdb.
-func kitdbFixture(t *testing.T, directory string, accounts []managed.UserInfo) (*managed.Root, string) {
+// kitdbFixture puts a KitDB managed root of testdata/kitdb/ at directory and gives the path of its
+// .catalog/data.kitdb. The roots were made by kitdb/managed's own API with the engine as it was before KROW went
+// (engine f210bef8): databases shop and blog, an administrator "admin" (password kitdb-admin-password), and each
+// account with the password <name>-password-2026.
+//   - accounts: reader and writer on shop, developer on blog, custom (connect, read and write on "SHOP"), mapped
+//     (connect on shop, and the database-local role 00112233445566778899aabbccddeeff on shop), sleeper (a reader,
+//     disabled), otheradmin (an administrator), kitwork (a reader on shop, the host admin's name).
+//   - reader: reader on shop.
+func kitdbFixture(t *testing.T, directory, name string) string {
 	t.Helper()
-	if _, err := managed.Init(directory); err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"shop", "blog"} {
-		database, err := kitdb.Open(filepath.Join(directory, name, "data.kitdb"))
+	source := filepath.Join("testdata", "kitdb", name)
+	err := filepath.Walk(source, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return err
+		}
+		relative, err := filepath.Rel(source, path)
 		if err != nil {
-			t.Fatal(err)
+			return err
 		}
-		if err := database.Close(); err != nil {
-			t.Fatal(err)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
 		}
-	}
-	root, err := managed.Open(directory)
+		if err := os.MkdirAll(filepath.Join(directory, filepath.Dir(relative)), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(directory, relative), data, 0o644)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { root.Close() })
-	for _, name := range []string{"shop", "blog"} {
-		if _, err := root.Register(name, name); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := root.EnableAuth("admin", "kitdb-admin-password"); err != nil {
-		t.Fatal(err)
-	}
-	for _, account := range accounts {
-		if err := root.SetUser(account, account.Name+"-password-2026"); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return root, filepath.Join(directory, managed.CatalogDirectory, "data.kitdb")
+	return filepath.Join(directory, ".catalog", "data.kitdb")
 }
 
 // kitdbFiles reads every file of the KitDB catalog beside path that a reader may open (its .lock is held).
@@ -890,26 +885,8 @@ func kitdbFiles(t *testing.T, path string) map[string][]byte {
 func TestImportKitDB(t *testing.T) {
 	t.Parallel()
 	directory := t.TempDir()
-	root, path := kitdbFixture(t, directory, []managed.UserInfo{
-		{Name: "reader", Grants: []managed.DatabaseGrant{{Database: "shop", Role: "reader"}}},
-		{Name: "writer", Grants: []managed.DatabaseGrant{{Database: "shop", Role: "writer"}}},
-		{Name: "developer", Grants: []managed.DatabaseGrant{{Database: "blog", Role: "developer"}}},
-		{Name: "custom", Grants: []managed.DatabaseGrant{{Database: "SHOP", Permissions: []string{"connect", "read", "write"}}}},
-		{Name: "mapped", Grants: []managed.DatabaseGrant{{Database: "shop", Permissions: []string{"connect"}}}},
-		{Name: "sleeper", Disabled: true, Grants: []managed.DatabaseGrant{{Database: "shop", Role: "reader"}}},
-		{Name: "otheradmin", Admin: true},
-		{Name: "kitwork", Grants: []managed.DatabaseGrant{{Database: "shop", Role: "reader"}}},
-	})
+	path := kitdbFixture(t, directory, "accounts")
 	ctx := context.Background()
-	if err := root.RequireLocalRoleSupport(ctx, "admin"); err != nil {
-		t.Fatal(err)
-	}
-	if err := root.ChangeLocalRole(ctx, "admin", "mapped", "shop", "00112233445566778899aabbccddeeff", false); err != nil {
-		t.Fatal(err)
-	}
-	if err := root.Close(); err != nil {
-		t.Fatal(err)
-	}
 	catalog, err := Open(ctx, directory, hostAdmin)
 	if err != nil {
 		t.Fatal(err)
@@ -972,8 +949,9 @@ func TestImportKitDB(t *testing.T) {
 	}
 }
 
-// TestImportReadsAPrivateCopy: the import reads a copy while the KitDB root still holds its lock, leaves every byte of
-// the KitDB files as it was, and removes the copy.
+// TestImportReadsAPrivateCopy: the import reads a copy while a writer of the KitDB catalog still holds its lock (the
+// managed root held it until 03/11/2026, a writer of the kitdb root now), leaves every byte of the KitDB files as it
+// was, and removes the copy.
 // CONTROL: opening path itself instead of the copy (copied := path) fails with
 // "import while the KitDB root holds its lock: catalog: import: open the copy of …: kitdb: lock writer for …: kitdb:
 // database already has a writer".
@@ -983,7 +961,12 @@ func TestImportReadsAPrivateCopy(t *testing.T) {
 	t.Setenv("TEMP", temporary)
 	t.Setenv("TMPDIR", temporary)
 	directory := t.TempDir()
-	_, path := kitdbFixture(t, directory, []managed.UserInfo{{Name: "reader", Grants: []managed.DatabaseGrant{{Database: "shop", Role: "reader"}}}})
+	path := kitdbFixture(t, directory, "reader")
+	writer, err := kitdb.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { writer.Close() })
 	before := kitdbFiles(t, path)
 	if len(before) == 0 {
 		t.Fatal("no KitDB file to compare")

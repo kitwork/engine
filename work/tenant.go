@@ -15,7 +15,6 @@ import (
 	"github.com/kitwork/engine/capabilities"
 	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/database"
-	kitdbnode "github.com/kitwork/engine/kitdb/node"
 	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/search"
 	"github.com/kitwork/engine/site"
@@ -133,11 +132,6 @@ type Tenant struct {
 	ownsSearchManager bool
 	searchStates      map[string]*searchIndexState
 
-	kitDBNodeMu      sync.Mutex
-	kitDBNodeManager *kitdbnode.Manager
-	kitDBNodeErr     error
-	kitDBNodeSet     bool
-
 	cacheLock sync.RWMutex
 	cache     map[string]*Responser
 
@@ -216,32 +210,6 @@ func (t *Tenant) SetSearchManager(manager *search.Manager, managerErr error) {
 	t.searchManager = manager
 	t.searchManagerErr = managerErr
 	t.searchManagerSet = true
-}
-
-// SetKitDBNodeManager injects the host-owned fleet governor before Tenant.Run.
-// Standalone tenants that do not receive one retain an app-owned fallback.
-func (t *Tenant) SetKitDBNodeManager(manager *kitdbnode.Manager, managerErr error) {
-	if t == nil {
-		return
-	}
-	t.kitDBNodeMu.Lock()
-	defer t.kitDBNodeMu.Unlock()
-	if t.kitDBNodeSet {
-		return
-	}
-	t.kitDBNodeManager = manager
-	t.kitDBNodeErr = managerErr
-	t.kitDBNodeSet = true
-}
-
-func (t *Tenant) kitDBNode() (*kitdbnode.Manager, error, bool) {
-	if t == nil {
-		return nil, nil, false
-	}
-	t.kitDBNodeMu.Lock()
-	manager, managerErr, configured := t.kitDBNodeManager, t.kitDBNodeErr, t.kitDBNodeSet
-	t.kitDBNodeMu.Unlock()
-	return manager, managerErr, configured
 }
 
 func (t *Tenant) searchManagerFor() (*search.Manager, error) {

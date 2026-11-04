@@ -14,7 +14,7 @@ import (
 // are stored, each its own run, so a Held or a Busy is the rule's doing, not a Dispatch that stores
 // nothing.
 func TestScheduleDispatchStoresEachDueTimeOnce(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "application.kitdb")
+	path := filepath.Join(t.TempDir(), "kitwork.db")
 	file := openFile(t, path)
 	store := New(file, "schedule")
 	queue := New(file, "queue")

@@ -1,27 +1,20 @@
 package queue
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
-
-	"github.com/kitwork/engine/kitdb/relational"
 )
 
-// fileDatabase is a KitDB file on its own: the tables in a file of the test, one writer at a time as the
-// app's database gives (work's runs database holds the file's writer gate). On SQLite (onSQLite) it is a
-// SQLite file, each write one transaction begun IMMEDIATE under the file's gate, as work's database of a
-// name of the host's catalogue gives (Immediate).
+// fileDatabase is a SQLite file of the runs, each write one transaction begun IMMEDIATE under the file's gate,
+// as work writes the app's database and a database of a name of the host's catalogue (Immediate). The tests ran on a
+// KitDB file too until KROW went (03/11/2026).
 type fileDatabase struct {
-	gate   sync.RWMutex
-	engine *relational.Engine // nil on SQLite
-	db     *sql.DB
-	path   string
+	db   *sql.DB
+	path string
 }
 
 // sqlite is the file as work writes a SQLite file of the runs.
@@ -29,54 +22,20 @@ func (f *fileDatabase) sqlite() Immediate {
 	return Immediate{Pool: f.db, Gate: FileGate(f.path)}
 }
 
-func (f *fileDatabase) Read(fn func(db SQL) error) error {
-	if f.engine == nil {
-		return f.sqlite().Read(fn)
-	}
-	f.gate.RLock()
-	defer f.gate.RUnlock()
-	return fn(f.db)
-}
+func (f *fileDatabase) Read(fn func(db SQL) error) error  { return f.sqlite().Read(fn) }
+func (f *fileDatabase) Write(fn func(db SQL) error) error { return f.sqlite().Write(fn) }
 
-func (f *fileDatabase) Write(fn func(db SQL) error) error {
-	if f.engine == nil {
-		return f.sqlite().Write(fn)
-	}
-	f.gate.Lock()
-	defer f.gate.Unlock()
-	return fn(f.db)
-}
+func (f *fileDatabase) close() { f.db.Close() }
 
-func (f *fileDatabase) close() {
-	f.db.Close()
-	if f.engine != nil {
-		f.engine.Close()
-	}
-}
-
+// openFile opens path as the engine opens a SQLite file of the runs, the tables made in it.
 func openFile(t *testing.T, path string) *fileDatabase {
 	t.Helper()
-	if _, sqlite := sqliteTests.Load(t); sqlite {
-		return openSQLiteFile(t, path)
-	}
-	engine, err := relational.OpenWithContext(context.Background(), path, relational.Options{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	db, err := relational.OpenNativeSQL(engine)
-	if err != nil {
-		engine.Close()
-		t.Fatal(err)
-	}
-	if err := InitSchema(db); err != nil {
-		t.Fatal(err)
-	}
-	return &fileDatabase{engine: engine, db: db, path: path}
+	return openSQLiteFile(t, path)
 }
 
 func newStore(t *testing.T) (*Store, *fileDatabase) {
 	t.Helper()
-	file := openFile(t, filepath.Join(t.TempDir(), "application.kitdb"))
+	file := openFile(t, filepath.Join(t.TempDir(), "kitwork.db"))
 	t.Cleanup(file.close)
 	return New(file, "queue"), file
 }
@@ -369,7 +328,7 @@ func TestSyncSkipsUnchangedDefinitions(t *testing.T) {
 
 // The runs are in the file: closed and opened again, the run sent before is there, pending, with its key.
 func TestRunsSurviveReopening(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "application.kitdb")
+	path := filepath.Join(t.TempDir(), "kitwork.db")
 	file := openFile(t, path)
 	run, _, err := New(file, "queue").Enqueue(NewRun{Name: "camOn", Key: "order:9", MaxAttempts: 4, Available: epoch.Add(5 * time.Minute)}, epoch)
 	if err != nil {

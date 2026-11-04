@@ -13,18 +13,6 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// sqliteTests holds the tests run on a SQLite file (onSQLite): openFile, and newStore through it, open one
-// for them instead of a KitDB file.
-var sqliteTests sync.Map
-
-// onSQLite runs test on a SQLite file.
-func onSQLite(t *testing.T, test func(*testing.T)) {
-	t.Helper()
-	sqliteTests.Store(t, true)
-	t.Cleanup(func() { sqliteTests.Delete(t) })
-	test(t)
-}
-
 // openSQLitePool opens a pool of a SQLite file as the engine opens a file of the host's catalogue
 // (database.Config: WAL, a busy timeout, foreign keys), the busy timeout in milliseconds.
 func openSQLitePool(t *testing.T, path string, busy int) *sql.DB {
@@ -48,46 +36,20 @@ func openSQLiteFile(t *testing.T, path string) *fileDatabase {
 	return file
 }
 
-// The store's statements are KitDB's SQL, and the same statements keep the runs of a database of the host's
-// catalogue, a SQLite file, when queue.database(db) or schedule.database(db) chooses one (KITWORK_QUEUE.md
-// mục 2, 24/10/2026): every test of the store runs on a SQLite file too, each write one transaction begun
-// IMMEDIATE. Send, keys, claim, the fenced settle, retry and the dead letter, cancel, replay, reclaim, runs()
-// and prune, list() and the sync of the definitions, the sequencer, a reopened file, and a schedule's due times.
+// The store's statements were KitDB's SQL; the same statements keep the runs on SQLite, the app's database
+// (.database/application/kitwork.db) or a database of the host's catalogue when queue.database(db) or
+// schedule.database(db) chooses one (KITWORK_QUEUE.md mục 2). Every test of the store runs on a SQLite file in
+// WAL (openFile); until KROW went (03/11/2026) they ran on a KitDB file too.
 //
-// CONTROL (24/10/2026): with openFile opening the KitDB file whatever the test, the subtests ran on KitDB
-// and the last check failed: journal_mode "" (kitdb SQL: PRAGMA journal_mode requires one table argument).
-func TestStoreOnSQLite(t *testing.T) {
-	for _, test := range []struct {
-		name string
-		run  func(*testing.T)
-	}{
-		{"EnqueueKeyGivesTheRunHoldingIt", TestEnqueueKeyGivesTheRunHoldingIt},
-		{"SettleIsFencedByTheLeaseToken", TestSettleIsFencedByTheLeaseToken},
-		{"FailRetriesThenDeadLetters", TestFailRetriesThenDeadLetters},
-		{"CancelFollowsTheStatus", TestCancelFollowsTheStatus},
-		{"CancellingRunThatFinishesIsCompleted", TestCancellingRunThatFinishesIsCompleted},
-		{"ReplayMakesANewRun", TestReplayMakesANewRun},
-		{"ReclaimGivesBackLostLeases", TestReclaimGivesBackLostLeases},
-		{"RunsNewestFirstAndPrune", TestRunsNewestFirstAndPrune},
-		{"SyncSkipsUnchangedDefinitions", TestSyncSkipsUnchangedDefinitions},
-		{"RunsSurviveReopening", TestRunsSurviveReopening},
-		{"ClaimLeavesWithheldJobsAndSaysWhenNextIsDue", TestClaimLeavesWithheldJobsAndSaysWhenNextIsDue},
-		{"ReclaimSaysWhenTheNextLeaseRunsOut", TestReclaimSaysWhenTheNextLeaseRunsOut},
-		{"SyncKeepsWithheldDefinitions", TestSyncKeepsWithheldDefinitions},
-		{"SequencerNumbersRuns", TestSequencerNumbersRuns},
-		{"ScheduleDispatchStoresEachDueTimeOnce", TestScheduleDispatchStoresEachDueTimeOnce},
-	} {
-		t.Run(test.name, func(t *testing.T) { onSQLite(t, test.run) })
+// CONTROL (03/11/2026): with openSQLitePool leaving out journal_mode(WAL), "openFile gave journal_mode
+// "delete" (<nil>), want a SQLite file in WAL".
+func TestOpenFileIsSQLiteInWAL(t *testing.T) {
+	file := openFile(t, filepath.Join(t.TempDir(), "jobs.db"))
+	defer file.close()
+	var mode string
+	if err := file.db.QueryRow(`PRAGMA journal_mode`).Scan(&mode); err != nil || mode != "wal" {
+		t.Fatalf("openFile gave journal_mode %q (%v), want a SQLite file in WAL", mode, err)
 	}
-	// the subtests ran on SQLite: a file of one is what openFile gives them
-	onSQLite(t, func(t *testing.T) {
-		file := openFile(t, filepath.Join(t.TempDir(), "jobs.db"))
-		defer file.close()
-		var mode string
-		if err := file.db.QueryRow(`PRAGMA journal_mode`).Scan(&mode); err != nil || mode != "wal" {
-			t.Fatalf("openFile on SQLite gave journal_mode %q (%v), want a SQLite file in WAL", mode, err)
-		}
-	})
 }
 
 // Writers on one SQLite file never give two runs one number, nor take one run twice. Two pools on the file

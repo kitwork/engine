@@ -17,8 +17,7 @@ Host / Engine
 
 - The host owns web and forward-proxy listeners, TLS, process signals,
   immutable gateway pools, the VM pool, the app registry,
-  the bounded process-wide full-text search manager, and the bounded KitDB node
-  handle/page-cache/maintenance governor.
+  and the bounded process-wide full-text search manager.
 - The host may capture detached diagnostics and an explicitly requested private
   heap profile. Diagnostics observe owners through bounded snapshots; they do
   not become a parallel owner or an automatic HTTP surface.
@@ -37,7 +36,7 @@ hostname dispatch, rate limiting, immutable reverse-proxy pools, and upstream
 HTTP transport. Optional active health workers and passive failure counters
 are bounded by the immutable node set and drain with the host. The gateway
 publishes bounded per-node telemetry snapshots without retaining request data.
-It creates no app registry entries, tenant VMs, search or KitDB node manager,
+It creates no app registry entries, tenant VMs, search manager,
 template/JIT pipeline, scheduler, or filesystem root.
 
 A proxy-only manifest is another reduced host shape. The host owns a bounded
@@ -160,62 +159,12 @@ Implemented:
 - configured database connections are opened exactly once per app runtime;
 - site-local SQLite connections are keyed by canonical path but owned and
   closed by the parent app runtime;
-- `core.Engine` owns one `kitdb/node.Manager` across every identity. AppRuntime
-  adapters hold per-file relational validation gates and operation leases, but
-  idle physical KitDB handles remain under the host LRU and global reservation
-  budget until pressure, explicit trim, or engine shutdown closes them;
-- KitDB checkpoint, verification, verified-backup, retained-history-prune, and
-  replica-catch-up maintenance is admitted by that same host owner. Jobs are
-  globally and per-database bounded, exact duplicate operations coalesce, and
-  every worker borrows normal node leases. A replica catch-up reserves both
-  source and target; overlapping jobs cannot run on either path, handle order is
-  canonical, and only one multi-database job runs at once to avoid partial
-  acquisition deadlock. Verified backup is the managed replica bootstrap and
-  safely resumes an immutable destination before sealing and pinning source
-  history. Catch-up moves bounded protocol-v1 batches: source read, idempotent
-  target apply through the ordinary WAL, then exact cursor acknowledgement.
-  Pure-Go wire v1 serializes those canonical WAL frames, and an explicit
-  filesystem mailbox publishes synced batches and ACKs without overwrite. The
-  same owner now schedules separate publish, apply, and acknowledge jobs,
-  reserves the mailbox beside the relevant source or target database, keeps one
-  managed batch in flight, and resumes solely from mailbox artifacts, the
-  target WAL cursor, and the source pin after manager restart. Mailboxes and
-  backup destinations are reservation-only paths: conflicts serialize without
-  opening them as databases or charging page cache. This adds no cursor sidecar
-  or second durability path and remains host-only. For an explicitly registered
-  local topology, one shared node dispatcher and a fixed worker pool may repeat
-  those exact jobs with bounded cadence, retry backoff, and health snapshots.
-  Link configuration is process-local; idle links retain no lease or per-link
-  goroutine, and restart progress still comes only from protocol-owned durable
-  state. The mailbox primitive itself has no watcher, and authenticated network
-  transport is not implemented. Prune preserves exact transaction boundaries;
-  catch-up delegates
-  identity, checksum, ordering, and target-WAL durability to the kernel. These
-  topology/destructive APIs are host-trusted. Request commits remain durable
-  through WAL even when maintenance is queued, rejected, canceled, or failing;
-- The same node owner may run explicitly registered local production policies.
-  They use one bounded dispatcher and fixed worker pool across databases, select
-  the earlier backup or restore deadline, and call the existing verified-backup
-  path rather than adding a second writer. Restart truth comes from immutable
-  verified anchors plus the source history pin; restore drills compare the
-  canonical logical digest in a disposable destination. A policy may also name
-  one host-owned publisher; readiness then requires destination read-back
-  evidence matching the exact current anchor. The built-in bounded directory
-  adapter is suitable for a separately provisioned volume or transfer spool,
-  while native object-store transport and proof of physical independence remain
-  deployment concerns. Configuration remains process-local, evidence and health
-  are path-free, idle policies own no lease or goroutine, and tenant VMs receive
-  no filesystem, publisher, or policy authority;
-- Kitwork registers stateless row-migration and secondary-index drivers with
-  the same node owner. Each dispatch leases one canonical file, takes its
-  shared relational gate, reloads checksummed `KRMS` or `KIBS`, commits at most
-  one bounded chunk, and yields to weighted maintenance scheduling. Driver
-  registration and wake hints are process-local; catalog and WAL state remain
-  the only restart authority. Secondary-index foreground admission commits
-  only metadata and opens no row cursor; all row/cutover/cleanup progress is
-  driver-owned;
-- KitDB node limits may be replaced only during host boot. Standalone tenants
-  outside Engine receive an app-owned bounded fallback rather than a global;
+- KROW, the old KitDB engine, went on 03/11/2026 (the root repository's
+  `docs/KITWORK_KITDB.md` câu 13.4): its node manager, maintenance, backup,
+  replica, production-policy and PostgreSQL COPY invariants with it. An app's
+  database is a SQLite file with one writer for the process
+  (`work/database_history.go`), held by the apps that declare tables on it and
+  closed with the last.
 - `core.Engine` owns one bounded `search.Manager` across every identity and
   domain. Tenant facades borrow it, generation replacement does not close it,
   and engine shutdown closes it only after tenant and app-runtime drain;
