@@ -63,7 +63,18 @@ func cmdAt(directory string) {
 		return nil
 	}))
 	last := database.Revision()
-	fmt.Printf("the history after the anchor: %d commits, %d row changes, revision %d to %d\n\n", len(commits), total, base, last)
+	var historyBytes int64
+	must(database.Read(ctx, func(snapshot *kitdb.Snapshot) error {
+		rows, err := snapshot.Query(`SELECT coalesce(sum(length(changes)), 0) FROM kitwork_history WHERE rev > ?`, int64(base))
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		rows.Next()
+		return rows.Scan(&historyBytes)
+	}))
+	fmt.Printf("the history after the anchor: %d commits, %d row changes, %d bytes (%.0f a write), revision %d to %d\n\n",
+		len(commits), total, historyBytes, float64(historyBytes)/float64(len(writes)), base, last)
 
 	reader := openSQLite(work, "&mode=ro&_pragma=temp_store(2)&_pragma=cache_size(-262144)")
 	defer reader.Close()
@@ -219,34 +230,43 @@ func atBackward(ctx context.Context, reader *sql.DB, revision uint64, columns []
 		}
 		return [2]any{merchant, id}
 	}
+	// every change of shopping after the moment, oldest first; an update of history format 3 keeps only the columns it
+	// changed, so the rows are rebuilt walking back from the live rows (kitdb.WholeImages), as the engine's at() does
+	var own []kitdb.Change
 	must(kitdb.ReadChanges(ctx, tx, revision, func(commit kitdb.Commit) error {
 		for _, change := range commit.Changes {
 			if change.Operation == kitdb.Statement || change.Operation == kitdb.Barrier {
 				return fmt.Errorf("revision %d changed the schema: at() restores across it", commit.Revision)
 			}
-			if change.Table != "shopping" || changed[change.RowID] {
-				continue // only the first change after the moment says what the row was at it
-			}
-			changed[change.RowID] = true
-			switch change.Operation {
-			case kitdb.Insert:
-				if len(inserted) < 20 {
-					inserted = append(inserted, key(change.Columns, change.After))
-				}
-			case kitdb.Update:
-				before[change.RowID] = change.Before
-				if len(updated) < 20 {
-					updated = append(updated, key(change.Columns, change.Before))
-				}
-			case kitdb.Delete:
-				before[change.RowID] = change.Before
-				if len(deleted) < 20 {
-					deleted = append(deleted, key(change.Columns, change.Before))
-				}
+			if change.Table == "shopping" {
+				own = append(own, change)
 			}
 		}
 		return nil
 	}))
+	must(kitdb.WholeImages(own, "shopping", liveShopping(ctx, tx)))
+	for _, change := range own {
+		if changed[change.RowID] {
+			continue // only the first change after the moment says what the row was at it
+		}
+		changed[change.RowID] = true
+		switch change.Operation {
+		case kitdb.Insert:
+			if len(inserted) < 20 {
+				inserted = append(inserted, key(change.Columns, change.After))
+			}
+		case kitdb.Update:
+			before[change.RowID] = change.Before
+			if len(updated) < 20 {
+				updated = append(updated, key(change.Columns, change.Before))
+			}
+		case kitdb.Delete:
+			before[change.RowID] = change.Before
+			if len(deleted) < 20 {
+				deleted = append(deleted, key(change.Columns, change.Before))
+			}
+		}
+	}
 	read.history = time.Since(start)
 	read.rows = len(changed)
 
@@ -306,6 +326,51 @@ const pageByArmQuery = `SELECT * FROM (SELECT * FROM (SELECT "merchant", "id", "
 	WHERE "merchant" = 'shopee' AND _rowid_ NOT IN (SELECT rid FROM temp.at_changed) ORDER BY "id" LIMIT 50)
 	UNION ALL SELECT * FROM (SELECT "merchant", "id", "name", "price", "stock" FROM temp.at_before
 	WHERE "merchant" = 'shopee' ORDER BY "id" LIMIT 50)) ORDER BY "id" LIMIT 50`
+
+// liveShopping reads rows of a table as they are now on tx, by rowid, five hundred at a time.
+func liveShopping(ctx context.Context, tx *sql.Tx) kitdb.LiveRows {
+	return func(table string, rowIDs []int64) ([]string, map[int64][]any, error) {
+		var columns []string
+		found := make(map[int64][]any, len(rowIDs))
+		for first := 0; first < len(rowIDs); first += 500 {
+			part := rowIDs[first:min(first+500, len(rowIDs))]
+			arguments := make([]any, len(part))
+			for position, rowID := range part {
+				arguments[position] = rowID
+			}
+			rows, err := tx.QueryContext(ctx, `SELECT _rowid_, * FROM main."`+table+`" WHERE _rowid_ IN (`+
+				strings.TrimSuffix(strings.Repeat("?, ", len(part)), ", ")+`)`, arguments...)
+			if err != nil {
+				return nil, nil, err
+			}
+			names, err := rows.Columns()
+			if err != nil {
+				rows.Close()
+				return nil, nil, err
+			}
+			columns = names[1:]
+			for rows.Next() {
+				values := make([]any, len(names))
+				pointers := make([]any, len(names))
+				for position := range values {
+					pointers[position] = &values[position]
+				}
+				if err := rows.Scan(pointers...); err != nil {
+					rows.Close()
+					return nil, nil, err
+				}
+				rowID, _ := values[0].(int64)
+				found[rowID] = values[1:]
+			}
+			err = rows.Err()
+			rows.Close()
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+		return columns, found, nil
+	}
+}
 
 type querier interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
