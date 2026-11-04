@@ -603,6 +603,75 @@ router.get((context) => {
 	}
 }
 
+// A text holding the NUL character is refused like a text that is not UTF-8, as PostgreSQL's text refuses it:
+// INVALID_ARGUMENT naming the column and where the value is written, never the value, and nothing is written. The
+// history reads a row's text up to its first NUL, so such a row would come back cut from history() and at()
+// (KITWORK_KITDB.md mục 5, 04/11/2026).
+//
+// CONTROL (04/11/2026): with the NUL rule taken out of bindValue the insert is refused anyway, by the writer in
+// its own words as DATABASE ("database insert error: kitdb: statement refused: argument 6 is a text holding the
+// NUL character"), and the condition matches nothing without a word ("ok":true,"rows":1); with the writer's
+// refusal taken out too the insert writes the row, "rows after the refused insert: … rows":2".
+func TestManagedDatabaseRefusesTextHoldingNUL(t *testing.T) {
+	route := `import * as router from "kitwork/router";
+import { db } from "app/.shared/schema/shop.work";
+
+router.post((context) => {
+  const email = context.request.form("email");
+  const item = context.request.form("item");
+  const amount = Number(context.request.form("amount"));
+  const day = context.request.form("day");
+  const inserted = safe(() => db.insert((orders) => ({ email, item, amount, day })));
+  return context.json({ ok: inserted.ok, error: inserted.error });
+});
+router.get((context) => {
+  const item = context.request.query("item");
+  const found = safe(() => db.list((orders) => orders.item === item));
+  return context.json({ ok: found.ok, error: found.error, rows: db.count((orders) => orders) });
+});
+`
+	tenant := newManagedApp(t, map[string]string{"shop.example/router.work": route}).site("shop.example")
+	refused := func(what string, body string) {
+		t.Helper()
+		var result struct {
+			OK    bool `json:"ok"`
+			Error struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(body), &result); err != nil {
+			t.Fatalf("%s: %v %s", what, err, body)
+		}
+		if result.OK || result.Error.Code != value.InvalidArgumentCode ||
+			!strings.Contains(result.Error.Message, "cột item là text(): giá trị ở router.work:") ||
+			!strings.Contains(result.Error.Message, "chứa ký tự NUL (byte 0)") ||
+			strings.Contains(result.Error.Message, "phê") {
+			t.Errorf("%s: %s, want INVALID_ARGUMENT naming the column item and where it is written, not the value", what, body)
+		}
+	}
+
+	if status, body := managedPost(tenant, "/", url.Values{
+		"email": {"an@example.com"}, "item": {"cà phê sữa"}, "amount": {"35000"}, "day": {"2026-11-04"},
+	}); status != http.StatusOK || !strings.Contains(body, `"ok":true`) {
+		t.Fatalf("CONTROL: the same order without NUL = %d %s", status, body)
+	}
+	_, body := managedPost(tenant, "/", url.Values{
+		"email": {"binh@example.com"}, "item": {"cà\x00phê"}, "amount": {"62000"}, "day": {"2026-11-04"},
+	})
+	refused("insert", body)
+
+	// a condition takes the rule a write follows: such a text is no value of the column
+	_, body = managedGet(tenant, "/?item=c%C3%A0%00ph%C3%AA")
+	refused("condition", body)
+	var after struct {
+		Rows float64 `json:"rows"`
+	}
+	if _, body := managedGet(tenant, "/?item=x"); json.Unmarshal([]byte(body), &after) != nil || after.Rows != 1 {
+		t.Fatalf("rows after the refused insert: %s, want the 1 written without NUL", body)
+	}
+}
+
 // goSchema builds, in Go, the tables a schema file builds with kitwork/schema: name → columns in
 // declaration order, each a builder of the module and its modifiers.
 type goColumn struct {

@@ -676,3 +676,76 @@ func TestConcurrentReadsSeeWholeRevisions(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestTextHoldingNULIsRefused: a text argument holding the NUL character is refused before it runs, and nothing is
+// written; the same bytes as a BLOB are kept whole. The reason, pinned: a TEXT value that does hold a NUL (written
+// past Exec, here by Maintain) comes back in the history's Before cut at it, because the pre-update hook reads TEXT
+// up to its first NUL (modernc.org/sqlite pre_update_hook.go, libc.GoString). If that ever stops being true, the
+// last check fails and the refusal can be reconsidered.
+//
+// CONTROL (04/11/2026): with the refusal taken out of Exec, "the text holding NUL was written: <nil>".
+func TestTextHoldingNULIsRefused(t *testing.T) {
+	ctx := context.Background()
+	database := openTestDatabase(t, filepath.Join(t.TempDir(), "kitwork.db"))
+	if _, err := database.Migrate(ctx, "boot", `CREATE TABLE notes (id INTEGER PRIMARY KEY, title TEXT, data BLOB)`); err != nil {
+		t.Fatal(err)
+	}
+	insert := func(id int, title, data any) error {
+		_, err := database.Write(ctx, "t", func(tx *Transaction) error {
+			_, err := tx.Exec(`INSERT INTO notes (id, title, data) VALUES (?, ?, ?)`, id, title, data)
+			return err
+		})
+		return err
+	}
+	if err := insert(1, "a\x00b", nil); !errors.Is(err, ErrStatementRefused) || !strings.Contains(err.Error(), "NUL") {
+		t.Fatalf("the text holding NUL was written: %v", err)
+	}
+	if err := insert(2, "ab", []byte("a\x00b")); err != nil {
+		t.Fatalf("a BLOB holding NUL: %v", err)
+	}
+	var rows int
+	var data []byte
+	err := database.Read(ctx, func(snapshot *Snapshot) error {
+		result, err := snapshot.Query(`SELECT count(*), max(data) FROM notes`)
+		if err != nil {
+			return err
+		}
+		defer result.Close()
+		result.Next()
+		return result.Scan(&rows, &data)
+	})
+	if err != nil || rows != 1 || string(data) != "a\x00b" {
+		t.Fatalf("after the refusal: %d rows, data %q (%v), want the BLOB row alone, whole", rows, data, err)
+	}
+
+	// The reason: a TEXT with a NUL in the file comes back cut in the history's Before.
+	if _, err := database.Maintain(ctx, "t", func(conn *sql.Conn) error {
+		_, err := conn.ExecContext(ctx, `INSERT INTO notes (id, title) VALUES (3, 'x' || char(0) || 'y')`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	before := database.Revision()
+	if _, err := database.Write(ctx, "t", func(tx *Transaction) error {
+		_, err := tx.Exec(`UPDATE notes SET title = 'z' WHERE id = 3`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var cut any
+	if err := database.Changes(ctx, before, func(commit Commit) error {
+		for _, change := range commit.Changes {
+			for position, column := range change.Columns {
+				if change.Table == "notes" && change.RowID == 3 && column == "title" {
+					cut = change.Before[position]
+				}
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if cut != "x" {
+		t.Fatalf("the Before of a TEXT holding NUL is %q, want it cut at the NUL (\"x\"): the hook may read TEXT whole now", cut)
+	}
+}

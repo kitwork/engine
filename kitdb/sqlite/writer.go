@@ -700,9 +700,19 @@ type Transaction struct {
 // Exec runs one data statement (INSERT, UPDATE, DELETE, REPLACE, or WITH …
 // one of them). A statement that fails leaves nothing, whatever its conflict
 // clause: each statement runs in a savepoint of its own.
+//
+// A text argument holding the NUL character is refused: TEXT never holds one,
+// as PostgreSQL's text never does, because the pre-update hook reads a TEXT
+// value up to its first NUL and the row's Before in the history would be cut
+// there. A value with NUL bytes is a BLOB ([]byte).
 func (transaction *Transaction) Exec(query string, arguments ...any) (sql.Result, error) {
 	if transaction.done {
 		return nil, fmt.Errorf("kitdb: transaction used after its request returned")
+	}
+	for position, argument := range arguments {
+		if text, ok := argument.(string); ok && strings.IndexByte(text, 0) >= 0 {
+			return nil, fmt.Errorf("%w: argument %d is a text holding the NUL character", ErrStatementRefused, position+1)
+		}
 	}
 	shape, err := classifyStatement(query)
 	if err != nil {

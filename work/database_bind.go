@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -308,6 +309,14 @@ func bindValue(column string, spec *ColumnSpec, item value.Value, site string) (
 	// (22/10/2026)
 	if item.K == value.String && !utf8.ValidString(item.String()) {
 		return value.Value{}, wrong("chuỗi UTF-8")
+	}
+	// nor is a text holding the NUL character: PostgreSQL's text refuses it in the same words as a byte that is not
+	// UTF-8, and the history reads a row's text up to its first NUL, so the row as it was would come back cut
+	// (KITWORK_KITDB.md mục 5, 04/11/2026)
+	if item.K == value.String && strings.IndexByte(item.String(), 0) >= 0 {
+		return value.Value{}, value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf(
+			"cột %s là %s: giá trị ở %s chứa ký tự NUL (byte 0); chữ trong database không chứa được nó, như text của PostgreSQL",
+			column, kindSpelling(spec, kind), site))
 	}
 	switch kind {
 	case "id", "text", "kitid", "uuid", "varchar", "char":
