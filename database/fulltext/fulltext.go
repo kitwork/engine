@@ -713,13 +713,19 @@ func (table *Table) changedRows(ctx context.Context, connection *sql.Conn, revis
 }
 
 // textChanged reports an update of a row that changed one of the index's columns: its value before and after differ.
+// An update is read as its Updates, whatever its format: format 3 holds only the columns it changed, and the index
+// reads the row again by its id, so it needs none kept whole.
 func (table *Table) textChanged(change kitdbsqlite.Change) bool {
-	if len(change.Before) != len(change.After) || len(change.Columns) != len(change.After) {
-		return true
+	if change.Updates == nil {
+		return true // nothing says which columns changed: read the row again
 	}
-	for _, column := range table.columns {
-		for position, name := range change.Columns {
-			if strings.EqualFold(name, column.Name) && Text(change.Before[position]) != Text(change.After[position]) {
+	for _, update := range change.Updates {
+		if update.Position < 0 || update.Position >= len(change.Columns) {
+			return true
+		}
+		name := change.Columns[update.Position]
+		for _, column := range table.columns {
+			if strings.EqualFold(name, column.Name) && Text(update.Old) != Text(update.New) {
 				return true
 			}
 		}

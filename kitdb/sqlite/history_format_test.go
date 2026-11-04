@@ -239,3 +239,28 @@ func TestReplayOfFormatThreeUpdates(t *testing.T) {
 		t.Fatalf("after the replay: %s, want %s", strings.Join(got, ", "), want)
 	}
 }
+
+// The search of Options.Search reads an update as its Updates: an update of format 3 that changed a searchable column
+// gives every searchable column from its kept values; one that changed none gives nothing; one that changed a
+// searchable column without the others kept whole cannot be folded, so the index is rebuilt from the rows.
+//
+// CONTROL (04/11/2026): with an update missing a searchable column folded anyway, "an update without the body kept
+// whole folded: [{7 map[title:trà] false}] true".
+func TestSearchChangesReadUpdates(t *testing.T) {
+	s := &searchable{config: SearchTable{Table: "notes", Columns: []SearchColumn{{Name: "title"}, {Name: "body"}}}}
+	columns := []string{"id", "title", "body", "price"}
+	update := func(updates ...ColumnUpdate) []Change {
+		return []Change{{Operation: Update, Table: "notes", RowID: 7, Columns: columns, Updates: updates}}
+	}
+	changes, ok := s.searchChanges(update(
+		ColumnUpdate{Position: 1, Old: "cà phê", New: "trà"}, ColumnUpdate{Position: 2, Old: "nóng", New: "nóng"}))
+	if !ok || len(changes) != 1 || changes[0].Fields["title"] != "trà" || changes[0].Fields["body"] != "nóng" {
+		t.Fatalf("an update of the title with the body kept whole: %v %v", changes, ok)
+	}
+	if changes, ok := s.searchChanges(update(ColumnUpdate{Position: 3, Old: int64(1), New: int64(2)})); !ok || len(changes) != 0 {
+		t.Fatalf("an update of the price alone: %v %v, want nothing", changes, ok)
+	}
+	if changes, ok := s.searchChanges(update(ColumnUpdate{Position: 1, Old: "cà phê", New: "trà"})); ok {
+		t.Fatalf("an update without the body kept whole folded: %v %v", changes, ok)
+	}
+}

@@ -207,3 +207,25 @@ func TestReleaseClosesTheContainer(t *testing.T) {
 		t.Fatalf("the container answers after the last release: %v", err)
 	}
 }
+
+// An update is read as its Updates: format 3 holds only the columns it changed, and the index reads a changed row
+// again by its id. A changed column the index does not hold changes nothing for it.
+//
+// CONTROL (04/11/2026): with every column of an update taken for the index's text, "an update of the price alone is a
+// change of the index's text".
+func TestTextChangedReadsUpdates(t *testing.T) {
+	table := &Table{columns: []Column{{Name: "title"}}}
+	columns := []string{"id", "title", "price"}
+	change := func(updates ...kitdbsqlite.ColumnUpdate) kitdbsqlite.Change {
+		return kitdbsqlite.Change{Operation: kitdbsqlite.Update, Table: "notes", RowID: 1, Columns: columns, Updates: updates}
+	}
+	if !table.textChanged(change(kitdbsqlite.ColumnUpdate{Position: 1, Old: "cà phê", New: "trà"})) {
+		t.Fatal("an update of the title is not a change of the index's text")
+	}
+	if table.textChanged(change(kitdbsqlite.ColumnUpdate{Position: 2, Old: int64(1), New: int64(2)})) {
+		t.Fatal("an update of the price alone is a change of the index's text")
+	}
+	if table.textChanged(change(kitdbsqlite.ColumnUpdate{Position: 1, Old: "trà", New: "trà"})) {
+		t.Fatal("a title kept as it was is a change of the index's text")
+	}
+}

@@ -236,28 +236,45 @@ func (s *searchable) searchChanges(changes []Change) ([]search.Change, bool) {
 			continue
 		}
 		fields := make(map[string]string, len(s.config.Columns))
-		unchanged := change.Operation == Update && len(change.Before) == len(change.After)
-		for _, column := range s.config.Columns {
-			position := -1
-			for index, name := range change.Columns {
-				if name == column.Name {
-					position = index
-					break
+		if change.Operation == Insert {
+			for _, column := range s.config.Columns {
+				fields[column.Name] = ""
+				if position := columnPosition(change.Columns, column.Name); position >= 0 {
+					fields[column.Name] = searchText(change.After[position])
 				}
 			}
+			result = append(result, search.Change{ID: identifier, Fields: fields})
+			continue
+		}
+		// an update is its Updates, whatever its format: format 3 holds the columns it changed and, when a searchable
+		// one changed, every searchable column kept whole (the writer keeps Options.Search's columns whole)
+		updates := make(map[int]ColumnUpdate, len(change.Updates))
+		for _, update := range change.Updates {
+			updates[update.Position] = update
+		}
+		changed, whole := false, true
+		for _, column := range s.config.Columns {
+			position := columnPosition(change.Columns, column.Name)
 			if position < 0 {
 				fields[column.Name] = ""
-				unchanged = false
+				changed = true
 				continue
 			}
-			fields[column.Name] = searchText(change.After[position])
-			if unchanged && !reflect.DeepEqual(change.Before[position], change.After[position]) {
-				unchanged = false
+			update, held := updates[position]
+			if !held {
+				whole = false
+				continue
 			}
+			fields[column.Name] = searchText(update.New)
+			changed = changed || !sameValue(update.Old, update.New)
 		}
-		if !unchanged {
-			result = append(result, search.Change{ID: identifier, Fields: fields})
+		if !changed {
+			continue // an update that leaves every searchable column as it was changes nothing
 		}
+		if !whole {
+			return nil, false // a searchable column changed and another is not in the history: rebuilt from the rows
+		}
+		result = append(result, search.Change{ID: identifier, Fields: fields})
 	}
 	return result, true
 }
@@ -451,4 +468,14 @@ func (snapshot *Snapshot) Search(table string, query search.MatchQuery, options 
 		result[position] = SearchHit{RowID: rowID, Score: hit.Score}
 	}
 	return result, nil
+}
+
+// columnPosition is the position of name among columns, -1 when it is not one.
+func columnPosition(columns []string, name string) int {
+	for position, column := range columns {
+		if column == name {
+			return position
+		}
+	}
+	return -1
 }
