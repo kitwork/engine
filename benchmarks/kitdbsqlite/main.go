@@ -10,6 +10,7 @@
 //	kitdbsqlite at <directory>                      at() going backward from the live file against the restore it runs today
 //	kitdbsqlite changeset <directory>               SQLite's changesets of the same writes against kitwork_history
 //	kitdbsqlite readtail <directory>                where a read right after a commit waits, with Windows' timer as it is and at 1 ms
+//	kitdbsqlite analytics <kitwork.db> <directory>   KCOL on SQLite: the copy of shopping's analytic columns built, then read back
 //
 // The commands that read the KitDB file (copy, bench, refresh, execute, measure, definition) went with KROW on
 // 03/11/2026 (docs/KITWORK_KITDB.md câu 13.4); the copy they made of shopping is .database/shopping/kitwork.db.
@@ -27,12 +28,12 @@ func must(err error) {
 }
 
 func main() {
-	arguments := map[string]int{"verify": 1, "query": 2, "decimal": 0, "idlayout": 2, "anchor": 1, "at": 1, "changeset": 1, "readtail": 1}
+	arguments := map[string]int{"verify": 1, "query": 2, "decimal": 0, "idlayout": 2, "anchor": 1, "at": 1, "changeset": 1, "readtail": 1, "analytics": 2}
 	if len(os.Args) < 2 {
 		os.Args = append(os.Args, "")
 	}
 	if count, known := arguments[os.Args[1]]; !known || len(os.Args) != count+2 {
-		fmt.Fprintln(os.Stderr, "usage: kitdbsqlite verify|query|decimal|idlayout|anchor|at|changeset|readtail …")
+		fmt.Fprintln(os.Stderr, "usage: kitdbsqlite verify|query|decimal|idlayout|anchor|at|changeset|readtail|analytics …")
 		os.Exit(2)
 	}
 	switch os.Args[1] {
@@ -52,5 +53,7 @@ func main() {
 		cmdChangeset(os.Args[2])
 	case "readtail":
 		cmdReadTail(os.Args[2])
+	case "analytics":
+		cmdAnalytics(os.Args[2], os.Args[3])
 	}
 }
