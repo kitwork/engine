@@ -9,6 +9,7 @@
 //	kitdbsqlite anchor <directory>                  the engine's anchors: a base, then the pages changed; restores, the fold
 //	kitdbsqlite at <directory>                      at() going backward from the live file against the restore it runs today
 //	kitdbsqlite changeset <directory>               SQLite's changesets of the same writes against kitwork_history
+//	kitdbsqlite readtail <directory>                where a read right after a commit waits, with Windows' timer as it is and at 1 ms
 //
 // The commands that read the KitDB file (copy, bench, refresh, execute, measure, definition) went with KROW on
 // 03/11/2026 (docs/KITWORK_KITDB.md câu 13.4); the copy they made of shopping is .database/shopping/kitwork.db.
@@ -26,12 +27,12 @@ func must(err error) {
 }
 
 func main() {
-	arguments := map[string]int{"verify": 1, "query": 2, "decimal": 0, "idlayout": 2, "anchor": 1, "at": 1, "changeset": 1}
+	arguments := map[string]int{"verify": 1, "query": 2, "decimal": 0, "idlayout": 2, "anchor": 1, "at": 1, "changeset": 1, "readtail": 1}
 	if len(os.Args) < 2 {
 		os.Args = append(os.Args, "")
 	}
 	if count, known := arguments[os.Args[1]]; !known || len(os.Args) != count+2 {
-		fmt.Fprintln(os.Stderr, "usage: kitdbsqlite verify|query|decimal|idlayout|anchor|at|changeset …")
+		fmt.Fprintln(os.Stderr, "usage: kitdbsqlite verify|query|decimal|idlayout|anchor|at|changeset|readtail …")
 		os.Exit(2)
 	}
 	switch os.Args[1] {
@@ -49,5 +50,7 @@ func main() {
 		cmdAt(os.Args[2])
 	case "changeset":
 		cmdChangeset(os.Args[2])
+	case "readtail":
+		cmdReadTail(os.Args[2])
 	}
 }
