@@ -3,6 +3,7 @@ package work
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/kitwork/engine/kitdb/gateway"
@@ -19,9 +20,10 @@ import (
 // migrationStatement is one change kitwork migrate makes to a file.
 type migrationStatement struct {
 	table    string
-	action   string   // create-table, add-column, add-unique, add-index, drop-index
+	action   string   // rename-table, rename-column, drop-column, rescale, create-table, add-column, add-unique, add-index, …
 	postgres string   // as PostgreSQL writes it; "" when its words cannot say it
 	sqlite   []string // what runs on the file
+	guard    string   // a count that must be 0 before it runs (a rescale's values past the column's precision)
 }
 
 // shown is the statement as the plan shows it: PostgreSQL's, or SQLite's after "-- SQLite:".
@@ -132,6 +134,52 @@ func schemaOfDatabase(name string) string {
 		return schema
 	}
 	return ""
+}
+
+// choiceStatements are the changes kitwork migrate was told to make, before what it adds: a table renamed, then its
+// columns renamed and dropped, then a number column's values rewritten to its new scale (ALTER COLUMN … TYPE, which
+// the port runs with the column's kind it reads; on the file, the rewrite itself).
+func choiceStatements(schema string, choices migrationChoices, gap databaseGap) []migrationStatement {
+	var statements []migrationStatement
+	for _, name := range gap.names {
+		if file, renamed := choices.tables[name]; renamed {
+			statements = append(statements, written(name, "rename-table", "ALTER TABLE "+qualifiedName(schema, file)+" RENAME TO "+gateway.WrittenName(name),
+				fmt.Sprintf("ALTER TABLE %q RENAME TO %q", file, name)))
+		}
+	}
+	for _, name := range gap.names {
+		reference := qualifiedName(schema, name)
+		renames := choices.columns[name]
+		for _, column := range sortedKeys(renames) {
+			statements = append(statements, written(name, "rename-column",
+				"ALTER TABLE "+reference+" RENAME COLUMN "+gateway.WrittenName(renames[column])+" TO "+gateway.WrittenName(column),
+				fmt.Sprintf("ALTER TABLE %q RENAME COLUMN %q TO %q", name, renames[column], column)))
+		}
+		for _, column := range choices.drops[name] {
+			statements = append(statements, written(name, "drop-column", "ALTER TABLE "+reference+" DROP COLUMN "+gateway.WrittenName(column),
+				fmt.Sprintf("ALTER TABLE %q DROP COLUMN %q", name, column)))
+		}
+		for _, rescale := range gap.tables[name].rescaled {
+			kind := "bigint"
+			if rescale.decimal {
+				kind = fmt.Sprintf("numeric(%d, %d)", rescale.precision, rescale.to)
+			}
+			rewrite := gateway.RescaleStatements(name, rescale.column, rescale.precision, rescale.from, rescale.to)
+			statements = append(statements, migrationStatement{table: name, action: "rescale",
+				postgres: "ALTER TABLE " + reference + " ALTER COLUMN " + gateway.WrittenName(rescale.column) + " TYPE " + kind,
+				sqlite:   []string{rewrite.Update}, guard: rewrite.Guard})
+		}
+	}
+	return statements
+}
+
+func sortedKeys[V any](items map[string]V) []string {
+	keys := make([]string, 0, len(items))
+	for key := range items {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // postgresType is a column's type as PostgreSQL writes it and the port takes it: "" for a kind it has no word for.

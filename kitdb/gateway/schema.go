@@ -78,6 +78,46 @@ type schemaPlan struct {
 	dropTable  []string
 	renameFrom string
 	renameTo   string
+	// rewrites are the values a number's new scale rewrites (ALTER COLUMN … TYPE numeric), run with the kinds
+	rewrites []Rescale
+}
+
+// Rescale is the rewrite of a number column's stored values from one scale to another: a decimal holds its value ×
+// 10^scale, an integer is a decimal of scale 0 (KITWORK_KITDB.md mục 8). Guard counts the values the new scale would
+// carry past the declared precision (none must be); Update rewrites them, a scale made smaller rounded half away from
+// zero as PostgreSQL's numeric rounds.
+type Rescale struct {
+	Column        string
+	Guard, Update string
+}
+
+// RescaleStatements is the rewrite of column of table from scale from to scale to, precision digits at most (18).
+func RescaleStatements(table, column string, precision, from, to int) Rescale {
+	quotedTable, quotedColumn := quoteIdentifier(table), quoteIdentifier(column)
+	rescale := Rescale{Column: column}
+	if to > from {
+		factor := pow10(to - from)
+		limit := pow10(min(precision, 18)) - 1
+		rescale.Guard = fmt.Sprintf("SELECT count(*) FROM %s WHERE abs(%s) > %d", quotedTable, quotedColumn, limit/factor)
+		rescale.Update = fmt.Sprintf("UPDATE %s SET %s = %s * %d WHERE %s IS NOT NULL", quotedTable, quotedColumn, quotedColumn, factor, quotedColumn)
+		return rescale
+	}
+	factor := pow10(from - to)
+	half := factor / 2
+	rescale.Update = fmt.Sprintf("UPDATE %s SET %s = CASE WHEN %s < 0 THEN -((-%s + %d) / %d) ELSE (%s + %d) / %d END WHERE %s IS NOT NULL",
+		quotedTable, quotedColumn, quotedColumn, quotedColumn, half, factor, quotedColumn, half, factor, quotedColumn)
+	return rescale
+}
+
+// RescalePower is the factor a rescale multiplies or divides by: 10^(to - from).
+func RescalePower(from, to int) int64 { return pow10(to - from) }
+
+func pow10(exponent int) int64 {
+	value := int64(1)
+	for range exponent {
+		value *= 10
+	}
+	return value
 }
 
 // schemaCursor reads a schema statement's tokens.
@@ -636,8 +676,29 @@ func (c *schemaCursor) alterTable() (schemaPlan, error) {
 			plan.statements = append(plan.statements, prefix+"RENAME COLUMN "+quoteIdentifier(from)+" TO "+quoteIdentifier(to))
 			plan.kinds = append(plan.kinds, kindChange{table: table, column: from, rename: true, to: to})
 		case a.keyword("ALTER"):
-			return schemaPlan{}, pgwire.NewError("0A000", "ALTER COLUMN (its type, NOT NULL, DEFAULT) is not supported: SQLite changes "+
-				"a column only by rebuilding the table")
+			a.keyword("COLUMN")
+			name, err := a.name()
+			if err != nil {
+				return schemaPlan{}, err
+			}
+			if !a.keyword("TYPE") && !a.keyword("SET", "DATA", "TYPE") {
+				return schemaPlan{}, pgwire.NewError("0A000", "ALTER COLUMN … NOT NULL or DEFAULT is not supported: SQLite changes a column "+
+					"only by rebuilding the table")
+			}
+			kind, err := a.typeOf(name)
+			if err != nil {
+				return schemaPlan{}, err
+			}
+			if !a.done() {
+				return schemaPlan{}, pgwire.NewError("0A000", "ALTER COLUMN … TYPE … USING is not supported")
+			}
+			rescale, err := c.rescale(schema, table, name, kind)
+			if err != nil {
+				return schemaPlan{}, err
+			}
+			plan.rewrites = append(plan.rewrites, rescale)
+			plan.kinds = append(plan.kinds, kindChange{table: table, column: name, kind: kind})
+			continue
 		default:
 			return schemaPlan{}, pgwire.NewError("0A000", fmt.Sprintf("ALTER TABLE … %s is not supported through the port", strings.Join(words(action[:min(2, len(action))]), " ")))
 		}
@@ -772,6 +833,33 @@ func (c *schemaCursor) dropIndex() (schemaPlan, error) {
 	return schemaPlan{schema: schema, statements: []string{text + quoteIdentifier(name)}}, nil
 }
 
+// rescale is ALTER COLUMN column TYPE kind of a number column: its scale changes, numeric(p, s) to numeric(p, s2) or to
+// bigint and back, the values it holds rewritten (a decimal stores its value × 10^scale). Any other change of type is a
+// rebuild of the table SQLite needs, refused. The column's kind is the session's (kitwork_columns).
+func (c *schemaCursor) rescale(schema, table, column string, kind columnKind) (Rescale, error) {
+	if kind.kind != "decimal" && kind.kind != "integer" || kind.serial {
+		return Rescale{}, pgwire.NewError("0A000", "ALTER COLUMN … TYPE changes the scale of a number only (numeric(p, s), bigint): "+
+			"another type is a rebuild of the table SQLite needs")
+	}
+	if c.session == nil || c.session.columns == nil {
+		return Rescale{}, pgwire.NewError("0A000", "ALTER COLUMN … TYPE needs the column's kind, which only a session reads")
+	}
+	current, _, scale, found := c.session.columns.Column(schema, table, column)
+	if !found || current != "decimal" && current != "integer" {
+		return Rescale{}, pgwire.NewError("0A000", fmt.Sprintf("ALTER COLUMN … TYPE changes the scale of a number only: column %s is no "+
+			"number of kitwork_columns (decimal, integer), and another change of type is a rebuild of the table SQLite needs", column))
+	}
+	from, to := 0, kind.scale
+	if current == "decimal" {
+		from = scale
+	}
+	precision := kind.precision
+	if kind.kind == "integer" {
+		precision = 18
+	}
+	return RescaleStatements(table, column, precision, from, to), nil
+}
+
 // hasColumn reports whether table of schema has column, as the session's catalog last read it; false without a
 // session (a structure file read, structure.go).
 func (c *schemaCursor) hasColumn(schema, table, column string) bool {
@@ -836,6 +924,11 @@ func (session *Session) changeSchema(ctx context.Context, parsed statement) (pgw
 	}
 	if len(statements) != len(plan.statements) {
 		if _, err := writer.Write(ctx, session.by(), func(transaction *kitdbsqlite.Transaction) error {
+			for _, rewrite := range plan.rewrites {
+				if err := runRescale(transaction, rewrite); err != nil {
+					return err
+				}
+			}
 			return writeKinds(transaction, plan)
 		}); err != nil {
 			return pgwire.Result{}, fmt.Errorf("gateway: the schema changed, its column kinds were not written: %w", writeError(err))
@@ -876,6 +969,29 @@ func writeKinds(transaction *kitdbsqlite.Transaction, plan schemaPlan) error {
 		}
 	}
 	return nil
+}
+
+// runRescale rewrites a number column's values in the transaction, refused when one would pass its precision.
+func runRescale(transaction *kitdbsqlite.Transaction, rescale Rescale) error {
+	if rescale.Guard != "" {
+		rows, err := transaction.Query(rescale.Guard)
+		if err != nil {
+			return err
+		}
+		over := 0
+		if rows.Next() {
+			err = rows.Scan(&over)
+		}
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		if over > 0 {
+			return pgwire.NewError("22003", fmt.Sprintf("numeric field overflow: %d values of column %s pass its precision at the new scale", over, rescale.Column))
+		}
+	}
+	_, err := transaction.Exec(rescale.Update)
+	return err
 }
 
 // columnsSearchWeight gives a kitwork_columns written before 31/10/2026 its search_weight, as the engine did at each

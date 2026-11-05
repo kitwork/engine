@@ -221,7 +221,8 @@ router.get((context) => {
 	}
 	refused := answer(t, other, "")
 	const want = `database connection("warehouse") (warehouse.db) chưa khớp bảng .shared/schema/ khai (database là gốc: engine không tự tạo bảng, thêm cột); ` +
-		`khác database: cột stocks.quantity: database lưu INTEGER, code khai text (lưu TEXT); sửa table() theo database (kitwork migrate không đổi kiểu cột đã có)`
+		`khác database: cột stocks.quantity: database lưu INTEGER, code khai text (lưu TEXT) (đổi cách lưu cần dựng lại bảng, chưa có); ` +
+		`sửa table() theo database, hay khi chỉ số lẻ của một cột số khác, để kitwork migrate viết lại giá trị (nó hỏi)`
 	if refused["code"] != value.DatabaseCode || refused["message"] != want {
 		t.Fatalf("a table that retypes a column: %v, want DATABASE %q", refused, want)
 	}

@@ -225,3 +225,46 @@ func TestSchemaStatementsMakeTheSearchIndex(t *testing.T) {
 		t.Fatalf("TranslateSchema of a search index: %q %v", statements, err)
 	}
 }
+
+// TestSchemaStatementsRescaleANumber: ALTER COLUMN … TYPE changes the scale of a number column, its stored values
+// rewritten in the commit that writes its kind (KITWORK_DATABASE.md "Database là gốc", mục 6): numeric(10, 2) to
+// numeric(10, 4) multiplies, to bigint divides rounding half away from zero (12.50 is 13, -0.50 is -1), each read back
+// as the type says. A value the new scale carries past the precision refuses it (22003), the values kept; a change of
+// another type is a rebuild of the table SQLite needs (0A000).
+//
+// CONTROL (06/11/2026): with the rewrites not run, "after numeric(10, 4): 0.1250|-0.0050" (the kind changed alone).
+func TestSchemaStatementsRescaleANumber(t *testing.T) {
+	fixture := newWriteFixture(t)
+	access := newAccess()
+	access.admin = true
+	session := fixture.session(t, access, Options{})
+	run(t, session, `CREATE TABLE prices (id bigserial PRIMARY KEY, amount numeric(10, 2), small numeric(4, 2))`)
+	run(t, session, `INSERT INTO prices (amount, small) VALUES (12.5, 99.99), (-0.5, 1)`)
+	read := func(query string) string {
+		t.Helper()
+		result, err := session.Execute(context.Background(), query, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cells(result)
+	}
+	if tag := run(t, session, `ALTER TABLE prices ALTER COLUMN amount TYPE numeric(10, 4)`); tag != "ALTER TABLE" {
+		t.Fatalf("tag %q", tag)
+	}
+	if got := read(`SELECT amount FROM prices ORDER BY id`); got != "12.5000|-0.5000" {
+		t.Fatalf("after numeric(10, 4): %s", got)
+	}
+	run(t, session, `ALTER TABLE prices ALTER COLUMN amount SET DATA TYPE bigint`)
+	if got := read(`SELECT amount FROM prices ORDER BY id`); got != "13|-1" {
+		t.Fatalf("after bigint: %s", got)
+	}
+	if got := kindsOf(t, fixture.publicDB, "prices"); !strings.Contains(got, "amount:integer") {
+		t.Fatalf("kinds after bigint: %s", got)
+	}
+	refused(t, session, `ALTER TABLE prices ALTER COLUMN small TYPE numeric(4, 3)`, "22003", "numeric field overflow: 1 values of column small")
+	if got := read(`SELECT small FROM prices ORDER BY id`); got != "99.99|1.00" {
+		t.Fatalf("after the refusal: %s", got)
+	}
+	refused(t, session, `ALTER TABLE prices ALTER COLUMN amount TYPE text`, "0A000", "changes the scale of a number only")
+	refused(t, session, `ALTER TABLE prices ALTER COLUMN amount SET NOT NULL`, "0A000", "NOT NULL or DEFAULT is not supported")
+}

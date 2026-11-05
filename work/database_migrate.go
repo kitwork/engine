@@ -54,6 +54,140 @@ type DatabaseMigration struct {
 	send     func(ctx context.Context, statements []string) error
 	tables   map[string]map[string]*ColumnSpec
 	tenant   *Tenant
+	// state is the file as the plan read it; choices what the plan was told besides (Question)
+	state   *databaseState
+	choices migrationChoices
+}
+
+// MigrationQuestion is what kitwork migrate asks before a change the declaration alone cannot tell (KITWORK_DATABASE.md
+// mục 6, as drizzle-kit asks): a table or a column the file lacks while it has one of the same shape no table()
+// declares (renamed, or new), a number column whose scale differs (its values rewritten, or the code to follow).
+type MigrationQuestion struct {
+	Text    string
+	Options []string
+	answer  func(int)
+}
+
+// Answer takes option, 0 the first, and plans again with it.
+func (q *MigrationQuestion) Answer(option int) error {
+	if option < 0 || option >= len(q.Options) {
+		return fmt.Errorf("chọn từ 1 tới %d", len(q.Options))
+	}
+	q.answer(option)
+	return nil
+}
+
+// Question is the plan's next question; nil when none is left.
+func (m *DatabaseMigration) Question() *MigrationQuestion {
+	if m.state == nil {
+		return nil
+	}
+	gap := compareDatabase(m.state, m.tables, m.choices)
+	for _, name := range gap.names {
+		table := gap.tables[name]
+		if !table.missing || len(table.tables) == 0 || m.choices.decided[name] {
+			continue
+		}
+		candidates := table.tables
+		question := &MigrationQuestion{Text: fmt.Sprintf("%s: bảng %s mới; database có bảng %s mà code không khai, có đủ các cột của nó",
+			m.Database, name, strings.Join(candidates, ", "))}
+		for _, candidate := range candidates {
+			question.Options = append(question.Options, fmt.Sprintf("đổi tên bảng %s → %s (giữ %d dòng)", candidate, name, m.state.tables[candidate].rows))
+		}
+		question.Options = append(question.Options, fmt.Sprintf("tạo bảng %s mới (%s ở lại, là bảng riêng của database)", name, strings.Join(candidates, ", ")))
+		question.answer = func(option int) {
+			m.choose(func(choices *migrationChoices) {
+				if option < len(candidates) {
+					choices.tables[name] = candidates[option]
+				}
+				choices.decided[name] = true
+			})
+		}
+		return question
+	}
+	for _, name := range gap.names {
+		table := gap.tables[name]
+		if table.missing {
+			continue
+		}
+		view := m.view(name)
+		for _, column := range table.absent {
+			key := name + "." + column
+			candidates := table.candidates[column]
+			if len(candidates) == 0 || m.choices.decided[key] {
+				continue
+			}
+			question := &MigrationQuestion{Text: fmt.Sprintf("%s: bảng %s, cột %s %s mới; database có cột %s cùng kiểu mà code không khai",
+				m.Database, name, column, declaredType(m.tables[name][column]), strings.Join(candidates, ", "))}
+			for _, candidate := range candidates {
+				question.Options = append(question.Options, fmt.Sprintf("đổi tên %s → %s (giữ %d giá trị)", candidate, column, view.values[candidate]))
+			}
+			question.Options = append(question.Options, fmt.Sprintf("thêm cột %s mới, giữ %s (cột riêng của database)", column, strings.Join(candidates, ", ")))
+			if len(candidates) == 1 {
+				question.Options = append(question.Options, fmt.Sprintf("thêm cột %s mới, bỏ %s (mất %d giá trị)", column, candidates[0], view.values[candidates[0]]))
+			}
+			question.answer = func(option int) {
+				m.choose(func(choices *migrationChoices) {
+					switch {
+					case option < len(candidates):
+						if choices.columns[name] == nil {
+							choices.columns[name] = map[string]string{}
+						}
+						choices.columns[name][column] = candidates[option]
+					case option == len(candidates)+1:
+						choices.drops[name] = append(choices.drops[name], candidates[0])
+					}
+					choices.decided[key] = true
+				})
+			}
+			return question
+		}
+		for _, rescale := range table.rescalable {
+			key := name + "." + rescale.column
+			if m.choices.decided["~"+key] {
+				continue
+			}
+			rewrite := fmt.Sprintf("viết lại %d giá trị của %s: nhân %d, giữ nguyên giá trị", view.values[rescale.column], key, gateway.RescalePower(rescale.from, rescale.to))
+			if rescale.to < rescale.from {
+				rewrite = fmt.Sprintf("viết lại %d giá trị của %s: chia %d, làm tròn (mất số lẻ)", view.values[rescale.column], key, gateway.RescalePower(rescale.to, rescale.from))
+			}
+			question := &MigrationQuestion{Text: fmt.Sprintf("%s: cột %s, database ghi %s, code khai %s", m.Database, key, rescale.file, rescale.declared),
+				Options: []string{rewrite, "không: sửa table() theo database"}}
+			question.answer = func(option int) {
+				m.choose(func(choices *migrationChoices) {
+					if option == 0 {
+						choices.rescale[key] = true
+					}
+					choices.decided["~"+key] = true
+				})
+			}
+			return question
+		}
+	}
+	return nil
+}
+
+// view is the file's table a declared table reads, as the choices leave it.
+func (m *DatabaseMigration) view(name string) *tableState {
+	source := name
+	if file, renamed := m.choices.tables[name]; renamed {
+		source = file
+	}
+	table := m.state.tables[source]
+	if table == nil {
+		return &tableState{values: map[string]int{}}
+	}
+	return table.after(m.choices.columns[name], m.choices.drops[name])
+}
+
+// choose changes the choices and plans again.
+func (m *DatabaseMigration) choose(change func(*migrationChoices)) {
+	if m.choices.tables == nil {
+		m.choices = migrationChoices{tables: map[string]string{}, columns: map[string]map[string]string{}, drops: map[string][]string{},
+			rescale: map[string]bool{}, decided: map[string]bool{}}
+	}
+	change(&m.choices)
+	m.fill()
 }
 
 // ThroughPort makes the plan apply through a database port: send runs the plan's PostgreSQL statements there, as an
@@ -75,19 +209,24 @@ func (m *DatabaseMigration) applyThroughPort(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	add, differ, notes := gap.lines()
-	if len(add) > 0 || len(differ) > 0 {
-		return fmt.Errorf("%s: sau các câu qua %s, database vẫn chưa có: %s", m.Database, m.Through, strings.Join(append(add, differ...), "; "))
+	add, _, notes := gap.lines() // what differs and was not changed stays, said by the plan
+	if len(add) > 0 {
+		return fmt.Errorf("%s: sau các câu qua %s, database vẫn chưa có: %s", m.Database, m.Through, strings.Join(add, "; "))
 	}
 	m.Left = notes
 	return nil
 }
 
-// fill says gap in the plan: its lines and the statements that close it.
-func (m *DatabaseMigration) fill(gap databaseGap) {
+// fill holds the file's state against the tables with the choices: the plan's lines and the statements that close
+// what it lacks.
+func (m *DatabaseMigration) fill() {
+	if m.state == nil {
+		return
+	}
+	gap := compareDatabase(m.state, m.tables, m.choices)
 	m.Add, m.Differ, m.Write = gap.lines()
 	m.Statements, m.postgres, m.native = nil, nil, false
-	for _, statement := range gapStatements(m.tables, gap, m.schema) {
+	for _, statement := range append(choiceStatements(m.schema, m.choices, gap), gapStatements(m.tables, gap, m.schema)...) {
 		m.Statements = append(m.Statements, statement.shown())
 		if statement.postgres == "" {
 			m.native = true
@@ -98,7 +237,9 @@ func (m *DatabaseMigration) fill(gap databaseGap) {
 }
 
 // Pending reports a migration that changes the file.
-func (m *DatabaseMigration) Pending() bool { return len(m.Add) > 0 || len(m.Write) > 0 }
+func (m *DatabaseMigration) Pending() bool {
+	return len(m.Add) > 0 || len(m.Write) > 0 || len(m.Statements) > 0
+}
 
 // Apply makes the file what the plan says, held against the file again inside the transaction that changes it; a
 // plan given a port applies through it.
@@ -121,9 +262,20 @@ func (m *DatabaseMigration) Apply(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		gap, err := checkDatabase(transaction, m.tables)
+		state, err := readDatabaseState(transaction, m.tables, false)
+		for _, file := range m.choices.tables { // the tables renamed from, which no table() declares
+			if err == nil && state.tables[file] == nil {
+				var table *tableState
+				if table, err = readTableState(transaction, file, false); table != nil {
+					state.tables[file] = table
+				}
+			}
+		}
 		if err == nil {
-			err = applyGap(transaction, m.tables, gap)
+			err = m.choices.hold(state)
+		}
+		if err == nil {
+			err = applyGap(transaction, m.tables, compareDatabase(state, m.tables, m.choices), m.choices)
 		}
 		if err != nil {
 			_ = transaction.Rollback()
@@ -170,13 +322,13 @@ func PlanAppMigrations(root, identity string, layout RootLayout, shared *SharedE
 		return nil, nil, err
 	}
 	for _, plan := range plans {
-		gap, held, err := tenant.planGap(plan.Path, plan.tables)
+		state, held, err := tenant.planState(plan.Path, plan.tables)
 		if err != nil {
 			closeTenant()
 			return nil, nil, fmt.Errorf("%s: %w", plan.Database, err)
 		}
-		plan.Held = held
-		plan.fill(gap)
+		plan.Held, plan.state = held, state
+		plan.fill()
 	}
 	return plans, closeTenant, nil
 }
@@ -191,12 +343,13 @@ func CheckAppDatabases(root, identity string, layout RootLayout, shared *SharedE
 	}
 	defer closeTenant()
 	for _, plan := range plans {
-		gap, err := readGap(plan.Path, plan.tables)
+		state, err := readState(plan.Path, plan.tables, false)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", plan.Database, err)
 		}
-		plan.fill(gap)
-		plan.tenant = nil
+		plan.state = state
+		plan.fill()
+		plan.state, plan.tenant = nil, nil // asks nothing, applies nothing
 	}
 	return plans, nil
 }
@@ -261,72 +414,82 @@ func declaredFiles(root, identity string, layout RootLayout, shared *SharedEnvir
 	return tenant, plans, closeTenant, nil
 }
 
-// readGap holds tables against the file at path reading only: the file itself on a connection that cannot write; the
-// file its structure file would make, made in a temporary folder; or a file of no table when neither is there.
+// readGap holds tables against the file at path reading only (readState).
 func readGap(path string, tables map[string]map[string]*ColumnSpec) (databaseGap, error) {
+	state, err := readState(path, tables, false)
+	if err != nil {
+		return databaseGap{}, err
+	}
+	return compareDatabase(state, tables, migrationChoices{}), nil
+}
+
+// readState reads the file at path reading only: the file itself on a connection that cannot write; the file its
+// structure file would make, made in a temporary folder; or a file of no table when neither is there. every reads its
+// other tables and the counts too (kitwork migrate's questions).
+func readState(path string, tables map[string]map[string]*ColumnSpec, every bool) (*databaseState, error) {
 	if _, err := os.Stat(path); err == nil {
 		file, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?_pragma=busy_timeout(5000)&_pragma=query_only(1)")
 		if err != nil {
-			return databaseGap{}, err
+			return nil, err
 		}
 		defer file.Close()
-		return checkDatabase(file, tables)
+		return readDatabaseState(file, tables, every)
 	}
 	structure, err := os.ReadFile(path + ".sql")
 	if errors.Is(err, os.ErrNotExist) {
-		return checkDatabase(nil, tables)
+		return readDatabaseState(nil, tables, every)
 	}
 	if err != nil {
-		return databaseGap{}, err
+		return nil, err
 	}
 	folder, err := os.MkdirTemp("", "kitwork-structure-")
 	if err != nil {
-		return databaseGap{}, err
+		return nil, err
 	}
 	defer os.RemoveAll(folder)
 	ctx := context.Background()
 	made, err := kitdbsqlite.Open(ctx, filepath.Join(folder, filepath.Base(path)), kitdbsqlite.Options{})
 	if err != nil {
-		return databaseGap{}, err
+		return nil, err
 	}
 	defer made.Close()
 	if err := gateway.LoadStructure(ctx, made, migrateBy, string(structure)); err != nil {
-		return databaseGap{}, fmt.Errorf("%s.sql: %w", filepath.Base(path), err)
+		return nil, fmt.Errorf("%s.sql: %w", filepath.Base(path), err)
 	}
-	var gap databaseGap
+	var state *databaseState
 	err = made.Read(ctx, func(snapshot *kitdbsqlite.Snapshot) error {
 		var err error
-		gap, err = checkDatabase(snapshot, tables)
+		state, err = readDatabaseState(snapshot, tables, every)
 		return err
 	})
-	return gap, err
+	return state, err
 }
 
 // planGap holds tables against the file at path: through its writer when the file, or its structure file, is
 // there; as a file of no table when neither is (nothing is made until the migration applies). A file another process
 // writes is read without the writer, and held.
-func (t *Tenant) planGap(path string, tables map[string]map[string]*ColumnSpec) (databaseGap, bool, error) {
+func (t *Tenant) planState(path string, tables map[string]map[string]*ColumnSpec) (*databaseState, bool, error) {
 	_, fileErr := os.Stat(path)
 	_, structureErr := os.Stat(path + ".sql")
 	if errors.Is(fileErr, os.ErrNotExist) && errors.Is(structureErr, os.ErrNotExist) {
-		gap, err := checkDatabase(nil, tables)
-		return gap, false, err
+		state, err := readDatabaseState(nil, tables, true)
+		return state, false, err
 	}
 	database, err := t.historyDatabase(path)
 	if errors.Is(err, kitdbsqlite.ErrLocked) {
-		gap, err := readGap(path, tables)
-		return gap, true, err
+		state, err := readState(path, tables, true)
+		return state, true, err
 	}
 	if err != nil {
-		return databaseGap{}, false, err
+		return nil, false, err
 	}
-	var gap databaseGap
+	var state *databaseState
 	err = database.Read(context.Background(), func(snapshot *kitdbsqlite.Snapshot) error {
 		var err error
-		gap, err = checkDatabase(snapshot, tables)
+		state, err = readDatabaseState(snapshot, tables, true)
 		return err
 	})
-	return gap, false, err
+	return state, false, err
 }
 
 // runSchemaFiles runs every file of the app's .shared/schema/ and gives the databases they declare that the engine

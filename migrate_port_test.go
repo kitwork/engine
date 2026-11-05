@@ -115,3 +115,52 @@ export const billing = connection().schema("billing").tables({ receipts });
 		t.Fatalf("the kinds the port wrote: %s", got)
 	}
 }
+
+// A rename answered goes through the port as PostgreSQL writes it (ALTER TABLE … RENAME COLUMN), the values kept under
+// the new name; the kinds the port cannot write of the columns already there are left, said.
+func TestMigrateRenamesThroughThePort(t *testing.T) {
+	fixture := newAppDatabaseFixture(t)
+	path := filepath.Join(fixture.apps, "acme", ".shared", "schema", "shop.work")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`import { table, id, text, decimal, boolean } from "kitwork/schema";
+import { connection } from "kitwork/database";
+
+const orders = table({ id: id(), email: text(), total: decimal(12, 2), paid: boolean() });
+
+export const db = connection().tables({ orders });
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plans, release, err := work.PlanAppMigrations(fixture.apps, "acme", work.RootLayoutMultiTenant, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if len(plans) != 1 {
+		t.Fatalf("plans %+v", plans)
+	}
+	question := plans[0].Question()
+	if question == nil || question.Options[0] != "đổi tên amount → total (giữ 2 giá trị)" {
+		t.Fatalf("the question: %+v", question)
+	}
+	if err := question.Answer(0); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(plans[0].Statements, " "); got != "ALTER TABLE orders RENAME COLUMN amount TO total;" {
+		t.Fatalf("statements %q", got)
+	}
+	database, _ := portDatabaseOf(fixture.host, fixture.apps, work.RootLayoutMultiTenant, plans[0].Path)
+	plans[0].ThroughPort("the test's port", portSender(fixture.address, "kitdb", appDatabaseTestPassword, database))
+	if err := plans[0].Apply(context.Background()); err != nil {
+		t.Fatalf("through the port: %v", err)
+	}
+	client := fixture.connect(t, "kitdb", appDatabaseTestPassword, "shop.example/application")
+	if got := appDatabaseRows(t, client, `SELECT total FROM orders ORDER BY id`); got != "35000.00; 90000.00" {
+		t.Fatalf("total through the port: %q", got)
+	}
+	if left := strings.Join(plans[0].Left, ", "); left != "kiểu của cột orders.id, orders.email trong kitwork_columns" {
+		t.Fatalf("left by the port: %q", left)
+	}
+}
