@@ -26,12 +26,13 @@ type Retention struct {
 const pruneBatch = 10000
 
 // Retain applies retention as of now. It writes an anchor when the oldest
-// commit no anchor holds is Every old, then removes what no moment from
-// now - Keep on needs: the anchors older than the newest one at or before that
-// moment, and the commits of kitwork_history before that anchor's revision. The
-// anchor's own commit stays, so the history starts at the moment the oldest
-// kept anchor holds. It returns that revision: the commits before it are gone,
-// 0 when every commit is still kept.
+// commit no anchor holds is Every old, then lets go of what no moment from
+// now - Keep on needs: the newest anchor at or before that moment becomes the
+// oldest kept (a .pages is folded into its base, which takes its name), the
+// anchors before it go, and so do the commits of kitwork_history before its
+// revision. The anchor's own commit stays, so the history starts at the moment
+// the oldest kept anchor holds. It returns that revision: the commits before
+// it are gone, 0 when every commit is still kept.
 func (database *Database) Retain(ctx context.Context, now time.Time, retention Retention) (uint64, error) {
 	if err := database.ensureOpen(); err != nil {
 		return 0, err
@@ -39,9 +40,40 @@ func (database *Database) Retain(ctx context.Context, now time.Time, retention R
 	if retention.Keep <= 0 || retention.Every <= 0 {
 		return 0, fmt.Errorf("kitdb: retention must be positive")
 	}
-	anchors, err := database.anchors()
+	start, errs, err := database.retainAnchors(ctx, now, retention)
 	if err != nil {
 		return 0, err
+	}
+	if start == 0 {
+		return 0, nil
+	}
+	// The anchors go first: a history that still holds commits an anchor no longer starts is only longer than it
+	// needs to be, and the next Retain takes them out. The writer is asked with no anchor lock held, since it
+	// anchors at a Barrier.
+	var first int64
+	if err := database.readers.QueryRowContext(ctx, `SELECT coalesce(min(rev), 0) FROM kitwork_history`).Scan(&first); err != nil {
+		return 0, errors.Join(append(errs, err)...)
+	}
+	for low := first; low > 0 && low < int64(start); low += pruneBatch {
+		below := min(low+pruneBatch, int64(start))
+		if _, err := database.Maintain(ctx, "retention", func(conn *sql.Conn) error {
+			_, err := conn.ExecContext(ctx, `DELETE FROM kitwork_history WHERE rev < ?`, below)
+			return err
+		}); err != nil {
+			return 0, errors.Join(append(errs, err)...)
+		}
+	}
+	return start, errors.Join(errs...)
+}
+
+// retainAnchors anchors when it is due and lets go of the anchors no moment from now - Keep on needs. It returns the
+// revision of the oldest anchor kept, 0 when every anchor is still needed, and the anchor files it could not remove.
+func (database *Database) retainAnchors(ctx context.Context, now time.Time, retention Retention) (uint64, []error, error) {
+	database.anchoring.Lock()
+	defer database.anchoring.Unlock()
+	anchors, err := database.anchors()
+	if err != nil {
+		return 0, nil, err
 	}
 	var newest uint64
 	if len(anchors) > 0 {
@@ -50,14 +82,14 @@ func (database *Database) Retain(ctx context.Context, now time.Time, retention R
 	var oldest int64
 	if err := database.readers.QueryRowContext(ctx, `SELECT coalesce(min(at), 0) FROM kitwork_history WHERE rev > ?`,
 		int64(newest)).Scan(&oldest); err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	if oldest != 0 && now.Sub(time.Unix(0, oldest)) >= retention.Every {
-		if _, err := database.Anchor(ctx); err != nil {
-			return 0, err
+		if _, err := database.writeAnchor(ctx); err != nil {
+			return 0, nil, err
 		}
 		if anchors, err = database.anchors(); err != nil {
-			return 0, err
+			return 0, nil, err
 		}
 	}
 	from := now.Add(-retention.Keep).UTC().UnixNano()
@@ -68,32 +100,33 @@ func (database *Database) Retain(ctx context.Context, now time.Time, retention R
 		}
 	}
 	if start == nil || start.revision == 0 {
-		return 0, nil
+		return 0, nil, nil
 	}
-	// The anchors go first: a history that still holds commits an anchor no longer starts is only longer than it
-	// needs to be, and the next Retain takes them out.
+	database.anchorFiles.Lock()
+	defer database.anchorFiles.Unlock()
+	if start.kind == anchorPages {
+		if err := database.fold(anchors, *start); err != nil {
+			return 0, nil, err
+		}
+	}
+	all, err := database.listAnchors()
+	if err != nil {
+		return 0, nil, err
+	}
+	chained := map[string]bool{}
+	for _, item := range chainedAnchors(all) {
+		chained[item.path] = true
+	}
 	var errs []error
-	for _, older := range anchors {
-		if older.revision < start.revision {
-			if err := os.Remove(older.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+	for _, item := range all {
+		// before the oldest kept, or a .pages whose chain no longer reaches a base
+		if item.revision < start.revision || !chained[item.path] {
+			if err := os.Remove(item.path); err != nil && !errors.Is(err, os.ErrNotExist) {
 				errs = append(errs, err)
 			}
 		}
 	}
-	var first int64
-	if err := database.readers.QueryRowContext(ctx, `SELECT coalesce(min(rev), 0) FROM kitwork_history`).Scan(&first); err != nil {
-		return 0, errors.Join(append(errs, err)...)
-	}
-	for low := first; low > 0 && low < int64(start.revision); low += pruneBatch {
-		below := min(low+pruneBatch, int64(start.revision))
-		if _, err := database.Maintain(ctx, "retention", func(conn *sql.Conn) error {
-			_, err := conn.ExecContext(ctx, `DELETE FROM kitwork_history WHERE rev < ?`, below)
-			return err
-		}); err != nil {
-			return 0, errors.Join(append(errs, err)...)
-		}
-	}
-	return start.revision, errors.Join(errs...)
+	return start.revision, errs, nil
 }
 
 // KeptFrom is the moment the history starts at once Retain has removed

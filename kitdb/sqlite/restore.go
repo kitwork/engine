@@ -7,106 +7,16 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 )
 
-// anchorDirectory holds full copies of the database at chosen revisions,
-// named <revision>-<moment>.db: zero-padded so they sort.
-func (database *Database) anchorDirectory() string { return database.path + ".history" }
-
-type anchor struct {
-	path     string
-	revision uint64
-	at       int64
-}
-
-// Anchor writes a full copy of the database as of the latest commit
-// (VACUUM INTO on a reader), its history down to that one commit, and returns
-// its revision. Restore starts from the newest anchor at or before the moment
-// it is asked for, so anchors bound how much history a restore replays.
-func (database *Database) Anchor(ctx context.Context) (uint64, error) {
-	if err := database.ensureOpen(); err != nil {
-		return 0, err
-	}
-	directory := database.anchorDirectory()
-	if err := os.MkdirAll(directory, 0o755); err != nil {
-		return 0, err
-	}
-	temporary := filepath.Join(directory, fmt.Sprintf("anchor-%d.tmp", time.Now().UnixNano()))
-	// A reader cannot run VACUUM INTO: query_only refuses even a write to another file.
-	source, err := sql.Open("sqlite", dataSourceName(database.path, "mode=ro"))
-	if err != nil {
-		return 0, err
-	}
-	defer source.Close()
-	if _, err := source.ExecContext(ctx, `VACUUM INTO ?`, filepath.ToSlash(temporary)); err != nil {
-		_ = os.Remove(temporary)
-		return 0, err
-	}
-	// The copy keeps its last commit, the link a restore chains from, and none of the history before it: what Retain
-	// takes out of the file, an anchor must not keep on.
-	copied, err := sql.Open("sqlite", dataSourceName(temporary, "_pragma=journal_mode(DELETE)"))
-	if err != nil {
-		_ = os.Remove(temporary)
-		return 0, err
-	}
-	copied.SetMaxOpenConns(1)
-	var revision, at, commits int64
-	err = copied.QueryRowContext(ctx, `SELECT coalesce(max(rev), 0), coalesce(max(at), 0), count(*) FROM kitwork_history`).Scan(&revision, &at, &commits)
-	if err == nil && commits > 1 {
-		if _, err = copied.ExecContext(ctx, `DELETE FROM kitwork_history WHERE rev < ?`, revision); err == nil {
-			_, err = copied.ExecContext(ctx, `VACUUM`)
-		}
-	}
-	_ = copied.Close()
-	if err != nil {
-		_ = os.Remove(temporary)
-		return 0, err
-	}
-	final := filepath.Join(directory, fmt.Sprintf("%020d-%020d.db", revision, at))
-	if _, err := os.Stat(final); err == nil {
-		_ = os.Remove(temporary)
-		return uint64(revision), nil
-	}
-	if err := os.Rename(temporary, final); err != nil {
-		_ = os.Remove(temporary)
-		return 0, err
-	}
-	return uint64(revision), nil
-}
-
-func (database *Database) anchors() ([]anchor, error) {
-	entries, err := os.ReadDir(database.anchorDirectory())
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	var anchors []anchor
-	for _, entry := range entries {
-		var revision uint64
-		var at int64
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".db") {
-			continue
-		}
-		if _, err := fmt.Sscanf(entry.Name(), "%020d-%020d.db", &revision, &at); err != nil {
-			continue
-		}
-		anchors = append(anchors, anchor{path: filepath.Join(database.anchorDirectory(), entry.Name()), revision: revision, at: at})
-	}
-	sort.Slice(anchors, func(i, j int) bool { return anchors[i].revision < anchors[j].revision })
-	return anchors, nil
-}
-
 // Restore writes to target the database as it was at moment: the newest anchor
-// at or before it, then every later commit whose moment is not after it. The
-// replayed history is checked link by link against the anchor's own last
-// checksum. It returns the restored revision. target must not exist. A moment
-// before the history Retain kept is ErrPruned.
+// at or before it (a base and the .pages of its chain, or a whole copy), then
+// every later commit whose moment is not after it. The replayed history is
+// checked link by link against the anchor's own last checksum. It returns the
+// restored revision. target must not exist. A moment before the history Retain
+// kept is ErrPruned.
 func (database *Database) Restore(ctx context.Context, moment time.Time, target string) (uint64, error) {
 	if err := database.ensureOpen(); err != nil {
 		return 0, err
@@ -118,21 +28,30 @@ func (database *Database) Restore(ctx context.Context, moment time.Time, target 
 	if err := database.prunedBefore(ctx, through); err != nil {
 		return 0, err
 	}
+	// a fold and Retain's removals wait for the anchor files to be read
+	database.anchorFiles.RLock()
 	anchors, err := database.anchors()
 	if err != nil {
+		database.anchorFiles.RUnlock()
 		return 0, err
 	}
-	var start *anchor
-	for position := range anchors {
-		if anchors[position].at <= through {
-			start = &anchors[position]
+	// The newest anchor at or before the moment, or, when its chain does not read back, the one before it: a longer
+	// replay, the same rows.
+	err = ErrNoAnchor
+	var corrupt error
+	for position := len(anchors) - 1; position >= 0; position-- {
+		if anchors[position].at > through {
+			continue
 		}
+		err = restoreAnchor(anchors, anchors[position], target)
+		if !errors.Is(err, ErrCorruptAnchor) {
+			break
+		}
+		corrupt = errors.Join(corrupt, err)
 	}
-	if start == nil {
-		return 0, ErrNoAnchor
-	}
-	if err := copyFile(start.path, target); err != nil {
-		return 0, err
+	database.anchorFiles.RUnlock()
+	if err != nil {
+		return 0, errors.Join(err, corrupt)
 	}
 	restored, err := sql.Open("sqlite", dataSourceName(target, "_pragma=foreign_keys(0)", "_pragma=journal_mode(WAL)"))
 	if err != nil {

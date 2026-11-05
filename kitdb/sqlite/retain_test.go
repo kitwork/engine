@@ -15,15 +15,14 @@ import (
 // TestRetainAnchorsADayAndLetsGoOfWhatNoMomentNeeds: Retain writes an anchor once the oldest commit no anchor holds
 // is Every old, and takes out the anchors and the commits no moment of the Keep before now needs. The oldest kept
 // anchor's own commit stays, so a moment between it and the next commit still names its revision; a moment before it
-// is ErrPruned for RevisionAt and Restore alike; a later moment restores from the kept anchor, and an anchor holds no
-// history but its own last commit.
+// is ErrPruned for RevisionAt and Restore alike; a later moment restores from the kept anchor, the base the anchor of
+// that day was folded into, the file as it was then with its history.
 //
 // CONTROL (03/11/2026): with no anchor written when one is due, "a day later Retain kept from revision 0, want 3";
 // with the commits before the kept anchor left in the file, "the history holds revisions 1..3, want 3..3"; with the
 // kept anchor's own commit taken out too, "the history holds revisions 0..0, want 3..3" (and the search index finds
 // its revision older than its base); with a moment before the kept history not refused, "RevisionAt of the first
-// insert = 0 (<nil>), want ErrPruned"; with an anchor keeping the history before its commit, "the anchor holds 3
-// commits (<nil>), want its own alone".
+// insert = 0 (<nil>), want ErrPruned".
 func TestRetainAnchorsADayAndLetsGoOfWhatNoMomentNeeds(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kitwork.db")
@@ -98,14 +97,24 @@ func TestRetainAnchorsADayAndLetsGoOfWhatNoMomentNeeds(t *testing.T) {
 	if notes, err := restoredNotes(t, database, moments[second]); err != nil || notes != "id|title; 1|first; 2|second" {
 		t.Fatalf("restoring the second insert = %q (%v)", notes, err)
 	}
-	copied, err := sql.Open("sqlite", dataSourceName(anchors[0].path, "mode=ro"))
+	// The kept anchor is the base the anchor of revision second was folded into: the file as it was then, history and
+	// all (decided 05/11/2026), read from a copy so the history directory gets no -wal or -shm.
+	if anchors[0].kind != anchorBase {
+		t.Fatalf("the kept anchor is %s, want a base", filepath.Base(anchors[0].path))
+	}
+	copyPath := filepath.Join(t.TempDir(), "anchor.db")
+	if err := copyFile(anchors[0].path, copyPath); err != nil {
+		t.Fatal(err)
+	}
+	copied, err := sql.Open("sqlite", dataSourceName(copyPath, "mode=ro"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer copied.Close()
-	var commits int
-	if err := copied.QueryRow(`SELECT count(*) FROM kitwork_history`).Scan(&commits); err != nil || commits != 1 {
-		t.Fatalf("the anchor holds %d commits (%v), want its own alone", commits, err)
+	var commits, top int64
+	if err := copied.QueryRow(`SELECT count(*), max(rev) FROM kitwork_history`).Scan(&commits, &top); err != nil ||
+		uint64(top) != second || uint64(commits) != second {
+		t.Fatalf("the anchor holds %d commits up to revision %d (%v), want the %d up to its own", commits, top, err, second)
 	}
 }
 

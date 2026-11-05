@@ -107,6 +107,11 @@ type Database struct {
 
 	snapshots sync.Mutex
 	open      map[uint64]int
+
+	// anchoring lets one anchor or one Retain of the anchors run at a time; anchorFiles is held for reading while
+	// Restore reads anchor files and for writing while a fold or Retain changes or removes them.
+	anchoring   sync.Mutex
+	anchorFiles sync.RWMutex
 }
 
 func dataSourceName(path string, parameters ...string) string {
@@ -157,6 +162,9 @@ func Open(ctx context.Context, path string, options Options) (*Database, error) 
 	}
 	database.readers.SetMaxOpenConns(options.Readers)
 	database.readers.SetMaxIdleConns(options.Readers)
+	if err := database.cleanAnchorDirectory(); err != nil {
+		return nil, err
+	}
 	anchorNeeded := created
 	if !created {
 		if anchorNeeded, err = database.unanchored(ctx); err != nil {
