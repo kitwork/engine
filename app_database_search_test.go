@@ -99,6 +99,8 @@ func TestAppDatabasePortSearch(t *testing.T) {
 		`SELECT name FROM products WHERE name MATCH 'logi*'`:                                       "Bàn phím Logitech MX",
 		`SELECT name FROM products WHERE products MATCH 'ca ph*'`:                                  "Cà phê sữa đá",
 		`SELECT name FROM products WHERE products MATCH 'ban phim NOT logitech'`:                   "Bàn phím cơ",
+		`SELECT name FROM products WHERE products MATCH 'ban phim NOT Cơ'`:                         "Bàn phím Logitech MX",
+		`SELECT count(*) FROM products WHERE products MATCH 'ban phim NOT co'`:                     "1",
 		`SELECT count(*) FROM products WHERE products MATCH 'akko OR logitech'`:                    "2",
 		`SELECT _snippet_ FROM products WHERE products MATCH 'ca phe'`:                             "<b>Cà</b> <b>phê</b> sữa đá",
 		`SELECT name, _score_ > 0 FROM products WHERE products MATCH 'akko' ORDER BY _score_ DESC`: "Bàn phím cơ 1",

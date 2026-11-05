@@ -60,8 +60,10 @@ const (
 )
 
 // SearchQuery is a MATCH query read: its kind and what the index searches (the words, the phrase, the prefix); a
-// last word typed in part (words ending in a prefix: 'quan dui na*') and the words to leave out ('ban phim NOT co'),
-// which the session checks on the rows the index ranked; the words that mark a snippet.
+// last word typed in part (words ending in a prefix: 'quan dui na*'), which the session checks on the rows the index
+// ranked; the words to leave out ('ban phim NOT co'), checked on those rows too, except in a statement that reads
+// every match (a count, an aggregate), where the rows the index finds for a word on at most excludedByIndex rows are
+// taken out of the matches instead; the words that mark a snippet.
 type SearchQuery struct {
 	Kind     SearchKind
 	Text     string
@@ -75,6 +77,13 @@ func (query SearchQuery) filtered() bool { return query.Prefix != "" || len(quer
 
 // maxSearchCandidates is the most rows one MATCH ranks (search.MaximumSearchLimit).
 const maxSearchCandidates = 100_000
+
+// excludedByIndex is the most rows a word left out may be on for the index to take them out of the matches of a
+// statement reading every match; a word on more is checked on the rows the statement reads (kitwork_match_word). On
+// shopping (05/11/2026) the index giving the rows of a word costs about as much as checking as many matches on the
+// rows, so a word on as many rows as the matches gains nothing: 'ban phim NOT co' (73,275 matches) counted in 2.67 s
+// with the rows of 'co' from the index, 1.72 s with them checked.
+var excludedByIndex = 10_000
 
 // The columns MATCH adds to a row; a table may not have a column of these names.
 const (
@@ -592,6 +601,17 @@ func (session *Session) matchRead(
 			return pgwire.Result{}, nil, err
 		}
 	}
+	// The words left out are checked on the rows the statement reads: a ranked read with a LIMIT reads the few it
+	// needs. A statement that reads every match (a count, an aggregate) takes the rows the index finds for a word
+	// left out out of the matches instead, and reads no row for it (measured on shopping, 05/11/2026: 'ban phim NOT
+	// k120' counted in 0.91 s against 1.68 s; asked of a ranked read with LIMIT 20, 59 ms against 41 ms, and for a
+	// word on 100,000 rows or more, 1.40 s against 0.11 s).
+	var excluded map[int64]bool
+	if len(query.Excluded) > 0 && !describeOnly && (clause.countOnly || clause.aggregate) {
+		if excluded, query, err = excludedRows(ctx, provider, clause, query); err != nil {
+			return pgwire.Result{}, nil, err
+		}
+	}
 	if len(clause.snippets) > 0 || query.filtered() {
 		if fields, err = provider.Fields(ctx, clause.schema, clause.table, clause.fields); err != nil {
 			return pgwire.Result{}, nil, err
@@ -624,9 +644,23 @@ func (session *Session) matchRead(
 		if !allowed {
 			return pgwire.Result{}, nil, pgwire.NewError("42501", fmt.Sprintf("permission denied for table %s.%s", clause.schema, clause.table))
 		}
-		count, err := provider.Count(ctx, clause.schema, clause.table, clause.fields, query)
-		if err != nil {
-			return pgwire.Result{}, nil, err
+		var count uint64
+		if len(excluded) == 0 {
+			if count, err = provider.Count(ctx, clause.schema, clause.table, clause.fields, query); err != nil {
+				return pgwire.Result{}, nil, err
+			}
+		} else {
+			// the matches less the rows left out: every match is read
+			hits, err := provider.Search(ctx, clause.schema, clause.table, clause.fields, query, maxSearchCandidates)
+			if err != nil {
+				return pgwire.Result{}, nil, err
+			}
+			if len(hits) >= maxSearchCandidates {
+				return pgwire.Result{}, nil, pgwire.NewError("54000", fmt.Sprintf(
+					"MATCH: counting with words left out reads at most %d matches, and this query has more: narrow the words or the conditions",
+					maxSearchCandidates))
+			}
+			count = uint64(len(withoutRows(hits, excluded)))
 		}
 		return pgwire.Result{
 			Columns:    []pgwire.Column{{Name: clause.countAlias, DataTypeOID: pgwire.OIDInt8, DataTypeSize: 8}},
@@ -652,11 +686,14 @@ func (session *Session) matchRead(
 		candidates = min(session.options.MaxRows+1, maxSearchCandidates)
 	}
 	for {
-		hits, err := provider.Search(ctx, clause.schema, clause.table, clause.fields, query, candidates)
+		// as many more as there are rows left out, so that taking them out leaves as many as were wanted
+		asked := min(candidates+len(excluded), maxSearchCandidates)
+		hits, err := provider.Search(ctx, clause.schema, clause.table, clause.fields, query, asked)
 		if err != nil {
 			return pgwire.Result{}, nil, err
 		}
-		exhausted := len(hits) < candidates
+		exhausted := len(hits) < asked
+		hits = withoutRows(hits, excluded)
 		if clause.aggregate && !exhausted {
 			return pgwire.Result{}, nil, pgwire.NewError("54000", fmt.Sprintf(
 				"MATCH: an aggregate over MATCH reads at most %d matches, and this query has more: narrow the words or the conditions",
@@ -669,6 +706,52 @@ func (session *Session) matchRead(
 		// The other conditions kept too few of the best matches: rank more of them.
 		candidates = min(candidates*4, maxSearchCandidates)
 	}
+}
+
+// excludedRows asks the index for the rows of each word query leaves out, and gives those of the words on at most
+// excludedByIndex rows, with query keeping the other words to be checked on the rows. A word is counted first, so a
+// word on more rows is not looked for.
+func excludedRows(ctx context.Context, provider SearchProvider, clause *matchClause, query SearchQuery) (map[int64]bool, SearchQuery, error) {
+	rows := map[int64]bool{}
+	var checked []string
+	for _, word := range query.Excluded {
+		alone := SearchQuery{Kind: SearchWords, Text: word, Words: word}
+		count, err := provider.Count(ctx, clause.schema, clause.table, clause.fields, alone)
+		if err != nil {
+			return nil, query, err
+		}
+		if count >= uint64(excludedByIndex) {
+			checked = append(checked, word)
+			continue
+		}
+		hits, err := provider.Search(ctx, clause.schema, clause.table, clause.fields, alone, excludedByIndex)
+		if err != nil {
+			return nil, query, err
+		}
+		if len(hits) >= excludedByIndex {
+			checked = append(checked, word)
+			continue
+		}
+		for _, hit := range hits {
+			rows[hit.RowID] = true
+		}
+	}
+	query.Excluded = checked
+	return rows, query, nil
+}
+
+// withoutRows is hits less the rows of excluded, in their order.
+func withoutRows(hits []SearchHit, excluded map[int64]bool) []SearchHit {
+	if len(excluded) == 0 {
+		return hits
+	}
+	kept := hits[:0:0]
+	for _, hit := range hits {
+		if !excluded[hit.RowID] {
+			kept = append(kept, hit)
+		}
+	}
+	return kept
 }
 
 // checkMatchColumns refuses a table that has a column named as one MATCH adds.

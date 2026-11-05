@@ -162,6 +162,13 @@ func openSearchSession(t *testing.T, access *fakeAccess) (*Session, *fakeSearch)
 // "… * SEARCH 'logitech': 42601 near "*": syntax error"; with the prefix check taking every row, "… 'ban phim logi*'
 // LIMIT 5 = "1|2|4", want "1|2""; with the words left out not checked, "… 'ban phim NOT logitech' = "1|2|4", want
 // "4""; with a filtered query taken as one without other conditions, the index is asked for 5 rows, not 200.
+//
+// CONTROL (05/11/2026, words left out by the index in a count): with the rows the index found not taken out, "…
+// count(*) … 'ban phim NOT co' = "3", want "2""; with the index asked for the rows of a word left out in a ranked read
+// too (as first written, 01/11), "a ranked read with a word left out asked = [count goods [] "logitech" search goods
+// [] 0 "logitech" 10000 …]"; with a word not counted first, "a count with a word on more rows asked = [count goods
+// [] "logitech" search goods [] 0 "logitech" 2 …]"; with a word on more rows than excludedByIndex not checked on the
+// rows, "… NOT logitech' on more rows than the index takes out = "3", want "1"".
 func TestMatch(t *testing.T) {
 	session, provider := openSearchSession(t, newAccess("public.goods", "public.many", "public.plain", "public.reserved"))
 	run := func(query string, parameters ...pgwire.Parameter) string {
@@ -230,6 +237,35 @@ func TestMatch(t *testing.T) {
 	if asked := provider.questions(); !strings.Contains(fmt.Sprint(asked), `search goods [] 0 "ban phim" 200`) {
 		t.Fatalf("words then a prefix asked = %v (the index ranks the whole words, more of them for the check)", asked)
 	}
+
+	// A word left out is checked on the rows a ranked read reads: with LIMIT 1, the index is asked for the 200 best
+	// matches, not for the rows of the word. A count reads every match: there the index gives the rows of a word left
+	// out, counted first, and they are taken out of the matches, no row checked. A word on more rows than
+	// excludedByIndex is not looked for, and is checked on the rows the count reads.
+	if got := run("SELECT id FROM goods WHERE goods MATCH 'ban phim NOT logitech' LIMIT 1"); got != "4" {
+		t.Fatalf("… 'ban phim NOT logitech' LIMIT 1 = %q, want \"4\"", got)
+	}
+	if asked := provider.questions(); fmt.Sprint(asked) != `[search goods [] 0 "ban phim" 200]` {
+		t.Fatalf("a ranked read with a word left out asked = %v", asked)
+	}
+	if got := run("SELECT count(*) FROM goods WHERE goods MATCH 'ban phim NOT co'"); got != "2" {
+		t.Fatalf("… count(*) … 'ban phim NOT co' = %q, want \"2\"", got)
+	}
+	if asked := provider.questions(); fmt.Sprint(asked) != `[count goods [] "co" search goods [] 0 "co" 10000 search goods [] 0 "ban phim" 100000]` {
+		t.Fatalf("a count with a word left out asked = %v", asked)
+	}
+	excludedByIndex = 2
+	t.Cleanup(func() { excludedByIndex = 10_000 })
+	if got := run("SELECT count(*) FROM goods WHERE goods MATCH 'ban phim NOT logitech'"); got != "1" {
+		t.Fatalf("… count(*) … NOT logitech' on more rows than the index takes out = %q, want \"1\"", got)
+	}
+	if asked := provider.questions(); fmt.Sprint(asked) != `[count goods [] "logitech" search goods [] 0 "ban phim" 100000]` {
+		t.Fatalf("a count with a word on more rows asked = %v", asked)
+	}
+	if got := run("SELECT count(*) FROM goods WHERE goods MATCH 'ban phim NOT mx NOT logitech'"); got != "1" {
+		t.Fatalf("one word taken out, one checked = %q, want \"1\"", got)
+	}
+	excludedByIndex = 10_000
 
 	// _snippet_: the passage of the best column around the words, escaped, the words in bold.
 	if got := run("SELECT id, _snippet_ FROM goods WHERE goods MATCH 'ban phim' LIMIT 3"); got != "1,<b>Bàn</b> <b>phím</b> Logitech MX|2,<b>Bàn</b> <b>phím</b> Logitech K380|4,<b>Bàn</b> <b>phím</b> cơ &lt;Akko&gt;" {
