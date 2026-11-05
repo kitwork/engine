@@ -14,6 +14,7 @@ import (
 	"github.com/kitwork/engine/app"
 	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/kitdb/gateway"
+	kitdbsqlite "github.com/kitwork/engine/kitdb/sqlite"
 	"github.com/kitwork/engine/value"
 )
 
@@ -466,9 +467,56 @@ func TestMigrateWritesSQLiteWherePostgreSQLCannot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	statements := gapStatements(tables, gap)
+	statements := gapStatements(tables, gap, "")
 	if len(statements) != 2 || statements[0].postgres != "" || !strings.HasPrefix(statements[0].shown(), `-- SQLite: CREATE TABLE IF NOT EXISTS "ledger"`) ||
 		statements[1].shown() != "CREATE TABLE notes (\n  id kitid PRIMARY KEY NOT NULL,\n  body text NOT NULL\n);" {
 		t.Fatalf("statements: %q, %q", statements[0].shown(), statements[len(statements)-1].shown())
+	}
+}
+
+// A file another process writes (a server running) is planned reading only, marked held; applying it without a port
+// says so, and with one (ThroughPort) sends the plan's PostgreSQL statements there, then holds the file against the
+// tables again. Here the port is the holder's own writer running what the port would (gateway.LoadStructure).
+//
+// CONTROL (05/11/2026): with planGap failing on a held file as before, "kitwork migrate: .database/application/
+// kitwork.db: kitwork.db đang được một tiến trình khác ghi (kitwork.db.lock)…"; with a held plan applied as any other,
+// "a held file applied without a port: kitwork.db đang được một tiến trình khác ghi …" (no word of the server).
+func TestAHeldFileAppliesThroughAPort(t *testing.T) {
+	v1 := `id: id(), email: text().unique(), amount: decimal(12, 2), day: date().index()`
+	managed := newManagedAppAsIs(t, map[string]string{".shared/schema/shop.work": followsSchema(v1)})
+	path := filepath.Join(managed.root, "acme", ".database", "application", "kitwork.db")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	holder, err := kitdbsqlite.Open(ctx, path, kitdbsqlite.Options{}) // the server's writer
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Close()
+
+	plans, release, err := PlanAppMigrations(managed.root, "acme", RootLayoutMultiTenant, nil)
+	if err != nil {
+		t.Fatalf("kitwork migrate: %v", err)
+	}
+	defer release()
+	if len(plans) != 1 || !plans[0].Held || len(plans[0].Add) != 1 || !strings.HasPrefix(plans[0].Add[0], "bảng orders (") {
+		t.Fatalf("the plan of a held file: %+v", plans)
+	}
+	if err := plans[0].Apply(ctx); err == nil || !strings.Contains(err.Error(), "đang được một tiến trình khác ghi") ||
+		!strings.Contains(err.Error(), "dừng server rồi chạy lại kitwork migrate") {
+		t.Fatalf("a held file applied without a port: %v", err)
+	}
+	var sent []string
+	plans[0].ThroughPort("a test port", func(ctx context.Context, statements []string) error {
+		sent = statements
+		return gateway.LoadStructure(ctx, holder, "port:admin", strings.Join(statements, ";\n")+";")
+	})
+	if err := plans[0].Apply(ctx); err != nil {
+		t.Fatalf("through the port: %v", err)
+	}
+	if len(sent) != 2 || !strings.HasPrefix(sent[0], "CREATE TABLE orders (") || sent[1] != "CREATE INDEX idx_orders_day ON orders (day)" ||
+		len(plans[0].Left) != 0 {
+		t.Fatalf("sent %q, left %q", sent, plans[0].Left)
 	}
 }

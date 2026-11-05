@@ -495,6 +495,7 @@ func PlanMigrations(configFile ...string) (plans []*work.DatabaseMigration, rele
 		releases = append(releases, releaseApp)
 		plans = append(plans, found...)
 	}
+	routeThroughPort(cfg, plans) // a file a server holds: through its port (migrate_port.go)
 	return plans, release, nil
 }
 

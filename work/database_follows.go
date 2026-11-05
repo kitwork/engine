@@ -461,7 +461,7 @@ func (t *SchemaTable) checkTables(reader structureReader, tables map[string]map[
 	sayNotes(t.databaseLabel(), notes)
 	if len(add) > 0 || len(differ) > 0 {
 		var statements []string
-		for _, statement := range gapStatements(tables, gap) {
+		for _, statement := range gapStatements(tables, gap, schemaOfDatabase(t.dbName)) {
 			if statement.postgres != "" {
 				statements = append(statements, strings.Join(strings.Fields(statement.postgres), " ")+";")
 			}
@@ -494,7 +494,7 @@ func applyGap(executor structureExecutor, tables map[string]map[string]*ColumnSp
 			return fmt.Errorf("bảng %s: %w", name, err)
 		}
 	}
-	for _, statement := range gapStatements(tables, gap) {
+	for _, statement := range gapStatements(tables, gap, "") {
 		for _, text := range statement.sqlite {
 			if _, err := executor.Exec(text); err != nil {
 				return fmt.Errorf("%s: %w", strings.TrimSuffix(statement.shown(), ";"), err)

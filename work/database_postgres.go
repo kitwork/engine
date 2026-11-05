@@ -43,47 +43,67 @@ func written(table, action, postgres string, sqlite ...string) migrationStatemen
 }
 
 // gapStatements are the changes that make the file what its tables' declarations ask, adding only, in the order
-// they run; their kinds of kitwork_columns are written after (applyGap).
-func gapStatements(tables map[string]map[string]*ColumnSpec, gap databaseGap) []migrationStatement {
+// they run; their kinds of kitwork_columns are written after (applyGap). schema is the file's schema as the port names
+// it ("" for public, kitwork.db): the PostgreSQL statements name their tables in it, so they run through the port as
+// they are; on the file itself the translator takes the table's name alone.
+func gapStatements(tables map[string]map[string]*ColumnSpec, gap databaseGap, schema string) []migrationStatement {
 	var statements []migrationStatement
 	for _, name := range gap.names {
 		columns, table := tables[name], gap.tables[name]
+		reference := qualifiedName(schema, name)
 		if table.missing {
-			create, _ := postgresCreateTable(name, columns)
+			create, _ := postgresCreateTable(reference, columns)
 			statements = append(statements, written(name, "create-table", create, schemaDDL(name, columns)))
 			// a column's .unique() is in the table; a named group is an index of its own
 			if groups, err := collectColumnUniqueGroups(columns); err == nil {
 				for _, group := range groups {
 					index := indexDef{name: group.name, columns: group.columns, unique: true}
-					statements = append(statements, written(name, "add-unique", postgresIndex(name, index), indexSQL(name, index)))
+					statements = append(statements, written(name, "add-unique", postgresIndex(reference, index), indexSQL(name, index)))
 				}
 			}
 			for _, index := range collectIndexes(name, columns) {
-				statements = append(statements, written(name, "add-index", postgresIndex(name, index), indexSQL(name, index)))
+				statements = append(statements, written(name, "add-index", postgresIndex(reference, index), indexSQL(name, index)))
 			}
 			continue
 		}
 		for _, column := range table.absent {
 			add := ""
 			if definition, ok := postgresColumn(column, columns[column], true); ok {
-				add = "ALTER TABLE " + gateway.WrittenName(name) + " ADD COLUMN " + definition
+				add = "ALTER TABLE " + reference + " ADD COLUMN " + definition
 			}
 			statements = append(statements, written(name, "add-column", add,
 				fmt.Sprintf("ALTER TABLE %q ADD COLUMN %s", name, addColumnSQL(column, columns[column]))))
 		}
 		for _, unique := range table.uniques {
 			index := indexDef{name: unique.name, columns: unique.columns, unique: true}
-			statements = append(statements, written(name, "add-unique", postgresIndex(name, index), indexSQL(name, index)))
+			statements = append(statements, written(name, "add-unique", postgresIndex(reference, index), indexSQL(name, index)))
 		}
 		for _, index := range table.indexes {
 			if table.replaced[index.name] {
-				statements = append(statements, written(name, "drop-index", "DROP INDEX "+gateway.WrittenName(index.name),
+				statements = append(statements, written(name, "drop-index", "DROP INDEX "+qualifiedName(schema, index.name),
 					fmt.Sprintf("DROP INDEX IF EXISTS %q", index.name)))
 			}
-			statements = append(statements, written(name, "add-index", postgresIndex(name, index), indexSQL(name, index)))
+			statements = append(statements, written(name, "add-index", postgresIndex(reference, index), indexSQL(name, index)))
 		}
 	}
 	return statements
+}
+
+// qualifiedName is name in schema as PostgreSQL writes it: alone in public ("").
+func qualifiedName(schema, name string) string {
+	if schema == "" {
+		return gateway.WrittenName(name)
+	}
+	return gateway.WrittenName(schema) + "." + gateway.WrittenName(name)
+}
+
+// schemaOfDatabase is the schema a declared database's file is to the port: billing of @application/billing, "" for
+// public and for any other.
+func schemaOfDatabase(name string) string {
+	if schema, ok := strings.CutPrefix(name, applicationDatabaseName+"/"); ok {
+		return schema
+	}
+	return ""
 }
 
 // postgresType is a column's type as PostgreSQL writes it and the port takes it: "" for a kind it has no word for.
@@ -173,8 +193,9 @@ func postgresColumn(name string, spec *ColumnSpec, adding bool) (string, bool) {
 	return strings.Join(parts, " "), true
 }
 
-// postgresCreateTable is a table's CREATE TABLE as PostgreSQL writes it; ok is false when its words cannot say a column.
-func postgresCreateTable(table string, columns map[string]*ColumnSpec) (string, bool) {
+// postgresCreateTable is a table's CREATE TABLE as PostgreSQL writes it, reference its name as written (qualified by
+// its schema or not); ok is false when its words cannot say a column.
+func postgresCreateTable(reference string, columns map[string]*ColumnSpec) (string, bool) {
 	var definitions []string
 	for _, name := range orderedColumns(columns) {
 		definition, ok := postgresColumn(name, columns[name], false)
@@ -205,11 +226,11 @@ func postgresCreateTable(table string, columns map[string]*ColumnSpec) (string, 
 		}
 		definitions = append(definitions, constraint)
 	}
-	return "CREATE TABLE " + gateway.WrittenName(table) + " (\n  " + strings.Join(definitions, ",\n  ") + "\n)", true
+	return "CREATE TABLE " + reference + " (\n  " + strings.Join(definitions, ",\n  ") + "\n)", true
 }
 
-// postgresIndex is an index's CREATE INDEX as PostgreSQL writes it.
-func postgresIndex(table string, index indexDef) string {
+// postgresIndex is an index's CREATE INDEX as PostgreSQL writes it, reference its table's name as written.
+func postgresIndex(reference string, index indexDef) string {
 	columns := make([]string, len(index.columns))
 	for position, column := range index.columns {
 		columns[position] = gateway.WrittenName(column)
@@ -218,7 +239,7 @@ func postgresIndex(table string, index indexDef) string {
 	if index.unique {
 		text = "CREATE UNIQUE INDEX "
 	}
-	text += gateway.WrittenName(index.name) + " ON " + gateway.WrittenName(table) + " (" + strings.Join(columns, ", ") + ")"
+	text += gateway.WrittenName(index.name) + " ON " + reference + " (" + strings.Join(columns, ", ") + ")"
 	if where := partialWhere(index.filter); where != "" {
 		text += " WHERE " + where
 	}

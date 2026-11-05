@@ -23,7 +23,9 @@ import (
 // declares tables on against its file (database_follows.go), says what it would add and what differs, and, asked to,
 // adds it through the file's writer in one transaction (Maintain, by "kitwork migrate"): the history keeps it as a
 // Barrier, the structure file beside the file is written again. It changes no column a table has: what differs is
-// the code's to follow. A server holding the file (one writer per database) keeps kitwork migrate from it.
+// the code's to follow. A file another process holds (a server running: one writer per database) is planned reading
+// only and marked Held; it applies through that server's database port when the engine gives the plan a way there
+// (ThroughPort, kitwork.go): the plan's PostgreSQL statements, sent as an admin.
 
 // migrateBy is who a migration's commit names in the history.
 const migrateBy = "kitwork migrate"
@@ -39,25 +41,75 @@ type DatabaseMigration struct {
 	// Statements are what it runs, as PostgreSQL writes them (what one sends through the port), or SQLite's after
 	// "-- SQLite:" where PostgreSQL's words cannot say it (database_postgres.go)
 	Statements []string
-	tables     map[string]map[string]*ColumnSpec
-	tenant     *Tenant
+	// Held is a file another process writes, a server running: the plan was read without its writer
+	Held bool
+	// Through says the port a plan applies through (ThroughPort); Left is what applying through it could not write,
+	// which kitwork migrate writes with the server stopped (a .searchable() weight, a kind of a column already there)
+	Through string
+	Left    []string
+	schema  string // the file's schema as the port names it ("" public)
+	// postgres are the statements as sent through the port; native tells that one of them has SQLite's words only
+	postgres []string
+	native   bool
+	send     func(ctx context.Context, statements []string) error
+	tables   map[string]map[string]*ColumnSpec
+	tenant   *Tenant
+}
+
+// ThroughPort makes the plan apply through a database port: send runs the plan's PostgreSQL statements there, as an
+// admin, through, in words, the port and the database it names.
+func (m *DatabaseMigration) ThroughPort(through string, send func(ctx context.Context, statements []string) error) {
+	m.Through, m.send = through, send
+}
+
+// applyThroughPort sends the plan's statements to the port and holds the file against the tables again, reading only;
+// what the port could not write is Left.
+func (m *DatabaseMigration) applyThroughPort(ctx context.Context) error {
+	if m.native {
+		return fmt.Errorf("%s: kế hoạch có câu chỉ SQLite nói được (sau -- SQLite:), không đi qua cổng: dừng server rồi chạy lại kitwork migrate", m.Database)
+	}
+	if err := m.send(ctx, m.postgres); err != nil {
+		return fmt.Errorf("%s, qua %s: %w", m.Database, m.Through, err)
+	}
+	gap, err := readGap(m.Path, m.tables)
+	if err != nil {
+		return err
+	}
+	add, differ, notes := gap.lines()
+	if len(add) > 0 || len(differ) > 0 {
+		return fmt.Errorf("%s: sau các câu qua %s, database vẫn chưa có: %s", m.Database, m.Through, strings.Join(append(add, differ...), "; "))
+	}
+	m.Left = notes
+	return nil
 }
 
 // fill says gap in the plan: its lines and the statements that close it.
 func (m *DatabaseMigration) fill(gap databaseGap) {
 	m.Add, m.Differ, m.Write = gap.lines()
-	m.Statements = nil
-	for _, statement := range gapStatements(m.tables, gap) {
+	m.Statements, m.postgres, m.native = nil, nil, false
+	for _, statement := range gapStatements(m.tables, gap, m.schema) {
 		m.Statements = append(m.Statements, statement.shown())
+		if statement.postgres == "" {
+			m.native = true
+			continue
+		}
+		m.postgres = append(m.postgres, statement.postgres)
 	}
 }
 
 // Pending reports a migration that changes the file.
 func (m *DatabaseMigration) Pending() bool { return len(m.Add) > 0 || len(m.Write) > 0 }
 
-// Apply makes the file what the plan says, held against the file again inside the transaction that changes it.
+// Apply makes the file what the plan says, held against the file again inside the transaction that changes it; a
+// plan given a port applies through it.
 func (m *DatabaseMigration) Apply(ctx context.Context) error {
-	if m.tenant == nil {
+	switch {
+	case m.send != nil:
+		return m.applyThroughPort(ctx)
+	case m.Held:
+		return fmt.Errorf("%s: %s; không có cổng database nào của server đó phục vụ file (app.database trong application.work): "+
+			"dừng server rồi chạy lại kitwork migrate", m.Database, heldError{path: m.Path})
+	case m.tenant == nil:
 		return fmt.Errorf("%s: a plan of CheckAppDatabases reads only", m.Database)
 	}
 	database, err := m.tenant.historyDatabase(m.Path)
@@ -118,11 +170,12 @@ func PlanAppMigrations(root, identity string, layout RootLayout, shared *SharedE
 		return nil, nil, err
 	}
 	for _, plan := range plans {
-		gap, err := tenant.planGap(plan.Path, plan.tables)
+		gap, held, err := tenant.planGap(plan.Path, plan.tables)
 		if err != nil {
 			closeTenant()
 			return nil, nil, fmt.Errorf("%s: %w", plan.Database, err)
 		}
+		plan.Held = held
 		plan.fill(gap)
 	}
 	return plans, closeTenant, nil
@@ -196,7 +249,7 @@ func declaredFiles(root, identity string, layout RootLayout, shared *SharedEnvir
 		plan := byPath[proxy.sqlitePath]
 		if plan == nil {
 			plan = &DatabaseMigration{App: appFolder, Database: databaseLabelOf(tenant, proxy.dbName, proxy.sqlitePath),
-				Path: proxy.sqlitePath, tables: map[string]map[string]*ColumnSpec{}, tenant: tenant}
+				Path: proxy.sqlitePath, schema: schemaOfDatabase(proxy.dbName), tables: map[string]map[string]*ColumnSpec{}, tenant: tenant}
 			byPath[proxy.sqlitePath] = plan
 			plans = append(plans, plan)
 		}
@@ -250,16 +303,22 @@ func readGap(path string, tables map[string]map[string]*ColumnSpec) (databaseGap
 }
 
 // planGap holds tables against the file at path: through its writer when the file, or its structure file, is
-// there; as a file of no table when neither is (nothing is made until the migration applies).
-func (t *Tenant) planGap(path string, tables map[string]map[string]*ColumnSpec) (databaseGap, error) {
+// there; as a file of no table when neither is (nothing is made until the migration applies). A file another process
+// writes is read without the writer, and held.
+func (t *Tenant) planGap(path string, tables map[string]map[string]*ColumnSpec) (databaseGap, bool, error) {
 	_, fileErr := os.Stat(path)
 	_, structureErr := os.Stat(path + ".sql")
 	if errors.Is(fileErr, os.ErrNotExist) && errors.Is(structureErr, os.ErrNotExist) {
-		return checkDatabase(nil, tables)
+		gap, err := checkDatabase(nil, tables)
+		return gap, false, err
 	}
 	database, err := t.historyDatabase(path)
+	if errors.Is(err, kitdbsqlite.ErrLocked) {
+		gap, err := readGap(path, tables)
+		return gap, true, err
+	}
 	if err != nil {
-		return databaseGap{}, err
+		return databaseGap{}, false, err
 	}
 	var gap databaseGap
 	err = database.Read(context.Background(), func(snapshot *kitdbsqlite.Snapshot) error {
@@ -267,7 +326,7 @@ func (t *Tenant) planGap(path string, tables map[string]map[string]*ColumnSpec) 
 		gap, err = checkDatabase(snapshot, tables)
 		return err
 	})
-	return gap, err
+	return gap, false, err
 }
 
 // runSchemaFiles runs every file of the app's .shared/schema/ and gives the databases they declare that the engine

@@ -226,10 +226,20 @@ func historyRefusal(path string, err error) error {
 		return fmt.Errorf("%s có thứ lịch sử của database không ghi được (%v): engine giữ lịch sử của mọi file nó khai bảng, "+
 			"nên file không có trigger, bảng ảo, bảng WITHOUT ROWID (KITWORK_KITDB.md mục 4)", filepath.Base(path), err)
 	case errors.Is(err, kitdbsqlite.ErrLocked):
-		return fmt.Errorf("%s đang được một tiến trình khác ghi (%s.lock): một database một tiến trình ghi", filepath.Base(path), filepath.Base(path))
+		return heldError{path: path}
 	}
 	return fmt.Errorf("%s: %w", filepath.Base(path), err)
 }
+
+// heldError is a file another process writes (a server running): said in words, and still kitdbsqlite.ErrLocked, so
+// kitwork migrate knows to go through that process's port (database_migrate.go).
+type heldError struct{ path string }
+
+func (e heldError) Error() string {
+	return fmt.Sprintf("%s đang được một tiến trình khác ghi (%s.lock): một database một tiến trình ghi", filepath.Base(e.path), filepath.Base(e.path))
+}
+
+func (e heldError) Unwrap() error { return kitdbsqlite.ErrLocked }
 
 // dropSearchTriggers takes out of a file what the engine wrote before 03/11/2026 to track a table for its full-text
 // index: the triggers kitwork_search_* and their two tables. The writer refuses a file with triggers, and the index
