@@ -55,6 +55,9 @@ type Columns interface {
 type Options struct {
 	MaxRows  int   // 10000 when zero or less
 	MaxBytes int64 // 10 << 20 when zero or less
+	// MaxTemporaryBytes is the most bytes the process's SQLite temporary files may hold while a statement of the
+	// session runs (temporary.go), PostgreSQL's temp_file_limit: 2 << 30 when zero or less.
+	MaxTemporaryBytes int64
 	// User is the session's user: what current_user answers and the owner the catalog shows.
 	User string
 	// Log, when set, is told each statement that fails and its error, as PostgreSQL logs a failed statement.
@@ -149,6 +152,9 @@ func Open(ctx context.Context, target Target, access Access, columns Columns, op
 	}
 	if options.MaxBytes <= 0 {
 		options.MaxBytes = DefaultMaxBytes
+	}
+	if options.MaxTemporaryBytes <= 0 {
+		options.MaxTemporaryBytes = DefaultMaxTemporaryBytes
 	}
 	order, err := schemaOrder(target)
 	if err != nil {
@@ -315,6 +321,7 @@ func (session *Session) attach(ctx context.Context, files map[string]string) err
 	if err := session.connection.QueryRowContext(ctx, "SELECT sqlite_version()").Scan(&session.sqliteVersion); err != nil {
 		return fmt.Errorf("gateway: SQLite version: %w", err)
 	}
+	prepareTemporaryFiles(ctx)
 	// Last, once the session's own setup is read: no single value may outgrow what a whole result may hold. SQLite
 	// refuses it while building it, before it is copied out.
 	if _, err := sqlite.Limit(session.connection, limitLength, int(min(session.options.MaxBytes, sqliteMaxLength))); err != nil {
@@ -374,11 +381,14 @@ func (session *Session) enter(ctx context.Context) (context.Context, func(), err
 		session.mutex.Unlock()
 		return nil, nil, err
 	}
-	statementContext, cancel := context.WithCancel(ctx)
+	statementContext, cancelCause := context.WithCancelCause(ctx)
+	cancel := func() { cancelCause(nil) }
 	session.statementMutex.Lock()
 	session.cancelStatement = cancel
 	session.statementMutex.Unlock()
+	unwatch := temporaryFiles.watch(session.options.MaxTemporaryBytes, cancelCause)
 	leave := func() {
+		unwatch()
 		session.statementMutex.Lock()
 		session.cancelStatement = nil
 		session.statementMutex.Unlock()
@@ -410,6 +420,7 @@ func (session *Session) Execute(ctx context.Context, query string, parameters []
 		return pgwire.Result{}, err
 	}
 	defer leave()
+	defer func() { err = temporaryCause(ctx, err) }() // before leave cancels the statement's context
 	parsed, err := parseStatement(session.translator().translate(query))
 	if err != nil {
 		session.fail()
@@ -433,6 +444,7 @@ func (session *Session) Describe(ctx context.Context, query string, parameters [
 		return nil, err
 	}
 	defer leave()
+	defer func() { err = temporaryCause(ctx, err) }() // before leave cancels the statement's context
 	parsed, err := parseStatement(session.translator().translate(query))
 	if err != nil {
 		session.fail()
