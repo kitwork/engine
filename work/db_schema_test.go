@@ -381,8 +381,10 @@ func TestMigrationPlanClassifies(t *testing.T) {
 	if s := noFlag["retype:amount"]; s.From != "TEXT" || s.To != "INTEGER" || !s.Destructive || s.WillApply {
 		t.Errorf("retype:amount (no flag) = %+v", s)
 	}
-	if s, ok := noFlag["drop:old"]; !ok || s.WillApply {
-		t.Errorf("drop:old (no flag) = %+v ok=%v", s, ok)
+	// 'old' is the database's own column (KITWORK_DATABASE.md, "Database là gốc", 05/11/2026): no step at all.
+	// CONTROL (05/11/2026): with extra columns planned as drops, "drop:old (no flag) planned: {Action:drop Column:old …}".
+	if s, ok := noFlag["drop:old"]; ok {
+		t.Errorf("drop:old (no flag) planned: %+v; a column the schema does not declare is the database's", s)
 	}
 
 	// With the flag: destructive steps WillApply.

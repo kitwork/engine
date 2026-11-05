@@ -212,13 +212,13 @@ router.get((context) => {
 		}
 	}
 
-	// item dropped, quantity retyped: refused, nothing applied
+	// quantity retyped: refused, nothing applied; item, which this app does not declare, is the database's own and stays
 	other, _, err := bootApp(t, declaring(`quantity: text()`), "depot.example")
 	if err != nil {
 		t.Fatal(err)
 	}
 	refused := answer(t, other, "")
-	const want = `bảng stocks trên connection("warehouse"): đổi kiểu cột quantity INTEGER→TEXT, bỏ cột item làm mất dữ liệu nên không chạy, database giữ nguyên; ` +
+	const want = `bảng stocks trên connection("warehouse"): đổi kiểu cột quantity INTEGER→TEXT làm mất dữ liệu nên không chạy, database giữ nguyên; ` +
 		`đưa table về như database đang có (mọi app gọi tên warehouse cùng khai một bảng); đổi mất dữ liệu là việc của kitwork migrate, chưa có trong engine hôm nay (lát 7)`
 	if refused["code"] != value.DatabaseCode || refused["message"] != want {
 		t.Fatalf("a struct that loses data: %v, want DATABASE %q", refused, want)

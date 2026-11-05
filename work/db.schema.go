@@ -1717,7 +1717,9 @@ type planStep struct {
 
 // planMigration computes what migrate() would do WITHOUT touching the database — the single classifier
 // shared by the dry-run (db.<table>.plan()) and the applier (migrate). Pure: (current, schema) in, plan
-// out. Destructive steps (retype/drop) are marked WillApply only when allowDrop is set.
+// out. A retype is destructive, marked WillApply only when allowDrop is set. A column the database has and the
+// schema does not declare is the database's own (KITWORK_DATABASE.md, "Database là gốc", 05/11/2026: added through
+// the port, or by another client), not drift: it is planned away only with the explicit allowDrop.
 func planMigration(current map[string]string, columns map[string]*ColumnSpec, allowDrop bool) []planStep {
 	if len(current) == 0 {
 		return []planStep{{Action: "create", WillApply: true}}
@@ -1735,7 +1737,7 @@ func planMigration(current map[string]string, columns map[string]*ColumnSpec, al
 	}
 	var drops []string
 	for col := range current {
-		if _, want := columns[col]; want {
+		if _, want := columns[col]; want || !allowDrop {
 			continue
 		}
 		drops = append(drops, col)

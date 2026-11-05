@@ -9,9 +9,10 @@ import (
 // kitwork_columns keeps, in each SQLite file the engine migrates, the kind each column of a table was declared with
 // (KITWORK_KITDB.md câu 13.5): what the file alone does not say, a decimal's scale above all (the file stores the
 // integer × 10^scale), so the PostgreSQL wire port gives 4.50 for 450 and a boolean as true or false. The rows of a
-// table are replaced by its declared columns each time the engine checks the table against its declaration
-// (ensureTable), in one transaction; the kinds are the engine's own (decimal, bool, datetime, date, json, kitid,
-// text, …). search_weight is a .searchable() column's weight in the table's full-text index, 0 for any other column:
+// table's declared columns are written again each time the engine checks the table against its declaration
+// (ensureTable), in one transaction; the rows of the columns it does not declare stay, the database's own (a column
+// added through the port, KITWORK_DATABASE.md "Database là gốc", 05/11/2026). The kinds are the engine's own
+// (decimal, bool, datetime, date, json, kitid, text, …). search_weight is a .searchable() column's weight in the table's full-text index, 0 for any other column:
 // the database port builds the index of each table that has one and answers MATCH on it (app_database_search.go).
 //
 // A table with a .searchable() column has its full-text index folded from the history of its file (engine/database/
@@ -50,8 +51,8 @@ type columnKindsWriter interface {
 	Exec(query string, args ...any) (sql.Result, error)
 }
 
-// writeColumnKinds replaces the rows of table in kitwork_columns with its declared columns, in the caller's
-// transaction.
+// writeColumnKinds writes the rows of table's declared columns in kitwork_columns, in the caller's transaction; the
+// rows of the columns it does not declare are left as they are, unless the table no longer has them.
 func writeColumnKinds(writer columnKindsWriter, table string, columns map[string]*ColumnSpec) error {
 	if _, err := writer.Exec(sqliteColumnsSchema); err != nil {
 		return err
@@ -59,7 +60,18 @@ func writeColumnKinds(writer columnKindsWriter, table string, columns map[string
 	if _, err := writer.Exec(sqliteColumnsSearch); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 		return err
 	}
-	if _, err := writer.Exec(`DELETE FROM kitwork_columns WHERE table_name = ?`, table); err != nil {
+	declared := make([]any, 0, len(columns)+1)
+	declared = append(declared, table)
+	for name := range columns {
+		declared = append(declared, name)
+	}
+	marks := strings.TrimSuffix(strings.Repeat("?, ", len(columns)), ", ")
+	if marks == "" {
+		marks = "NULL"
+	}
+	// the declared columns' rows are written again; another column's row goes only with its column
+	if _, err := writer.Exec(`DELETE FROM kitwork_columns WHERE table_name = ? AND (column_name IN (`+marks+`)
+		OR column_name NOT IN (SELECT name FROM pragma_table_xinfo(table_name)))`, declared...); err != nil {
 		return err
 	}
 	for _, name := range orderedColumns(columns) {
