@@ -353,8 +353,8 @@ func (d *datastorePlace) sweep(database queuestore.Immediate) error {
 }
 
 // sayDatastoreLeftBehind says, once for each run of the app, that the KitDB file datastore() was before
-// 30/10/2026 is still there and no longer read: what it holds stays in it until `kitwork migrate kitdb` copies
-// it. It is said at the boot of an app that has background work (the only apps that boot a tenant of their own),
+// 30/10/2026 is still there and no longer read: what it holds stays in it, and the engine no longer copies it
+// (kitdb_legacy.go). It is said at the boot of an app that has background work (the only apps that boot a tenant of their own),
 // or else at the app's first use of datastore() (openDatastore).
 func (t *Tenant) sayDatastoreLeftBehind() {
 	shared, err := t.storage()
@@ -381,10 +381,10 @@ func (t *Tenant) sayDatastoreLeftBehindNow() {
 }
 
 // datastoreLegacyLine is what boot says of an app whose datastore() is still in the KitDB file.
-const datastoreLegacyLine = "[Storage] .database/storage/storage.kitdb (KitDB cũ) không còn đọc: datastore() nay ở .database/storage/kitwork.db; giá trị cũ ở lại trong file đó cho tới khi `kitwork migrate kitdb` chép chúng sang"
+const datastoreLegacyLine = "[Storage] .database/storage/storage.kitdb (KitDB cũ) không còn đọc: datastore() nay ở .database/storage/kitwork.db; giá trị cũ ở lại trong file đó; engine không còn chép file KitDB (05/11/2026): `kitwork migrate kitdb` của một bản engine trước ngày đó chép chúng sang"
 
 // datastoreCopied reports whether the app's kitwork.db of datastore() holds the mark of a copy from the KitDB
-// file (kitwork_copies, kitdb_copy.go).
+// file (kitwork_copies, kitdb_legacy.go).
 func datastoreCopied(t *Tenant) bool {
 	return kitDBCopyMarked(t, datastoreDatabaseName, datastorePath(t), datastoreLegacySource)
 }

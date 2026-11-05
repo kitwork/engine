@@ -450,37 +450,6 @@ func Check(configFile ...string) (core.CheckReport, error) {
 	), nil
 }
 
-// KitDBCopyOptions is `kitwork migrate kitdb [--app <identity>] [--dry-run]`.
-type KitDBCopyOptions = core.KitDBCopyOptions
-
-// KitDBCopyResult is the copy of one app's KitDB files.
-type KitDBCopyResult = core.KitDBCopyResult
-
-// MigrateKitDB copies each app's KitDB files (application.kitdb, storage.kitdb) into its SQLite files, or
-// with DryRun says what it would copy (`kitwork migrate kitdb`). It reads the manifest as Check does, so an
-// app's .shared/schema/ sees the databases the server would (app.databases), and starts nothing: no listener,
-// no worker, no schedule.
-func MigrateKitDB(options KitDBCopyOptions, configFile ...string) ([]KitDBCopyResult, error) {
-	cfg, err := commandConfig(configFile...)
-	if err != nil {
-		return nil, err
-	}
-	if err := validateAppDatabaseConfigs(cfg.AppDatabases); err != nil {
-		return nil, err
-	}
-	for i := range cfg.Databases {
-		dbConfig := cfg.Databases[i]
-		alias := dbConfig.Alias
-		if alias == "" {
-			alias = "default"
-		}
-		database.Configs[alias] = dbConfig
-	}
-	applyDatabaseManifest(cfg)
-	work.AllowLocal = cfg.AllowLocal
-	return core.CopyKitDB(cfg.Root, cfg.MaxEnergy, cfg.RootLayout, cfg.SharedEnvironment, options)
-}
-
 // applyDatabaseManifest hands the engine what application.work says an app's .shared/schema/ may reach
 // (KITWORK_DATABASE.md mục 1): the app.databases catalogue, which connection("tên") picks from, and
 // app.policy({ tenantConnections }), which turns connect() off, and app.history({ days }), how long the history

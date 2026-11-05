@@ -17,8 +17,9 @@
 // Revoking a table that a schema-wide grant still covers, or a role for one database that the user still holds for
 // every database, is refused rather than done while the access stays.
 //
-// Stored admins exist only from ImportKitDB: a KitDB administrator stays an administrator (it may run account
-// statements, connect to and select from everything). No statement makes or unmakes one. When the catalog has no
+// Stored admins exist only from ImportKitDB, which brought the accounts of an old KitDB catalog over until the KROW
+// reader left the engine (05/11/2026): a KitDB administrator stays an administrator (it may run account statements,
+// connect to and select from everything). No statement makes or unmakes one. When the catalog has no
 // host admin, the last enabled stored admin cannot be dropped or disabled (kitdb/managed's rule); with a host admin
 // there is always an admin, so a stored one may go.
 //
@@ -69,7 +70,7 @@
 //	grants      (grantee, privilege 'connect' | 'select', database_name, schema_name, table_name; table '' = every
 //	             table of the schema; schema and table COLLATE NOCASE)
 //	sequence    (name PRIMARY KEY, value)            'stamp' → the last stamp given
-//	imports     (source PRIMARY KEY, users, imported_at)   'kitdb' once ImportKitDB has run
+//	imports     (source PRIMARY KEY, users, imported_at)   'kitdb' once ImportKitDB ran (until 05/11/2026)
 //
 // Triggers keep a name in users or roles, never both; refuse a grant to a name in neither; and delete a name's
 // grants and memberships when it is deleted, so a name made again never finds old rights.

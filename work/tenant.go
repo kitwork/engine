@@ -522,8 +522,7 @@ func (t *Tenant) Run() error {
 }
 
 // prepareProgram readies what every file of the tenant runs with, and nothing more: the VM and its globals,
-// the boundaries of the app's and the site's folders, and the environment. Run starts from it; `kitwork
-// migrate kitdb` (CopyKitDB) runs the app's .shared/schema/ on it without starting the workers Run starts.
+// the boundaries of the app's and the site's folders, and the environment. Run starts from it.
 func (t *Tenant) prepareProgram() error {
 	t.bytecode = &compiler.Bytecode{Program: runtime.EmptyProgram()}
 	t.vm = runtime.New(t.bytecode.Program)

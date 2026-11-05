@@ -67,7 +67,7 @@ func validateAppDatabaseConfigs(configs []AppDatabaseConfig) error {
 	for _, config := range configs {
 		info, err := os.Stat(config.Path)
 		if err == nil && !info.IsDir() {
-			return fmt.Errorf("app.database %q: path is a file; the port serves the host's .database/ folder (a KitDB file is copied with kitwork migrate kitdb)", config.Path)
+			return fmt.Errorf("app.database %q: path is a file; the port serves the host's .database/ folder", config.Path)
 		}
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("app.database %q: %w", config.Path, err)
@@ -228,8 +228,9 @@ func (g *appDatabaseGateway) appOf(domain string) (string, error) {
 	return filepath.Join(g.apps.root, identity), nil
 }
 
-// catalogOf is the catalog of a cluster, opened once; the accounts of its old KitDB catalog are brought in the first
-// time (catalog.ImportKitDB keeps a mark and never writes the KitDB file).
+// catalogOf is the catalog of a cluster, opened once. The accounts of an old KitDB catalog (.catalog/data.kitdb) were
+// brought in by the catalog's first opening until 05/11/2026, when the KROW reader left the engine (KITWORK_KITDB.md
+// câu 13.4); an engine from before that day still imports them.
 func (g *appDatabaseGateway) catalogOf(ctx context.Context, cluster string) (*catalog.Catalog, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -244,9 +245,8 @@ func (g *appDatabaseGateway) catalogOf(ctx context.Context, cluster string) (*ca
 		return nil, err
 	}
 	if legacy := filepath.Join(cluster, catalog.Directory, "data.kitdb"); fileExists(legacy) {
-		if _, err := opened.ImportKitDB(ctx, legacy); err != nil {
-			slog.Warn("Database port: the accounts of the old KitDB catalog were not imported", "catalog", legacy, "error", err)
-		}
+		slog.Warn("Database port: the accounts of the old KitDB catalog are no longer imported; an engine from before 05/11/2026 imports them",
+			"catalog", legacy)
 	}
 	g.catalogs[cluster] = opened
 	return opened, nil

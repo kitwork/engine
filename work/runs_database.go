@@ -251,9 +251,10 @@ func placeName(place *runsPlace) string {
 // sayLeftBehind says where runs of kind that had not ended stay with no worker reading them: how many the app's
 // own database (.database/application/kitwork.db) holds when queue.database or schedule.database put the runs in
 // a database of the catalogue, and, whatever the place, that the KitDB file the app's database was before
-// 29/10/2026 (application.kitdb) is no longer read until `kitwork migrate kitdb` copies it (kitdb_copy.go). Boot
-// does not open that file to count its runs (KROW goes, KITWORK_KITDB.md câu 13.4); once kitwork.db holds the
-// mark of the copy nothing is said of it. Neither file is made when it does not exist.
+// 29/10/2026 (application.kitdb) is no longer read, and that the engine no longer copies it (kitdb_legacy.go):
+// `kitwork migrate kitdb` of an engine from before 05/11/2026 does. Boot does not open that file to count its runs
+// (KITWORK_KITDB.md câu 13.4); once kitwork.db holds the mark of the copy nothing is said of it. Neither file is
+// made when it does not exist.
 func (t *Tenant) sayLeftBehind(kind string, place *runsPlace, label, call string) {
 	noun := "job"
 	if kind == scheduleKind {
@@ -274,7 +275,7 @@ func (t *Tenant) sayLeftBehind(kind string, place *runsPlace, label, call string
 	case err != nil:
 		fmt.Printf("%s .database/application/application.kitdb: %v\n", label, err)
 	case legacy:
-		fmt.Printf("%s .database/application/application.kitdb (KitDB cũ) không còn đọc: các lần chạy của %s nay nằm ở %s; lần chạy chưa xong trong file cũ ở lại đó và không chạy cho tới khi `kitwork migrate kitdb` chép chúng sang .database/application/kitwork.db\n",
+		fmt.Printf("%s .database/application/application.kitdb (KitDB cũ) không còn đọc: các lần chạy của %s nay nằm ở %s; lần chạy chưa xong trong file cũ ở lại đó và không chạy; engine không còn chép file KitDB (05/11/2026): `kitwork migrate kitdb` của một bản engine trước ngày đó chép chúng sang .database/application/kitwork.db\n",
 			label, noun, placeName(place))
 	}
 }
