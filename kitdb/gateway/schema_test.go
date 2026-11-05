@@ -42,7 +42,7 @@ func kindsOf(t *testing.T, database *kitdbsqlite.Database, table string) string 
 //
 // CONTROL (05/11/2026): with the kinds not read again after the statement, "INSERT INTO notes (title, price, done)
 // VALUES ('a', 12.5, 't'): constraint failed: cannot store REAL value in INTEGER column notes.price"; with the kinds
-// not written, "kinds of notes "", want at:text data:json done:bool id:integer price:decimal(10,2) title:text".
+// not written, "kinds of notes "", want at:datetime data:json done:bool id:integer price:decimal(10,2) title:text".
 func TestSchemaStatementsThroughThePort(t *testing.T) {
 	fixture := newWriteFixture(t)
 	access := newAccess()
@@ -62,8 +62,8 @@ func TestSchemaStatementsThroughThePort(t *testing.T) {
 			t.Fatalf("the table made: %s; want %s in it", definition, want)
 		}
 	}
-	if got := kindsOf(t, fixture.publicDB, "notes"); got != "at:text data:json done:bool id:integer price:decimal(10,2) title:text" {
-		t.Fatalf("kinds of notes %q, want at:text data:json done:bool id:integer price:decimal(10,2) title:text", got)
+	if got := kindsOf(t, fixture.publicDB, "notes"); got != "at:datetime data:json done:bool id:integer price:decimal(10,2) title:text" {
+		t.Fatalf("kinds of notes %q, want at:datetime data:json done:bool id:integer price:decimal(10,2) title:text", got)
 	}
 	run(t, session, `INSERT INTO notes (title, price, done) VALUES ('a', 12.5, 't')`)
 	run(t, session, `INSERT INTO notes (title) VALUES ('b')`)
@@ -84,7 +84,7 @@ func TestSchemaStatementsThroughThePort(t *testing.T) {
 	}
 	run(t, session, `DROP INDEX public.notes_name_idx`)
 	run(t, session, `ALTER TABLE notes DROP COLUMN IF EXISTS total, DROP COLUMN IF EXISTS nothing`)
-	if got := kindsOf(t, fixture.publicDB, "notes"); got != "at:text data:json done:bool id:integer name:text price:decimal(10,2)" {
+	if got := kindsOf(t, fixture.publicDB, "notes"); got != "at:datetime data:json done:bool id:integer name:text price:decimal(10,2)" {
 		t.Fatalf("kinds after ALTER: %q", got)
 	}
 	run(t, session, `ALTER TABLE notes ADD COLUMN IF NOT EXISTS name text`) // there: nothing to do
@@ -130,5 +130,40 @@ func TestSchemaStatementsThroughThePort(t *testing.T) {
 	run(t, session, `ROLLBACK`)
 	if later := stored(t, fixture.publicDB, `SELECT count(*) FROM sqlite_schema WHERE name = 'later'`); later != int64(1) {
 		t.Fatal("the table made in the block before its write went with the ROLLBACK")
+	}
+}
+
+// TestSchemaStatementsTakeTheEnginesKinds: the port's schema statements say every kind of the engine's table() in
+// PostgreSQL's words (KITWORK_DATABASE.md "Database là gốc"): kitid, KitDB's own domain, whose CREATE DOMAIN kitid AS
+// text is taken and does nothing; date; timestamptz, the engine's timestamp(). timestamp without a time zone, time and
+// uuid stay text. Any other domain is refused.
+//
+// CONTROL (05/11/2026): with typeOf mapping date to text as before, "kinds of events "at:datetime day:text id:kitid
+// local:text ref:text starts:text"".
+func TestSchemaStatementsTakeTheEnginesKinds(t *testing.T) {
+	fixture := newWriteFixture(t)
+	access := newAccess()
+	access.admin = true
+	session := fixture.session(t, access, Options{})
+	if tag := run(t, session, `CREATE DOMAIN kitid AS text`); tag != "CREATE DOMAIN" {
+		t.Fatalf("CREATE DOMAIN kitid AS text: tag %q", tag)
+	}
+	refused(t, session, `CREATE DOMAIN money AS numeric(12, 2)`, "0A000", "the one domain is KitDB's own")
+	run(t, session, `CREATE TABLE events (id kitid PRIMARY KEY NOT NULL, day date NOT NULL, at timestamptz, `+
+		`local timestamp without time zone, starts time, ref uuid)`)
+	if got := kindsOf(t, fixture.publicDB, "events"); got != "at:datetime day:date id:kitid local:text ref:text starts:text" {
+		t.Fatalf("kinds of events %q", got)
+	}
+	definition := stored(t, fixture.publicDB, `SELECT sql FROM sqlite_schema WHERE name = 'events'`).(string)
+	if !strings.Contains(definition, `"id" TEXT PRIMARY KEY NOT NULL`) || !strings.Contains(definition, `"at" TEXT`) {
+		t.Fatalf("the table made: %s", definition)
+	}
+	for _, statement := range []string{`CREATE TABLE t (id kitid PRIMARY KEY)`, `ALTER TABLE t ADD COLUMN at timestamptz`, kitidDomain + ";"} {
+		if _, err := TranslateSchema(statement); err != nil {
+			t.Fatalf("TranslateSchema(%q): %v", statement, err)
+		}
+	}
+	if _, err := TranslateSchema(`DROP TABLE t`); err == nil {
+		t.Fatal("TranslateSchema took DROP TABLE, which kitwork migrate never writes")
 	}
 }

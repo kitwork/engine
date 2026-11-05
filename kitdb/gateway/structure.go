@@ -110,7 +110,11 @@ func Structure(ctx context.Context, source structureQuerier) (string, error) {
 	if tables == 0 {
 		return "", nil
 	}
-	return StructureHeader + out.String(), nil
+	body := out.String()
+	if strings.Contains(body, " kitid") {
+		body = "\n" + kitidDomain + ";\n" + body
+	}
+	return StructureHeader + body, nil
 }
 
 // kindRows is the INSERT of table's kinds into kitwork_columns, by column name.
@@ -156,8 +160,10 @@ func unsaidKinds(ctx context.Context, source structureQuerier, table string, kin
 	implied := map[string]string{"INTEGER": "integer", "INT": "integer", "REAL": "float", "TEXT": "text", "BLOB": "blob"}
 	unsaid := map[string]columnKind{}
 	for column, kind := range kinds {
-		if kind.weight == 0 && (kind.kind == "decimal" || kind.kind == "bool" || kind.kind == "json" || implied[storage[column]] == kind.kind) {
-			continue // numeric(p, s), boolean, json, or the kind its storage gives
+		said := kind.kind == "decimal" || kind.kind == "bool" || kind.kind == "json" || implied[storage[column]] == kind.kind ||
+			storage[column] == "TEXT" && (kind.kind == "kitid" || kind.kind == "date" || kind.kind == "datetime")
+		if kind.weight == 0 && said {
+			continue // numeric(p, s), boolean, json, kitid, date, timestamptz, or the kind its storage gives
 		}
 		unsaid[column] = kind
 	}
@@ -336,6 +342,12 @@ func renderTable(text string, kinds map[string]columnKind) (string, string) {
 			written = "boolean"
 		case found && kind.kind == "json" && storage == "TEXT":
 			written = "json"
+		case found && kind.kind == "kitid" && storage == "TEXT":
+			written = "kitid"
+		case found && kind.kind == "date" && storage == "TEXT":
+			written = "date"
+		case found && kind.kind == "datetime" && storage == "TEXT":
+			written = "timestamptz"
 		case storage == "INTEGER" && primary && len(rest) > 1 && rest[0].word() == "PRIMARY" && rest[1].word() == "KEY":
 			written = "bigserial" // the rowid's own key
 		case storage == "INTEGER" || storage == "INT":
@@ -524,6 +536,8 @@ func structureStatements(text string) ([]string, []kindChange, []string, error) 
 		c := &schemaCursor{tokens: part}
 		var plan schemaPlan
 		switch {
+		case c.keyword("CREATE", "DOMAIN"):
+			plan, err = c.createDomain()
 		case c.keyword("CREATE", "TABLE"):
 			plan, err = c.createTable()
 		case c.keyword("CREATE", "UNIQUE", "INDEX"):

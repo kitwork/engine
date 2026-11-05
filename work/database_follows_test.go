@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"github.com/kitwork/engine/app"
 	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/kitdb/gateway"
+	"github.com/kitwork/engine/value"
 )
 
 // followsRoute inserts an order of the form's email and lists today's orders, each answering its failure as
@@ -35,7 +37,7 @@ router.get((context) => {
 
 // followsSchema is the shop's schema with the columns of orders given.
 func followsSchema(columns string) string {
-	return `import { table, id, text, decimal, date, timestamp } from "kitwork/schema";
+	return `import { table, id, text, integer, float, decimal, boolean, date, json, timestamp } from "kitwork/schema";
 import { connection } from "kitwork/database";
 
 const orders = table({ ` + columns + ` });
@@ -261,11 +263,11 @@ router.get((context) => context.json({ rows: db.list((posts) => posts.title !== 
 
 // A table made with the port's schema statements, as an admin writes them in PostgreSQL's words (KITWORK_DATABASE.md
 // "Database là gốc", slice 2), serves the app that declares it, without kitwork migrate: its storage is what the
-// declaration's is. The kinds the port does not know (a kitid, a date) are said once; kitwork migrate writes them.
+// declaration's is, and date is the engine's date. A key written as text where the app declares id() (a kitid) is
+// said once; kitwork migrate writes its kind.
 //
 // CONTROL (05/11/2026): with checkTable holding a kind of kitwork_columns other than decimal as a difference, "the
-// table made through the port: map[code:DATABASE message:… khác database: cột orders.id: database ghi text; cột
-// orders.day: database ghi text; …]".
+// table made through the port: map[code:DATABASE message:… khác database: cột orders.id: database ghi text; …]".
 func TestATableMadeThroughThePortServesTheApp(t *testing.T) {
 	v1 := `id: id(), email: text().unique(), amount: decimal(12, 2), day: date()`
 	managed := newManagedAppAsIs(t, map[string]string{".shared/schema/shop.work": followsSchema(v1), "shop.example/router.work": followsRoute})
@@ -290,7 +292,7 @@ func TestATableMadeThroughThePortServesTheApp(t *testing.T) {
 	if added["row"] == nil {
 		t.Fatalf("the table made through the port: %v", added)
 	}
-	if !strings.Contains(said, "kitwork migrate sẽ ghi thêm kiểu của cột orders.id, orders.day trong kitwork_columns") {
+	if !strings.Contains(said, "kitwork migrate sẽ ghi thêm kiểu của cột orders.id trong kitwork_columns") {
 		t.Fatalf("the kinds the port does not know were said as %q", said)
 	}
 	if listed := answer(t, tenant, ""); count(t, listed, "rows") != 1 {
@@ -375,5 +377,98 @@ func TestCheckAppDatabasesReadsOnly(t *testing.T) {
 	}
 	if names, err := textRowsOf(rows); err != nil || strings.Join(names, ",") != "id,email,amount" {
 		t.Fatalf("orders after CheckAppDatabases: %v (%v)", names, err)
+	}
+}
+
+// kitwork migrate writes in PostgreSQL's words (KITWORK_DATABASE.md "Database là gốc", slice 4): its plan shows the
+// statements an admin would send through the port, they run through the port's translator, so the tables it makes are
+// STRICT and the structure file says them as PostgreSQL does (kitid, numeric, date, timestamptz, json), with KitDB's
+// domain before them. The app reads and writes them as before. A column added is an ALTER TABLE, which a statement
+// that meets the file before kitwork migrate names, to run through the port.
+//
+// CONTROL (05/11/2026): with written() never taking the PostgreSQL statement, "kitwork migrate's statements: ["--
+// SQLite: CREATE TABLE IF NOT EXISTS \"orders\" …"]"; with the error naming no statement, "a column the file lacks:
+// map[code:DATABASE message:… hay bằng câu đổi schema qua cổng database]".
+func TestMigrateWritesPostgreSQL(t *testing.T) {
+	v1 := `id: id(), email: text().unique(), amount: decimal(12, 2), day: date().index(), data: json().nullable(), ` +
+		`rate: float().nullable(), count: integer().nullable(), paid: boolean().default(false), createdAt: timestamp().created()`
+	managed := newManagedAppAsIs(t, map[string]string{".shared/schema/shop.work": followsSchema(v1), "shop.example/router.work": followsRoute})
+	path := filepath.Join(managed.root, "acme", ".database", "application", "kitwork.db")
+	plans := migrateAppForTest(t, managed.root, "acme", RootLayoutMultiTenant)
+	create := "CREATE TABLE orders (\n  id kitid PRIMARY KEY NOT NULL,\n  email text NOT NULL UNIQUE,\n  amount numeric(12, 2) NOT NULL,\n" +
+		"  day date NOT NULL,\n  data json,\n  rate double precision,\n  count bigint,\n  paid boolean NOT NULL DEFAULT false,\n  \"createdAt\" timestamptz NOT NULL\n);"
+	if len(plans) != 1 || len(plans[0].Statements) != 2 || plans[0].Statements[0] != create ||
+		plans[0].Statements[1] != "CREATE INDEX idx_orders_day ON orders (day);" {
+		t.Fatalf("kitwork migrate's statements: %q", plans[0].Statements)
+	}
+	file, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?mode=ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	var definition string
+	if err := file.QueryRow(`SELECT sql FROM sqlite_schema WHERE name = 'orders'`).Scan(&definition); err != nil || !strings.HasSuffix(definition, "STRICT") {
+		t.Fatalf("the table kitwork migrate made: %s is not STRICT (%v)", definition, err)
+	}
+	structure, err := os.ReadFile(path + ".sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"CREATE DOMAIN kitid AS text;", "CREATE TABLE orders (\n  id kitid PRIMARY KEY NOT NULL,", "  day date NOT NULL,",
+		"  \"createdAt\" timestamptz NOT NULL\n);", "CREATE INDEX idx_orders_day ON orders (day);"} {
+		if !strings.Contains(string(structure), want) {
+			t.Fatalf("kitwork.db.sql:\n%s\nholds no %q", structure, want)
+		}
+	}
+	if strings.Contains(string(structure), "\n-- SQLite: ") || strings.Contains(string(structure), "\n-- KitDB: ") { // the header names them inside a line
+		t.Fatalf("kitwork.db.sql says something in SQLite's words:\n%s", structure)
+	}
+
+	tenant := managed.site("shop.example")
+	if added := followsPost(t, tenant, "an@example.com"); added["row"] == nil {
+		t.Fatalf("insert into the STRICT table: %v", added)
+	}
+	if listed := answer(t, tenant, ""); count(t, listed, "rows") != 1 || !strings.Contains(fmt.Sprint(listed["rows"]), "amount:12.5") {
+		t.Fatalf("list of the STRICT table: %v", listed)
+	}
+
+	// a column added: an ALTER TABLE, named by the statement that meets the file first
+	writeAppTree(t, managed.root, map[string]string{"acme/.shared/schema/shop.work": followsSchema(v1 + `, note: text().nullable()`),
+		"acme/two.example/router.work": followsRoute})
+	tenant = managed.site("two.example")
+	if refused := answer(t, tenant, ""); refused["code"] != "DATABASE" ||
+		!strings.Contains(refused["message"].(string), "hay bằng câu đổi schema qua cổng database: ALTER TABLE orders ADD COLUMN note text;") {
+		t.Fatalf("a column the file lacks: %v", refused)
+	}
+	plans = migrateAppForTest(t, managed.root, "acme", RootLayoutMultiTenant)
+	if len(plans[0].Statements) != 1 || plans[0].Statements[0] != "ALTER TABLE orders ADD COLUMN note text;" {
+		t.Fatalf("kitwork migrate's statements for a column: %q", plans[0].Statements)
+	}
+	if listed := answer(t, tenant, ""); count(t, listed, "rows") != 1 {
+		t.Fatalf("after the column: %v", listed)
+	}
+}
+
+// What PostgreSQL's words cannot say through the port is written as the engine's SQLite statement, shown so: a CHECK on
+// a decimal (it compares the stored integer), which the port's translator refuses. The rest of the same plan stays
+// PostgreSQL's.
+//
+// CONTROL (05/11/2026): with the translator's refusal not taken, "statements: "CREATE TABLE ledger (… amount
+// numeric(12, 2) NOT NULL CHECK (amount >= '0')…".
+func TestMigrateWritesSQLiteWherePostgreSQLCannot(t *testing.T) {
+	checked := &ColumnSpec{kind: "decimal", precision: 12, scale: 2, notNull: true, seq: 2,
+		checks: []colCheckRef{{operator: ">=", value: value.New(0)}}}
+	tables := map[string]map[string]*ColumnSpec{
+		"ledger": {"id": {kind: "kitid", primary: true, seq: 1}, "amount": checked},
+		"notes":  {"id": {kind: "kitid", primary: true, seq: 3}, "body": {kind: "text", notNull: true, seq: 4}},
+	}
+	gap, err := checkDatabase(nil, tables)
+	if err != nil {
+		t.Fatal(err)
+	}
+	statements := gapStatements(tables, gap)
+	if len(statements) != 2 || statements[0].postgres != "" || !strings.HasPrefix(statements[0].shown(), `-- SQLite: CREATE TABLE IF NOT EXISTS "ledger"`) ||
+		statements[1].shown() != "CREATE TABLE notes (\n  id kitid PRIMARY KEY NOT NULL,\n  body text NOT NULL\n);" {
+		t.Fatalf("statements: %q, %q", statements[0].shown(), statements[len(statements)-1].shown())
 	}
 }

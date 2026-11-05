@@ -60,6 +60,8 @@ type tableGap struct {
 	differ []string
 	// differs are the columns that differ: kitwork migrate writes no kind of theirs
 	differs map[string]bool
+	// replaced are the declared indexes the table has under their name with another definition: dropped first
+	replaced map[string]bool
 }
 
 // databaseGap is what a database file lacks of the tables the app declares on it, table by table.
@@ -121,7 +123,7 @@ func checkDatabase(reader structureReader, tables map[string]map[string]*ColumnS
 
 // checkTable holds one table's declaration against the file.
 func checkTable(reader structureReader, table string, columns map[string]*ColumnSpec) (*tableGap, error) {
-	gap := &tableGap{differs: map[string]bool{}}
+	gap := &tableGap{differs: map[string]bool{}, replaced: map[string]bool{}}
 	live := map[string]string{}
 	if reader != nil {
 		var err error
@@ -190,6 +192,11 @@ func checkTable(reader structureReader, table string, columns map[string]*Column
 	for _, index := range collectIndexes(table, columns) {
 		if !indexHeld(indexes, table, index) {
 			gap.indexes = append(gap.indexes, index)
+			for _, current := range indexes {
+				if current.name == index.name {
+					gap.replaced[index.name] = true
+				}
+			}
 		}
 	}
 	return gap, nil
@@ -388,9 +395,10 @@ func readLiveIndexes(reader structureReader, table string) ([]liveIndex, error) 
 // databaseGapError is a database file that lacks, or differs from, what the app declares on it: every statement on
 // it fails with it until the file is changed (kitwork migrate, the port) or the code is.
 type databaseGapError struct {
-	database string // the file as the app names it
-	add      []string
-	differ   []string
+	database   string // the file as the app names it
+	add        []string
+	differ     []string
+	statements []string // what kitwork migrate runs, as PostgreSQL writes it: what one sends through the port
 }
 
 func (e *databaseGapError) Error() string {
@@ -398,7 +406,10 @@ func (e *databaseGapError) Error() string {
 	fmt.Fprintf(&out, "database %s chưa khớp bảng .shared/schema/ khai (database là gốc: engine không tự tạo bảng, thêm cột)", e.database)
 	if len(e.add) > 0 {
 		out.WriteString("; database chưa có: " + strings.Join(e.add, "; "))
-		out.WriteString("; thêm bằng kitwork migrate (dừng server trước: một database một tiến trình ghi), hay bằng câu đổi schema qua cổng database (CREATE TABLE, ALTER TABLE … ADD COLUMN, CREATE UNIQUE INDEX)")
+		out.WriteString("; thêm bằng kitwork migrate (dừng server trước: một database một tiến trình ghi), hay bằng câu đổi schema qua cổng database")
+		if len(e.statements) > 0 {
+			out.WriteString(": " + strings.Join(e.statements, " "))
+		}
 	}
 	if len(e.differ) > 0 {
 		out.WriteString("; khác database: " + strings.Join(e.differ, "; "))
@@ -449,7 +460,13 @@ func (t *SchemaTable) checkTables(reader structureReader, tables map[string]map[
 	add, differ, notes := gap.lines()
 	sayNotes(t.databaseLabel(), notes)
 	if len(add) > 0 || len(differ) > 0 {
-		return &databaseGapError{database: t.databaseLabel(), add: add, differ: differ}
+		var statements []string
+		for _, statement := range gapStatements(tables, gap) {
+			if statement.postgres != "" {
+				statements = append(statements, strings.Join(strings.Fields(statement.postgres), " ")+";")
+			}
+		}
+		return &databaseGapError{database: t.databaseLabel(), add: add, differ: differ, statements: statements}
 	}
 	for _, name := range pending {
 		ensuredTables.Store(t.ensuredKey(name, tables[name]), true)
@@ -464,77 +481,32 @@ type structureExecutor interface {
 }
 
 // applyGap makes the file what its tables' declarations ask, adding only (kitwork migrate): a table the file has not,
-// a column a table has not, a unique constraint, an index, the kinds of kitwork_columns. What differs from the file
-// is left; it is the code's to follow.
+// a column a table has not, a unique constraint, an index, each in PostgreSQL's words through the port's translator
+// where they say it (gapStatements), then the kinds of kitwork_columns. What differs from the file is left; it is the
+// code's to follow.
 func applyGap(executor structureExecutor, tables map[string]map[string]*ColumnSpec, gap databaseGap) error {
 	if _, err := executor.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %q (
 		id TEXT PRIMARY KEY, table_name TEXT, action TEXT, statement TEXT, applied_at TEXT)`, migrationsTable)); err != nil {
 		return err
 	}
-	record := func(table, action, statement string) error {
-		_, err := executor.Exec(fmt.Sprintf("INSERT INTO %q (id, table_name, action, statement, applied_at) VALUES (?, ?, ?, ?, ?)", migrationsTable),
-			id.Entity(), table, action, statement, time.Now().UTC().Format(time.RFC3339))
-		return err
+	for _, name := range gap.names {
+		if err := validateSchema(tables[name]); err != nil {
+			return fmt.Errorf("bảng %s: %w", name, err)
+		}
+	}
+	for _, statement := range gapStatements(tables, gap) {
+		for _, text := range statement.sqlite {
+			if _, err := executor.Exec(text); err != nil {
+				return fmt.Errorf("%s: %w", strings.TrimSuffix(statement.shown(), ";"), err)
+			}
+		}
+		if _, err := executor.Exec(fmt.Sprintf("INSERT INTO %q (id, table_name, action, statement, applied_at) VALUES (?, ?, ?, ?, ?)", migrationsTable),
+			id.Entity(), statement.table, statement.action, statement.shown(), time.Now().UTC().Format(time.RFC3339)); err != nil {
+			return err
+		}
 	}
 	for _, name := range gap.names {
 		columns, table := tables[name], gap.tables[name]
-		if err := validateSchema(columns); err != nil {
-			return fmt.Errorf("bảng %s: %w", name, err)
-		}
-		if table.missing {
-			statement := schemaDDL(name, columns)
-			if _, err := executor.Exec(statement); err != nil {
-				return fmt.Errorf("tạo bảng %s: %w", name, err)
-			}
-			if err := record(name, "create-table", statement); err != nil {
-				return err
-			}
-		}
-		for _, column := range table.absent {
-			statement := fmt.Sprintf("ALTER TABLE %q ADD COLUMN %s", name, addColumnSQL(column, columns[column]))
-			if _, err := executor.Exec(statement); err != nil {
-				return fmt.Errorf("thêm cột %s.%s: %w", name, column, err)
-			}
-			if err := record(name, "add-column", statement); err != nil {
-				return err
-			}
-		}
-		// what the table now has: a table made here has its uniques inline, an added column has none
-		indexes, err := readLiveIndexes(executor, name)
-		if err != nil {
-			return err
-		}
-		for _, unique := range declaredUniques(name, columns) {
-			if uniqueHeld(indexes, unique.columns) {
-				continue
-			}
-			statement := indexSQL(name, indexDef{name: unique.name, columns: unique.columns, unique: true})
-			if _, err := executor.Exec(statement); err != nil {
-				return fmt.Errorf("ràng buộc unique (%s) của bảng %s: %w", strings.Join(unique.columns, ", "), name, err)
-			}
-			if err := record(name, "add-unique", statement); err != nil {
-				return err
-			}
-		}
-		for _, index := range collectIndexes(name, columns) {
-			if indexHeld(indexes, name, index) {
-				continue
-			}
-			for _, current := range indexes {
-				if current.name == index.name {
-					if _, err := executor.Exec(fmt.Sprintf("DROP INDEX IF EXISTS %q", index.name)); err != nil {
-						return fmt.Errorf("chỉ mục %s: %w", index.name, err)
-					}
-				}
-			}
-			statement := indexSQL(name, index)
-			if _, err := executor.Exec(statement); err != nil {
-				return fmt.Errorf("chỉ mục %s: %w", index.name, err)
-			}
-			if err := record(name, "add-index", statement); err != nil {
-				return err
-			}
-		}
 		kinds := make(map[string]*ColumnSpec, len(columns))
 		for column, spec := range columns {
 			if !table.differs[column] {

@@ -82,6 +82,11 @@ func shapeOf(t *testing.T, path string) string {
 // "-- KitDB:" (a timestamp in milliseconds, a .searchable() weight); a new file made from it has the same tables,
 // columns, keys, indexes and kinds, and its own structure is the same text, byte for byte.
 //
+// The engine's kinds a PostgreSQL type says (kitid, KitDB's domain, written once before the tables; date; timestamptz)
+// are written as those types, with no row. CONTROL (05/11/2026): with kitid not written by its name, "the structure: …
+// holds no "id kitid PRIMARY KEY NOT NULL""; with the loader not taking CREATE DOMAIN, "gateway: a structure file makes
+// tables and indexes: "CREATE DOMAIN kitid" is neither".
+//
 // CONTROL (05/11/2026, slice 4): without the rows of a translated table's unsaid kinds, "the structure: … holds no
 // "-- KitDB: the kinds its PostgreSQL types do not say""; with the translator's kinds written over those rows when the
 // file is made, "the new file differs" (users created datetime and name's weight 2 lost).
@@ -109,6 +114,7 @@ func TestStructureFileMakesTheSameFile(t *testing.T) {
 		`CREATE TABLE ledger (id INTEGER PRIMARY KEY, amount INTEGER NOT NULL CHECK (amount > 0)) STRICT`,
 		`CREATE TABLE loose (id INTEGER PRIMARY KEY, anything)`,
 		`CREATE VIEW rich AS SELECT id FROM orders WHERE price > 100000`,
+		`CREATE TABLE events (id TEXT PRIMARY KEY NOT NULL, day TEXT NOT NULL, at TEXT) STRICT`,
 		columnsTable,
 	); err != nil {
 		t.Fatal(err)
@@ -116,7 +122,8 @@ func TestStructureFileMakesTheSameFile(t *testing.T) {
 	if _, err := database.Write(ctx, "test", func(transaction *kitdbsqlite.Transaction) error {
 		for _, row := range [][]any{{"accounts", "balance", "decimal", 14, 4, 0}, {"users", "active", "bool", 0, 0, 0}, {"users", "profile", "json", 0, 0, 0},
 			{"orders", "price", "decimal", 10, 2, 0}, {"ledger", "amount", "decimal", 12, 2, 0}, {"users", "name", "text", 0, 0, 2},
-			{"users", "created", "datetime", 0, 0, 0}, {"users", "order", "integer", 0, 0, 0}} {
+			{"users", "created", "datetime", 0, 0, 0}, {"users", "order", "integer", 0, 0, 0},
+			{"events", "id", "kitid", 0, 0, 0}, {"events", "day", "date", 0, 0, 0}, {"events", "at", "datetime", 0, 0, 0}} {
 			if _, err := transaction.Exec(`INSERT INTO kitwork_columns (table_name, column_name, kind, precision, scale, search_weight) VALUES (?, ?, ?, ?, ?, ?)`, row...); err != nil {
 				return err
 			}
@@ -130,7 +137,9 @@ func TestStructureFileMakesTheSameFile(t *testing.T) {
 		"profile json", "price numeric(10, 2) NOT NULL DEFAULT 1.50", "note text COLLATE NOCASE", "picture bytea", "rate double precision",
 		"-- SQLite: a CHECK reads a decimal column", "-- SQLite: a table that is not STRICT", "-- SQLite: its WHERE reads a decimal column",
 		"-- SQLite: a view", "CREATE INDEX orders_user ON orders (user_id, price DESC);",
-		"-- KitDB: the kinds its PostgreSQL types do not say", "('users', 'created', 'datetime', 0, 0, 0)", "('users', 'name', 'text', 0, 0, 2)"} {
+		"-- KitDB: the kinds its PostgreSQL types do not say", "('users', 'name', 'text', 0, 0, 2)",
+		"('users', 'created', 'datetime', 0, 0, 0)", "CREATE DOMAIN kitid AS text;", "id kitid PRIMARY KEY NOT NULL", "day date NOT NULL",
+		"at timestamptz"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("the structure:\n%s\nholds no %q", text, want)
 		}

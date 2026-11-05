@@ -25,10 +25,12 @@ import (
 //
 // Types: smallint, integer, bigint (int2, int4, int8, int) and their serials are INTEGER; real, double precision
 // (float4, float8, float) REAL; numeric(p, s) and decimal(p, s) INTEGER holding the value × 10^s, kind decimal, as
-// the engine stores one; boolean INTEGER 0/1, kind bool; text, varchar(n), char(n) and the times, dates and uuid
+// the engine stores one; boolean INTEGER 0/1, kind bool; date TEXT, kind date; timestamptz (timestamp with time zone)
+// TEXT, kind datetime, the engine's timestamp(); kitid TEXT, kind kitid, KitDB's own domain (CREATE DOMAIN kitid AS
+// text is taken and does nothing); text, varchar(n), char(n), timestamp without a time zone, time, interval and uuid
 // TEXT; json and jsonb TEXT, kind json; bytea BLOB. Another type, an array, numeric without its scale is 0A000. The
 // kinds go to kitwork_columns, which the port reads a decimal's scale from, as the engine writes them for its own
-// tables.
+// tables. kitwork migrate writes an app's tables with the same statements (TranslateSchema).
 //
 // The statements run as one commit through the file's writer (Migrate), whose history keeps them as written; the
 // kinds are written after, in a commit of their own. A schema statement inside a transaction block commits at once,
@@ -201,7 +203,10 @@ func (c *schemaCursor) typeOf(column string) (columnKind, error) {
 			words = append(words, "VARYING")
 		}
 	case "TIMESTAMP", "TIME":
-		if c.keyword("WITH", "TIME", "ZONE") || c.keyword("WITHOUT", "TIME", "ZONE") {
+		switch {
+		case c.keyword("WITH", "TIME", "ZONE"):
+			words = append(words, "WITH", "ZONE")
+		case c.keyword("WITHOUT", "TIME", "ZONE"):
 			words = append(words, "ZONE")
 		}
 	}
@@ -241,8 +246,14 @@ func (c *schemaCursor) typeOf(column string) (columnKind, error) {
 		return columnKind{storage: "INTEGER", kind: "decimal", precision: arguments[0], scale: arguments[1]}, nil
 	case "BOOLEAN", "BOOL":
 		return columnKind{storage: "INTEGER", kind: "bool"}, nil
+	case "KITID":
+		return columnKind{storage: "TEXT", kind: "kitid"}, nil // KitDB's own domain (kitidDomain)
+	case "DATE":
+		return columnKind{storage: "TEXT", kind: "date"}, nil
+	case "TIMESTAMPTZ", "TIMESTAMP WITH ZONE":
+		return columnKind{storage: "TEXT", kind: "datetime"}, nil // the engine's timestamp(): RFC 3339 text in UTC
 	case "TEXT", "VARCHAR", "CHARACTER VARYING", "CHAR", "CHARACTER", "BPCHAR", "CITEXT", "NAME",
-		"TIMESTAMP", "TIMESTAMPTZ", "TIMESTAMP ZONE", "DATE", "TIME", "TIMETZ", "TIME ZONE", "UUID", "INTERVAL":
+		"TIMESTAMP", "TIMESTAMP ZONE", "TIME", "TIMETZ", "TIME ZONE", "TIME WITH ZONE", "UUID", "INTERVAL":
 		return columnKind{storage: "TEXT", kind: "text"}, nil
 	case "JSON", "JSONB":
 		return columnKind{storage: "TEXT", kind: "json"}, nil
@@ -354,10 +365,63 @@ func (session *Session) schemaStatement(parsed statement) (plan schemaPlan, err 
 		return c.dropTable()
 	case c.keyword("DROP", "INDEX"):
 		return c.dropIndex()
+	case c.keyword("CREATE", "DOMAIN"):
+		return c.createDomain()
 	}
 	return plan, pgwire.NewError("0A000", fmt.Sprintf("%s is not supported through the port: CREATE TABLE, ALTER TABLE, DROP "+
 		"TABLE, CREATE INDEX and DROP INDEX are", strings.Join(words(parsed.tokens[:min(2, len(parsed.tokens))]), " ")))
 }
+
+// kitidDomain is the one domain a KitDB database has, always: kitid, the engine's key of id() (a text the engine makes,
+// sortable by when it was made). A structure file writes it before the tables that use it, so PostgreSQL runs the file
+// too; KitDB takes the statement and does nothing.
+const kitidDomain = "CREATE DOMAIN kitid AS text"
+
+// createDomain takes CREATE DOMAIN kitid AS text, which KitDB always has; any other domain is refused.
+func (c *schemaCursor) createDomain() (schemaPlan, error) {
+	name, err := c.name()
+	if err != nil {
+		return schemaPlan{}, err
+	}
+	if !strings.EqualFold(name, "kitid") || !c.keyword("AS", "TEXT") || !c.done() {
+		return schemaPlan{}, pgwire.NewError("0A000", "CREATE DOMAIN is not supported through the port: the one domain is KitDB's own, "+
+			"kitid AS text")
+	}
+	return schemaPlan{}, nil
+}
+
+// TranslateSchema is a schema statement written as PostgreSQL writes it, the way the port takes it, as the statements
+// of SQLite that run it on a file (a STRICT table, a decimal's DEFAULT as the file holds it); kitwork migrate writes
+// the tables an app declares with it (work/database_migrate.go). No session: any schema is taken, no column is looked
+// up. An error is what the port would answer.
+func TranslateSchema(text string) ([]string, error) {
+	tokens, err := scan(strings.TrimSuffix(strings.TrimSpace(text), ";"))
+	if err != nil {
+		return nil, err
+	}
+	c := &schemaCursor{tokens: tokens}
+	var plan schemaPlan
+	switch {
+	case c.keyword("CREATE", "TABLE"):
+		plan, err = c.createTable()
+	case c.keyword("CREATE", "UNIQUE", "INDEX"):
+		plan, err = c.createIndex(true)
+	case c.keyword("CREATE", "INDEX"):
+		plan, err = c.createIndex(false)
+	case c.keyword("ALTER", "TABLE"):
+		plan, err = c.alterTable()
+	case c.keyword("DROP", "INDEX"):
+		plan, err = c.dropIndex()
+	case c.keyword("CREATE", "DOMAIN"):
+		plan, err = c.createDomain()
+	default:
+		return nil, pgwire.NewError("0A000", fmt.Sprintf("%q is not a schema statement kitwork migrate writes", text))
+	}
+	return plan.statements, err
+}
+
+// WrittenName is a name as PostgreSQL and the structure file write it: bare when it can be, quoted when it must.
+func WrittenName(name string) string { return writtenName(name) }
 
 // known checks that schema is one of the database's.
 func (session *Session) known(schema string) (string, error) {

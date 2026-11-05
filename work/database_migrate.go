@@ -36,8 +36,20 @@ type DatabaseMigration struct {
 	Add      []string // what it adds: a table, a column, a unique constraint
 	Write    []string // what it writes besides, which statements run without: an index, a column's kind
 	Differ   []string // what differs from the file, which it leaves: the code follows the database there
-	tables   map[string]map[string]*ColumnSpec
-	tenant   *Tenant
+	// Statements are what it runs, as PostgreSQL writes them (what one sends through the port), or SQLite's after
+	// "-- SQLite:" where PostgreSQL's words cannot say it (database_postgres.go)
+	Statements []string
+	tables     map[string]map[string]*ColumnSpec
+	tenant     *Tenant
+}
+
+// fill says gap in the plan: its lines and the statements that close it.
+func (m *DatabaseMigration) fill(gap databaseGap) {
+	m.Add, m.Differ, m.Write = gap.lines()
+	m.Statements = nil
+	for _, statement := range gapStatements(m.tables, gap) {
+		m.Statements = append(m.Statements, statement.shown())
+	}
 }
 
 // Pending reports a migration that changes the file.
@@ -111,7 +123,7 @@ func PlanAppMigrations(root, identity string, layout RootLayout, shared *SharedE
 			closeTenant()
 			return nil, nil, fmt.Errorf("%s: %w", plan.Database, err)
 		}
-		plan.Add, plan.Differ, plan.Write = gap.lines()
+		plan.fill(gap)
 	}
 	return plans, closeTenant, nil
 }
@@ -130,7 +142,7 @@ func CheckAppDatabases(root, identity string, layout RootLayout, shared *SharedE
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", plan.Database, err)
 		}
-		plan.Add, plan.Differ, plan.Write = gap.lines()
+		plan.fill(gap)
 		plan.tenant = nil
 	}
 	return plans, nil
