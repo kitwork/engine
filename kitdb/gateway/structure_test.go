@@ -83,7 +83,8 @@ func shapeOf(t *testing.T, path string) string {
 // columns, keys, indexes and kinds, and its own structure is the same text, byte for byte.
 //
 // The engine's kinds a PostgreSQL type says (kitid, KitDB's domain, written once before the tables; date; timestamptz)
-// are written as those types, with no row. CONTROL (05/11/2026): with kitid not written by its name, "the structure: …
+// are written as those types, with no row; a table's searchable columns are its search index, CREATE INDEX … USING
+// search (…) WITH (…). CONTROL (05/11/2026): with kitid not written by its name, "the structure: …
 // holds no "id kitid PRIMARY KEY NOT NULL""; with the loader not taking CREATE DOMAIN, "gateway: a structure file makes
 // tables and indexes: "CREATE DOMAIN kitid" is neither".
 //
@@ -137,9 +138,9 @@ func TestStructureFileMakesTheSameFile(t *testing.T) {
 		"profile json", "price numeric(10, 2) NOT NULL DEFAULT 1.50", "note text COLLATE NOCASE", "picture bytea", "rate double precision",
 		"-- SQLite: a CHECK reads a decimal column", "-- SQLite: a table that is not STRICT", "-- SQLite: its WHERE reads a decimal column",
 		"-- SQLite: a view", "CREATE INDEX orders_user ON orders (user_id, price DESC);",
-		"-- KitDB: the kinds its PostgreSQL types do not say", "('users', 'name', 'text', 0, 0, 2)",
-		"('users', 'created', 'datetime', 0, 0, 0)", "CREATE DOMAIN kitid AS text;", "id kitid PRIMARY KEY NOT NULL", "day date NOT NULL",
-		"at timestamptz"} {
+		"-- KitDB: the kinds its PostgreSQL types do not say", "('users', 'created', 'datetime', 0, 0)",
+		"CREATE INDEX users_search ON users USING search (name) WITH (name = 2);", "CREATE DOMAIN kitid AS text;",
+		"id kitid PRIMARY KEY NOT NULL", "day date NOT NULL", "at timestamptz"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("the structure:\n%s\nholds no %q", text, want)
 		}

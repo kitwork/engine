@@ -199,9 +199,9 @@ func TestStatementsFollowTheDatabase(t *testing.T) {
 // at the first statement and serves without kitwork migrate: the tables, and every kind and .searchable() weight the
 // statements need, are in the file, so nothing is said to add.
 //
-// CONTROL (05/11/2026): with the structure file's rows writing 0 for every search_weight, "the clone said "[database]
-// kitwork.db tạo từ kitwork.db.sql … [database] .database/application/kitwork.db: câu vẫn chạy; kitwork migrate sẽ ghi
-// thêm …"" (title's weight lost).
+// CONTROL (05/11/2026): with the structure file's rows writing 0 for every search_weight, then with the structure
+// writing no search index (CREATE INDEX … USING search), "the clone said "[database] kitwork.db tạo từ kitwork.db.sql …
+// [database] .database/application/kitwork.db: câu vẫn chạy; kitwork migrate sẽ ghi thêm …"" (title's weight lost).
 func TestANewMachineServesFromTheStructureFile(t *testing.T) {
 	schema := `import { table, id, text, timestamp } from "kitwork/schema";
 import { connection } from "kitwork/database";
@@ -518,5 +518,63 @@ func TestAHeldFileAppliesThroughAPort(t *testing.T) {
 	if len(sent) != 2 || !strings.HasPrefix(sent[0], "CREATE TABLE orders (") || sent[1] != "CREATE INDEX idx_orders_day ON orders (day)" ||
 		len(plans[0].Left) != 0 {
 		t.Fatalf("sent %q, left %q", sent, plans[0].Left)
+	}
+}
+
+// A table's .searchable() columns are its search index, a statement of the database: kitwork migrate writes CREATE INDEX
+// posts_search ON posts USING search (title), and when the declaration's columns change, DROP INDEX posts_search and
+// the new one; the file's kitwork_columns holds the weights, and its structure file the statement.
+//
+// CONTROL (05/11/2026): with checkTable not holding the search index against the file, "kitwork migrate's statements
+// for a second searchable column: [], []".
+func TestMigrateWritesTheSearchIndex(t *testing.T) {
+	schema := func(columns string) string {
+		return `import { table, id, text } from "kitwork/schema";
+import { connection } from "kitwork/database";
+
+const posts = table({ ` + columns + ` });
+
+export const db = connection().tables({ posts });
+`
+	}
+	managed := newManagedAppAsIs(t, map[string]string{".shared/schema/shop.work": schema(`id: id(), title: text().searchable(), body: text()`)})
+	path := filepath.Join(managed.root, "acme", ".database", "application", "kitwork.db")
+	plans := migrateAppForTest(t, managed.root, "acme", RootLayoutMultiTenant)
+	if got := plans[0].Statements[len(plans[0].Statements)-1]; got != "CREATE INDEX posts_search ON posts USING search (title);" {
+		t.Fatalf("kitwork migrate's statements: %q", plans[0].Statements)
+	}
+	weights := func() string {
+		t.Helper()
+		file, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?mode=ro")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer file.Close()
+		rows, err := file.Query(`SELECT column_name || ':' || search_weight FROM kitwork_columns WHERE table_name = 'posts' AND search_weight > 0 ORDER BY column_name`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		names, err := textRowsOf(rows)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.Join(names, " ")
+	}
+	if got := weights(); got != "title:1" {
+		t.Fatalf("weights %q", got)
+	}
+
+	writeAppTree(t, managed.root, map[string]string{"acme/.shared/schema/shop.work": schema(`id: id(), title: text().searchable(), body: text().searchable()`)})
+	plans = migrateAppForTest(t, managed.root, "acme", RootLayoutMultiTenant)
+	if strings.Join(plans[0].Statements, " ") != "DROP INDEX posts_search; CREATE INDEX posts_search ON posts USING search (title, body);" ||
+		strings.Join(plans[0].Write, "; ") != "chỉ mục tìm kiếm posts_search của bảng posts (title, body)" {
+		t.Fatalf("kitwork migrate's statements for a second searchable column: %q, %q", plans[0].Statements, plans[0].Write)
+	}
+	if got := weights(); got != "body:1 title:1" {
+		t.Fatalf("weights after %q", got)
+	}
+	structure, err := os.ReadFile(path + ".sql")
+	if err != nil || !strings.Contains(string(structure), "CREATE INDEX posts_search ON posts USING search (title, body);") {
+		t.Fatalf("kitwork.db.sql (%v):\n%s", err, structure)
 	}
 }

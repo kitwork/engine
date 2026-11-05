@@ -35,7 +35,8 @@ func (s migrationStatement) shown() string {
 // written is a change as PostgreSQL writes it when the port's translator takes it, else as SQLite's.
 func written(table, action, postgres string, sqlite ...string) migrationStatement {
 	if postgres != "" {
-		if translated, err := gateway.TranslateSchema(postgres); err == nil && len(translated) > 0 {
+		// a search index translates to no SQLite statement: its columns are kitwork_columns's, written after
+		if translated, err := gateway.TranslateSchema(postgres); err == nil {
 			return migrationStatement{table: table, action: action, postgres: postgres, sqlite: translated}
 		}
 	}
@@ -64,6 +65,9 @@ func gapStatements(tables map[string]map[string]*ColumnSpec, gap databaseGap, sc
 			for _, index := range collectIndexes(name, columns) {
 				statements = append(statements, written(name, "add-index", postgresIndex(reference, index), indexSQL(name, index)))
 			}
+			if table.search != nil {
+				statements = append(statements, written(name, "search-index", postgresSearch(schema, name, columns, table.search)))
+			}
 			continue
 		}
 		for _, column := range table.absent {
@@ -85,8 +89,32 @@ func gapStatements(tables map[string]map[string]*ColumnSpec, gap databaseGap, sc
 			}
 			statements = append(statements, written(name, "add-index", postgresIndex(reference, index), indexSQL(name, index)))
 		}
+		if table.search != nil {
+			if table.searched {
+				statements = append(statements, written(name, "drop-search", "DROP INDEX "+qualifiedName(schema, searchIndexName(name))))
+			}
+			statements = append(statements, written(name, "search-index", postgresSearch(schema, name, columns, table.search)))
+		}
 	}
 	return statements
+}
+
+// postgresSearch is a table's search index as the port takes it: CREATE INDEX <table>_search ON <table> USING search
+// (columns) WITH (a weight other than 1).
+func postgresSearch(schema, table string, columns map[string]*ColumnSpec, search map[string]int) string {
+	var names, weights []string
+	for _, column := range searchColumns(columns, search) {
+		names = append(names, gateway.WrittenName(column))
+		if search[column] != 1 {
+			weights = append(weights, fmt.Sprintf("%s = %d", gateway.WrittenName(column), search[column]))
+		}
+	}
+	text := "CREATE INDEX " + gateway.WrittenName(searchIndexName(table)) + " ON " + qualifiedName(schema, table) + " USING search (" +
+		strings.Join(names, ", ") + ")"
+	if len(weights) > 0 {
+		text += " WITH (" + strings.Join(weights, ", ") + ")"
+	}
+	return text
 }
 
 // qualifiedName is name in schema as PostgreSQL writes it: alone in public ("").

@@ -97,14 +97,21 @@ func Structure(ctx context.Context, source structureQuerier) (string, error) {
 		tableKinds := kinds[strings.ToLower(current.name)]
 		if native != "" && len(tableKinds) > 0 {
 			out.WriteString("-- KitDB: the kinds of its columns\n" + kindRows(current.name, tableKinds) + ";\n")
-			continue
+		} else {
+			unsaid, err := unsaidKinds(ctx, source, current.name, tableKinds)
+			if err != nil {
+				return "", err
+			}
+			if len(unsaid) > 0 {
+				out.WriteString("-- KitDB: the kinds its PostgreSQL types do not say\n" + kindRows(current.name, unsaid) + ";\n")
+			}
 		}
-		unsaid, err := unsaidKinds(ctx, source, current.name, tableKinds)
+		order, err := columnOrder(ctx, source, current.name)
 		if err != nil {
 			return "", err
 		}
-		if len(unsaid) > 0 {
-			out.WriteString("-- KitDB: the kinds its PostgreSQL types do not say\n" + kindRows(current.name, unsaid) + ";\n")
+		if search := searchStatement(current.name, tableKinds, order); search != "" {
+			out.WriteString(search + ";\n")
 		}
 	}
 	if tables == 0 {
@@ -127,10 +134,52 @@ func kindRows(table string, kinds map[string]columnKind) string {
 	values := make([]string, len(names))
 	for index, name := range names {
 		kind := kinds[name]
-		values[index] = fmt.Sprintf("(%s, %s, %s, %d, %d, %d)", quoteLiteral(table), quoteLiteral(kind.column), quoteLiteral(kind.kind),
-			kind.precision, kind.scale, kind.weight)
+		values[index] = fmt.Sprintf("(%s, %s, %s, %d, %d)", quoteLiteral(table), quoteLiteral(kind.column), quoteLiteral(kind.kind),
+			kind.precision, kind.scale)
 	}
-	return "INSERT INTO kitwork_columns (table_name, column_name, kind, precision, scale, search_weight) VALUES\n  " + strings.Join(values, ",\n  ")
+	return "INSERT INTO kitwork_columns (table_name, column_name, kind, precision, scale) VALUES\n  " + strings.Join(values, ",\n  ")
+}
+
+// searchStatement is a table's search index as the port takes it, its columns in the table's order (order, lower
+// case), a weight other than 1 in WITH; "" for a table no column of which is searchable.
+func searchStatement(table string, kinds map[string]columnKind, order []string) string {
+	var columns, weights []string
+	for _, name := range order {
+		kind, found := kinds[name]
+		if !found || kind.weight <= 0 {
+			continue
+		}
+		columns = append(columns, writtenName(kind.column))
+		if kind.weight != 1 {
+			weights = append(weights, fmt.Sprintf("%s = %d", writtenName(kind.column), kind.weight))
+		}
+	}
+	if len(columns) == 0 {
+		return ""
+	}
+	text := "CREATE INDEX " + writtenName(searchIndexName(table)) + " ON " + writtenName(table) + " USING search (" + strings.Join(columns, ", ") + ")"
+	if len(weights) > 0 {
+		text += " WITH (" + strings.Join(weights, ", ") + ")"
+	}
+	return text
+}
+
+// columnOrder is a table's columns in their order, lower case.
+func columnOrder(ctx context.Context, source structureQuerier, table string) ([]string, error) {
+	rows, err := source.QueryContext(ctx, `SELECT name FROM pragma_table_info(?) ORDER BY cid`, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var order []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		order = append(order, strings.ToLower(name))
+	}
+	return order, rows.Err()
 }
 
 // unsaidKinds are the kinds of a translated table that the PostgreSQL types the structure writes do not say: the
@@ -162,7 +211,7 @@ func unsaidKinds(ctx context.Context, source structureQuerier, table string, kin
 	for column, kind := range kinds {
 		said := kind.kind == "decimal" || kind.kind == "bool" || kind.kind == "json" || implied[storage[column]] == kind.kind ||
 			storage[column] == "TEXT" && (kind.kind == "kitid" || kind.kind == "date" || kind.kind == "datetime")
-		if kind.weight == 0 && said {
+		if said {
 			continue // numeric(p, s), boolean, json, kitid, date, timestamptz, or the kind its storage gives
 		}
 		unsaid[column] = kind
@@ -477,6 +526,12 @@ func LoadStructure(ctx context.Context, writer StructureFileWriter, by, text str
 			}
 		}
 		for _, change := range kinds {
+			if change.search || change.unsearch {
+				if err := writeSearch(transaction, change); err != nil {
+					return err
+				}
+				continue
+			}
 			if _, err := transaction.Exec(`INSERT INTO kitwork_columns (table_name, column_name, kind, precision, scale) VALUES (?, ?, ?, ?, ?)
 				ON CONFLICT (table_name, column_name) DO NOTHING`, change.table, change.column, change.kind.kind, change.kind.precision, change.kind.scale); err != nil {
 				return err

@@ -14,11 +14,14 @@ import (
 // kitwork migrate through the port (KITWORK_DATABASE.md "Database là gốc", slice 4): the port names a file of an app's
 // database <domain>/<folder>, one of the host's <folder>, and serves no other file. A plan given the port sends its
 // PostgreSQL statements there as the admin, the file's schema in them (billing.receipts): the tables are made by the
-// port's own writer, with their kinds; a .searchable() weight, which the port has no statement for, is left, said.
+// port's own writer, with their kinds and their search index (CREATE INDEX notes_search ON notes USING search
+// (title)), on a file whose kitwork_columns, from before 31/10/2026, had no search_weight yet; nothing is left.
 //
 // CONTROL (05/11/2026): with the statements not naming their schema, "through the port: .database/application/
 // billing.db: sau các câu qua the test's port, database vẫn chưa có: bảng receipts (id id, code text)" (made in
-// public); with the host's database not named by its folder, "portDatabaseOf(…shopping/kitwork.db) = "" false, want
+// public); with the port not adding search_weight to an old kitwork_columns, "through the port: … CREATE INDEX
+// notes_search ON notes USING search (title): pq: gateway: the schema changed, its column kinds were not written: no
+// such column: search_weight"; with the host's database not named by its folder, "portDatabaseOf(…shopping/kitwork.db) = "" false, want
 // "shopping"".
 func TestMigrateThroughThePort(t *testing.T) {
 	fixture := newAppDatabaseFixture(t)
@@ -79,8 +82,9 @@ export const billing = connection().schema("billing").tables({ receipts });
 	if !strings.HasPrefix(plans[0].Statements[0], "CREATE TABLE billing.receipts (") {
 		t.Fatalf("the billing plan's statements: %q", plans[0].Statements)
 	}
-	if left := strings.Join(plans[1].Left, ", "); left != "kiểu của cột notes.title trong kitwork_columns" {
-		t.Fatalf("left by the port: %q", left)
+	if left := strings.Join(plans[1].Left, ", "); left != "" || !strings.Contains(strings.Join(plans[1].Statements, " "),
+		"CREATE INDEX notes_search ON notes USING search (title);") {
+		t.Fatalf("left by the port: %q, statements %q", left, plans[1].Statements)
 	}
 
 	client := fixture.connect(t, "kitdb", appDatabaseTestPassword, "shop.example/application")
@@ -95,7 +99,7 @@ export const billing = connection().schema("billing").tables({ receipts });
 	}
 	defer file.Close()
 	var kinds []string
-	rows, err := file.Query(`SELECT column_name || ' ' || kind FROM kitwork_columns WHERE table_name = 'notes' ORDER BY column_name`)
+	rows, err := file.Query(`SELECT column_name || ' ' || kind || ' ' || search_weight FROM kitwork_columns WHERE table_name = 'notes' ORDER BY column_name`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +111,7 @@ export const billing = connection().schema("billing").tables({ receipts });
 		kinds = append(kinds, kind)
 	}
 	rows.Close()
-	if got := strings.Join(kinds, ", "); got != "amount decimal, createdAt datetime, id kitid, title text" {
+	if got := strings.Join(kinds, ", "); got != "amount decimal 0, createdAt datetime 0, id kitid 0, title text 1" {
 		t.Fatalf("the kinds the port wrote: %s", got)
 	}
 }

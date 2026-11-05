@@ -62,6 +62,33 @@ type tableGap struct {
 	differs map[string]bool
 	// replaced are the declared indexes the table has under their name with another definition: dropped first
 	replaced map[string]bool
+	// search is the table's search index as declared (each .searchable() column's weight) when the file's differs;
+	// searched tells the file has one, dropped first
+	search      map[string]int
+	searched    bool
+	searchOrder []string // its columns in declared order
+}
+
+// declaredSearch is a table's search index as declared: each .searchable() column's weight; none when no column is.
+func declaredSearch(columns map[string]*ColumnSpec) map[string]int {
+	search := map[string]int{}
+	for name, spec := range columns {
+		if weight := declaredWeight(spec); weight > 0 {
+			search[name] = weight
+		}
+	}
+	return search
+}
+
+// searchColumns lists a search index's columns in declared order.
+func searchColumns(columns map[string]*ColumnSpec, search map[string]int) []string {
+	var names []string
+	for _, name := range orderedColumns(columns) {
+		if search[name] > 0 {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 // databaseGap is what a database file lacks of the tables the app declares on it, table by table.
@@ -95,6 +122,10 @@ func (gap databaseGap) lines() (add, differ, notes []string) {
 		}
 		if len(table.kinds) > 0 {
 			notes = append(notes, fmt.Sprintf("kiểu của cột %s trong kitwork_columns", qualifiedColumns(name, table.kinds)))
+		}
+		if table.search != nil {
+			notes = append(notes, fmt.Sprintf("chỉ mục tìm kiếm %s của bảng %s (%s)", searchIndexName(name), name,
+				strings.Join(table.searchOrder, ", ")))
 		}
 	}
 	return add, differ, notes
@@ -137,6 +168,9 @@ func checkTable(reader structureReader, table string, columns map[string]*Column
 		gap.add = append(gap.add, fmt.Sprintf("bảng %s (%s)", table, declaredColumns(columns, ordered)))
 		gap.indexes = collectIndexes(table, columns)
 		gap.kinds = ordered
+		if search := declaredSearch(columns); len(search) > 0 {
+			gap.search, gap.searchOrder = search, searchColumns(columns, search)
+		}
 		return gap, nil
 	}
 	stored, err := readStoredKinds(reader, table)
@@ -172,9 +206,19 @@ func checkTable(reader structureReader, table string, columns map[string]*Column
 		case spec.kind != "decimal" && recorded && row.kind == "decimal":
 			gap.differs[name] = true
 			gap.differ = append(gap.differ, fmt.Sprintf("cột %s.%s: database ghi %s (kitwork_columns), code khai %s", table, name, storedType(row), declaredType(spec)))
-		case !recorded || row.kind != spec.kind || spec.kind == "decimal" && row.precision != spec.precision || row.weight != declaredWeight(spec):
+		case !recorded || row.kind != spec.kind || spec.kind == "decimal" && row.precision != spec.precision:
 			gap.kinds = append(gap.kinds, name)
 		}
+	}
+	// the search index is the table's, one: declared by a .searchable() column, it is the file's to hold as declared
+	held := map[string]int{}
+	for column, row := range stored {
+		if row.weight > 0 {
+			held[column] = row.weight
+		}
+	}
+	if search := declaredSearch(columns); len(search) > 0 && !sameWeights(search, held) {
+		gap.search, gap.searched, gap.searchOrder = search, len(held) > 0, searchColumns(columns, search)
 	}
 	if len(gap.absent) > 0 {
 		gap.add = append(gap.add, fmt.Sprintf("cột %s của bảng %s", declaredColumns(columns, gap.absent), table))
@@ -201,6 +245,22 @@ func checkTable(reader structureReader, table string, columns map[string]*Column
 	}
 	return gap, nil
 }
+
+// sameWeights reports two search indexes with the same columns and weights.
+func sameWeights(a, b map[string]int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for column, weight := range a {
+		if b[column] != weight {
+			return false
+		}
+	}
+	return true
+}
+
+// searchIndexName is the name of a table's search index (kitdb/gateway's): one per table.
+func searchIndexName(table string) string { return table + "_search" }
 
 // declaredType is a column's type as .shared/schema/ writes it.
 func declaredType(spec *ColumnSpec) string {
@@ -507,6 +567,19 @@ func applyGap(executor structureExecutor, tables map[string]map[string]*ColumnSp
 	}
 	for _, name := range gap.names {
 		columns, table := tables[name], gap.tables[name]
+		if table.search != nil {
+			// the index as declared: a column of the file's own, not declared, leaves it too (kitwork_columns as
+			// writeColumnKinds makes it, with search_weight)
+			if _, err := executor.Exec(sqliteColumnsSchema); err != nil {
+				return err
+			}
+			if _, err := executor.Exec(sqliteColumnsSearch); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+				return err
+			}
+			if _, err := executor.Exec(`UPDATE kitwork_columns SET search_weight = 0 WHERE table_name = ?`, name); err != nil {
+				return fmt.Errorf("chỉ mục tìm kiếm của bảng %s: %w", name, err)
+			}
+		}
 		kinds := make(map[string]*ColumnSpec, len(columns))
 		for column, spec := range columns {
 			if !table.differs[column] {

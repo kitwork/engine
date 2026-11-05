@@ -167,3 +167,61 @@ func TestSchemaStatementsTakeTheEnginesKinds(t *testing.T) {
 		t.Fatal("TranslateSchema took DROP TABLE, which kitwork migrate never writes")
 	}
 }
+
+// TestSchemaStatementsMakeTheSearchIndex: a table's full-text index is a statement of the database (KITWORK_DATABASE.md
+// "Database là gốc"): CREATE INDEX <table>_search ON <table> USING search (columns) WITH (column = weight) sets the
+// columns the port's MATCH and an app's matches read, as written (a column out of it leaves it); DROP INDEX
+// <table>_search takes them all out. One per table, by that name; no b-tree index takes the name.
+//
+// CONTROL (05/11/2026): with searchIndex setting the columns without taking the others out first, "weights after the
+// second CREATE "body:1 title:3"".
+func TestSchemaStatementsMakeTheSearchIndex(t *testing.T) {
+	fixture := newWriteFixture(t)
+	access := newAccess()
+	access.admin = true
+	session := fixture.session(t, access, Options{})
+	run(t, session, `CREATE TABLE posts (id kitid PRIMARY KEY NOT NULL, title text NOT NULL, body text)`)
+	weights := func() string {
+		t.Helper()
+		var found []string
+		err := fixture.publicDB.Read(context.Background(), func(snapshot *kitdbsqlite.Snapshot) error {
+			rows, err := snapshot.Query(`SELECT column_name || ':' || search_weight FROM kitwork_columns WHERE table_name = 'posts' AND search_weight > 0 ORDER BY column_name`)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var weight string
+				if err := rows.Scan(&weight); err != nil {
+					return err
+				}
+				found = append(found, weight)
+			}
+			return rows.Err()
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.Join(found, " ")
+	}
+	if tag := run(t, session, `CREATE INDEX posts_search ON posts USING search (title, body) WITH (title = 2)`); tag != "CREATE INDEX" {
+		t.Fatalf("tag %q", tag)
+	}
+	if got := weights(); got != "body:1 title:2" {
+		t.Fatalf("weights %q", got)
+	}
+	run(t, session, `CREATE INDEX posts_search ON posts USING search (title) WITH (title = 3)`)
+	if got := weights(); got != "title:3" {
+		t.Fatalf("weights after the second CREATE %q", got)
+	}
+	refused(t, session, `CREATE INDEX finder ON posts USING search (title)`, "0A000", "one search index, named posts_search")
+	refused(t, session, `CREATE INDEX posts_search ON posts (title)`, "0A000", "the name of table posts's search index")
+	refused(t, session, `CREATE INDEX posts_search ON posts USING search (title) WITH (body = 2)`, "42601", "of a column the index reads")
+	run(t, session, `DROP INDEX posts_search`)
+	if got := weights(); got != "" {
+		t.Fatalf("weights after DROP INDEX %q", got)
+	}
+	if statements, err := TranslateSchema(`CREATE INDEX posts_search ON posts USING search (title)`); err != nil || len(statements) != 0 {
+		t.Fatalf("TranslateSchema of a search index: %q %v", statements, err)
+	}
+}

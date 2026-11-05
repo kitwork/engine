@@ -2,7 +2,9 @@ package gateway
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -57,7 +59,16 @@ type kindChange struct {
 	kind          columnKind
 	drop, rename  bool
 	to            string // a rename's new name
+	// the table's search index (searchIndex): unsearch takes every column of the table out of it, search puts column
+	// in with weight
+	search, unsearch bool
+	weight           int
 }
+
+// searchIndexName is the name of a table's search index: one per table, the columns its full-text index reads, each
+// with a weight (KITWORK_DATABASE.md "Database là gốc"; the port's MATCH, an app's matches). It is no SQLite index: its
+// columns are search_weight of kitwork_columns.
+func searchIndexName(table string) string { return table + "_search" }
 
 // schemaPlan is a schema statement as the writer runs it, and what it changes of the kinds.
 type schemaPlan struct {
@@ -506,9 +517,17 @@ func (c *schemaCursor) createIndex(unique bool) (schemaPlan, error) {
 	if c.keyword("USING") {
 		method := c.word()
 		c.position++
-		if method != "BTREE" {
-			return schemaPlan{}, pgwire.NewError("0A000", fmt.Sprintf("index method %s is not supported: SQLite's indexes are b-trees", strings.ToLower(method)))
+		if method == "SEARCH" {
+			return c.searchIndex(unique, name, schema, table)
 		}
+		if method != "BTREE" {
+			return schemaPlan{}, pgwire.NewError("0A000", fmt.Sprintf("index method %s is not supported: SQLite's indexes are b-trees; "+
+				"a table's full-text index is USING search", strings.ToLower(method)))
+		}
+	}
+	if strings.EqualFold(name, searchIndexName(table)) {
+		return schemaPlan{}, pgwire.NewError("0A000", fmt.Sprintf("%s is the name of table %s's search index: CREATE INDEX %s ON %s USING search (…)",
+			name, table, name, table))
 	}
 	columns, err := c.group()
 	if err != nil {
@@ -665,6 +684,66 @@ func (c *schemaCursor) dropTable() (schemaPlan, error) {
 	return plan, nil
 }
 
+// searchIndex reads the rest of CREATE INDEX <table>_search ON <table> USING search (column, …) [WITH (column = weight,
+// …)]: the table's search index, set as written (the columns it had before are taken out), a column's weight 1 unless
+// WITH gives another. It changes kitwork_columns only.
+func (c *schemaCursor) searchIndex(unique bool, name, schema, table string) (schemaPlan, error) {
+	want := searchIndexName(table)
+	switch {
+	case unique:
+		return schemaPlan{}, pgwire.NewError("0A000", "a search index is not UNIQUE")
+	case name != "" && !strings.EqualFold(name, want):
+		return schemaPlan{}, pgwire.NewError("0A000", fmt.Sprintf("a table has one search index, named %s: CREATE INDEX %s ON %s USING search (…)",
+			want, want, table))
+	}
+	inside, err := c.group()
+	if err != nil {
+		return schemaPlan{}, err
+	}
+	weights := map[string]int{}
+	var columns []string
+	for _, part := range splitTop(inside) {
+		if len(part) != 1 || (part[0].kind != tokenWord && part[0].kind != tokenQuoted) {
+			return schemaPlan{}, syntaxError("a search index lists its columns by name")
+		}
+		column := identifierText(part[0])
+		if _, twice := weights[strings.ToLower(column)]; twice {
+			return schemaPlan{}, syntaxError(fmt.Sprintf("column %s is in the search index twice", column))
+		}
+		weights[strings.ToLower(column)] = 1
+		columns = append(columns, column)
+	}
+	if len(columns) == 0 {
+		return schemaPlan{}, syntaxError("a search index reads at least one column")
+	}
+	if c.keyword("WITH") {
+		options, err := c.group()
+		if err != nil {
+			return schemaPlan{}, err
+		}
+		for _, option := range splitTop(options) {
+			if len(option) != 3 || option[1].text != "=" || option[2].kind != tokenNumber {
+				return schemaPlan{}, syntaxError("a search index's WITH gives a column's weight: WITH (title = 2)")
+			}
+			column := strings.ToLower(identifierText(option[0]))
+			weight, err := strconv.Atoi(option[2].text)
+			if _, listed := weights[column]; !listed || err != nil || weight < 1 {
+				return schemaPlan{}, syntaxError(fmt.Sprintf("WITH (%s = %s): a weight is a whole number from 1, of a column the index reads",
+					identifierText(option[0]), option[2].text))
+			}
+			weights[column] = weight
+		}
+	}
+	if !c.done() {
+		return schemaPlan{}, syntaxError(fmt.Sprintf("unexpected %q after the search index", c.peek().text))
+	}
+	plan := schemaPlan{schema: schema, kinds: []kindChange{{table: table, unsearch: true}}}
+	for _, column := range columns {
+		plan.kinds = append(plan.kinds, kindChange{table: table, column: column, search: true, weight: weights[strings.ToLower(column)]})
+	}
+	return plan, nil
+}
+
 func (c *schemaCursor) dropIndex() (schemaPlan, error) {
 	if c.keyword("CONCURRENTLY") {
 		return schemaPlan{}, pgwire.NewError("0A000", "DROP INDEX CONCURRENTLY is not supported")
@@ -684,6 +763,11 @@ func (c *schemaCursor) dropIndex() (schemaPlan, error) {
 	text := "DROP INDEX "
 	if ifExists {
 		text += "IF EXISTS "
+	}
+	if table, search := strings.CutSuffix(name, "_search"); search && table != "" {
+		// a table's search index: its columns leave it; a SQLite index of that name, from before, goes too
+		return schemaPlan{schema: schema, statements: []string{"DROP INDEX IF EXISTS " + quoteIdentifier(name)},
+			kinds: []kindChange{{table: table, unsearch: true}}}, nil
 	}
 	return schemaPlan{schema: schema, statements: []string{text + quoteIdentifier(name)}}, nil
 }
@@ -732,7 +816,7 @@ func (session *Session) changeSchema(ctx context.Context, parsed statement) (pgw
 	if tag == "CREATE UNIQUE" {
 		tag = "CREATE INDEX"
 	}
-	if len(plan.statements) == 0 {
+	if len(plan.statements) == 0 && len(plan.kinds) == 0 {
 		return pgwire.Result{CommandTag: tag}, nil // IF [NOT] EXISTS found nothing to do
 	}
 	writer, err := session.writerOf(plan.schema)
@@ -741,7 +825,11 @@ func (session *Session) changeSchema(ctx context.Context, parsed statement) (pgw
 	}
 	statements := plan.statements
 	if len(plan.kinds) > 0 || len(plan.dropTable) > 0 || plan.renameFrom != "" {
-		statements = append([]string{columnsTable}, statements...)
+		prefix := []string{columnsTable}
+		if lacksSearchWeight(session.files[plan.schema]) {
+			prefix = append(prefix, columnsSearchWeight) // a kitwork_columns written before 31/10/2026
+		}
+		statements = append(prefix, statements...)
 	}
 	if _, err := writer.Migrate(ctx, session.by(), statements...); err != nil {
 		return pgwire.Result{}, writeError(err)
@@ -776,6 +864,8 @@ func writeKinds(transaction *kitdbsqlite.Transaction, plan schemaPlan) error {
 			_, err = transaction.Exec(`DELETE FROM kitwork_columns WHERE table_name = ? AND column_name = ?`, change.table, change.column)
 		case change.rename:
 			_, err = transaction.Exec(`UPDATE kitwork_columns SET column_name = ? WHERE table_name = ? AND column_name = ?`, change.to, change.table, change.column)
+		case change.search || change.unsearch:
+			err = writeSearch(transaction, change)
 		default:
 			_, err = transaction.Exec(`INSERT INTO kitwork_columns (table_name, column_name, kind, precision, scale) VALUES (?, ?, ?, ?, ?)
 				ON CONFLICT (table_name, column_name) DO UPDATE SET kind = excluded.kind, precision = excluded.precision, scale = excluded.scale`,
@@ -786,6 +876,42 @@ func writeKinds(transaction *kitdbsqlite.Transaction, plan schemaPlan) error {
 		}
 	}
 	return nil
+}
+
+// columnsSearchWeight gives a kitwork_columns written before 31/10/2026 its search_weight, as the engine did at each
+// boot until the database became the root (work/db.sqlite_columns.go).
+const columnsSearchWeight = `ALTER TABLE kitwork_columns ADD COLUMN search_weight INTEGER NOT NULL DEFAULT 0`
+
+// lacksSearchWeight reports a file whose kitwork_columns has no search_weight, read on a connection of its own.
+func lacksSearchWeight(path string) bool {
+	if path == "" {
+		return false
+	}
+	file, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?mode=ro&_pragma=busy_timeout(5000)")
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+	var tables, weights int
+	if file.QueryRow(`SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = 'kitwork_columns'`).Scan(&tables) != nil || tables == 0 {
+		return false
+	}
+	if file.QueryRow(`SELECT count(*) FROM pragma_table_info('kitwork_columns') WHERE name = 'search_weight'`).Scan(&weights) != nil {
+		return false
+	}
+	return weights == 0
+}
+
+// writeSearch writes a change of a table's search index in kitwork_columns: every column of the table out of it, or one
+// column in with its weight (a column without a row of its own gets one of kind text, what a searchable column is).
+func writeSearch(transaction *kitdbsqlite.Transaction, change kindChange) error {
+	if change.unsearch {
+		_, err := transaction.Exec(`UPDATE kitwork_columns SET search_weight = 0 WHERE table_name = ?`, change.table)
+		return err
+	}
+	_, err := transaction.Exec(`INSERT INTO kitwork_columns (table_name, column_name, kind, precision, scale, search_weight) VALUES (?, ?, 'text', 0, 0, ?)
+		ON CONFLICT (table_name, column_name) DO UPDATE SET search_weight = excluded.search_weight`, change.table, change.column, change.weight)
+	return err
 }
 
 // fileColumns are the kinds the files' kitwork_columns hold, read again after the session changed the schema, over
