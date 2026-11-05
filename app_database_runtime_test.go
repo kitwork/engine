@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kitwork/engine/kitdb/gateway"
 	kitdbsqlite "github.com/kitwork/engine/kitdb/sqlite"
 	"github.com/kitwork/engine/work"
 	"github.com/lib/pq"
@@ -221,6 +222,37 @@ func TestAppDatabasePortReadsTheHostsAndAnAppsDatabases(t *testing.T) {
 	missing := fixture.connect(t, "kitdb", appDatabaseTestPassword, "nowhere.example/application")
 	if err := missing.Ping(); appDatabaseCode(err) != "3D000" {
 		t.Errorf("a database nobody has = %v, want 3D000", err)
+	}
+}
+
+// A database whose folder holds kitwork.db.sql and no kitwork.db (a machine new to it) has the file made from it when a
+// client connects: its tables there, its decimal a decimal; the port then writes the structure again as it changes.
+//
+// CONTROL (05/11/2026): without the file made, "a database made from its structure: pq: database "warehouse": no
+// kitwork.db".
+func TestAppDatabasePortMakesADatabaseFromItsStructure(t *testing.T) {
+	fixture := newAppDatabaseFixture(t)
+	folder := filepath.Join(fixture.host, "warehouse")
+	if err := os.MkdirAll(folder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	structure := gateway.StructureHeader + "\nCREATE TABLE stocks (\n  id bigserial PRIMARY KEY,\n  item text NOT NULL,\n  cost numeric(10, 2) NOT NULL DEFAULT 0.00\n);\n"
+	if err := os.WriteFile(filepath.Join(folder, "kitwork.db.sql"), []byte(structure), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	client := fixture.connect(t, "kitdb", appDatabaseTestPassword, "warehouse")
+	if _, err := client.Exec(`INSERT INTO stocks (item, cost) VALUES ('trà', 12.5)`); err != nil {
+		t.Fatalf("a database made from its structure: %v", err)
+	}
+	if got := appDatabaseRows(t, client, `SELECT item, cost FROM stocks`); got != "trà 12.50" {
+		t.Errorf("stocks = %q", got)
+	}
+	if _, err := client.Exec(`ALTER TABLE stocks ADD COLUMN note text`); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(filepath.Join(folder, "kitwork.db.sql"))
+	if err != nil || !strings.Contains(string(content), "note text") || !strings.Contains(string(content), "cost numeric(10, 2) NOT NULL DEFAULT 0.00") {
+		t.Errorf("kitwork.db.sql after ALTER TABLE: %v\n%s", err, content)
 	}
 }
 

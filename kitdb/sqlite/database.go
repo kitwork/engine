@@ -68,6 +68,12 @@ type Options struct {
 	// SearchFold is how many changes a search index keeps in memory before a
 	// background fold writes them to disk (1024).
 	SearchFold int
+	// Structure, when set, is called on the writer's connection, between
+	// commits, once the database opens and after every commit that changed the
+	// file's schema or its kitwork_columns: the owner writes the file's
+	// structure beside it (<file>.sql, kitdb/gateway's Structure). What it does
+	// with an error is its own.
+	Structure func(ctx context.Context, conn *sql.Conn)
 }
 
 func (options Options) normalized() (Options, error) {
@@ -200,6 +206,16 @@ func Open(ctx context.Context, path string, options Options) (*Database, error) 
 		database.searchables[table.Table] = searchable
 	}
 	opened = true
+	if options.Structure != nil {
+		// once now, on the writer's goroutine; after that the writer calls it itself
+		if _, err := database.Maintain(ctx, "", func(conn *sql.Conn) error {
+			options.Structure(ctx, conn)
+			return nil
+		}); err != nil {
+			_ = database.Close()
+			return nil, err
+		}
+	}
 	return database, nil
 }
 

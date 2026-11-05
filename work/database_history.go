@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/kitwork/engine/kitdb/gateway"
 	kitdbsqlite "github.com/kitwork/engine/kitdb/sqlite"
 	"github.com/kitwork/engine/utilities/query"
 	"github.com/kitwork/engine/value"
@@ -117,9 +118,18 @@ func acquireHistory(path string) (*kitdbsqlite.Database, func(), error) {
 		if err := dropSearchTriggers(absolute); err != nil {
 			return nil, nil, fmt.Errorf("%s: %w", filepath.Base(absolute), err)
 		}
-		database, err := kitdbsqlite.Open(context.Background(), absolute, kitdbsqlite.Options{})
+		structure, made := readStructureToMake(absolute)
+		database, err := kitdbsqlite.Open(context.Background(), absolute, kitdbsqlite.Options{Structure: structureWriter(absolute)})
 		if err != nil {
 			return nil, nil, historyRefusal(absolute, err)
+		}
+		if made {
+			if err := gateway.LoadStructure(context.Background(), database, "kitwork", structure); err != nil {
+				_ = database.Close()
+				removeMadeFile(absolute) // nothing is in it but what the structure made: the next open tries again
+				return nil, nil, fmt.Errorf("%s: tạo database từ %s.sql: %w", filepath.Base(absolute), filepath.Base(absolute), err)
+			}
+			fmt.Printf("[database] %s tạo từ %s.sql\n", filepath.Base(absolute), filepath.Base(absolute))
 		}
 		ctx, stop := context.WithCancel(context.Background())
 		entry = &historyWriter{database: database, stop: stop, done: make(chan struct{})}
@@ -129,6 +139,68 @@ func acquireHistory(path string) (*kitdbsqlite.Database, func(), error) {
 	entry.users++
 	var once sync.Once
 	return entry.database, func() { once.Do(func() { releaseHistory(absolute, entry) }) }, nil
+}
+
+// The structure file (KITWORK_DATABASE.md "Database là gốc", slice 3): beside each file the engine declares tables
+// on, <file>.sql holds its tables and indexes as PostgreSQL writes them (kitdb/gateway's Structure), written again by
+// the file's writer whenever its schema or its kitwork_columns changes; a folder holding the .sql and not the file
+// gets the file made from it when the writer first opens it.
+
+// readStructureToMake is the structure file of path when path does not exist yet and its .sql does: the file to make.
+func readStructureToMake(path string) (string, bool) {
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		return "", false
+	}
+	content, err := os.ReadFile(path + ".sql")
+	if err != nil {
+		return "", false
+	}
+	return string(content), true
+}
+
+// removeMadeFile takes away a file made from its structure that could not be finished, with what SQLite and KitDB
+// made beside it; the .sql stays.
+func removeMadeFile(path string) {
+	for _, suffix := range []string{"", "-wal", "-shm", ".lock"} {
+		_ = os.Remove(path + suffix)
+	}
+	_ = os.RemoveAll(path + ".history")
+}
+
+// structureWriter writes path's structure file whenever the writer gives it the file's structure, only when it
+// changed (no new bytes, no new time, for git). A file of no table writes none, and never takes away one there: the
+// file may be new and about to be made from it (acquireHistory opens it first). Only after this writer wrote tables
+// does a file that lost all of them get the header alone, a structure of no table.
+func structureWriter(path string) func(context.Context, *sql.Conn) {
+	wroteTables := false // the hook runs on the writer's goroutine alone
+	return func(ctx context.Context, conn *sql.Conn) {
+		structure, err := gateway.Structure(ctx, conn)
+		if err != nil {
+			fmt.Printf("[database] %s: cấu trúc không đọc được, %s.sql giữ như cũ: %v\n", filepath.Base(path), filepath.Base(path), err)
+			return
+		}
+		target := path + ".sql"
+		switch {
+		case structure == "" && !wroteTables:
+			return
+		case structure == "":
+			structure = gateway.StructureHeader
+		default:
+			wroteTables = true
+		}
+		if previous, err := os.ReadFile(target); err == nil && string(previous) == structure {
+			return
+		}
+		temporary := target + ".tmp"
+		if err := os.WriteFile(temporary, []byte(structure), 0o644); err != nil {
+			fmt.Printf("[database] %s: %v\n", filepath.Base(target), err)
+			return
+		}
+		if err := os.Rename(temporary, target); err != nil {
+			_ = os.Remove(temporary)
+			fmt.Printf("[database] %s: %v\n", filepath.Base(target), err)
+		}
+	}
 }
 
 func releaseHistory(path string, entry *historyWriter) {

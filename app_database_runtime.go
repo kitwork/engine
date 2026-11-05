@@ -207,7 +207,8 @@ func (g *appDatabaseGateway) resolve(name string) (appDatabaseTarget, error) {
 		cluster = filepath.Join(app, ".database")
 	}
 	folder := filepath.Join(cluster, database)
-	if info, err := os.Stat(filepath.Join(folder, "kitwork.db")); err != nil || !info.Mode().IsRegular() {
+	_, structure := os.Stat(filepath.Join(folder, "kitwork.db.sql")) // a database its structure makes (appDatabaseSchemas)
+	if info, err := os.Stat(filepath.Join(folder, "kitwork.db")); (err != nil || !info.Mode().IsRegular()) && structure != nil {
 		return appDatabaseTarget{}, fmt.Errorf("database %q does not exist: no %s", name, filepath.ToSlash(filepath.Join(database, "kitwork.db")))
 	}
 	return appDatabaseTarget{name: name, cluster: cluster, folder: folder}, nil
@@ -366,6 +367,30 @@ func appDatabaseSchemas(folder string) (map[string]string, error) {
 	entries, err := os.ReadDir(folder)
 	if err != nil {
 		return nil, err
+	}
+	// a schema whose structure file is there and whose file is not (a machine new to the database) gets its file made
+	// from it, by the writer the engine writes it through (work.OpenWriter, KITWORK_DATABASE.md "Database là gốc")
+	made := false
+	for _, entry := range entries {
+		name := entry.Name()
+		if !entry.Type().IsRegular() || !strings.HasSuffix(name, ".db.sql") {
+			continue
+		}
+		file := filepath.Join(folder, strings.TrimSuffix(name, ".sql"))
+		if _, err := os.Stat(file); !errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		_, release, err := work.OpenWriter(file)
+		if err != nil {
+			return nil, err
+		}
+		release()
+		made = true
+	}
+	if made {
+		if entries, err = os.ReadDir(folder); err != nil {
+			return nil, err
+		}
 	}
 	schemas := map[string]string{}
 	for _, entry := range entries {

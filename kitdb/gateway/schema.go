@@ -45,6 +45,7 @@ type columnKind struct {
 	precision int
 	scale     int
 	serial    bool
+	column    string // the column's name as kitwork_columns writes it (structure.go)
 }
 
 // kindChange is what a schema statement does to kitwork_columns.
@@ -262,7 +263,7 @@ func (c *schemaCursor) columnDefinition(schema string, adding bool) (string, str
 	}
 	rest := c.tokens[c.position:]
 	c.position = len(c.tokens)
-	constraints, primary, err := c.session.constraints(rest, schema, name, kind)
+	constraints, primary, err := translateConstraints(rest, schema, name, kind)
 	if err != nil {
 		return "", "", columnKind{}, err
 	}
@@ -277,9 +278,9 @@ func (c *schemaCursor) columnDefinition(schema string, adding bool) (string, str
 	return name, definition, kind, nil
 }
 
-// constraints translates a column's constraints: REFERENCES of the same schema, a decimal's or a boolean's literal
-// DEFAULT as the file holds it; a CHECK on a decimal is refused (it would compare the stored integer).
-func (session *Session) constraints(tokens []token, schema, column string, kind columnKind) (string, bool, error) {
+// translateConstraints translates a column's constraints: REFERENCES of the same schema, a decimal's or a boolean's
+// literal DEFAULT as the file holds it; a CHECK on a decimal is refused (it would compare the stored integer).
+func translateConstraints(tokens []token, schema, column string, kind columnKind) (string, bool, error) {
 	var out []token
 	primary := false
 	for index := 0; index < len(tokens); index++ {
@@ -298,6 +299,15 @@ func (session *Session) constraints(tokens []token, schema, column string, kind 
 			}
 			continue
 		case "DEFAULT":
+			if kind.kind == "bool" && index+1 < len(tokens) && (tokens[index+1].word() == "TRUE" || tokens[index+1].word() == "FALSE") {
+				stored := "0"
+				if tokens[index+1].word() == "TRUE" {
+					stored = "1"
+				}
+				out = append(out, current, token{kind: tokenNumber, text: stored})
+				index++
+				continue
+			}
 			if (kind.kind == "decimal" || kind.kind == "bool") && index+1 < len(tokens) {
 				end := index + 2
 				if (tokens[index+1].text == "-" || tokens[index+1].text == "+") && end < len(tokens) {
@@ -364,7 +374,7 @@ func (c *schemaCursor) createTable() (schemaPlan, error) {
 	if err != nil {
 		return schemaPlan{}, err
 	}
-	if schema, err = c.session.known(schema); err != nil {
+	if schema, err = c.known(schema); err != nil {
 		return schemaPlan{}, err
 	}
 	inside, err := c.group()
@@ -382,7 +392,7 @@ func (c *schemaCursor) createTable() (schemaPlan, error) {
 		}
 		switch part[0].word() {
 		case "PRIMARY", "UNIQUE", "CHECK", "FOREIGN", "CONSTRAINT":
-			constraint, _, err := c.session.constraints(part, schema, "", columnKind{})
+			constraint, _, err := translateConstraints(part, schema, "", columnKind{})
 			if err != nil {
 				return schemaPlan{}, err
 			}
@@ -425,7 +435,7 @@ func (c *schemaCursor) createIndex(unique bool) (schemaPlan, error) {
 	if err != nil {
 		return schemaPlan{}, err
 	}
-	if schema, err = c.session.known(schema); err != nil {
+	if schema, err = c.known(schema); err != nil {
 		return schemaPlan{}, err
 	}
 	if c.keyword("USING") {
@@ -477,7 +487,7 @@ func (c *schemaCursor) alterTable() (schemaPlan, error) {
 	if err != nil {
 		return schemaPlan{}, err
 	}
-	if schema, err = c.session.known(schema); err != nil {
+	if schema, err = c.known(schema); err != nil {
 		return schemaPlan{}, err
 	}
 	_ = ifExists
@@ -496,7 +506,7 @@ func (c *schemaCursor) alterTable() (schemaPlan, error) {
 			if err != nil {
 				return schemaPlan{}, err
 			}
-			if skip && c.session.hasColumn(schema, table, name) {
+			if skip && c.hasColumn(schema, table, name) {
 				continue
 			}
 			plan.statements = append(plan.statements, prefix+"ADD COLUMN "+definition)
@@ -514,7 +524,7 @@ func (c *schemaCursor) alterTable() (schemaPlan, error) {
 				return schemaPlan{}, pgwire.NewError("0A000", "DROP COLUMN … CASCADE is not supported: drop what depends on the column first")
 			}
 			a.keyword("RESTRICT")
-			if skip && !c.session.hasColumn(schema, table, name) {
+			if skip && !c.hasColumn(schema, table, name) {
 				continue
 			}
 			plan.statements = append(plan.statements, prefix+"DROP COLUMN "+quoteIdentifier(name))
@@ -562,7 +572,7 @@ func (c *schemaCursor) dropTable() (schemaPlan, error) {
 		if err != nil {
 			return schemaPlan{}, err
 		}
-		if schema, err = c.session.known(schema); err != nil {
+		if schema, err = c.known(schema); err != nil {
 			return schemaPlan{}, err
 		}
 		if plan.schema != "" && plan.schema != schema {
@@ -599,7 +609,7 @@ func (c *schemaCursor) dropIndex() (schemaPlan, error) {
 	if err != nil {
 		return schemaPlan{}, err
 	}
-	if schema, err = c.session.known(schema); err != nil {
+	if schema, err = c.known(schema); err != nil {
 		return schemaPlan{}, err
 	}
 	c.keyword("RESTRICT")
@@ -613,10 +623,23 @@ func (c *schemaCursor) dropIndex() (schemaPlan, error) {
 	return schemaPlan{schema: schema, statements: []string{text + quoteIdentifier(name)}}, nil
 }
 
-// hasColumn reports whether table of schema has column, as the catalog last read it.
-func (session *Session) hasColumn(schema, table, column string) bool {
-	found := session.tables[strings.ToLower(schema)][strings.ToLower(table)]
+// hasColumn reports whether table of schema has column, as the session's catalog last read it; false without a
+// session (a structure file read, structure.go).
+func (c *schemaCursor) hasColumn(schema, table, column string) bool {
+	if c.session == nil {
+		return false
+	}
+	found := c.session.tables[strings.ToLower(schema)][strings.ToLower(table)]
 	return found != nil && found.known[strings.ToLower(column)]
+}
+
+// known is schema as the session names it: one of the database's; any without a session (a structure file names
+// none: its tables are its file's).
+func (c *schemaCursor) known(schema string) (string, error) {
+	if c.session == nil {
+		return schema, nil
+	}
+	return c.session.known(schema)
 }
 
 // changeSchema runs a schema statement: an admin's, through the writer of its file, then its kinds.

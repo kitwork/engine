@@ -78,6 +78,10 @@ type writer struct {
 	anchor  func(context.Context) (uint64, error)
 	refused error
 
+	// structure is Options.Structure; structureDue says the last commit changed the schema or kitwork_columns.
+	structure    func(context.Context, *sql.Conn)
+	structureDue bool
+
 	// whole is, by table, the columns an update keeps whole in format 3 when one of them changes: the searchable
 	// columns of Options.Search, whose index is built from the history's values.
 	whole map[string]map[string]bool
@@ -99,7 +103,7 @@ func openWriter(ctx context.Context, name string, options Options, anchor func(c
 	w := &writer{
 		pool: pool, conn: conn, queue: make(chan writerRequest, options.Queue),
 		finished: make(chan struct{}), maximumBatch: options.MaximumBatch, anchor: anchor,
-		whole: map[string]map[string]bool{},
+		whole: map[string]map[string]bool{}, structure: options.Structure,
 	}
 	for _, table := range options.Search {
 		if w.whole[table.Table] == nil {
@@ -326,6 +330,28 @@ func (w *writer) run() {
 	}
 }
 
+// writeStructure gives the owner the file's structure to write when the last commit changed it; it runs before the
+// commit's requests are answered, so a caller that changed the schema finds the structure written when it returns.
+func (w *writer) writeStructure() {
+	if !w.structureDue {
+		return
+	}
+	w.structureDue = false
+	if w.structure != nil {
+		w.structure(context.Background(), w.conn)
+	}
+}
+
+// touchesColumnKinds reports a change of kitwork_columns among the events: the kinds the structure writes.
+func touchesColumnKinds(events []event) bool {
+	for _, change := range events {
+		if strings.EqualFold(change.table, "kitwork_columns") {
+			return true
+		}
+	}
+	return false
+}
+
 func (w *writer) exec(query string, arguments ...any) error {
 	_, err := w.conn.ExecContext(context.Background(), query, arguments...)
 	return err
@@ -369,7 +395,10 @@ func (w *writer) commitBatch(batch []writerRequest) {
 	if err == nil {
 		changes, err = w.netChanges(context.Background(), nil)
 	}
+	kinds := touchesColumnKinds(w.events)
 	revision, err := w.finish(changes, err)
+	w.structureDue = w.structureDue || err == nil && kinds
+	w.writeStructure()
 	for position, request := range batch {
 		switch {
 		case err != nil:
@@ -426,6 +455,8 @@ func (w *writer) commitSchema(request writerRequest) {
 	if err != nil {
 		_ = w.loadShapes(context.Background())
 	}
+	w.structureDue = w.structureDue || err == nil
+	w.writeStructure()
 	request.done <- writerOutcome{revision: revision, err: err}
 }
 
@@ -455,9 +486,12 @@ func (w *writer) commitMaintain(request writerRequest) {
 			break
 		}
 	}
+	kinds := touchesColumnKinds(w.events)
 	w.events, w.hookErr = w.events[:0], nil
 	after, err := w.schemaVersion(ctx)
+	w.structureDue = w.structureDue || kinds || err == nil && after != before
 	if err != nil || after == before && rows == "" {
+		w.writeStructure()
 		request.done <- writerOutcome{revision: w.revision, err: errors.Join(workErr, err)}
 		return
 	}
@@ -472,6 +506,7 @@ func (w *writer) commitMaintain(request writerRequest) {
 		w.refused = fmt.Errorf("%w; the history no longer follows the file", err)
 	}
 	if err != nil {
+		w.writeStructure()
 		request.done <- writerOutcome{revision: w.revision, err: errors.Join(workErr, err)}
 		return
 	}
@@ -480,6 +515,7 @@ func (w *writer) commitMaintain(request writerRequest) {
 	if err == nil {
 		_, err = w.anchor(ctx)
 	}
+	w.writeStructure()
 	request.done <- writerOutcome{revision: revision, err: errors.Join(workErr, err)}
 }
 
