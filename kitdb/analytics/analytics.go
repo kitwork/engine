@@ -88,8 +88,8 @@ type Querier interface {
 
 // columnKinds reads the declared type of each column of table and gives its kind: INTEGER (and a boolean, stored
 // 0 or 1) an integer, REAL a real, TEXT a text, by SQLite's rules of affinity. Any other is ErrUnsupported.
-func columnKinds(ctx context.Context, source Querier, table string, names []string) ([]Column, error) {
-	rows, err := source.QueryContext(ctx, `SELECT name, type, hidden FROM pragma_table_xinfo(?)`, table)
+func columnKinds(ctx context.Context, source Querier, schema, table string, names []string) ([]Column, error) {
+	rows, err := source.QueryContext(ctx, `SELECT name, type, hidden FROM pragma_table_xinfo(?, ?)`, table, schema)
 	if err != nil {
 		return nil, err
 	}
@@ -148,24 +148,26 @@ func kindOf(declared string) (columnar.Kind, error) {
 	return 0, ErrUnsupported // NUMERIC: an integer on one row, a real on the next
 }
 
-// snapshotState is the revision and schema_version a read transaction sees.
-func snapshotState(ctx context.Context, source Querier) (uint64, int64, error) {
-	var schema int64
-	if err := source.QueryRowContext(ctx, `PRAGMA schema_version`).Scan(&schema); err != nil {
-		return 0, 0, err
+// snapshotState is the revision and schema_version a read transaction sees of the file attached as schema ("main"
+// for the connection's own file), and whether the file has a history.
+func snapshotState(ctx context.Context, source Querier, schema string) (uint64, int64, bool, error) {
+	var version int64
+	if err := source.QueryRowContext(ctx, `PRAGMA `+quoteIdentifier(schema)+`.schema_version`).Scan(&version); err != nil {
+		return 0, 0, false, err
 	}
 	var history int
-	if err := source.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = 'kitwork_history'`).Scan(&history); err != nil {
-		return 0, 0, err
+	if err := source.QueryRowContext(ctx, `SELECT count(*) FROM `+quoteIdentifier(schema)+
+		`.sqlite_schema WHERE type = 'table' AND name = 'kitwork_history'`).Scan(&history); err != nil {
+		return 0, 0, false, err
 	}
 	if history == 0 {
-		return 0, schema, nil
+		return 0, version, false, nil
 	}
 	var revision int64
-	if err := source.QueryRowContext(ctx, `SELECT coalesce(max(rev), 0) FROM kitwork_history`).Scan(&revision); err != nil {
-		return 0, 0, err
+	if err := source.QueryRowContext(ctx, `SELECT coalesce(max(rev), 0) FROM `+quoteIdentifier(schema)+`.kitwork_history`).Scan(&revision); err != nil {
+		return 0, 0, false, err
 	}
-	return uint64(revision), schema, nil
+	return uint64(revision), version, true, nil
 }
 
 // ReadManifest reads the manifest of table's copy in directory; a copy that is not there is nil and no error.

@@ -499,7 +499,13 @@ type rowQuerier interface {
 
 // readHistory visits the rows after revision, through at (zero: every row), in order.
 func readHistory(ctx context.Context, querier rowQuerier, after uint64, through int64, visit func(historyRow) error) error {
-	query := `SELECT rev, at, checksum, changes FROM kitwork_history WHERE rev > ?`
+	return readHistoryOf(ctx, querier, "kitwork_history", after, through, visit)
+}
+
+// readHistoryOf is readHistory of the history table named history (qualified by its schema on a connection that
+// attaches the file).
+func readHistoryOf(ctx context.Context, querier rowQuerier, history string, after uint64, through int64, visit func(historyRow) error) error {
+	query := `SELECT rev, at, checksum, changes FROM ` + history + ` WHERE rev > ?`
 	arguments := []any{int64(after)}
 	if through != 0 {
 		query += ` AND at <= ?`
@@ -539,6 +545,19 @@ func ReadChanges(ctx context.Context, querier interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }, after uint64, visit func(Commit) error) error {
 	return readHistory(ctx, querier, after, 0, func(row historyRow) error {
+		changes, err := decodeChanges(row.changes)
+		if err != nil {
+			return fmt.Errorf("revision %d: %w", row.revision, err)
+		}
+		return visit(Commit{Revision: row.revision, At: time.Unix(0, row.at).UTC(), Changes: changes})
+	})
+}
+
+// ReadChangesIn is ReadChanges of the file a connection attaches as schema.
+func ReadChangesIn(ctx context.Context, querier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}, schema string, after uint64, visit func(Commit) error) error {
+	return readHistoryOf(ctx, querier, quoteIdentifier(schema)+".kitwork_history", after, 0, func(row historyRow) error {
 		changes, err := decodeChanges(row.changes)
 		if err != nil {
 			return fmt.Errorf("revision %d: %w", row.revision, err)

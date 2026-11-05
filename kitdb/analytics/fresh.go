@@ -59,22 +59,19 @@ type View struct {
 	Revision uint64
 }
 
-// View brings the copy to the snapshot source reads, inside that read transaction: the commits after the newest
+// View brings the copy to the snapshot source reads of the file it attaches as schema ("main": its own), inside that
+// read transaction: the commits after the newest
 // revision the table holds rows for at or before the snapshot's are read from the history, and the rows they touched
 // are read as the snapshot holds them. A snapshot the copy cannot reach is ErrStale.
-func (t *Table) View(ctx context.Context, source Querier) (*View, error) {
+func (t *Table) View(ctx context.Context, source Querier, schema string) (*View, error) {
 	manifest := t.copy.Manifest
-	revision, schema, err := snapshotState(ctx, source)
-	if err != nil {
-		return nil, err
-	}
-	hasHistory, err := historyExists(ctx, source)
+	revision, version, hasHistory, err := snapshotState(ctx, source, schema)
 	if err != nil {
 		return nil, err
 	}
 	switch {
-	case schema != manifest.Schema:
-		return nil, fmt.Errorf("%w: the schema moved (version %d, the copy's %d)", ErrStale, schema, manifest.Schema)
+	case version != manifest.Schema:
+		return nil, fmt.Errorf("%w: the schema moved (version %d, the copy's %d)", ErrStale, version, manifest.Schema)
 	case !hasHistory:
 		return nil, fmt.Errorf("%w: the file has no history", ErrStale)
 	case revision < manifest.Revision:
@@ -91,7 +88,7 @@ func (t *Table) View(ctx context.Context, source Querier) (*View, error) {
 	if base.revision == revision {
 		return &View{table: t, changed: base, Revision: revision}, nil
 	}
-	next, err := t.advance(ctx, source, base, revision)
+	next, err := t.advance(ctx, source, schema, base, revision)
 	if err != nil {
 		return nil, err
 	}
@@ -121,19 +118,13 @@ func compare(a, b uint64) int {
 	return 0
 }
 
-func historyExists(ctx context.Context, source Querier) (bool, error) {
-	var count int
-	err := source.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = 'kitwork_history'`).Scan(&count)
-	return count > 0, err
-}
-
 // advance is base brought to revision: the rows the commits after base.revision touched, read as the snapshot holds
 // them, over base's.
-func (t *Table) advance(ctx context.Context, source Querier, base *changed, revision uint64) (*changed, error) {
+func (t *Table) advance(ctx context.Context, source Querier, schema string, base *changed, revision uint64) (*changed, error) {
 	table := t.copy.Manifest.Table
 	touched := map[int64]bool{}
 	expected := base.revision + 1
-	err := kitdb.ReadChanges(ctx, source, base.revision, func(commit kitdb.Commit) error {
+	err := kitdb.ReadChangesIn(ctx, source, schema, base.revision, func(commit kitdb.Commit) error {
 		if commit.Revision != expected {
 			return fmt.Errorf("%w: the history goes from revision %d to %d", ErrStale, expected-1, commit.Revision)
 		}
@@ -161,7 +152,7 @@ func (t *Table) advance(ctx context.Context, source Querier, base *changed, revi
 	next := &changed{revision: revision, images: maps.Clone(base.images)}
 	if len(touched) > 0 {
 		rowIDs := slices.Sorted(maps.Keys(touched))
-		images, err := t.readRows(ctx, source, rowIDs)
+		images, err := t.readRows(ctx, source, schema, rowIDs)
 		if err != nil {
 			return nil, err
 		}
@@ -174,7 +165,7 @@ func (t *Table) advance(ctx context.Context, source Querier, base *changed, revi
 }
 
 // readRows reads the copy's columns of rowIDs as source holds them; a rowid not there is absent from the map.
-func (t *Table) readRows(ctx context.Context, source Querier, rowIDs []int64) (map[int64][]any, error) {
+func (t *Table) readRows(ctx context.Context, source Querier, schema string, rowIDs []int64) (map[int64][]any, error) {
 	manifest := t.copy.Manifest
 	names := make([]string, len(manifest.Columns))
 	for position, column := range manifest.Columns {
@@ -188,7 +179,7 @@ func (t *Table) readRows(ctx context.Context, source Querier, rowIDs []int64) (m
 			arguments[position] = rowID
 		}
 		marks := strings.TrimSuffix(strings.Repeat("?, ", len(part)), ", ")
-		rows, err := source.QueryContext(ctx, `SELECT _rowid_, `+strings.Join(names, ", ")+` FROM `+quoteIdentifier(manifest.Table)+
+		rows, err := source.QueryContext(ctx, `SELECT _rowid_, `+strings.Join(names, ", ")+` FROM `+quoteIdentifier(schema)+"."+quoteIdentifier(manifest.Table)+
 			` WHERE _rowid_ IN (`+marks+`)`, arguments...)
 		if err != nil {
 			return nil, err

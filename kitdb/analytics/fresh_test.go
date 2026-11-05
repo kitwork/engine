@@ -97,7 +97,7 @@ func TestViewReadsEachSnapshotAsTheRowsDo(t *testing.T) {
 	path, database := ordersFile(t, 3000)
 	ctx := context.Background()
 	directory := Directory(path)
-	if _, err := Build(ctx, readTransaction(t, path), directory, "orders", viewColumns); err != nil {
+	if _, err := Build(ctx, readTransaction(t, path), "main", directory, "orders", viewColumns); err != nil {
 		t.Fatal(err)
 	}
 	table, err := OpenTable(directory, "orders")
@@ -127,7 +127,7 @@ func TestViewReadsEachSnapshotAsTheRowsDo(t *testing.T) {
 			older = tx
 			continue
 		}
-		view, err := table.View(ctx, tx)
+		view, err := table.View(ctx, tx, "main")
 		if err != nil {
 			t.Fatalf("step %d: %v", step, err)
 		}
@@ -136,7 +136,7 @@ func TestViewReadsEachSnapshotAsTheRowsDo(t *testing.T) {
 				view.Revision, view.Changed(), len(got), len(want))
 		}
 	}
-	view, err := table.View(ctx, older)
+	view, err := table.View(ctx, older, "main")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestViewRefusesWhatItCannotReach(t *testing.T) {
 		before := readTransaction(t, path)
 		begin(t, before)
 		write(t, database, `UPDATE orders SET amount = 1 WHERE id = 3`)
-		if _, err := Build(ctx, readTransaction(t, path), Directory(path), "orders", viewColumns); err != nil {
+		if _, err := Build(ctx, readTransaction(t, path), "main", Directory(path), "orders", viewColumns); err != nil {
 			t.Fatal(err)
 		}
 		table, err := OpenTable(Directory(path), "orders")
@@ -172,7 +172,7 @@ func TestViewRefusesWhatItCannotReach(t *testing.T) {
 	}
 	stale := func(t *testing.T, table *Table, tx *sql.Tx, want string) {
 		t.Helper()
-		if _, err := table.View(ctx, tx); !errors.Is(err, ErrStale) || !strings.Contains(err.Error(), want) {
+		if _, err := table.View(ctx, tx, "main"); !errors.Is(err, ErrStale) || !strings.Contains(err.Error(), want) {
 			t.Fatalf("view: %v, want ErrStale saying %q", err, want)
 		}
 	}
@@ -223,7 +223,7 @@ func TestViewRefusesWhatItCannotReach(t *testing.T) {
 		if _, err := db.Exec(`INSERT INTO orders (id, merchant, paid) VALUES (1, 'a', 0)`); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Build(ctx, readTransaction(t, path), Directory(path), "orders", []string{"merchant"}); err != nil {
+		if _, err := Build(ctx, readTransaction(t, path), "main", Directory(path), "orders", []string{"merchant"}); err != nil {
 			t.Fatal(err)
 		}
 		table, err := OpenTable(Directory(path), "orders")
@@ -243,7 +243,7 @@ func TestViewRefusesWhatItCannotReach(t *testing.T) {
 func TestViewScansABlockHoldingAChangedRow(t *testing.T) {
 	path, database := ordersFile(t, 3000)
 	ctx := context.Background()
-	if _, err := Build(ctx, readTransaction(t, path), Directory(path), "orders", viewColumns); err != nil {
+	if _, err := Build(ctx, readTransaction(t, path), "main", Directory(path), "orders", viewColumns); err != nil {
 		t.Fatal(err)
 	}
 	table, err := OpenTable(Directory(path), "orders")
@@ -255,7 +255,7 @@ func TestViewScansABlockHoldingAChangedRow(t *testing.T) {
 	write(t, database, `UPDATE orders SET amount = 5 WHERE id = 3003`)
 	write(t, database, `INSERT INTO orders (id, merchant, paid) VALUES (77777, 'x', 1)`)
 	tx := readTransaction(t, path)
-	view, err := table.View(ctx, tx)
+	view, err := table.View(ctx, tx, "main")
 	if err != nil {
 		t.Fatal(err)
 	}

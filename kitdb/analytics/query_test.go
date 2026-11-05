@@ -160,7 +160,7 @@ func sameValue(got, want any) bool {
 func TestExecuteAnswersAsSQLite(t *testing.T) {
 	path, database := ordersFile(t, 4000)
 	ctx := context.Background()
-	if _, err := Build(ctx, readTransaction(t, path), Directory(path), "orders", viewColumns); err != nil {
+	if _, err := Build(ctx, readTransaction(t, path), "main", Directory(path), "orders", viewColumns); err != nil {
 		t.Fatal(err)
 	}
 	table, err := OpenTable(Directory(path), "orders")
@@ -172,7 +172,7 @@ func TestExecuteAnswersAsSQLite(t *testing.T) {
 	write(t, database, `UPDATE orders SET amount = NULL, merchant = 'tiki' WHERE id % 11 = 0`)
 	write(t, database, `INSERT INTO orders (id, merchant, amount, price, paid, note) VALUES (500000, 'mới', 1, 2.5, 1, NULL)`)
 	tx := readTransaction(t, path)
-	view, err := table.View(ctx, tx)
+	view, err := table.View(ctx, tx, "main")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +219,7 @@ func TestExecuteAnswersAsSQLite(t *testing.T) {
 func TestExecuteTakesStatisticsAndRefuses(t *testing.T) {
 	path, database := ordersFile(t, 4000)
 	ctx := context.Background()
-	if _, err := Build(ctx, readTransaction(t, path), Directory(path), "orders", viewColumns); err != nil {
+	if _, err := Build(ctx, readTransaction(t, path), "main", Directory(path), "orders", viewColumns); err != nil {
 		t.Fatal(err)
 	}
 	table, err := OpenTable(Directory(path), "orders")
@@ -230,7 +230,7 @@ func TestExecuteTakesStatisticsAndRefuses(t *testing.T) {
 	write(t, database, `UPDATE orders SET amount = 999999999999999 WHERE id = 3003`)
 	write(t, database, `DELETE FROM orders WHERE id BETWEEN 6000 AND 6100`)
 	tx := readTransaction(t, path)
-	view, err := table.View(ctx, tx)
+	view, err := table.View(ctx, tx, "main")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +248,7 @@ func TestExecuteTakesStatisticsAndRefuses(t *testing.T) {
 	}
 	write(t, database, `UPDATE orders SET amount = 9000000000000000000 WHERE id IN (3, 6)`)
 	tx = readTransaction(t, path)
-	if view, err = table.View(ctx, tx); err != nil {
+	if view, err = table.View(ctx, tx, "main"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := view.Execute(ctx, Query{Aggregates: []Aggregate{{"sum", "amount"}}}); !errors.Is(err, ErrOverflow) {

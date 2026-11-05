@@ -34,7 +34,7 @@ func cmdAnalytics(path, directory string) {
 	if _, err := os.Stat(filepath.Join(directory, "shopping.json")); err == nil {
 		fmt.Println("the copy built before in " + directory + " is read") // its view says whether it is behind
 	} else {
-		manifest, err := analytics.Build(ctx, tx, directory, "shopping", analyticsColumns)
+		manifest, err := analytics.Build(ctx, tx, "main", directory, "shopping", analyticsColumns)
 		must(err)
 		fmt.Printf("built %d rows of %d columns at revision %d: %s, %s\n", manifest.Rows, len(manifest.Columns),
 			manifest.Revision, duration(time.Since(start)), gigabytes(manifest.Bytes))
@@ -100,7 +100,7 @@ func answerAnalytics(ctx context.Context, db *sql.DB, directory string) {
 	must(err)
 	defer tx.Rollback()
 	start := time.Now()
-	view, err := table.View(ctx, tx)
+	view, err := table.View(ctx, tx, "main")
 	must(err)
 	fmt.Println()
 	fmt.Println(fmt.Sprintf("the view at revision %d (%d changed rows): %s", view.Revision, view.Changed(), duration(time.Since(start))))

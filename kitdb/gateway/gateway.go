@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kitwork/engine/kitdb/analytics"
 	"github.com/kitwork/engine/kitdb/pgwire"
 	sqlite "modernc.org/sqlite" // also the "sqlite" database/sql driver
 )
@@ -64,6 +65,9 @@ type Options struct {
 	Log func(statement string, err error)
 	// Search answers SEARCH (search.go); nil when the port has no full-text index.
 	Search SearchProvider
+	// Analytics keeps the column copies that answer the aggregates SQLite would scan a table for (analytic.go); nil
+	// when the port has none.
+	Analytics *analytics.Registry
 }
 
 const (

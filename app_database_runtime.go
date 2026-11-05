@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/kitwork/engine/kitdb/analytics"
 	"github.com/kitwork/engine/kitdb/catalog"
 	"github.com/kitwork/engine/kitdb/gateway"
 	"github.com/kitwork/engine/kitdb/pgwire"
@@ -95,10 +96,12 @@ func startAppDatabaseRuntime(parent context.Context, config AppDatabaseConfig, a
 			apps.root = absolute
 		}
 	}
+	// options.Analytics: the column copies the port's aggregates read (kitdb/analytics), decided by the engine and built
+	// beside each file
 	port := &appDatabaseGateway{
 		host: host, apps: apps,
 		admin:    catalog.Admin{User: config.User, Password: config.Password},
-		options:  gateway.Options{MaxRows: 10_000, MaxBytes: 10 << 20},
+		options:  gateway.Options{MaxRows: 10_000, MaxBytes: 10 << 20, Analytics: analytics.NewRegistry()},
 		catalogs: map[string]*catalog.Catalog{},
 	}
 	ctx, cancel := context.WithCancel(parent)
@@ -346,6 +349,9 @@ func (g *appDatabaseGateway) Close() error {
 		closeErr = errors.Join(closeErr, opened.Close())
 	}
 	g.catalogs = nil
+	if g.options.Analytics != nil {
+		closeErr = errors.Join(closeErr, g.options.Analytics.Close())
+	}
 	return errors.Join(closeErr, g.search.Close())
 }
 

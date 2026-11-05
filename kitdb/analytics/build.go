@@ -16,23 +16,23 @@ import (
 	"github.com/kitwork/engine/kitdb/columnar"
 )
 
-// Build writes the main part of the copy of columns of table, as the read transaction source sees the file, into
-// directory, and returns its manifest. The rows go in rowid order, blocks of 1,024. The data file takes a name of
+// Build writes the main part of the copy of columns of table, as the read transaction source sees the file it
+// attaches as schema ("main": its own), into directory, and returns its manifest. The rows go in rowid order, blocks of 1,024. The data file takes a name of
 // its own and the manifest names it last, so a reader of the copy before keeps its file; the files no manifest names
 // any more are removed when nothing holds them.
-func Build(ctx context.Context, source Querier, directory, table string, columns []string) (*Manifest, error) {
+func Build(ctx context.Context, source Querier, schema, directory, table string, columns []string) (*Manifest, error) {
 	if len(columns) == 0 || len(columns)+1 > columnar.MaximumColumns {
 		return nil, fmt.Errorf("analytics: a copy holds 1..%d columns", columnar.MaximumColumns-1)
 	}
-	revision, schema, err := snapshotState(ctx, source)
+	revision, version, _, err := snapshotState(ctx, source, schema)
 	if err != nil {
 		return nil, err
 	}
-	kinds, err := columnKinds(ctx, source, table, columns)
+	kinds, err := columnKinds(ctx, source, schema, table, columns)
 	if err != nil {
 		return nil, err
 	}
-	manifest := &Manifest{Format: manifestFormat, Table: table, Columns: kinds, Revision: revision, Schema: schema}
+	manifest := &Manifest{Format: manifestFormat, Table: table, Columns: kinds, Revision: revision, Schema: version}
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		return nil, err
 	}
@@ -69,7 +69,8 @@ func Build(ctx context.Context, source Querier, directory, table string, columns
 	for position, column := range kinds {
 		names[position] = quoteIdentifier(column.Name)
 	}
-	rows, err := source.QueryContext(ctx, `SELECT _rowid_, `+strings.Join(names, ", ")+` FROM `+quoteIdentifier(table)+` ORDER BY _rowid_`)
+	rows, err := source.QueryContext(ctx, `SELECT _rowid_, `+strings.Join(names, ", ")+` FROM `+quoteIdentifier(schema)+"."+
+		quoteIdentifier(table)+` ORDER BY _rowid_`)
 	if err != nil {
 		return nil, err
 	}

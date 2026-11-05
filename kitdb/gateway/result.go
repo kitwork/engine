@@ -209,6 +209,9 @@ func (session *Session) read(
 		}
 		return pgwire.Result{}, described, nil
 	}
+	if answer, answered := session.analyticRead(ctx, parsed, arguments, columns); answered {
+		return answer, nil, nil
+	}
 	result, err = session.run(ctx, parsed, arguments, columns)
 	return result, nil, err
 }

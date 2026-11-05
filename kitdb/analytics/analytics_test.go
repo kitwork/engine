@@ -148,7 +148,7 @@ func TestBuildCopiesTheColumnsAsTheSnapshotHoldsThem(t *testing.T) {
 	tx := readTransaction(t, path)
 	directory := Directory(path)
 	columns := []string{"merchant", "amount", "price", "paid", "note"}
-	manifest, err := Build(context.Background(), tx, directory, "orders", columns)
+	manifest, err := Build(context.Background(), tx, "main", directory, "orders", columns)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,10 +187,10 @@ func TestBuildRefusesWhatItCannotHold(t *testing.T) {
 	ctx := context.Background()
 	directory := Directory(path)
 	tx := readTransaction(t, path)
-	if _, err := Build(ctx, tx, directory, "orders", []string{"photo"}); !errors.Is(err, ErrUnsupported) || !strings.Contains(err.Error(), "orders.photo") {
+	if _, err := Build(ctx, tx, "main", directory, "orders", []string{"photo"}); !errors.Is(err, ErrUnsupported) || !strings.Contains(err.Error(), "orders.photo") {
 		t.Fatalf("a BLOB column: %v", err)
 	}
-	if _, err := Build(ctx, tx, directory, "orders", []string{"nothing"}); err == nil || !strings.Contains(err.Error(), `no column "nothing"`) {
+	if _, err := Build(ctx, tx, "main", directory, "orders", []string{"nothing"}); err == nil || !strings.Contains(err.Error(), `no column "nothing"`) {
 		t.Fatalf("a column that is not there: %v", err)
 	}
 	// a text in the integer column amount (the table is not STRICT, so SQLite keeps it)
@@ -201,7 +201,7 @@ func TestBuildRefusesWhatItCannotHold(t *testing.T) {
 		t.Fatal(err)
 	}
 	fresh := readTransaction(t, path)
-	if _, err := Build(ctx, fresh, directory, "orders", []string{"amount"}); !errors.Is(err, ErrUnsupported) || !strings.Contains(err.Error(), "orders.amount, rowid 3") {
+	if _, err := Build(ctx, fresh, "main", directory, "orders", []string{"amount"}); !errors.Is(err, ErrUnsupported) || !strings.Contains(err.Error(), "orders.amount, rowid 3") {
 		t.Fatalf("a text in an integer column: %v", err)
 	}
 	if entries, _ := os.ReadDir(directory); len(entries) != 0 {
@@ -215,7 +215,7 @@ func TestBuildAgainReplacesTheMainPart(t *testing.T) {
 	path, database := ordersFile(t, 1200)
 	ctx := context.Background()
 	directory := Directory(path)
-	first, err := Build(ctx, readTransaction(t, path), directory, "orders", []string{"amount"})
+	first, err := Build(ctx, readTransaction(t, path), "main", directory, "orders", []string{"amount"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func TestBuildAgainReplacesTheMainPart(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	second, err := Build(ctx, readTransaction(t, path), directory, "orders", []string{"amount"})
+	second, err := Build(ctx, readTransaction(t, path), "main", directory, "orders", []string{"amount"})
 	if err != nil {
 		t.Fatal(err)
 	}
