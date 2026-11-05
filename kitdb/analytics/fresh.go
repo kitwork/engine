@@ -220,10 +220,10 @@ func (v *View) Changed() int { return len(v.changed.rowIDs) }
 
 // Scan visits the table as the view's snapshot holds it, the rowid (column 0 of the batch) and the named columns
 // after it: the blocks of the main part, a row changed since skipped (skip[row] true), then the changed rows that are
-// there, in batches of their own (skip nil). decide is given each block of the main part first; a block holding a
-// changed row is scanned even when decide answers UseBlockStatistics, since its statistics count that row as it was.
-// visit must not keep the batch or skip.
-func (v *View) Scan(ctx context.Context, columns []string, decide func(*columnar.BlockStatistics) (columnar.BlockAction, error),
+// there, in batches of their own (skip nil). decide is given each block of the main part first, and whether it holds
+// a changed row (touched); such a block is scanned even when decide answers UseBlockStatistics, since its statistics
+// count that row as it was. visit must not keep the batch or skip.
+func (v *View) Scan(ctx context.Context, columns []string, decide func(statistics *columnar.BlockStatistics, touched bool) (columnar.BlockAction, error),
 	visit func(batch *columnar.Batch, skip []bool) error) (columnar.ScanReport, error) {
 	positions := make([]int, len(columns))
 	for index, name := range columns {
@@ -235,15 +235,16 @@ func (v *View) Scan(ctx context.Context, columns []string, decide func(*columnar
 		return at < len(rowIDs) && rowIDs[at] <= high
 	}
 	blockDecide := func(statistics *columnar.BlockStatistics) (columnar.BlockAction, error) {
+		rowID := statistics.Columns[0]
+		touched := len(rowIDs) > 0 && touches(rowID.IntegerMin, rowID.IntegerMax)
 		action := columnar.ScanBlock
 		if decide != nil {
 			var err error
-			if action, err = decide(statistics); err != nil {
+			if action, err = decide(statistics, touched); err != nil {
 				return action, err
 			}
 		}
-		rowID := statistics.Columns[0]
-		if action == columnar.UseBlockStatistics && len(rowIDs) > 0 && touches(rowID.IntegerMin, rowID.IntegerMax) {
+		if action == columnar.UseBlockStatistics && touched {
 			action = columnar.ScanBlock
 		}
 		return action, nil

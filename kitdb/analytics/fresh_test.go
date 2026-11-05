@@ -260,13 +260,13 @@ func TestViewScansABlockHoldingAChangedRow(t *testing.T) {
 		t.Fatal(err)
 	}
 	var counted int
-	_, err = view.Scan(ctx, []string{"paid"}, func(statistics *columnar.BlockStatistics) (columnar.BlockAction, error) {
-		counted += statistics.Rows // taken if the block is not scanned; given back below if it is
+	_, err = view.Scan(ctx, []string{"paid"}, func(statistics *columnar.BlockStatistics, touched bool) (columnar.BlockAction, error) {
+		if touched {
+			return columnar.UseBlockStatistics, nil // a caller that would: the view scans it anyway
+		}
+		counted += statistics.Rows
 		return columnar.UseBlockStatistics, nil
 	}, func(batch *columnar.Batch, skip []bool) error {
-		if skip != nil {
-			counted -= batch.Rows // a main block scanned after all
-		}
 		for row := range batch.Rows {
 			if skip == nil || !skip[row] {
 				counted++
