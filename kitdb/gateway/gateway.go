@@ -142,6 +142,8 @@ type Session struct {
 	files   map[string]string
 	writers map[string]Writer
 	block   *writeBlock
+	// kindsChanged says a schema statement changed kitwork_columns: the kinds are read again (schema.go)
+	kindsChanged bool
 
 	statementMutex  sync.Mutex
 	cancelStatement context.CancelFunc
@@ -495,7 +497,11 @@ func (session *Session) Describe(ctx context.Context, query string, parameters [
 		} else {
 			_, err = shapeOfWrite(parsed) // a write returns no rows: nothing to describe
 		}
-	case statementRefused, statementAccount:
+	case statementAccount:
+		if session.options.Writers == nil {
+			err = readOnlyError(parsed.verb) // a schema or account statement returns no rows: nothing to describe
+		}
+	case statementRefused:
 		err = readOnlyError(parsed.verb)
 	}
 	if err != nil {
@@ -520,6 +526,12 @@ func (session *Session) fail() {
 }
 
 func (session *Session) execute(ctx context.Context, parsed statement, parameters []pgwire.Parameter) (pgwire.Result, error) {
+	if session.kindsChanged && session.transaction == pgwire.TransactionIdle {
+		if err := session.reloadKinds(ctx); err != nil {
+			return pgwire.Result{}, err
+		}
+		session.kindsChanged = false
+	}
 	switch parsed.kind {
 	case statementEmpty:
 		return pgwire.Result{}, nil
@@ -556,6 +568,9 @@ func (session *Session) execute(ctx context.Context, parsed statement, parameter
 		if handled {
 			return pgwire.Result{CommandTag: tag}, nil
 		}
+		if session.options.Writers != nil && (parsed.verb == "CREATE" || parsed.verb == "ALTER" || parsed.verb == "DROP") {
+			return session.changeSchema(ctx, parsed)
+		}
 		return pgwire.Result{}, session.notRun(parsed.verb)
 	default:
 		return pgwire.Result{}, session.notRun(parsed.verb)
@@ -572,7 +587,7 @@ func (session *Session) notRun(verb string) error {
 		verb = "this statement"
 	}
 	return pgwire.NewError("0A000", verb+" is not supported through the port: it reads and writes rows (SELECT, INSERT, UPDATE, "+
-		"DELETE); schema statements are not supported yet")
+		"DELETE) and changes tables and indexes (CREATE, ALTER, DROP)")
 }
 
 // begin opens one read transaction on the session's connection: every later statement of the block reads the

@@ -108,16 +108,16 @@ func (access *fakeAccess) CanSelect(_ context.Context, schema, table string) (bo
 	access.mutex.Lock()
 	defer access.mutex.Unlock()
 	access.asked = append(access.asked, schema+"."+table)
-	return access.allowed[schema+"."+table], nil
+	return access.admin || access.allowed[schema+"."+table], nil
 }
 
-// CanModify allows what allow named ("insert public.orders").
+// CanModify allows what allowed names ("insert public.orders"), and everything to an admin, as the host's access does.
 func (access *fakeAccess) CanModify(_ context.Context, schema, table, privilege string) (bool, error) {
 	access.mutex.Lock()
 	defer access.mutex.Unlock()
 	key := privilege + " " + schema + "." + table
 	access.asked = append(access.asked, key)
-	return access.allowed[key], nil
+	return access.admin || access.allowed[key], nil
 }
 
 func (access *fakeAccess) Admin(context.Context) (bool, error) {

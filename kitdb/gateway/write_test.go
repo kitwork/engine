@@ -206,7 +206,7 @@ func TestWritesGoThroughTheWriterAndItsHistory(t *testing.T) {
 
 // TestWritesNeedTheirPrivileges: each verb needs its privilege on the table, an UPDATE or DELETE with a WHERE
 // SELECT on it too, an INSERT … SELECT SELECT on what it reads; a write reads and writes one schema; a foreign key's
-// action on other tables needs an admin; schema statements are not run.
+// action on other tables needs an admin; what is neither a row's statement nor a table's or an index's is not run.
 //
 // CONTROL (05/11/2026): with the privileges not asked, "INSERT INTO orders (id, amount) VALUES (20, 1): <nil>, want
 // 42501 saying "permission denied for table public.orders""; with the foreign keys' actions ignored, "DELETE FROM users
@@ -238,7 +238,7 @@ func TestWritesNeedTheirPrivileges(t *testing.T) {
 	if items := stored(t, fixture.publicDB, `SELECT count(*) FROM items`); items != int64(0) {
 		t.Fatalf("%v items left, want their user's foreign key to delete them", items)
 	}
-	refused(t, session, `CREATE TABLE extra (id INTEGER)`, "0A000", "schema statements are not supported yet")
+	refused(t, session, `CREATE VIEW extra AS SELECT 1`, "0A000", "CREATE TABLE, ALTER TABLE")
 	refused(t, session, `PRAGMA user_version = 3`, "0A000", "not supported through the port")
 }
 

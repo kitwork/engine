@@ -47,9 +47,11 @@ type Writers interface {
 	Open(path string) (Writer, error)
 }
 
-// Writer is one file's writer while the session holds it: kitdb/sqlite.Database.Write.
+// Writer is one file's writer while the session holds it: kitdb/sqlite.Database's Write, and Migrate for a schema
+// statement (schema.go).
 type Writer interface {
 	Write(ctx context.Context, by string, request func(*kitdbsqlite.Transaction) error) (uint64, error)
+	Migrate(ctx context.Context, by string, statements ...string) (uint64, error)
 	Close() error
 }
 
