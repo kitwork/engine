@@ -12,6 +12,7 @@ import (
 
 	"github.com/kitwork/engine/app"
 	"github.com/kitwork/engine/compiler"
+	"github.com/kitwork/engine/kitdb/gateway"
 	kitdbsqlite "github.com/kitwork/engine/kitdb/sqlite"
 	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/value"
@@ -44,6 +45,9 @@ func (m *DatabaseMigration) Pending() bool { return len(m.Add) > 0 || len(m.Writ
 
 // Apply makes the file what the plan says, held against the file again inside the transaction that changes it.
 func (m *DatabaseMigration) Apply(ctx context.Context) error {
+	if m.tenant == nil {
+		return fmt.Errorf("%s: a plan of CheckAppDatabases reads only", m.Database)
+	}
 	database, err := m.tenant.historyDatabase(m.Path)
 	if err != nil {
 		return err
@@ -97,6 +101,61 @@ func hasSchemaFolder(appRoot string) bool {
 // tables on against its file. The plans hold the files' writers until close: a file another process writes (a server
 // running) is said as such, a file made from its structure file is made here, as any open of it would.
 func PlanAppMigrations(root, identity string, layout RootLayout, shared *SharedEnvironment) ([]*DatabaseMigration, func(), error) {
+	tenant, plans, closeTenant, err := declaredFiles(root, identity, layout, shared)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, plan := range plans {
+		gap, err := tenant.planGap(plan.Path, plan.tables)
+		if err != nil {
+			closeTenant()
+			return nil, nil, fmt.Errorf("%s: %w", plan.Database, err)
+		}
+		plan.Add, plan.Differ, plan.Write = gap.lines()
+	}
+	return plans, closeTenant, nil
+}
+
+// CheckAppDatabases is PlanAppMigrations reading only: no writer opens, no file is made or changed, so a server's
+// boot and kitwork check say what each database lacks before anything runs. A file that is not there is held as the
+// file its structure file would make (made in a temporary folder), or as a file of no table. Its plans do not apply.
+func CheckAppDatabases(root, identity string, layout RootLayout, shared *SharedEnvironment) ([]*DatabaseMigration, error) {
+	_, plans, closeTenant, err := declaredFiles(root, identity, layout, shared)
+	if err != nil {
+		return nil, err
+	}
+	defer closeTenant()
+	for _, plan := range plans {
+		gap, err := readGap(plan.Path, plan.tables)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", plan.Database, err)
+		}
+		plan.Add, plan.Differ, plan.Write = gap.lines()
+		plan.tenant = nil
+	}
+	return plans, nil
+}
+
+// Say tells what a database lacks, or has otherwise, as the boot says it: the statements on it fail until it changes
+// (kitwork migrate, the port) or the code does; what they run without is said once, as a statement says it.
+func (m *DatabaseMigration) Say() {
+	where := m.Database
+	if m.App != "" {
+		where += " (app " + m.App + ")"
+	}
+	if len(m.Add) > 0 {
+		fmt.Printf("[database] %s chưa có: %s; câu trên database này lỗi tới khi thêm: dừng server rồi chạy go run . migrate, "+
+			"hay câu đổi schema qua cổng\n", where, strings.Join(m.Add, "; "))
+	}
+	if len(m.Differ) > 0 {
+		fmt.Printf("[database] %s khác code: %s; câu trên database này lỗi tới khi sửa table() theo database\n", where, strings.Join(m.Differ, "; "))
+	}
+	sayNotes(m.Database, m.Write)
+}
+
+// declaredFiles runs the .shared/schema/ of the app identity and gives, file by file, the tables its databases declare
+// on it (two schema files may each declare connection()), the plans' gaps not read yet.
+func declaredFiles(root, identity string, layout RootLayout, shared *SharedEnvironment) (*Tenant, []*DatabaseMigration, func(), error) {
 	tenant := NewAppTenantWithRuntimeLayout(root, identity, layout, app.NewRuntime(identity))
 	tenant.ownsApp = true
 	tenant.SetSharedEnvironment(shared)
@@ -106,12 +165,12 @@ func PlanAppMigrations(root, identity string, layout RootLayout, shared *SharedE
 	}
 	if err := tenant.prepareProgram(); err != nil {
 		closeTenant()
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	declared, err := tenant.runSchemaFiles()
 	if err != nil {
 		closeTenant()
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	appFolder := identity
 	if layout.IsSingleApp() {
@@ -134,15 +193,48 @@ func PlanAppMigrations(root, identity string, layout RootLayout, shared *SharedE
 		}
 	}
 	sort.Slice(plans, func(i, j int) bool { return plans[i].Path < plans[j].Path })
-	for _, plan := range plans {
-		gap, err := tenant.planGap(plan.Path, plan.tables)
+	return tenant, plans, closeTenant, nil
+}
+
+// readGap holds tables against the file at path reading only: the file itself on a connection that cannot write; the
+// file its structure file would make, made in a temporary folder; or a file of no table when neither is there.
+func readGap(path string, tables map[string]map[string]*ColumnSpec) (databaseGap, error) {
+	if _, err := os.Stat(path); err == nil {
+		file, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?_pragma=busy_timeout(5000)&_pragma=query_only(1)")
 		if err != nil {
-			closeTenant()
-			return nil, nil, fmt.Errorf("%s: %w", plan.Database, err)
+			return databaseGap{}, err
 		}
-		plan.Add, plan.Differ, plan.Write = gap.lines()
+		defer file.Close()
+		return checkDatabase(file, tables)
 	}
-	return plans, closeTenant, nil
+	structure, err := os.ReadFile(path + ".sql")
+	if errors.Is(err, os.ErrNotExist) {
+		return checkDatabase(nil, tables)
+	}
+	if err != nil {
+		return databaseGap{}, err
+	}
+	folder, err := os.MkdirTemp("", "kitwork-structure-")
+	if err != nil {
+		return databaseGap{}, err
+	}
+	defer os.RemoveAll(folder)
+	ctx := context.Background()
+	made, err := kitdbsqlite.Open(ctx, filepath.Join(folder, filepath.Base(path)), kitdbsqlite.Options{})
+	if err != nil {
+		return databaseGap{}, err
+	}
+	defer made.Close()
+	if err := gateway.LoadStructure(ctx, made, migrateBy, string(structure)); err != nil {
+		return databaseGap{}, fmt.Errorf("%s.sql: %w", filepath.Base(path), err)
+	}
+	var gap databaseGap
+	err = made.Read(ctx, func(snapshot *kitdbsqlite.Snapshot) error {
+		var err error
+		gap, err = checkDatabase(snapshot, tables)
+		return err
+	})
+	return gap, err
 }
 
 // planGap holds tables against the file at path: through its writer when the file, or its structure file, is

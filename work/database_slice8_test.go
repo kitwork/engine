@@ -261,7 +261,7 @@ router.get((context) => {
 		t.Fatal(err)
 	}
 	if lacking := answer(t, added, ""); lacking["code"] != value.DatabaseCode ||
-		!strings.Contains(fmt.Sprint(lacking["message"]), "database chưa có: bảng stocks chưa có cột note text; thêm bằng kitwork migrate") {
+		!strings.Contains(fmt.Sprint(lacking["message"]), "database chưa có: cột note text của bảng stocks; thêm bằng kitwork migrate") {
 		t.Fatalf("a table that adds a column, before kitwork migrate: %v", lacking)
 	}
 	if live := columns(); live["note"] != "" {

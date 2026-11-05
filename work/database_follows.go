@@ -132,7 +132,7 @@ func checkTable(reader structureReader, table string, columns map[string]*Column
 	ordered := orderedColumns(columns)
 	if len(live) == 0 {
 		gap.missing = true
-		gap.add = append(gap.add, fmt.Sprintf("bảng %s chưa có (%s)", table, declaredColumns(columns, ordered)))
+		gap.add = append(gap.add, fmt.Sprintf("bảng %s (%s)", table, declaredColumns(columns, ordered)))
 		gap.indexes = collectIndexes(table, columns)
 		gap.kinds = ordered
 		return gap, nil
@@ -175,7 +175,7 @@ func checkTable(reader structureReader, table string, columns map[string]*Column
 		}
 	}
 	if len(gap.absent) > 0 {
-		gap.add = append(gap.add, fmt.Sprintf("bảng %s chưa có cột %s", table, declaredColumns(columns, gap.absent)))
+		gap.add = append(gap.add, fmt.Sprintf("cột %s của bảng %s", declaredColumns(columns, gap.absent), table))
 	}
 	indexes, err := readLiveIndexes(reader, table)
 	if err != nil {
@@ -184,7 +184,7 @@ func checkTable(reader structureReader, table string, columns map[string]*Column
 	for _, unique := range declaredUniques(table, columns) {
 		if !uniqueHeld(indexes, unique.columns) {
 			gap.uniques = append(gap.uniques, unique)
-			gap.add = append(gap.add, fmt.Sprintf("bảng %s chưa có ràng buộc unique (%s)", table, strings.Join(unique.columns, ", ")))
+			gap.add = append(gap.add, fmt.Sprintf("ràng buộc unique (%s) của bảng %s", strings.Join(unique.columns, ", "), table))
 		}
 	}
 	for _, index := range collectIndexes(table, columns) {

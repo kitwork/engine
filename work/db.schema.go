@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
-	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -1779,75 +1778,6 @@ func logPlan(table string, steps []planStep) {
 	for _, s := range steps {
 		fmt.Printf("[db.migrate] %q — %s\n", table, s.describe())
 	}
-}
-
-// ---- kitwork check integration: preview migrations without a live request ----
-
-// TablePlan is one table's migration plan for a preflight (kitwork check): what migrate() would do to
-// the live table to match the schema, computed WITHOUT applying anything.
-type TablePlan struct {
-	Engine string
-	DB     string
-	Table  string
-	Steps  []planStep
-}
-
-// Lines renders the plan as CLI-ready strings ("<engine>/<db>.<table>: <step>"), so callers outside
-// this package need not touch the internal step type.
-func (tp TablePlan) Lines() []string {
-	prefix := fmt.Sprintf("%s/%s.%s", tp.Engine, tp.DB, tp.Table)
-	if len(tp.Steps) == 0 {
-		return []string{prefix + ": up to date"}
-	}
-	out := make([]string, 0, len(tp.Steps))
-	for _, s := range tp.Steps {
-		out = append(out, prefix+": "+s.describe())
-	}
-	return out
-}
-
-// MigrationPlansFor returns the migration plan for every schema tenant t declared during its Run. It
-// introspects each table's live state — or, when the tenant DB does not exist yet, treats it as empty
-// so the plan is a clean "create". NOTHING is applied. Used by kitwork check to preview a deploy.
-func MigrationPlansFor(t *Tenant) []TablePlan {
-	if t == nil {
-		return nil
-	}
-	scope := tenantScopeKey(t)
-
-	schemaRegMu.Lock()
-	var proxies []*dbProxy
-	for _, p := range schemaReg {
-		if p.tenant != nil && tenantScopeKey(p.tenant) == scope {
-			proxies = append(proxies, p)
-		}
-	}
-	schemaRegMu.Unlock()
-	sort.Slice(proxies, func(i, j int) bool {
-		return proxies[i].engine+proxies[i].dbName < proxies[j].engine+proxies[j].dbName
-	})
-
-	var plans []TablePlan
-	for _, p := range proxies {
-		tables, _ := p.schemaSnapshot()
-		// Introspect the live DB only if it already exists — never create a file during a preflight.
-		live := map[string]map[string]string{}
-		table := &SchemaTable{tenant: p.tenant, engine: p.engine, dbName: p.dbName, sqlitePath: p.sqlitePath}
-		if _, err := os.Stat(table.sqliteFile()); err == nil {
-			if db := table.source().db(); db != nil {
-				for name := range tables {
-					if cols, err := tableColumns(db, name); err == nil {
-						live[name] = cols
-					}
-				}
-			}
-		}
-		for _, name := range sortedTableNames(tables) {
-			steps := planMigration(live[name], tables[name], p.allowDrop)
-			plans = append(plans, TablePlan{Engine: p.engine, DB: p.dbName, Table: name, Steps: steps})
-		}
-	}
-	return plans
 }
 
 func sortedTableNames(tables map[string]map[string]*ColumnSpec) []string {

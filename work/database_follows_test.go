@@ -113,7 +113,7 @@ func TestStatementsFollowTheDatabase(t *testing.T) {
 
 	refused := followsPost(t, tenant, "an@example.com")
 	const lacking = "database .database/application/kitwork.db chưa khớp bảng .shared/schema/ khai (database là gốc: engine không tự tạo bảng, thêm cột); " +
-		"database chưa có: bảng orders chưa có (id id, email text, amount decimal(12, 2), day date); thêm bằng kitwork migrate"
+		"database chưa có: bảng orders (id id, email text, amount decimal(12, 2), day date); thêm bằng kitwork migrate"
 	if refused["code"] != "DATABASE" || !strings.HasPrefix(refused["message"].(string), lacking) {
 		t.Fatalf("a statement before kitwork migrate answered %v, want DATABASE %q…", refused, lacking)
 	}
@@ -130,7 +130,7 @@ func TestStatementsFollowTheDatabase(t *testing.T) {
 	v2 := v1 + `, note: text().nullable()`
 	writeAppTree(t, managed.root, map[string]string{"acme/.shared/schema/shop.work": followsSchema(v2), "acme/two.example/router.work": followsRoute})
 	tenant = managed.site("two.example") // another site of the app, booted on the declaration as it is now
-	if refused := answer(t, tenant, ""); refused["code"] != "DATABASE" || !strings.Contains(refused["message"].(string), "database chưa có: bảng orders chưa có cột note text;") {
+	if refused := answer(t, tenant, ""); refused["code"] != "DATABASE" || !strings.Contains(refused["message"].(string), "database chưa có: cột note text của bảng orders;") {
 		t.Fatalf("a column the file lacks: %v", refused)
 	}
 	file, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?mode=ro")
@@ -308,5 +308,72 @@ func TestATableMadeThroughThePortServesTheApp(t *testing.T) {
 	var kind string
 	if err := file.QueryRow(`SELECT kind FROM kitwork_columns WHERE table_name = 'orders' AND column_name = 'id'`).Scan(&kind); err != nil || kind != "kitid" {
 		t.Fatalf("after kitwork migrate orders.id is %q (%v), want kitid", kind, err)
+	}
+}
+
+// CheckAppDatabases, what a server's boot and kitwork check say (KITWORK_DATABASE.md "Database là gốc", slice 4),
+// reads only. A database that is not there lacks every table, and nothing is made; one whose folder holds only its
+// structure file is held as the file the structure would make (a clone), still not made; a database that lacks a
+// column says it, as the boot prints it, and keeps its columns.
+//
+// CONTROL (05/11/2026): with the plans read through the writer as kitwork migrate reads them, "CheckAppDatabases made
+// the clone's database"; with a missing file held as a file of no table even beside its structure file, "the clone
+// lacks [bảng orders (id id, email text, amount decimal(12, 2))]".
+func TestCheckAppDatabasesReadsOnly(t *testing.T) {
+	v1 := `id: id(), email: text().unique(), amount: decimal(12, 2)`
+	root := t.TempDir()
+	writeAppTree(t, root, map[string]string{"acme/.shared/schema/shop.work": followsSchema(v1)})
+	folder := filepath.Join(root, "acme", ".database")
+	plans, err := CheckAppDatabases(root, "acme", RootLayoutMultiTenant, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plans) != 1 || len(plans[0].Add) != 1 || !strings.HasPrefix(plans[0].Add[0], "bảng orders (") {
+		t.Fatalf("a database that is not there: %+v", plans)
+	}
+	if err := plans[0].Apply(context.Background()); err == nil {
+		t.Fatal("a plan of CheckAppDatabases applied")
+	}
+	if _, err := os.Stat(folder); !os.IsNotExist(err) {
+		t.Fatalf("CheckAppDatabases made the app's database (%v)", err)
+	}
+
+	// a clone: the structure file alone
+	migrateAppForTest(t, root, "acme", RootLayoutMultiTenant)
+	structure, err := os.ReadFile(filepath.Join(folder, "application", "kitwork.db.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	clone := t.TempDir()
+	writeAppTree(t, clone, map[string]string{"acme/.shared/schema/shop.work": followsSchema(v1), "acme/.database/application/kitwork.db.sql": string(structure)})
+	if plans, err := CheckAppDatabases(clone, "acme", RootLayoutMultiTenant, nil); err != nil || len(plans) != 1 ||
+		len(plans[0].Add)+len(plans[0].Differ)+len(plans[0].Write) != 0 {
+		t.Fatalf("the clone lacks %v %v %v (%v)", plans[0].Add, plans[0].Differ, plans[0].Write, err)
+	}
+	if _, err := os.Stat(filepath.Join(clone, "acme", ".database", "application", "kitwork.db")); !os.IsNotExist(err) {
+		t.Fatalf("CheckAppDatabases made the clone's database (%v)", err)
+	}
+
+	// a column the declaration adds
+	writeAppTree(t, root, map[string]string{"acme/.shared/schema/shop.work": followsSchema(v1 + `, note: text().nullable()`)})
+	plans, err = CheckAppDatabases(root, "acme", RootLayoutMultiTenant, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	said := captureOutput(t, func() { plans[0].Say() })
+	if !strings.Contains(said, "[database] .database/application/kitwork.db (app acme) chưa có: cột note text của bảng orders; câu trên database này lỗi tới khi thêm: dừng server rồi chạy go run . migrate") {
+		t.Fatalf("the boot said %q", said)
+	}
+	file, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(folder, "application", "kitwork.db"))+"?mode=ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	rows, err := file.Query(`SELECT name FROM pragma_table_info('orders') ORDER BY cid`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if names, err := textRowsOf(rows); err != nil || strings.Join(names, ",") != "id,email,amount" {
+		t.Fatalf("orders after CheckAppDatabases: %v (%v)", names, err)
 	}
 }

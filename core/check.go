@@ -47,7 +47,9 @@ type CheckReport struct {
 	Programs   int
 	Compatible int
 	Issues     []CheckIssue
-	Migrations []work.TablePlan // per-table migration preview (dry-run) for schemas declared at Run
+	// Databases are the apps' databases held against their files, reading only (KITWORK_DATABASE.md "Database là
+	// gốc", slice 4): what a database lacks or has otherwise is an issue too, what kitwork migrate writes besides is not.
+	Databases []*work.DatabaseMigration
 }
 
 func (r CheckReport) OK() bool {
@@ -189,8 +191,6 @@ func CheckWithEnvironment(
 			})
 		} else {
 			report.Valid++
-			// Schemas registered during Run — preview their migration (dry-run, applies nothing).
-			report.Migrations = append(report.Migrations, work.MigrationPlansFor(tenant)...)
 		}
 		tenant.Close()
 		appRuntime.RemoveSite(target.domain)
@@ -231,6 +231,25 @@ func CheckWithEnvironment(
 				Stage: "queue compile", Identity: identity,
 				File: issue.File, Err: issue.Err,
 			})
+		}
+	}
+
+	for _, identity := range work.MigrationApps(root, layout) {
+		plans, err := work.CheckAppDatabases(root, identity, layout, shared)
+		if err != nil {
+			report.Issues = append(report.Issues, CheckIssue{Stage: "database", Identity: identity, Err: err})
+			continue
+		}
+		report.Databases = append(report.Databases, plans...)
+		for _, plan := range plans {
+			if len(plan.Add) > 0 {
+				report.Issues = append(report.Issues, CheckIssue{Stage: "database", Identity: identity, File: plan.Database,
+					Err: fmt.Errorf("chưa có %s; chạy kitwork migrate", strings.Join(plan.Add, "; "))})
+			}
+			if len(plan.Differ) > 0 {
+				report.Issues = append(report.Issues, CheckIssue{Stage: "database", Identity: identity, File: plan.Database,
+					Err: fmt.Errorf("khác code: %s; sửa table() theo database", strings.Join(plan.Differ, "; "))})
+			}
 		}
 	}
 

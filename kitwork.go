@@ -153,6 +153,7 @@ func Run(configFile ...string) (err error) {
 	)
 
 	applyDatabaseManifest(cfg)
+	sayDatabaseGaps(cfg)
 
 	var systemConnected bool
 	for i := range cfg.Databases {
@@ -448,6 +449,22 @@ func Check(configFile ...string) (core.CheckReport, error) {
 		cfg.SharedEnvironment,
 		bytecodeCacheDirectory(cfg),
 	), nil
+}
+
+// sayDatabaseGaps says, as the server starts, what each database the apps declare tables on lacks of their
+// .shared/schema/, or has otherwise (KITWORK_DATABASE.md "Database là gốc", slice 4), before any statement meets it.
+// It reads only: no writer opens, nothing is made, and the boot goes on (the statements on such a database fail).
+func sayDatabaseGaps(cfg *Config) {
+	for _, identity := range work.MigrationApps(cfg.Root, cfg.RootLayout) {
+		plans, err := work.CheckAppDatabases(cfg.Root, identity, cfg.RootLayout, cfg.SharedEnvironment)
+		if err != nil {
+			fmt.Printf("[database] app %s: %v\n", identity, err)
+			continue
+		}
+		for _, plan := range plans {
+			plan.Say()
+		}
+	}
 }
 
 // PlanMigrations is kitwork migrate's plan (KITWORK_DATABASE.md "Database là gốc", slice 4): every database the
