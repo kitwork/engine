@@ -10,8 +10,8 @@
 //	kitdbsqlite at <directory>                      at() going backward from the live file against the restore it runs today
 //	kitdbsqlite changeset <directory>               SQLite's changesets of the same writes against kitwork_history
 //	kitdbsqlite readtail <directory>                where a read right after a commit waits, with Windows' timer as it is and at 1 ms
-//	kitdbsqlite analytics <kitwork.db> <directory>   KCOL on SQLite: the copy of shopping's analytic columns built, then read back
-//	kitdbsqlite port <kitwork.db> <directory>        the same queries through the read-only port, the copy against SQLite
+//	kitdbsqlite analytics <kitwork.db> <copies>      KCOL on SQLite: the copy of shopping's analytic columns built, then read back
+//	kitdbsqlite port <kitwork.db> <copies>           the same queries through the read-only port, the copy against SQLite
 //
 // The commands that read the KitDB file (copy, bench, refresh, execute, measure, definition) went with KROW on
 // 03/11/2026 (docs/KITWORK_KITDB.md câu 13.4); the copy they made of shopping is .database/shopping/kitwork.db.

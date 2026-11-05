@@ -96,8 +96,8 @@ func startAppDatabaseRuntime(parent context.Context, config AppDatabaseConfig, a
 			apps.root = absolute
 		}
 	}
-	// options.Analytics: the column copies the port's aggregates read (kitdb/analytics), decided by the engine and built
-	// beside each file
+	// options.Analytics: the column copies the port's aggregates read (kitdb/analytics), decided by the engine, every
+	// table's of a file in one file beside it (<file>.analytics)
 	port := &appDatabaseGateway{
 		host: host, apps: apps,
 		admin:    catalog.Admin{User: config.User, Password: config.Password},

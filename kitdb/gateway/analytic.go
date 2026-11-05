@@ -628,13 +628,11 @@ func (session *Session) analyticRead(ctx context.Context, parsed statement, argu
 	view, err := table.View(ctx, session.connection, schema)
 	if err != nil {
 		if errors.Is(err, analytics.ErrStale) {
-			registry.Stale(path, shape.table)
+			registry.Stale(path, shape.table) // built again in the background; an older snapshot (ErrBehind) is not
 		}
 		return pgwire.Result{}, false
 	}
-	if manifest := table.Manifest(); uint64(view.Changed())*20 > manifest.Rows {
-		registry.Stale(path, shape.table) // the changed rows grew past a twentieth: a new copy, in the background
-	}
+	registry.Changed(path, shape.table, view) // many changed rows: folded in the background
 	answer, err := view.Execute(ctx, query)
 	if err != nil {
 		return pgwire.Result{}, false

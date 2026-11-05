@@ -3,24 +3,20 @@ package analytics
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
-	"os"
-	"path/filepath"
-	"regexp"
 	"strings"
-	"time"
 
 	"github.com/kitwork/engine/kitdb/columnar"
 )
 
 // Build writes the main part of the copy of columns of table, as the read transaction source sees the file it
-// attaches as schema ("main": its own), into directory, and returns its manifest. The rows go in rowid order, blocks of 1,024. The data file takes a name of
-// its own and the manifest names it last, so a reader of the copy before keeps its file; the files no manifest names
-// any more are removed when nothing holds them.
-func Build(ctx context.Context, source Querier, schema, directory, table string, columns []string) (*Manifest, error) {
+// attaches as schema ("main": its own), as table's section of a new generation of f, and returns its manifest. The
+// rows go in rowid order, blocks of 1,024. A reader of the copy before keeps its generation; the section before stays
+// in the file, unread, until the file is compacted.
+func (f *File) Build(ctx context.Context, source Querier, schema, table string, columns []string) (*Manifest, error) {
 	if len(columns) == 0 || len(columns)+1 > columnar.MaximumColumns {
 		return nil, fmt.Errorf("analytics: a copy holds 1..%d columns", columnar.MaximumColumns-1)
 	}
@@ -32,50 +28,44 @@ func Build(ctx context.Context, source Querier, schema, directory, table string,
 	if err != nil {
 		return nil, err
 	}
-	manifest := &Manifest{Format: manifestFormat, Table: table, Columns: kinds, Revision: revision, Schema: version}
-	if err := os.MkdirAll(directory, 0o755); err != nil {
-		return nil, err
-	}
-	stamp := time.Now().UnixNano()
-	temporary := filepath.Join(directory, fmt.Sprintf("%s-%d.tmp", table, stamp))
-	written := false
-	defer func() {
-		if !written {
-			_ = os.Remove(temporary)
-		}
-	}()
-	file, err := os.OpenFile(temporary, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	f.publish.Lock()
+	defer f.publish.Unlock()
+	manifest, err := f.publishLocked(ctx, table, func(output io.Writer, _ *generation) (*Manifest, error) {
+		manifest := &Manifest{Columns: kinds, Revision: revision, Schema: version}
+		return manifest, writeRows(ctx, source, schema, table, manifest, output)
+	})
 	if err != nil {
 		return nil, err
 	}
-	closed := false
-	defer func() {
-		if !closed {
-			_ = file.Close()
-		}
-	}()
-	buffered := bufio.NewWriterSize(file, 4<<20)
+	f.moved()
+	return manifest, nil
+}
+
+// writeRows writes the rows of table as source holds them into output, KCOL blocks of 1,024, counting them into
+// manifest.
+func writeRows(ctx context.Context, source Querier, schema, table string, manifest *Manifest, output io.Writer) error {
+	counted := &countingWriter{output: output}
+	buffered := bufio.NewWriterSize(counted, 4<<20)
 	fields := manifest.fields()
 	writer, err := columnar.NewWriter(buffered, fields)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	batch, err := columnar.NewBatch(fields)
 	if err != nil {
-		return nil, err
+		return err
 	}
-
-	names := make([]string, len(kinds))
-	for position, column := range kinds {
+	names := make([]string, len(manifest.Columns))
+	for position, column := range manifest.Columns {
 		names[position] = quoteIdentifier(column.Name)
 	}
 	rows, err := source.QueryContext(ctx, `SELECT _rowid_, `+strings.Join(names, ", ")+` FROM `+quoteIdentifier(schema)+"."+
 		quoteIdentifier(table)+` ORDER BY _rowid_`)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer rows.Close()
-	values := make([]any, len(kinds)+1)
+	values := make([]any, len(names)+1)
 	pointers := make([]any, len(values))
 	for position := range values {
 		pointers[position] = &values[position]
@@ -87,23 +77,24 @@ func Build(ctx context.Context, source Querier, schema, directory, table string,
 		if err := writer.WriteBatch(batch); err != nil {
 			return err
 		}
+		manifest.Blocks++
 		batch.Reset()
 		return nil
 	}
 	for rows.Next() {
 		if err := rows.Scan(pointers...); err != nil {
-			return nil, err
+			return err
 		}
 		row := batch.Rows
 		rowID, isInteger := values[0].(int64)
 		if !isInteger {
-			return nil, fmt.Errorf("analytics: %q gave a rowid of %T", table, values[0])
+			return fmt.Errorf("analytics: %q gave a rowid of %T", table, values[0])
 		}
 		batch.Columns[0].Integers[row] = rowID
 		batch.Columns[0].Valid[row] = 1
-		for position, column := range kinds {
+		for position, column := range manifest.Columns {
 			if err := setCell(&batch.Columns[position+1], row, values[position+1]); err != nil {
-				return nil, fmt.Errorf("%w: %s.%s, rowid %d: %v", ErrUnsupported, table, column.Name, rowID, err)
+				return fmt.Errorf("%w: %s.%s, rowid %d: %v", ErrUnsupported, table, column.Name, rowID, err)
 			}
 		}
 		batch.Rows++
@@ -111,47 +102,39 @@ func Build(ctx context.Context, source Querier, schema, directory, table string,
 		manifest.MaxRowID = rowID
 		if batch.Rows == columnar.BatchRows {
 			if err := flush(); err != nil {
-				return nil, err
+				return err
 			}
 			if manifest.Rows%(64*columnar.BatchRows) == 0 {
 				if err := ctx.Err(); err != nil {
-					return nil, err
+					return err
 				}
 			}
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return err
 	}
 	rows.Close()
 	if err := flush(); err != nil {
-		return nil, err
+		return err
 	}
 	if err := buffered.Flush(); err != nil {
-		return nil, err
+		return err
 	}
-	if err := file.Sync(); err != nil {
-		return nil, err
-	}
-	info, err := file.Stat()
-	if err != nil {
-		return nil, err
-	}
-	manifest.Bytes = info.Size()
-	closed = true
-	if err := file.Close(); err != nil {
-		return nil, err
-	}
-	manifest.Data = fmt.Sprintf("%s-%d-%d.kcol", table, revision, stamp)
-	if err := os.Rename(temporary, filepath.Join(directory, manifest.Data)); err != nil {
-		return nil, err
-	}
-	written = true
-	if err := writeManifest(directory, manifest); err != nil {
-		return nil, err
-	}
-	removeUnnamed(directory, table, manifest.Data)
-	return manifest, nil
+	manifest.Bytes = counted.written
+	return nil
+}
+
+// countingWriter counts the bytes written through it.
+type countingWriter struct {
+	output  io.Writer
+	written int64
+}
+
+func (w *countingWriter) Write(data []byte) (int, error) {
+	n, err := w.output.Write(data)
+	w.written += int64(n)
+	return n, err
 }
 
 // setCell puts value at row of vector: a NULL as no value; an integer, a real or a text of the vector's kind.
@@ -188,51 +171,4 @@ func setCell(vector *columnar.Vector, row int, value any) error {
 	}
 	vector.Valid[row] = 1
 	return nil
-}
-
-// writeManifest replaces table's manifest in directory.
-func writeManifest(directory string, manifest *Manifest) error {
-	content, err := json.MarshalIndent(manifest, "", "  ")
-	if err != nil {
-		return err
-	}
-	temporary := filepath.Join(directory, fmt.Sprintf("%s-%d.json.tmp", manifest.Table, time.Now().UnixNano()))
-	file, err := os.OpenFile(temporary, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	_, err = file.Write(content)
-	if err == nil {
-		err = file.Sync()
-	}
-	if err = errors.Join(err, file.Close()); err != nil {
-		_ = os.Remove(temporary)
-		return err
-	}
-	if err := os.Rename(temporary, manifestPath(directory, manifest.Table)); err != nil {
-		_ = os.Remove(temporary)
-		return err
-	}
-	return nil
-}
-
-// ownFile is a file of a table's copy after its name and a dash: a main part (<revision>-<stamp>.kcol), what a build
-// or a manifest cut short left (<stamp>.tmp, <stamp>.json.tmp). Another table whose name begins with this one's
-// and a dash never matches.
-var ownFile = regexp.MustCompile(`^[0-9]+(-[0-9]+\.kcol|\.tmp|\.json\.tmp)$`)
-
-// removeUnnamed removes the data files of table the manifest no longer names, and what a build cut short left; a
-// file a reader still holds stays, for the next build to remove.
-func removeUnnamed(directory, table, named string) {
-	entries, err := os.ReadDir(directory)
-	if err != nil {
-		return
-	}
-	for _, entry := range entries {
-		name := entry.Name()
-		if name == named || !strings.HasPrefix(name, table+"-") || !ownFile.MatchString(name[len(table)+1:]) {
-			continue
-		}
-		_ = os.Remove(filepath.Join(directory, name))
-	}
 }

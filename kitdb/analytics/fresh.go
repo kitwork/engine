@@ -14,10 +14,13 @@ import (
 )
 
 // ErrStale means the copy cannot be brought to the snapshot a query reads: the schema moved since it was built, the
-// file has no history to say what changed, the history no longer reaches back to the copy's revision, rows of the
-// table changed outside the history, or the snapshot is older than the copy. The query reads the rows instead, and
-// the copy is built again.
+// file has no history to say what changed, the history no longer reaches back to the copy's revision, or rows of the
+// table changed outside the history. The query reads the rows instead, and the copy is built again.
 var ErrStale = errors.New("analytics: the copy is stale")
+
+// ErrBehind means the snapshot a query reads is older than the copy (a read transaction begun before a fold or a
+// build): the query reads the rows instead; the copy is right for the snapshots after.
+var ErrBehind = errors.New("analytics: the snapshot is older than the copy")
 
 // keepVersions is how many revisions of the changed rows a Table keeps for the readers of older snapshots.
 const keepVersions = 8
@@ -37,19 +40,31 @@ type changed struct {
 	rowIDs   []int64 // the keys of images, ascending
 }
 
-// OpenTable opens table's copy in directory; nil and no error when there is none.
-func OpenTable(directory, table string) (*Table, error) {
-	copy, err := Open(directory, table)
-	if err != nil || copy == nil {
-		return nil, err
+// newTable is the table read from copy, no row changed yet.
+func newTable(copy *Copy) *Table {
+	return &Table{copy: copy, versions: []*changed{{revision: copy.Manifest.Revision, images: map[int64][]any{}}}}
+}
+
+// carry keeps the rows changed that previous, the same main part opened from an earlier generation, read already.
+func (t *Table) carry(previous *Table) {
+	if previous == nil || previous.copy.Manifest.Section != t.copy.Manifest.Section || previous.copy.Manifest.Revision != t.copy.Manifest.Revision {
+		return
 	}
-	return &Table{copy: copy, versions: []*changed{{revision: copy.Manifest.Revision, images: map[int64][]any{}}}}, nil
+	previous.mutex.Lock()
+	versions := slices.Clone(previous.versions)
+	previous.mutex.Unlock()
+	t.mutex.Lock()
+	t.versions = versions
+	t.mutex.Unlock()
 }
 
 // Manifest is the main part's manifest.
 func (t *Table) Manifest() *Manifest { return t.copy.Manifest }
 
-// Close closes the main part.
+// Copy is the main part, as it was built or last folded.
+func (t *Table) Copy() *Copy { return t.copy }
+
+// Close lets the main part go.
 func (t *Table) Close() error { return t.copy.Close() }
 
 // View is the table as one read transaction sees it.
@@ -75,7 +90,7 @@ func (t *Table) View(ctx context.Context, source Querier, schema string) (*View,
 	case !hasHistory:
 		return nil, fmt.Errorf("%w: the file has no history", ErrStale)
 	case revision < manifest.Revision:
-		return nil, fmt.Errorf("%w: the snapshot is at revision %d, the copy at %d", ErrStale, revision, manifest.Revision)
+		return nil, fmt.Errorf("%w: the snapshot is at revision %d, the copy at %d", ErrBehind, revision, manifest.Revision)
 	}
 	t.mutex.Lock()
 	base := t.versions[0]

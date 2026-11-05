@@ -3,53 +3,44 @@ package analytics
 import (
 	"context"
 	"fmt"
-	"io"
-	"os"
-	"path/filepath"
+	"sync"
 
 	"github.com/kitwork/engine/kitdb/columnar"
 )
 
-// Copy is the open main part of one table's copy.
+// Copy is the open main part of one table's copy: its section of a generation of the File, which it keeps readable
+// until closed.
 type Copy struct {
-	Manifest *Manifest
-	file     *os.File
-	reader   *columnar.Reader
+	Manifest   *Manifest
+	generation *generation
+	reader     *columnar.Reader
+	close      sync.Once
 }
 
-// Open opens the main part of table's copy in directory: nil and no error when there is none.
-func Open(directory, table string) (*Copy, error) {
-	manifest, err := ReadManifest(directory, table)
-	if err != nil || manifest == nil {
-		return nil, err
-	}
-	file, err := os.Open(filepath.Join(directory, manifest.Data))
+// openCopy opens manifest's section of g; the caller has acquired g for it.
+func openCopy(g *generation, manifest *Manifest) (*Copy, error) {
+	section, err := g.reader.Section(manifest.Section)
 	if err != nil {
 		return nil, err
 	}
-	info, err := file.Stat()
-	if err != nil {
-		file.Close()
-		return nil, err
+	if section.Size() != manifest.Bytes {
+		return nil, fmt.Errorf("analytics: the section of %q holds %d bytes, its manifest says %d", manifest.Table, section.Size(), manifest.Bytes)
 	}
-	if info.Size() != manifest.Bytes {
-		file.Close()
-		return nil, fmt.Errorf("analytics: %s holds %d bytes, its manifest says %d", manifest.Data, info.Size(), manifest.Bytes)
-	}
-	reader, err := columnar.Open(io.NewSectionReader(file, 0, info.Size()))
+	reader, err := columnar.Open(section)
 	if err != nil {
-		file.Close()
 		return nil, err
 	}
 	if fmt.Sprint(reader.Fields) != fmt.Sprint(manifest.fields()) {
-		file.Close()
-		return nil, fmt.Errorf("analytics: %s holds other columns than its manifest", manifest.Data)
+		return nil, fmt.Errorf("analytics: the section of %q holds other columns than its manifest", manifest.Table)
 	}
-	return &Copy{Manifest: manifest, file: file, reader: reader}, nil
+	return &Copy{Manifest: manifest, generation: g, reader: reader}, nil
 }
 
-// Close closes the main part's file.
-func (c *Copy) Close() error { return c.file.Close() }
+// Close lets the copy's generation go.
+func (c *Copy) Close() error {
+	c.close.Do(c.generation.release)
+	return nil
+}
 
 // fieldsOf are the fields of the rowid and of the named columns, in that order.
 func (c *Copy) fieldsOf(columns []string) ([]columnar.Field, error) {

@@ -6,17 +6,15 @@
 // changed since are read from the history (kitwork_history) as the file goes on, so a query reads exactly what the
 // rows read at the same moment. The engine decides which tables and columns have a copy; nobody declares one.
 //
-// The copy is derived data: <file>.analytics/ may be deleted at any time and is built again.
+// Every table's copy of a file is in one file beside it, <file>.analytics (File); it is derived data, deleted at any
+// time and built again.
 package analytics
 
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/kitwork/engine/kitdb/columnar"
@@ -25,9 +23,6 @@ import (
 // ErrUnsupported means a column the copy cannot hold: a type other than an integer, a real or a text, a value of
 // another type than the column's, a real that is not finite.
 var ErrUnsupported = errors.New("analytics: column not supported")
-
-// manifestFormat is the format of a table's manifest.
-const manifestFormat = 1
 
 // rowIDTag is the field of the rowid in a copy; column i of the manifest is field i+2.
 const rowIDTag = 1
@@ -38,11 +33,10 @@ type Column struct {
 	Kind columnar.Kind `json:"kind"`
 }
 
-// Manifest describes the main part of one table's copy.
+// Manifest describes the main part of one table's copy, as the generation of the File holding it names it.
 type Manifest struct {
-	Format  int      `json:"format"`
 	Table   string   `json:"table"`
-	Data    string   `json:"data"` // the file of the main part, in the copy's directory
+	Section string   `json:"section"` // the section of the File holding the blocks
 	Columns []Column `json:"columns"`
 	// Revision is the last commit the main part holds: a file without a history holds 0.
 	Revision uint64 `json:"revision"`
@@ -50,8 +44,11 @@ type Manifest struct {
 	Schema int64  `json:"schema"`
 	Rows   uint64 `json:"rows"`
 	Bytes  int64  `json:"bytes"`
+	Blocks int    `json:"blocks"`
 	// MaxRowID is the largest rowid the main part holds.
 	MaxRowID int64 `json:"max_rowid"`
+	// Folds is how many folds wrote the main part since the build it comes from.
+	Folds int `json:"folds,omitempty"`
 }
 
 // fields are the copy's columnar fields: the rowid, then the columns.
@@ -73,12 +70,8 @@ func (manifest *Manifest) position(name string) int {
 	return -1
 }
 
-// Directory is the directory of the copies of the file at path.
-func Directory(path string) string { return path + ".analytics" }
-
-func manifestPath(directory, table string) string {
-	return filepath.Join(directory, table+".json")
-}
+// Path is the file of the copies of the database file at path.
+func Path(path string) string { return path + ".analytics" }
 
 // Querier is what reads the file: a *sql.Tx or a *sql.Conn inside a read transaction.
 type Querier interface {
@@ -168,25 +161,6 @@ func snapshotState(ctx context.Context, source Querier, schema string) (uint64, 
 		return 0, 0, false, err
 	}
 	return uint64(revision), version, true, nil
-}
-
-// ReadManifest reads the manifest of table's copy in directory; a copy that is not there is nil and no error.
-func ReadManifest(directory, table string) (*Manifest, error) {
-	content, err := os.ReadFile(manifestPath(directory, table))
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	var manifest Manifest
-	if err := json.Unmarshal(content, &manifest); err != nil {
-		return nil, fmt.Errorf("analytics: manifest of %q: %w", table, err)
-	}
-	if manifest.Format != manifestFormat || manifest.Table != table || manifest.Data != filepath.Base(manifest.Data) {
-		return nil, fmt.Errorf("analytics: manifest of %q is not one this engine wrote", table)
-	}
-	return &manifest, nil
 }
 
 func quoteIdentifier(name string) string {

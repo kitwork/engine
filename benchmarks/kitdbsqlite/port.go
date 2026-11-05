@@ -19,13 +19,13 @@ func (portAccess) Command(context.Context, string) (string, bool, error)   { ret
 func (portAccess) Current(context.Context) (bool, error)                   { return true, nil }
 
 // cmdPort runs the analytic queries of RESULTS_2026-10-27.md through two sessions of the read-only port on the file
-// (kitdb/gateway), as a PostgreSQL client sends them: one whose registry finds the copy in directory (built by
-// `kitdbsqlite analytics`), one without copies, SQLite answering. The results must be the same field for field.
-// Evidence for KITWORK_KITDB.md mục 6 and 7 (05/11/2026).
-func cmdPort(path, directory string) {
+// (kitdb/gateway), as a PostgreSQL client sends them: one whose registry finds the copy in the copies' file at copies
+// (built by `kitdbsqlite analytics`), one without copies, SQLite answering. The results must be the same field for
+// field. Evidence for KITWORK_KITDB.md mục 6 and 7 (05/11/2026).
+func cmdPort(path, copies string) {
 	ctx := context.Background()
 	registry := analytics.NewRegistry()
-	registry.Place = func(string) string { return directory }
+	registry.Place = func(string) string { return copies }
 	defer registry.Close()
 	open := func(options gateway.Options) *gateway.Session {
 		session, err := gateway.Open(ctx, gateway.Target{Name: "shopping", Schemas: map[string]string{"public": path}},

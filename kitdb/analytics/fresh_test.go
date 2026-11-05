@@ -96,15 +96,7 @@ var viewColumns = []string{"merchant", "amount", "price", "paid", "note"}
 func TestViewReadsEachSnapshotAsTheRowsDo(t *testing.T) {
 	path, database := ordersFile(t, 3000)
 	ctx := context.Background()
-	directory := Directory(path)
-	if _, err := Build(ctx, readTransaction(t, path), "main", directory, "orders", viewColumns); err != nil {
-		t.Fatal(err)
-	}
-	table, err := OpenTable(directory, "orders")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer table.Close()
+	table := builtTable(t, path, viewColumns)
 	random := rand.New(rand.NewPCG(3, 9))
 	var older *sql.Tx
 	for step := range 40 {
@@ -145,8 +137,11 @@ func TestViewReadsEachSnapshotAsTheRowsDo(t *testing.T) {
 	}
 }
 
-// TestViewRefusesWhatItCannotReach: a schema change, rows changed outside the history, a hole in the history, a file
-// without one and a snapshot older than the copy are ErrStale.
+// TestViewRefusesWhatItCannotReach: a schema change, rows changed outside the history, a hole in the history and a
+// file without one are ErrStale; a snapshot older than the copy is ErrBehind, which builds nothing again.
+//
+// CONTROL (05/11/2026): with an older snapshot ErrStale, "view: analytics: the copy is stale: the snapshot is at
+// revision 4, the copy at 5, want ErrBehind and not ErrStale".
 //
 // CONTROL (05/11/2026): with the schema_version not compared, the schema subtest still stale but by the history's
 // Statement ("revision 6 changed the schema"), a second guard; with the revisions not checked to follow one another,
@@ -160,14 +155,7 @@ func TestViewRefusesWhatItCannotReach(t *testing.T) {
 		before := readTransaction(t, path)
 		begin(t, before)
 		write(t, database, `UPDATE orders SET amount = 1 WHERE id = 3`)
-		if _, err := Build(ctx, readTransaction(t, path), "main", Directory(path), "orders", viewColumns); err != nil {
-			t.Fatal(err)
-		}
-		table, err := OpenTable(Directory(path), "orders")
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { table.Close() })
+		table := builtTable(t, path, viewColumns)
 		return path, database, table, before
 	}
 	stale := func(t *testing.T, table *Table, tx *sql.Tx, want string) {
@@ -178,7 +166,9 @@ func TestViewRefusesWhatItCannotReach(t *testing.T) {
 	}
 	t.Run("older snapshot", func(t *testing.T) {
 		_, _, table, before := open(t)
-		stale(t, table, before, "the snapshot is at revision")
+		if _, err := table.View(ctx, before, "main"); !errors.Is(err, ErrBehind) || errors.Is(err, ErrStale) {
+			t.Fatalf("view: %v, want ErrBehind and not ErrStale", err)
+		}
 	})
 	t.Run("schema", func(t *testing.T) {
 		path, database, table, _ := open(t)
@@ -223,14 +213,7 @@ func TestViewRefusesWhatItCannotReach(t *testing.T) {
 		if _, err := db.Exec(`INSERT INTO orders (id, merchant, paid) VALUES (1, 'a', 0)`); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Build(ctx, readTransaction(t, path), "main", Directory(path), "orders", []string{"merchant"}); err != nil {
-			t.Fatal(err)
-		}
-		table, err := OpenTable(Directory(path), "orders")
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer table.Close()
+		table := builtTable(t, path, []string{"merchant"})
 		stale(t, table, readTransaction(t, path), "the file has no history")
 	})
 }
@@ -243,14 +226,7 @@ func TestViewRefusesWhatItCannotReach(t *testing.T) {
 func TestViewScansABlockHoldingAChangedRow(t *testing.T) {
 	path, database := ordersFile(t, 3000)
 	ctx := context.Background()
-	if _, err := Build(ctx, readTransaction(t, path), "main", Directory(path), "orders", viewColumns); err != nil {
-		t.Fatal(err)
-	}
-	table, err := OpenTable(Directory(path), "orders")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer table.Close()
+	table := builtTable(t, path, viewColumns)
 	write(t, database, `DELETE FROM orders WHERE id BETWEEN 300 AND 330`)
 	write(t, database, `UPDATE orders SET amount = 5 WHERE id = 3003`)
 	write(t, database, `INSERT INTO orders (id, merchant, paid) VALUES (77777, 'x', 1)`)

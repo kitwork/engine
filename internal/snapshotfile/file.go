@@ -301,6 +301,25 @@ func (r *Reader) Section(name string) (*io.SectionReader, error) {
 	return io.NewSectionReader(r.readerAt(), entry.Offset, entry.Length), nil
 }
 
+// SectionExtents is how many physical ranges the named section is made of: 1
+// for a section of a single-generation file, 0 when there is no such section.
+// An owner that builds sections by referencing old ranges reads it to bound the
+// directory, whose extents are counted against one budget (MaximumExtents).
+func (r *Reader) SectionExtents(name string) int {
+	entry, exists := r.entries[name]
+	switch {
+	case !exists:
+		return 0
+	case r.generation == nil:
+		return 1
+	}
+	return len(entry.Extents)
+}
+
+// MaximumExtents is how many physical ranges one generation's sections may be
+// made of, all together.
+const MaximumExtents = maximumExtents
+
 // ReadHandles reports the bounded number of handles backing section reads.
 func (r *Reader) ReadHandles() int {
 	if r == nil {

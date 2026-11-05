@@ -4,8 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"os"
-	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/kitwork/engine/kitdb/analytics"
@@ -18,9 +17,10 @@ var analyticsColumns = []string{"merchant", "id", "shop", "category", "price", "
 	"review", "official"}
 
 // cmdAnalytics builds KCOL on SQLite (kitdb/analytics, docs/KITWORK_KITDB.md mục 6 of the Kitwork repository) for
-// shopping's analytic columns, from one read transaction of the file opened read-only, into directory, and reads
-// every block of it back. The file is never written. Evidence for mục 6 and 11, bước 2 (05/11/2026).
-func cmdAnalytics(path, directory string) {
+// shopping's analytic columns, from one read transaction of the file opened read-only, into the copies' file at
+// copies (a copy it holds already is read), and reads every block of it back. The database is never written. Evidence
+// for mục 6 and 11, bước 2 (05/11/2026, one file the same day).
+func cmdAnalytics(path, copiesPath string) {
 	ctx := context.Background()
 	db, err := sql.Open("sqlite", "file:"+toSlash(path)+"?mode=ro&_pragma=busy_timeout(10000)&_pragma=cache_size(-262144)")
 	must(err)
@@ -30,20 +30,24 @@ func cmdAnalytics(path, directory string) {
 	must(err)
 	defer tx.Rollback()
 
+	copies, err := analytics.OpenFile(copiesPath)
+	must(err)
+	defer copies.Close()
 	start := time.Now()
-	if _, err := os.Stat(filepath.Join(directory, "shopping.json")); err == nil {
-		fmt.Println("the copy built before in " + directory + " is read") // its view says whether it is behind
+	if slices.Contains(copies.Tables(), "shopping") {
+		fmt.Println("the copy built before in " + copiesPath + " is read") // its view says whether it is behind
 	} else {
-		manifest, err := analytics.Build(ctx, tx, "main", directory, "shopping", analyticsColumns)
+		manifest, err := copies.Build(ctx, tx, "main", "shopping", analyticsColumns)
 		must(err)
-		fmt.Printf("built %d rows of %d columns at revision %d: %s, %s\n", manifest.Rows, len(manifest.Columns),
-			manifest.Revision, duration(time.Since(start)), gigabytes(manifest.Bytes))
+		fmt.Printf("built %d rows of %d columns at revision %d: %s, %s in %d blocks\n", manifest.Rows, len(manifest.Columns),
+			manifest.Revision, duration(time.Since(start)), gigabytes(manifest.Bytes), manifest.Blocks)
 	}
 
-	answerAnalytics(ctx, db, directory)
-	copy, err := analytics.Open(directory, "shopping")
+	answerAnalytics(ctx, db, copies)
+	table, err := copies.Table("shopping")
 	must(err)
-	defer copy.Close()
+	defer table.Close()
+	copy := table.Copy()
 	for _, columns := range [][]string{{"price"}, {"merchant", "price"}, analyticsColumns} {
 		start = time.Now()
 		var rows, sum int64
@@ -92,8 +96,8 @@ var analyticsQueries = []struct {
 // SQLite in that same transaction, and prints both times and whether the rows are the same. The copy answers every
 // query twice first, the second timed, then SQLite answers each: a SQLite scan of the whole file pushes the copy out of
 // the system's file cache, so alternating would time the copy read from disk.
-func answerAnalytics(ctx context.Context, db *sql.DB, directory string) {
-	table, err := analytics.OpenTable(directory, "shopping")
+func answerAnalytics(ctx context.Context, db *sql.DB, copies *analytics.File) {
+	table, err := copies.Table("shopping")
 	must(err)
 	defer table.Close()
 	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
