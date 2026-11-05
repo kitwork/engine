@@ -93,6 +93,7 @@ type fakeAccess struct {
 	commands []string
 	current  bool
 	checks   int
+	admin    bool
 }
 
 func newAccess(tables ...string) *fakeAccess {
@@ -108,6 +109,21 @@ func (access *fakeAccess) CanSelect(_ context.Context, schema, table string) (bo
 	defer access.mutex.Unlock()
 	access.asked = append(access.asked, schema+"."+table)
 	return access.allowed[schema+"."+table], nil
+}
+
+// CanModify allows what allow named ("insert public.orders").
+func (access *fakeAccess) CanModify(_ context.Context, schema, table, privilege string) (bool, error) {
+	access.mutex.Lock()
+	defer access.mutex.Unlock()
+	key := privilege + " " + schema + "." + table
+	access.asked = append(access.asked, key)
+	return access.allowed[key], nil
+}
+
+func (access *fakeAccess) Admin(context.Context) (bool, error) {
+	access.mutex.Lock()
+	defer access.mutex.Unlock()
+	return access.admin, nil
 }
 
 func (access *fakeAccess) Command(_ context.Context, statement string) (string, bool, error) {

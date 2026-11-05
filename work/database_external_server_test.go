@@ -76,6 +76,10 @@ func (login postgresTestLogin) Authenticate(ctx context.Context, startup pgwire.
 type postgresTestAccess struct{}
 
 func (postgresTestAccess) CanSelect(context.Context, string, string) (bool, error) { return true, nil }
+func (postgresTestAccess) CanModify(context.Context, string, string, string) (bool, error) {
+	return false, nil
+}
+func (postgresTestAccess) Admin(context.Context) (bool, error) { return false, nil }
 func (postgresTestAccess) Command(context.Context, string) (string, bool, error) {
 	return "", false, nil
 }

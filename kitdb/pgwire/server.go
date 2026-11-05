@@ -728,6 +728,16 @@ func (wire *wireConnection) simpleQuery(ctx context.Context, body []byte) error 
 		}
 		return wire.ready()
 	}
+	if splitter, ok := wire.session.(SplitSession); ok {
+		statements, err := splitter.Split(query)
+		if err != nil {
+			_ = wire.sendError(err)
+			return wire.ready()
+		}
+		if len(statements) > 1 {
+			return wire.runStatements(ctx, statements)
+		}
+	}
 	result, err := wire.runQuery(ctx, query, nil)
 	if err != nil {
 		_ = wire.sendError(err)
@@ -735,6 +745,44 @@ func (wire *wireConnection) simpleQuery(ctx context.Context, body []byte) error 
 	}
 	if err := wire.sendResult(result, 0, true); err != nil {
 		return err
+	}
+	return wire.ready()
+}
+
+// runStatements runs the statements of one simple query in turn (SplitSession).
+func (wire *wireConnection) runStatements(ctx context.Context, statements []SplitStatement) error {
+	implicit := true
+	if session, ok := wire.session.(TransactionStatusSession); !ok || session.TransactionStatus() != TransactionIdle {
+		implicit = false
+	}
+	for _, statement := range statements {
+		if statement.Control {
+			implicit = false
+		}
+	}
+	if implicit {
+		if _, err := wire.runQuery(ctx, "BEGIN", nil); err != nil {
+			_ = wire.sendError(err)
+			return wire.ready()
+		}
+	}
+	for _, statement := range statements {
+		result, err := wire.runQuery(ctx, statement.Text, nil)
+		if err != nil {
+			_ = wire.sendError(err)
+			if implicit {
+				_, _ = wire.runQuery(context.WithoutCancel(ctx), "ROLLBACK", nil)
+			}
+			return wire.ready()
+		}
+		if err := wire.sendResult(result, 0, true); err != nil {
+			return err
+		}
+	}
+	if implicit {
+		if _, err := wire.runQuery(ctx, "COMMIT", nil); err != nil {
+			_ = wire.sendError(err)
+		}
 	}
 	return wire.ready()
 }

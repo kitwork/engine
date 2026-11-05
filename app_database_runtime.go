@@ -19,11 +19,13 @@ import (
 	"github.com/kitwork/engine/kitdb/catalog"
 	"github.com/kitwork/engine/kitdb/gateway"
 	"github.com/kitwork/engine/kitdb/pgwire"
+	kitdbsqlite "github.com/kitwork/engine/kitdb/sqlite"
 	"github.com/kitwork/engine/work"
 )
 
 // app.database(path, { port, user, password }) is the host's database port (KITWORK_KITDB.md câu 13.5, 30/10/2026):
-// the PostgreSQL wire, read-only, on SQLite files. A client names its database the way the catalogue of a cluster
+// the PostgreSQL wire on SQLite files, read-only until 05/11/2026; an account granted INSERT, UPDATE or DELETE now
+// writes, through the writer the engine's own statements write through (work.OpenWriter). A client names its database the way the catalogue of a cluster
 // does: a folder of the host's .database/ (`shopping`), or `<domain>/<database>` of an app (`demo.kitwork.io/
 // application`, the folder application/ of the .database/ of the app that has the domain). The database's schemas
 // are the .db files of its folder: kitwork.db is public, billing.db is billing. Each .database/ is one cluster with
@@ -100,8 +102,9 @@ func startAppDatabaseRuntime(parent context.Context, config AppDatabaseConfig, a
 	// table's of a file in one file beside it (<file>.analytics)
 	port := &appDatabaseGateway{
 		host: host, apps: apps,
-		admin:    catalog.Admin{User: config.User, Password: config.Password},
-		options:  gateway.Options{MaxRows: 10_000, MaxBytes: 10 << 20, Analytics: analytics.NewRegistry()},
+		admin: catalog.Admin{User: config.User, Password: config.Password},
+		options: gateway.Options{MaxRows: 10_000, MaxBytes: 10 << 20, Analytics: analytics.NewRegistry(),
+			Writers: appDatabaseWriters{}},
 		catalogs: map[string]*catalog.Catalog{},
 	}
 	ctx, cancel := context.WithCancel(parent)
@@ -398,6 +401,36 @@ func (access *appDatabaseAccess) CanSelect(ctx context.Context, schema, table st
 		return true, nil
 	}
 	return access.catalog.CanSelect(ctx, access.user, access.database, schema, table)
+}
+
+func (access *appDatabaseAccess) CanModify(ctx context.Context, schema, table, privilege string) (bool, error) {
+	if access.admin {
+		return true, nil
+	}
+	return access.catalog.Can(ctx, access.user, access.database, schema, table, privilege)
+}
+
+func (access *appDatabaseAccess) Admin(context.Context) (bool, error) { return access.admin, nil }
+
+// appDatabaseWriters opens, for a session that writes, the writer of a file the engine's statements write through.
+type appDatabaseWriters struct{}
+
+func (appDatabaseWriters) Open(path string) (gateway.Writer, error) {
+	database, release, err := work.OpenWriter(path)
+	if err != nil {
+		return nil, err
+	}
+	return appDatabaseWriter{Database: database, release: release}, nil
+}
+
+type appDatabaseWriter struct {
+	*kitdbsqlite.Database
+	release func()
+}
+
+func (writer appDatabaseWriter) Close() error {
+	writer.release()
+	return nil
 }
 
 func (access *appDatabaseAccess) Command(ctx context.Context, statement string) (string, bool, error) {

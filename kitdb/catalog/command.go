@@ -182,8 +182,8 @@ func (c *Catalog) apply(work *transaction, actor, database string, parsed *state
 		return c.drop(work, actor, parsed)
 	case actionGrantConnect:
 		return c.grantConnect(work, parsed)
-	case actionGrantSelect:
-		return c.grantSelect(work, database, parsed)
+	case actionGrantTable:
+		return c.grantTable(work, database, parsed)
 	case actionGrantRole:
 		return c.grantRole(work, parsed)
 	}
@@ -328,40 +328,45 @@ func (c *Catalog) grantConnect(work *transaction, parsed *statement) error {
 	return work.touch(parsed.name)
 }
 
-func (c *Catalog) grantSelect(work *transaction, database string, parsed *statement) error {
+func (c *Catalog) grantTable(work *transaction, database string, parsed *statement) error {
 	if database == "" {
-		return pgwire.NewError("3D000", "GRANT SELECT applies to the database the session is connected to: connect to one")
+		return pgwire.NewError("3D000", "GRANT on a table applies to the database the session is connected to: connect to one")
 	}
 	skip, err := c.grantee(work, parsed.name)
 	if err != nil || skip {
 		return err
 	}
 	var changed int64
-	switch {
-	case !parsed.revoke:
-		changed, err = work.exec(`INSERT OR IGNORE INTO grants (grantee, privilege, database_name, schema_name, table_name)
-			VALUES (?, 'select', ?, ?, ?)`, parsed.name, database, parsed.schema, parsed.table)
-	case parsed.table == "":
-		changed, err = work.exec(`DELETE FROM grants WHERE grantee = ? AND privilege = 'select' AND database_name = ? AND schema_name = ?`,
-			parsed.name, database, parsed.schema)
-	default:
-		changed, err = work.exec(`DELETE FROM grants WHERE grantee = ? AND privilege = 'select' AND database_name = ? AND schema_name = ?
-			AND table_name = ?`, parsed.name, database, parsed.schema, parsed.table)
+	for _, privilege := range parsed.privileges {
+		var count int64
+		switch {
+		case !parsed.revoke:
+			count, err = work.exec(`INSERT OR IGNORE INTO grants (grantee, privilege, database_name, schema_name, table_name)
+				VALUES (?, ?, ?, ?, ?)`, parsed.name, privilege, database, parsed.schema, parsed.table)
+		case parsed.table == "":
+			count, err = work.exec(`DELETE FROM grants WHERE grantee = ? AND privilege = ? AND database_name = ? AND schema_name = ?`,
+				parsed.name, privilege, database, parsed.schema)
+		default:
+			everyTable, err := work.exists(`SELECT 1 FROM grants WHERE grantee = ? AND privilege = ? AND database_name = ?
+				AND schema_name = ? AND table_name = ''`, parsed.name, privilege, database, parsed.schema)
+			if err != nil {
+				return err
+			}
+			if everyTable {
+				word := strings.ToUpper(privilege)
+				return unsupported(fmt.Sprintf("%s on every table of schema %q stays granted to %q: REVOKE %s ON ALL TABLES IN SCHEMA %s FROM %s first",
+					word, parsed.schema, parsed.name, word, parsed.schema, parsed.name))
+			}
+			count, err = work.exec(`DELETE FROM grants WHERE grantee = ? AND privilege = ? AND database_name = ? AND schema_name = ?
+				AND table_name = ?`, parsed.name, privilege, database, parsed.schema, parsed.table)
+		}
 		if err != nil {
 			return err
 		}
-		everyTable, err := work.exists(`SELECT 1 FROM grants WHERE grantee = ? AND privilege = 'select' AND database_name = ?
-			AND schema_name = ? AND table_name = ''`, parsed.name, database, parsed.schema)
-		if err != nil {
-			return err
-		}
-		if everyTable {
-			return unsupported(fmt.Sprintf("SELECT on every table of schema %q stays granted to %q: REVOKE SELECT ON ALL TABLES IN SCHEMA %s FROM %s first",
-				parsed.schema, parsed.name, parsed.schema, parsed.name))
-		}
+		changed += count
 	}
-	if err != nil || changed == 0 {
-		return err
+	if changed == 0 {
+		return nil
 	}
 	return work.touch(parsed.name)
 }

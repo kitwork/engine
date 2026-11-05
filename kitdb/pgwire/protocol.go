@@ -100,6 +100,23 @@ type Session interface {
 	Close() error
 }
 
+// SplitSession optionally cuts a simple query's text into its statements. The
+// server then runs them one after another, as PostgreSQL runs such a query,
+// each answered by its own CommandComplete and stopping at the first error: in
+// one implicit transaction when the session is idle and no statement begins or
+// ends a transaction itself (an error rolls back the statements before it),
+// else each as the session's transaction has it.
+type SplitSession interface {
+	Split(query string) ([]SplitStatement, error)
+}
+
+// SplitStatement is one statement of a simple query.
+type SplitStatement struct {
+	Text string
+	// Control is BEGIN, START TRANSACTION, COMMIT, END, ROLLBACK or ABORT.
+	Control bool
+}
+
 // TerminationSession optionally binds session cancellation to its transport.
 // The returned function unregisters the callback before transport cleanup.
 type TerminationSession interface {

@@ -331,7 +331,11 @@ func TestRefusedStatements(t *testing.T) {
 		{`ALTER USER alice`, "42601"},
 		{`ALTER ROLE readers PASSWORD 'readers-password-2026'`, "0A000"},
 		{`ALTER USER alice RENAME TO alicia`, "0A000"},
-		{`GRANT INSERT ON users TO alice`, "0A000"},
+		{`GRANT TRUNCATE ON users TO alice`, "0A000"},
+		{`GRANT INSERT (name) ON users TO alice`, "0A000"},
+		{`GRANT SELECT, CONNECT ON users TO alice`, "0A000"},
+		{`GRANT SELECT, SELECT ON users TO alice`, "42601"},
+		{`GRANT SELECT INSERT ON users TO alice`, "42601"},
 		{`GRANT ALL ON DATABASE shop TO alice`, "0A000"},
 		{`GRANT CONNECT, SELECT ON DATABASE shop TO alice`, "0A000"},
 		{`GRANT CONNECT ON DATABASE shop TO PUBLIC`, "0A000"},
@@ -450,6 +454,115 @@ func TestSelectGrants(t *testing.T) {
 	mustRun(t, catalog, admin, "shop", `ALTER USER alice NOLOGIN`, "ALTER ROLE")
 	if canSelect(t, catalog, "alice", "shop", "billing", "invoices") {
 		t.Fatal("a disabled user selects")
+	}
+}
+
+// TestWriteGrants: INSERT, UPDATE and DELETE are granted on a table or on every table of a schema, alone, as a list,
+// or with SELECT as ALL PRIVILEGES, to a user or through a role, and revoked one by one; a privilege reaches nothing
+// else.
+//
+// CONTROL (05/11/2026): with Can asking for SELECT whatever the privilege, "alice may not delete billing.invoices".
+func TestWriteGrants(t *testing.T) {
+	t.Parallel()
+	catalog, _ := openTest(t, hostAdmin)
+	admin := hostAdmin.User
+	can := func(user, schema, table, privilege string) bool {
+		t.Helper()
+		allowed, err := catalog.Can(context.Background(), user, "shop", schema, table, privilege)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return allowed
+	}
+	mustRun(t, catalog, admin, "", `CREATE USER alice WITH PASSWORD 'alice-password-2026'`, "CREATE ROLE")
+	mustRun(t, catalog, admin, "", `CREATE USER bob WITH PASSWORD 'bob-password-2026'`, "CREATE ROLE")
+	mustRun(t, catalog, admin, "", `CREATE ROLE editors`, "CREATE ROLE")
+	mustRun(t, catalog, admin, "shop", `GRANT SELECT, INSERT, UPDATE ON orders TO alice`, "GRANT")
+	mustRun(t, catalog, admin, "shop", `GRANT DELETE ON ALL TABLES IN SCHEMA billing TO alice`, "GRANT")
+	mustRun(t, catalog, admin, "shop", `GRANT ALL PRIVILEGES ON TABLE notes TO editors`, "GRANT")
+	mustRun(t, catalog, admin, "", `GRANT editors TO bob`, "GRANT")
+	for _, allowed := range [][4]string{{"alice", "public", "orders", "select"}, {"alice", "PUBLIC", "Orders", "insert"},
+		{"alice", "public", "orders", "update"}, {"alice", "billing", "invoices", "delete"}, {"bob", "public", "notes", "delete"},
+		{"bob", "public", "notes", "insert"}, {"bob", "public", "notes", "select"}, {admin, "public", "anything", "delete"}} {
+		if !can(allowed[0], allowed[1], allowed[2], allowed[3]) {
+			t.Fatalf("%s may not %s %s.%s", allowed[0], allowed[3], allowed[1], allowed[2])
+		}
+	}
+	for _, refused := range [][4]string{{"alice", "public", "orders", "delete"}, {"alice", "billing", "invoices", "insert"},
+		{"alice", "public", "notes", "update"}, {"bob", "public", "orders", "insert"}, {"nobody", "public", "orders", "select"}} {
+		if can(refused[0], refused[1], refused[2], refused[3]) {
+			t.Fatalf("%s may %s %s.%s", refused[0], refused[3], refused[1], refused[2])
+		}
+	}
+	if _, err := catalog.Can(context.Background(), "alice", "shop", "public", "orders", "truncate"); err == nil {
+		t.Fatal("truncate was taken as a table privilege")
+	}
+	mustRun(t, catalog, admin, "shop", `REVOKE UPDATE ON orders FROM alice`, "REVOKE")
+	if can("alice", "public", "orders", "update") || !can("alice", "public", "orders", "insert") {
+		t.Fatal("REVOKE UPDATE took another privilege or left UPDATE")
+	}
+	mustFail(t, catalog, admin, "shop", `REVOKE DELETE ON billing.invoices FROM alice`, "0A000")
+	mustRun(t, catalog, admin, "shop", `REVOKE ALL ON ALL TABLES IN SCHEMA billing FROM alice`, "REVOKE")
+	if can("alice", "billing", "invoices", "delete") {
+		t.Fatal("REVOKE ALL left DELETE")
+	}
+}
+
+// TestOpenMovesAVersion1Catalog: a catalog of schema version 1 (CONNECT and SELECT only, 30/10–05/11/2026) opens as
+// version 2, its grants kept, its trigger on grants made again, and takes the privileges that write.
+//
+// CONTROL (05/11/2026): without the trigger made again, "a grant to a name that does not exist was kept".
+func TestOpenMovesAVersion1Catalog(t *testing.T) {
+	t.Parallel()
+	cluster := t.TempDir()
+	if err := os.Mkdir(filepath.Join(cluster, Directory), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	database, err := sql.Open("sqlite", dataSourceName(filepath.Join(cluster, Directory, File)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	version1 := []string{}
+	for _, statement := range schemaStatements {
+		switch statement {
+		case grantsTable:
+			statement = strings.NewReplacer(
+				"CHECK (privilege IN ('connect', 'select', 'insert', 'update', 'delete'))", "CHECK (privilege IN ('connect', 'select'))",
+				"(privilege <> 'connect' AND schema_name <> '')", "(privilege = 'select' AND schema_name <> '')").Replace(statement)
+		}
+		version1 = append(version1, statement)
+	}
+	for _, statement := range append(version1,
+		`INSERT INTO users (name, salt, iterations, stored_key, server_key, stamp) VALUES ('alice', zeroblob(16), 4096, zeroblob(32), zeroblob(32), 2)`,
+		`INSERT INTO grants (grantee, privilege, database_name, schema_name, table_name) VALUES ('alice', 'select', 'shop', 'public', 'orders')`,
+		`PRAGMA user_version = 1`) {
+		if _, err := database.Exec(statement); err != nil {
+			t.Fatalf("%s: %v", statement, err)
+		}
+	}
+	if _, err := database.Exec(`INSERT INTO grants (grantee, privilege, database_name, schema_name) VALUES ('alice', 'insert', 'shop', 'public')`); err == nil {
+		t.Fatal("the version 1 catalog of the test takes INSERT")
+	}
+	database.Close()
+	catalog, err := Open(context.Background(), cluster, hostAdmin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer catalog.Close()
+	if !canSelect(t, catalog, "alice", "shop", "public", "orders") {
+		t.Fatal("the grant of version 1 was lost")
+	}
+	mustRun(t, catalog, hostAdmin.User, "shop", `GRANT INSERT ON orders TO alice`, "GRANT")
+	if allowed, err := catalog.Can(context.Background(), "alice", "shop", "public", "orders", "insert"); err != nil || !allowed {
+		t.Fatalf("INSERT after the move: %v, %v", allowed, err)
+	}
+	if _, err := catalog.database.Exec(`INSERT INTO grants (grantee, privilege, database_name, schema_name) VALUES ('nobody', 'select', 'shop', 'public')`); err == nil {
+		t.Fatal("a grant to a name that does not exist was kept")
+	}
+	var version int
+	if err := catalog.database.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != 2 {
+		t.Fatalf("schema version %d, %v", version, err)
 	}
 }
 
@@ -772,7 +885,7 @@ func TestOpenRefusesOtherFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.Exec(`PRAGMA user_version = 2`); err != nil {
+	if _, err := database.Exec(`PRAGMA user_version = 3`); err != nil {
 		t.Fatal(err)
 	}
 	database.Close()

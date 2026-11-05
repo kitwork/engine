@@ -575,6 +575,14 @@ const (
 	resultReadOnly  = 8
 	resultInterrupt = 9
 	resultTooBig    = 18
+
+	resultConstraint     = 19
+	constraintCheck      = 275
+	constraintForeignKey = 787
+	constraintNotNull    = 1299
+	constraintPrimaryKey = 1555
+	constraintUnique     = 2067
+	constraintDatatype   = 3091
 )
 
 var resultCodeSuffix = regexp.MustCompile(`\s*\(\d+\)(\s*\(SQLITE_[A-Z]+\))?$`)
@@ -621,6 +629,20 @@ func sqliteError(err error) error {
 		return pgwire.NewError("XX000", message)
 	}
 	switch failure.Code() & 0xff {
+	case resultConstraint:
+		switch failure.Code() {
+		case constraintUnique, constraintPrimaryKey:
+			return pgwire.NewError("23505", message)
+		case constraintNotNull:
+			return pgwire.NewError("23502", message)
+		case constraintForeignKey:
+			return pgwire.NewError("23503", message)
+		case constraintCheck:
+			return pgwire.NewError("23514", message)
+		case constraintDatatype:
+			return pgwire.NewError("42804", message)
+		}
+		return pgwire.NewError("23000", message)
 	case resultInterrupt:
 		return pgwire.NewError("57014", "canceling statement due to user request")
 	case resultReadOnly:

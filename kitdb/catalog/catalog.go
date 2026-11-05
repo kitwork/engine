@@ -11,9 +11,10 @@
 // A user (CREATE USER, Postgres's CREATE ROLE … LOGIN) logs in; a role (CREATE ROLE) is a group that cannot log in.
 // Users and roles share one namespace, as Postgres's roles do. A role is granted to users only (no role inside a
 // role), for every database of the cluster (GRANT role TO user) or for one (GRANT role ON DATABASE db TO user, a
-// KitDB form Postgres does not have). Grants are CONNECT on a database and SELECT on a table (schema.table) or on
-// every table of a schema, present and future (GRANT SELECT ON ALL TABLES IN SCHEMA s); nothing else, the port is
-// read-only. A grant goes to a user or a role; a user may do what it was granted and what its roles were granted.
+// KitDB form Postgres does not have). Grants are CONNECT on a database, and SELECT, INSERT, UPDATE and DELETE on a
+// table (schema.table) or on every table of a schema, present and future (GRANT … ON ALL TABLES IN SCHEMA s), one or
+// a list of them, or ALL [PRIVILEGES] for the four (the port writes since 05/11/2026; it read only before). A grant
+// goes to a user or a role; a user may do what it was granted and what its roles were granted.
 // Revoking a table that a schema-wide grant still covers, or a role for one database that the user still holds for
 // every database, is refused rather than done while the access stays.
 //
@@ -53,22 +54,27 @@
 //	ALTER USER | ALTER ROLE name [WITH] PASSWORD '…' | LOGIN | NOLOGIN …  ALTER ROLE (users only)
 //	DROP USER | DROP ROLE [IF EXISTS] name                              DROP ROLE (either kind, with its grants)
 //	GRANT | REVOKE CONNECT ON DATABASE database TO | FROM name          GRANT | REVOKE
-//	GRANT | REVOKE SELECT ON [TABLE] [schema.]table TO | FROM name      GRANT | REVOKE (the session's database)
-//	GRANT | REVOKE SELECT ON ALL TABLES IN SCHEMA schema TO | FROM name GRANT | REVOKE (the session's database)
+//	GRANT | REVOKE privileges ON [TABLE] [schema.]table TO | FROM name      GRANT | REVOKE (the session's database)
+//	GRANT | REVOKE privileges ON ALL TABLES IN SCHEMA schema TO | FROM name GRANT | REVOKE (the session's database)
+//
+// privileges is SELECT, INSERT, UPDATE or DELETE, a list of them separated by commas, or ALL [PRIVILEGES].
+//
 //	GRANT | REVOKE role [ON DATABASE database] TO | FROM user           GRANT | REVOKE
 //
 // REVOKE takes RESTRICT or CASCADE and ignores them; REVOKE role FROM user takes the role for every database it was
-// held for. Other privileges, role options, lists, PUBLIC, WITH GRANT OPTION and cross-database names are 0A000.
+// held for. Other privileges, column privileges, role options, lists of grantees or tables, PUBLIC, WITH GRANT
+// OPTION and cross-database names are 0A000.
 //
 // # Schema
 //
-// PRAGMA user_version is 1. Tables are STRICT.
+// PRAGMA user_version is 2 (1 until 05/11/2026, whose grants were CONNECT and SELECT only: Open moves such a file to
+// 2). Tables are STRICT.
 //
 //	users       (name PRIMARY KEY, salt, iterations, stored_key, server_key, admin, disabled, stamp)
 //	roles       (name PRIMARY KEY)
 //	memberships (role → roles, member → users, database_name; '' = every database)
-//	grants      (grantee, privilege 'connect' | 'select', database_name, schema_name, table_name; table '' = every
-//	             table of the schema; schema and table COLLATE NOCASE)
+//	grants      (grantee, privilege 'connect' | 'select' | 'insert' | 'update' | 'delete', database_name,
+//	             schema_name, table_name; table '' = every table of the schema; schema and table COLLATE NOCASE)
 //	sequence    (name PRIMARY KEY, value)            'stamp' → the last stamp given
 //	imports     (source PRIMARY KEY, users, imported_at)   'kitdb' once ImportKitDB ran (until 05/11/2026)
 //
@@ -101,7 +107,7 @@ const (
 	// PasswordIterations is the PBKDF2-HMAC-SHA256 iteration count of a password the catalog derives.
 	PasswordIterations = 600000
 
-	schemaVersion            = 1
+	schemaVersion            = 2
 	saltBytes                = 16
 	minimumPasswordBytes     = 12
 	maximumPasswordBytes     = 1024
@@ -127,6 +133,22 @@ type Catalog struct {
 	adminVerifier pgwire.SCRAMVerifier
 }
 
+// grantsTable and grantsGranteeTrigger are the grants and the trigger that keeps them to existing grantees.
+const (
+	grantsTable = `CREATE TABLE grants (
+		grantee       TEXT NOT NULL,
+		privilege     TEXT NOT NULL CHECK (privilege IN ('connect', 'select', 'insert', 'update', 'delete')),
+		database_name TEXT NOT NULL,
+		schema_name   TEXT NOT NULL DEFAULT '' COLLATE NOCASE,
+		table_name    TEXT NOT NULL DEFAULT '' COLLATE NOCASE,
+		PRIMARY KEY (grantee, privilege, database_name, schema_name, table_name),
+		CHECK ((privilege = 'connect' AND schema_name = '' AND table_name = '') OR (privilege <> 'connect' AND schema_name <> ''))
+	) STRICT`
+	grantsGranteeTrigger = `CREATE TRIGGER grants_grantee_exists BEFORE INSERT ON grants
+	WHEN NOT EXISTS (SELECT 1 FROM users WHERE name = NEW.grantee) AND NOT EXISTS (SELECT 1 FROM roles WHERE name = NEW.grantee)
+	BEGIN SELECT RAISE(ABORT, 'the grantee does not exist'); END`
+)
+
 var schemaStatements = []string{
 	`CREATE TABLE users (
 		name       TEXT PRIMARY KEY NOT NULL,
@@ -148,15 +170,7 @@ var schemaStatements = []string{
 		PRIMARY KEY (role, member, database_name)
 	) STRICT`,
 	`CREATE INDEX memberships_member ON memberships (member)`,
-	`CREATE TABLE grants (
-		grantee       TEXT NOT NULL,
-		privilege     TEXT NOT NULL CHECK (privilege IN ('connect', 'select')),
-		database_name TEXT NOT NULL,
-		schema_name   TEXT NOT NULL DEFAULT '' COLLATE NOCASE,
-		table_name    TEXT NOT NULL DEFAULT '' COLLATE NOCASE,
-		PRIMARY KEY (grantee, privilege, database_name, schema_name, table_name),
-		CHECK ((privilege = 'connect' AND schema_name = '' AND table_name = '') OR (privilege = 'select' AND schema_name <> ''))
-	) STRICT`,
+	grantsTable,
 	`CREATE TABLE sequence (
 		name  TEXT PRIMARY KEY NOT NULL,
 		value INTEGER NOT NULL
@@ -173,9 +187,7 @@ var schemaStatements = []string{
 	`CREATE TRIGGER roles_name_free BEFORE INSERT ON roles
 	WHEN EXISTS (SELECT 1 FROM users WHERE name = NEW.name)
 	BEGIN SELECT RAISE(ABORT, 'a user has this name'); END`,
-	`CREATE TRIGGER grants_grantee_exists BEFORE INSERT ON grants
-	WHEN NOT EXISTS (SELECT 1 FROM users WHERE name = NEW.grantee) AND NOT EXISTS (SELECT 1 FROM roles WHERE name = NEW.grantee)
-	BEGIN SELECT RAISE(ABORT, 'the grantee does not exist'); END`,
+	grantsGranteeTrigger,
 	`CREATE TRIGGER users_forget AFTER DELETE ON users
 	BEGIN
 		DELETE FROM grants WHERE grantee = OLD.name;
@@ -291,6 +303,33 @@ func (c *Catalog) prepare(ctx context.Context) error {
 	}
 	switch version {
 	case schemaVersion:
+		return transaction.Commit()
+	case 1:
+		// version 1's grants took CONNECT and SELECT alone: the table is made again with the privileges that write,
+		// its rows kept. Its own trigger goes with it, and the two that delete from it would stop the rename (SQLite
+		// checks every trigger then): all three are made again after.
+		moves := []string{
+			`DROP TRIGGER users_forget`,
+			`DROP TRIGGER roles_forget`,
+			strings.Replace(grantsTable, "CREATE TABLE grants (", "CREATE TABLE grants_2 (", 1),
+			`INSERT INTO grants_2 SELECT grantee, privilege, database_name, schema_name, table_name FROM grants`,
+			`DROP TABLE grants`,
+			`ALTER TABLE grants_2 RENAME TO grants`,
+			grantsGranteeTrigger,
+		}
+		for _, statement := range schemaStatements {
+			if strings.HasPrefix(statement, "CREATE TRIGGER users_forget ") || strings.HasPrefix(statement, "CREATE TRIGGER roles_forget ") {
+				moves = append(moves, statement)
+			}
+		}
+		if len(moves) != 9 {
+			return fmt.Errorf("catalog: the triggers of the grants are not where the move from version 1 looks")
+		}
+		for _, statement := range append(moves, fmt.Sprintf(`PRAGMA user_version = %d`, schemaVersion)) {
+			if _, err := transaction.ExecContext(ctx, statement); err != nil {
+				return fmt.Errorf("catalog: move %s to schema version %d: %w", c.path, schemaVersion, err)
+			}
+		}
 		return transaction.Commit()
 	case 0:
 	default:
@@ -423,8 +462,18 @@ func (c *Catalog) CanConnect(ctx context.Context, user, database string) (bool, 
 // CanSelect reports whether user may read table of schema in database: an admin, or SELECT on that table or on
 // every table of that schema, granted to the user or to one of its roles. CONNECT is CanConnect's question.
 func (c *Catalog) CanSelect(ctx context.Context, user, database, schema, table string) (bool, error) {
+	return c.Can(ctx, user, database, schema, table, "select")
+}
+
+// Can reports whether user holds privilege ("select", "insert", "update" or "delete") on table of schema in database:
+// an admin, or the privilege on that table or on every table of that schema, granted to the user or to one of its
+// roles.
+func (c *Catalog) Can(ctx context.Context, user, database, schema, table, privilege string) (bool, error) {
 	if ctx == nil {
 		return false, errors.New("catalog: nil context")
+	}
+	if privilege != "select" && privilege != "insert" && privilege != "update" && privilege != "delete" {
+		return false, fmt.Errorf("catalog: %q is no table privilege", privilege)
 	}
 	if c.admin != "" && user == c.admin {
 		return true, nil
@@ -437,11 +486,11 @@ func (c *Catalog) CanSelect(ctx context.Context, user, database, schema, table s
 		SELECT 1 FROM users AS u WHERE u.name = ?1 AND u.disabled = 0 AND (
 			u.admin = 1 OR EXISTS (
 				SELECT 1 FROM grants AS g
-				WHERE g.privilege = 'select' AND g.database_name = ?2 AND g.schema_name = ?3
+				WHERE g.privilege = ?5 AND g.database_name = ?2 AND g.schema_name = ?3
 					AND (g.table_name = ?4 OR g.table_name = '') AND (
 					g.grantee = u.name OR g.grantee IN (
 						SELECT m.role FROM memberships AS m WHERE m.member = u.name AND m.database_name IN ('', ?2))))))`,
-		user, database, schema, table).Scan(&allowed)
+		user, database, schema, table, privilege).Scan(&allowed)
 	if err != nil {
 		return false, fmt.Errorf("catalog: read grants: %w", err)
 	}

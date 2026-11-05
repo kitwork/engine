@@ -243,7 +243,8 @@ const (
 	statementCommit                        // COMMIT / END
 	statementRollback                      // ROLLBACK / ABORT
 	statementAccount                       // CREATE, ALTER, DROP, GRANT, REVOKE: Access.Command first
-	statementRefused                       // anything else: a write
+	statementWrite                         // INSERT, UPDATE, DELETE, REPLACE, WITH … one of them (write.go)
+	statementRefused                       // anything else
 )
 
 // statement is one statement of a query, cut at its terminator.
@@ -266,8 +267,43 @@ func readOnlyError(verb string) error {
 	return pgwire.NewError("25006", "cannot execute "+verb+" in a read-only transaction")
 }
 
+// Split cuts a simple query into its statements (pgwire.SplitSession): the server runs them one by one, as
+// PostgreSQL does. A text the scanner cannot read is refused as one statement would be.
+func (session *Session) Split(query string) ([]pgwire.SplitStatement, error) {
+	tokens, err := scan(query)
+	if err != nil {
+		return nil, err
+	}
+	var statements []pgwire.SplitStatement
+	start := 0
+	first := ""
+	cut := func(end int) {
+		if text := strings.TrimSpace(query[start:end]); first != "" {
+			switch first {
+			case "BEGIN", "START", "COMMIT", "END", "ROLLBACK", "ABORT":
+				statements = append(statements, pgwire.SplitStatement{Text: text, Control: true})
+			default:
+				statements = append(statements, pgwire.SplitStatement{Text: text})
+			}
+		}
+		first = ""
+	}
+	for _, candidate := range tokens {
+		if candidate.kind == tokenSemicolon {
+			cut(candidate.start)
+			start = candidate.end
+			continue
+		}
+		if first == "" {
+			first = strings.ToUpper(candidate.text)
+		}
+	}
+	cut(len(query))
+	return statements, nil
+}
+
 // parseStatement cuts query at its first terminator and classifies the one statement it holds. A second statement
-// is refused: the gateway runs one statement at a time.
+// is refused: the gateway runs one statement at a time (a simple query's are split first, Split).
 func parseStatement(query string) (statement, error) {
 	tokens, err := scan(query)
 	if err != nil {
@@ -318,7 +354,11 @@ func parseStatement(query string) (statement, error) {
 		result.authorized = result.text
 		if result.verb == "WITH" {
 			result.verb = mainVerb(tokens)
-			if result.verb != "SELECT" && result.verb != "VALUES" && result.verb != "" {
+			switch result.verb {
+			case "SELECT", "VALUES", "":
+			case "INSERT", "UPDATE", "DELETE", "REPLACE":
+				result.kind = statementWrite
+			default:
 				result.kind = statementRefused
 			}
 		}
@@ -341,7 +381,7 @@ func parseStatement(query string) (statement, error) {
 		case statementRead, statementVersion:
 			result.kind = statementExplain
 			result.authorized = explained.text
-		case statementRefused, statementAccount:
+		case statementRefused, statementAccount, statementWrite:
 			result.kind = statementRefused
 			result.verb = explained.verb
 		default:
@@ -359,6 +399,8 @@ func parseStatement(query string) (statement, error) {
 		result.kind = statementRollback
 	case "CREATE", "ALTER", "DROP", "GRANT", "REVOKE":
 		result.kind = statementAccount
+	case "INSERT", "UPDATE", "DELETE", "REPLACE":
+		result.kind = statementWrite
 	default:
 		result.kind = statementRefused
 	}

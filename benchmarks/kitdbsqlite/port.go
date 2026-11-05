@@ -15,8 +15,12 @@ import (
 type portAccess struct{}
 
 func (portAccess) CanSelect(context.Context, string, string) (bool, error) { return true, nil }
-func (portAccess) Command(context.Context, string) (string, bool, error)   { return "", false, nil }
-func (portAccess) Current(context.Context) (bool, error)                   { return true, nil }
+func (portAccess) CanModify(context.Context, string, string, string) (bool, error) {
+	return false, nil
+}
+func (portAccess) Admin(context.Context) (bool, error)                   { return false, nil }
+func (portAccess) Command(context.Context, string) (string, bool, error) { return "", false, nil }
+func (portAccess) Current(context.Context) (bool, error)                 { return true, nil }
 
 // cmdPort runs the analytic queries of RESULTS_2026-10-27.md through two sessions of the read-only port on the file
 // (kitdb/gateway), as a PostgreSQL client sends them: one whose registry finds the copy in the copies' file at copies

@@ -11,13 +11,14 @@ import (
 	"strings"
 	"testing"
 
+	kitdbsqlite "github.com/kitwork/engine/kitdb/sqlite"
 	"github.com/kitwork/engine/work"
 	"github.com/lib/pq"
 )
 
 // The tests of the host's database port (app_database_runtime.go): app.database serving the SQLite files of the
-// host's .database/ and of each app's, read-only, over the PostgreSQL wire, with SCRAM-SHA-256 and each cluster's
-// accounts (KITWORK_KITDB.md câu 13.5).
+// host's .database/ and of each app's over the PostgreSQL wire, with SCRAM-SHA-256 and each cluster's accounts; reads,
+// and since 05/11/2026 writes through the engine's writer (KITWORK_KITDB.md câu 13.5).
 
 const appDatabaseTestPassword = "port-admin-password"
 
@@ -170,8 +171,9 @@ func appDatabaseCode(err error) string {
 
 // The admin of app.database reads the host's database by its folder's name and an app's by <domain>/<database>, its
 // schemas the files of the folder (users, public.users and billing.invoices, joined), decimals in their scale and
-// booleans as booleans, with $n parameters; a database nobody has is 3D000; a write is 25006, and the files keep their
-// bytes.
+// booleans as booleans, with $n parameters; a database nobody has is 3D000. The admin's INSERT goes through the
+// engine's writer: the decimal and the boolean stored as the app stores them, the change in the file's history by
+// the port's user.
 //
 // CONTROL: with appDatabaseGateway.resolve taking the domain as a folder of the host's .database/, "SELECT … FROM
 // orders: pq: database \"shop.example/application\" does not exist".
@@ -189,8 +191,32 @@ func TestAppDatabasePortReadsTheHostsAndAnAppsDatabases(t *testing.T) {
 	if got := appDatabaseRows(t, application, `SELECT count(*) FROM "public"."orders"`); got != "2" {
 		t.Errorf(`"public"."orders" = %q`, got)
 	}
-	if _, err := application.Exec(`INSERT INTO orders VALUES ('o3', 'c@example.com', 1, 0)`); appDatabaseCode(err) != "25006" {
-		t.Errorf("INSERT = %v, want 25006", err)
+	if _, err := application.Exec(`INSERT INTO orders VALUES ('o3', 'c@example.com', $1, $2)`, "12.5", "f"); err != nil {
+		t.Fatalf("INSERT as the admin: %v", err)
+	}
+	if got := appDatabaseRows(t, application, `SELECT id, amount, paid FROM orders WHERE id = 'o3'`); got != "o3 12.50 false" {
+		t.Errorf("the row written = %q", got)
+	}
+	file, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(fixture.apps, "acme", ".database", "application", "kitwork.db"))+"?mode=ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	var amount int64
+	var by string
+	if err := file.QueryRow(`SELECT amount FROM orders WHERE id = 'o3'`).Scan(&amount); err != nil || amount != 1250 {
+		t.Errorf("amount stored %d (%v), want 1250", amount, err)
+	}
+	err = kitdbsqlite.ReadChangesIn(context.Background(), file, "main", 0, func(commit kitdbsqlite.Commit) error {
+		for _, change := range commit.Changes {
+			if change.Table == "orders" {
+				by = change.By
+			}
+		}
+		return nil
+	})
+	if err != nil || by != "port:kitdb" {
+		t.Errorf("the history's last change of orders by %q (%v), want port:kitdb", by, err)
 	}
 	missing := fixture.connect(t, "kitdb", appDatabaseTestPassword, "nowhere.example/application")
 	if err := missing.Ping(); appDatabaseCode(err) != "3D000" {
@@ -224,6 +250,19 @@ func TestAppDatabasePortAccountsAndGrants(t *testing.T) {
 	}
 	if _, err := reader.Exec(`CREATE USER sneaky WITH PASSWORD 'sneaky-password-1'`); appDatabaseCode(err) != "42501" {
 		t.Errorf("CREATE USER as reader: %v, want 42501", err)
+	}
+	if _, err := reader.Exec(`UPDATE orders SET paid = true WHERE id = 'o2'`); appDatabaseCode(err) != "42501" {
+		t.Errorf("UPDATE as reader: %v, want 42501", err)
+	}
+	if _, err := admin.Exec(`GRANT UPDATE ON orders TO reader`); err != nil {
+		t.Fatal(err)
+	}
+	reader = fixture.connect(t, "reader", "reader-password-1", "shop.example/application") // a grant ends the session
+	if _, err := reader.Exec(`UPDATE orders SET paid = true WHERE id = 'o2'`); err != nil {
+		t.Errorf("UPDATE as reader given UPDATE: %v", err)
+	}
+	if got := appDatabaseRows(t, reader, `SELECT paid FROM orders WHERE id = 'o2'`); got != "true" {
+		t.Errorf("paid after the reader's UPDATE = %q", got)
 	}
 	if err := fixture.connect(t, "reader", "wrong-password-1", "shop.example/application").Ping(); appDatabaseCode(err) != "28P01" {
 		t.Errorf("a wrong password: %v, want 28P01", err)

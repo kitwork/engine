@@ -96,6 +96,10 @@ var historyWriters = struct {
 	files map[string]*historyWriter
 }{files: map[string]*historyWriter{}}
 
+// OpenWriter opens the writer of the file at path, or shares the one the engine's statements write through, until
+// release: the host's database port writes through it (KITWORK_KITDB.md câu 13.5), so the history sees its writes too.
+func OpenWriter(path string) (*kitdbsqlite.Database, func(), error) { return acquireHistory(path) }
+
 // acquireHistory opens the writer of the file at path, or shares the one open, until release.
 func acquireHistory(path string) (*kitdbsqlite.Database, func(), error) {
 	absolute, err := filepath.Abs(path)

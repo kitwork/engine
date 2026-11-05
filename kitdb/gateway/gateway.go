@@ -1,7 +1,7 @@
-// Package gateway serves one database made of SQLite files on the PostgreSQL wire port, read-only
-// (KITWORK_KITDB.md question 13.5). A Session is a pgwire.Session on one SQLite connection of its own: the main
-// database in memory, every schema file of the database ATTACHed read-only (mode=ro) under its schema name, public
-// first, then PRAGMA query_only=1, so SQLite itself refuses any write.
+// Package gateway serves one database made of SQLite files on the PostgreSQL wire port (KITWORK_KITDB.md question
+// 13.5). A Session is a pgwire.Session on one SQLite connection of its own: the main database in memory, every schema
+// file of the database ATTACHed read-only (mode=ro) under its schema name, public first, then PRAGMA query_only=1, so
+// SQLite itself refuses any write there. A write goes to the writer of its file instead (write.go).
 //
 // What a user may read is decided before a statement runs, from the statement's own program: the session asks SQLite
 // to EXPLAIN it with the same parameters and reads every opcode that opens a b-tree. OpenRead and ReopenIdx name the
@@ -35,9 +35,14 @@ type Target struct {
 	Schemas map[string]string // schema name → SQLite file ("public" → …/application/kitwork.db, "billing" → …/billing.db)
 }
 
-// Access is what the session's user may read; the gateway asks it for every table a statement opens.
+// Access is what the session's user may do; the gateway asks it for every table a statement opens.
 type Access interface {
 	CanSelect(ctx context.Context, schema, table string) (bool, error)
+	// CanModify answers whether the user may "insert", "update" or "delete" rows of table.
+	CanModify(ctx context.Context, schema, table, privilege string) (bool, error)
+	// Admin answers whether the user is an admin: what a write whose program runs another (a foreign key's action on
+	// other tables) needs.
+	Admin(ctx context.Context) (bool, error)
 	// Command runs an account statement (handled=false when it is not one); nil for no account statements.
 	Command(ctx context.Context, statement string) (tag string, handled bool, err error)
 	// Current reports whether the session may go on (false once its user's stamp changed: the session ends).
@@ -68,6 +73,11 @@ type Options struct {
 	// Analytics keeps the column copies that answer the aggregates SQLite would scan a table for (analytic.go); nil
 	// when the port has none.
 	Analytics *analytics.Registry
+	// Writers opens the writer of a schema file for the writes (write.go); nil when the port writes nothing.
+	Writers Writers
+	// WriteIdle is how long a transaction block that wrote may wait for its next statement (DefaultWriteIdle when
+	// zero); WriteLimit how long it may hold its file's writer in all (DefaultWriteLimit when zero).
+	WriteIdle, WriteLimit time.Duration
 }
 
 const (
@@ -126,6 +136,12 @@ type Session struct {
 	transaction byte  // pgwire.TransactionIdle, TransactionActive or TransactionFailed
 	ended       error // set once Access.Current said the session may not go on
 	closed      bool
+
+	// files is each schema's file; writers the writers of the files the session wrote, block the transaction block
+	// holding one (write.go)
+	files   map[string]string
+	writers map[string]Writer
+	block   *writeBlock
 
 	statementMutex  sync.Mutex
 	cancelStatement context.CancelFunc
@@ -200,6 +216,7 @@ func Open(ctx context.Context, target Target, access Access, columns Columns, op
 		tableFunctions: map[string]string{},
 		oids:           map[string]uint32{},
 		transaction:    pgwire.TransactionIdle,
+		files:          files,
 	}
 	if err := session.attach(ctx, files); err != nil {
 		_ = session.release()
@@ -276,8 +293,8 @@ func (session *Session) attach(ctx context.Context, files map[string]string) err
 	if err := session.createCatalog(ctx); err != nil {
 		return err
 	}
-	// Views and triggers in the files may not call functions or virtual tables with side effects; then nothing
-	// the session runs may write.
+	// Views and triggers in the files may not call functions or virtual tables with side effects; then nothing the
+	// session runs may write.
 	for _, pragma := range []string{"PRAGMA trusted_schema=0", "PRAGMA query_only=1"} {
 		if _, err := session.connection.ExecContext(ctx, pragma); err != nil {
 			return fmt.Errorf("gateway: %s: %w", pragma, err)
@@ -334,8 +351,9 @@ func (session *Session) attach(ctx context.Context, files map[string]string) err
 	return nil
 }
 
-// release closes the SQLite connection.
+// release closes the SQLite connection, and lets the writers the session held go.
 func (session *Session) release() error {
+	session.closeWriters()
 	var err error
 	if session.connection != nil {
 		err = session.connection.Close()
@@ -390,6 +408,7 @@ func (session *Session) enter(ctx context.Context) (context.Context, func(), err
 	session.statementMutex.Lock()
 	session.cancelStatement = cancel
 	session.statementMutex.Unlock()
+	prepareTemporaryFiles(statementContext) // the process's directory again, when something removed it
 	unwatch := temporaryFiles.watch(session.options.MaxTemporaryBytes, cancelCause)
 	leave := func() {
 		unwatch()
@@ -470,6 +489,12 @@ func (session *Session) Describe(ctx context.Context, query string, parameters [
 		var result pgwire.Result
 		result, err = session.execute(ctx, parsed, parameters)
 		columns = result.Columns
+	case statementWrite:
+		if session.options.Writers == nil {
+			err = readOnlyError(parsed.verb)
+		} else {
+			_, err = shapeOfWrite(parsed) // a write returns no rows: nothing to describe
+		}
 	case statementRefused, statementAccount:
 		err = readOnlyError(parsed.verb)
 	}
@@ -515,6 +540,8 @@ func (session *Session) execute(ctx context.Context, parsed statement, parameter
 		return show(parsed)
 	case statementSet:
 		return set(parsed)
+	case statementWrite:
+		return session.write(ctx, parsed, parameters)
 	case statementBegin:
 		return session.begin(ctx, parsed)
 	case statementCommit:
@@ -529,10 +556,23 @@ func (session *Session) execute(ctx context.Context, parsed statement, parameter
 		if handled {
 			return pgwire.Result{CommandTag: tag}, nil
 		}
-		return pgwire.Result{}, readOnlyError(parsed.verb)
+		return pgwire.Result{}, session.notRun(parsed.verb)
 	default:
-		return pgwire.Result{}, readOnlyError(parsed.verb)
+		return pgwire.Result{}, session.notRun(parsed.verb)
 	}
+}
+
+// notRun refuses a statement the port does not run: as a write in a read-only transaction when it writes nothing,
+// as a statement not supported when it writes rows only.
+func (session *Session) notRun(verb string) error {
+	if session.options.Writers == nil {
+		return readOnlyError(verb)
+	}
+	if verb == "" {
+		verb = "this statement"
+	}
+	return pgwire.NewError("0A000", verb+" is not supported through the port: it reads and writes rows (SELECT, INSERT, UPDATE, "+
+		"DELETE); schema statements are not supported yet")
 }
 
 // begin opens one read transaction on the session's connection: every later statement of the block reads the
@@ -546,12 +586,14 @@ func (session *Session) begin(ctx context.Context, parsed statement) (pgwire.Res
 		}
 		tag = "START TRANSACTION"
 	}
-	// BEGIN READ WRITE, what drivers and database tools send for any transaction not marked read-only (lib/pq for a
-	// plain Begin), begins the same read transaction: a write inside it is refused as anywhere else. IMMEDIATE and
-	// EXCLUSIVE, which take SQLite's write lock, are refused.
+	// The block's reads see the snapshot of its first statement; its first write takes its file's writer (write.go).
+	// IMMEDIATE and EXCLUSIVE, SQLite's words for taking the write lock at once, are not PostgreSQL's.
 	for _, word := range all {
-		if word == "IMMEDIATE" || word == "EXCLUSIVE" {
+		if (word == "IMMEDIATE" || word == "EXCLUSIVE") && session.options.Writers == nil {
 			return pgwire.Result{}, pgwire.NewError("25006", "cannot begin a read-write transaction: this database is read-only")
+		}
+		if word == "IMMEDIATE" || word == "EXCLUSIVE" {
+			return pgwire.Result{}, pgwire.NewError("0A000", "BEGIN IMMEDIATE and EXCLUSIVE are not supported: a transaction takes its file's writer at its first write")
 		}
 	}
 	if session.transaction != pgwire.TransactionIdle {
@@ -586,10 +628,15 @@ func (session *Session) finish(parsed statement, rollback bool) (pgwire.Result, 
 		return pgwire.Result{CommandTag: tag}, nil // PostgreSQL warns there is no transaction in progress
 	}
 	session.transaction = pgwire.TransactionIdle
-	// A read transaction has nothing to keep: both end it. SQLite may already have ended it after an interrupt.
+	// The writes commit, or go; then the read transaction, which has nothing to keep, ends either way. SQLite may
+	// already have ended it after an interrupt.
+	written := session.endBlock(tag == "COMMIT")
 	if _, err := session.connection.ExecContext(context.Background(), "ROLLBACK"); err != nil &&
 		!strings.Contains(err.Error(), "no transaction is active") {
 		return pgwire.Result{}, sqliteError(err)
+	}
+	if written != nil {
+		return pgwire.Result{}, written
 	}
 	return pgwire.Result{CommandTag: tag}, nil
 }

@@ -24,19 +24,19 @@ var temporaryDirectory struct {
 	path string
 }
 
-// prepareTemporaryFiles gives the process's SQLite temporary files a directory of their own, once. A directory it
-// cannot make or set leaves the files where SQLite puts them, unmeasured.
+// prepareTemporaryFiles gives the process's SQLite temporary files a directory of their own, once, and makes it again
+// when it is gone (another program cleaning the temporary directory). A directory it cannot make or set leaves the
+// files where SQLite puts them, unmeasured.
 func prepareTemporaryFiles(ctx context.Context) {
+	if path := temporaryDirectory.path; path != "" {
+		if _, err := os.Stat(path); err != nil {
+			_ = os.MkdirAll(path, 0o700)
+		}
+	}
 	temporaryDirectory.once.Do(func() {
 		parent := os.TempDir()
 		own := "kitwork-sqlite-" + strconv.Itoa(os.Getpid())
-		if entries, err := os.ReadDir(parent); err == nil {
-			for _, entry := range entries {
-				if entry.IsDir() && strings.HasPrefix(entry.Name(), "kitwork-sqlite-") && entry.Name() != own {
-					_ = os.Remove(filepath.Join(parent, entry.Name())) // an empty one, left by a process gone
-				}
-			}
-		}
+		removeStaleTemporaryDirectories(parent, own, processRunning)
 		path := filepath.Join(parent, own)
 		if err := os.MkdirAll(path, 0o700); err != nil {
 			return
@@ -51,6 +51,38 @@ func prepareTemporaryFiles(ctx context.Context) {
 		}
 		temporaryDirectory.path = path
 	})
+}
+
+// removeStaleTemporaryDirectories removes the empty kitwork-sqlite-<pid> directories of processes no longer running.
+// The directory of a process that runs is left alone, empty or not: it is empty most of the time, between the statements
+// that spill, and SQLite cannot make a temporary file once it is gone ("unable to open database file"; until
+// 05/11/2026 every empty one was removed, so two engines on one machine broke each other's sorts).
+func removeStaleTemporaryDirectories(parent, own string, running func(int) bool) {
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if !entry.IsDir() || !strings.HasPrefix(name, "kitwork-sqlite-") || name == own {
+			continue
+		}
+		pid, err := strconv.Atoi(strings.TrimPrefix(name, "kitwork-sqlite-"))
+		if err != nil || pid <= 0 || running(pid) {
+			continue
+		}
+		_ = os.Remove(filepath.Join(parent, name)) // an empty one, left by a process gone
+	}
+}
+
+// processRunning reports whether a process of that id runs (one the user may open).
+func processRunning(pid int) bool {
+	process, err := os.FindProcess(pid) // OpenProcess on Windows: an error when no such process runs
+	if err != nil {
+		return false
+	}
+	_ = process.Release()
+	return true
 }
 
 // sqliteTemporaryBytes is the size of the process's SQLite temporary files.

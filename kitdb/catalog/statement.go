@@ -15,7 +15,7 @@ const (
 	actionAlterUser    = "alter user"
 	actionDrop         = "drop"
 	actionGrantConnect = "grant connect"
-	actionGrantSelect  = "grant select"
+	actionGrantTable   = "grant table"
 	actionGrantRole    = "grant role"
 )
 
@@ -28,9 +28,11 @@ type statement struct {
 	password *string
 	login    *bool
 	database string // CONNECT's database; a role's database ('' every database)
-	schema   string // SELECT's schema
-	table    string // SELECT's table; '' every table of the schema
-	role     string // the role GRANT role and REVOKE role name
+	// privileges are what a table grant gives: "select", "insert", "update", "delete", each once
+	privileges []string
+	schema     string // a table grant's schema
+	table      string // a table grant's table; '' every table of the schema
+	role       string // the role GRANT role and REVOKE role name
 }
 
 // tag is Postgres's command tag of the statement.
@@ -71,10 +73,13 @@ var unsupportedOptions = map[string]bool{
 	"admin": true, "user": true, "sysid": true, "unencrypted": true, "rename": true, "set": true, "reset": true,
 }
 
-// otherPrivileges are Postgres's privileges besides CONNECT and SELECT: a read-only port grants none of them.
+// tablePrivileges are the privileges granted on tables, as Postgres names them (05/11/2026: the port writes).
+var tablePrivileges = map[string]bool{"select": true, "insert": true, "update": true, "delete": true}
+
+// otherPrivileges are Postgres's privileges the catalog does not grant.
 var otherPrivileges = map[string]bool{
-	"insert": true, "update": true, "delete": true, "truncate": true, "references": true, "trigger": true,
-	"create": true, "temporary": true, "temp": true, "execute": true, "usage": true, "all": true, "maintain": true,
+	"truncate": true, "references": true, "trigger": true, "create": true, "temporary": true, "temp": true,
+	"execute": true, "usage": true, "maintain": true,
 }
 
 func syntaxError(message string) error {
@@ -245,26 +250,29 @@ func (parser *scanner) grant(result *statement) error {
 	mark := parser.position
 	word := parser.word()
 	if otherPrivileges[word] {
-		return unsupported("only CONNECT and SELECT can be granted: the port is read-only")
+		return unsupported("only SELECT, INSERT, UPDATE and DELETE on tables, and CONNECT on a database, can be granted")
 	}
-	if (word == "connect" || word == "select") && parser.keyword("on") {
-		if word == "connect" {
-			if !parser.keyword("database") {
-				return unsupported("CONNECT is granted ON DATABASE only")
-			}
-			database, err := parser.databaseName()
-			if err != nil {
-				return err
-			}
-			result.action, result.database = actionGrantConnect, database
-		} else if err := parser.selectTarget(result); err != nil {
+	privileges, isTable, err := parser.tablePrivileges(word)
+	if err != nil {
+		return err
+	}
+	if word == "connect" && parser.keyword("on") {
+		if !parser.keyword("database") {
+			return unsupported("CONNECT is granted ON DATABASE only")
+		}
+		database, err := parser.databaseName()
+		if err != nil {
+			return err
+		}
+		result.action, result.database = actionGrantConnect, database
+	} else if isTable {
+		result.privileges = privileges
+		if err := parser.tableTarget(result); err != nil {
 			return err
 		}
 	} else {
-		if word == "connect" || word == "select" {
-			if parser.symbol(',') {
-				return unsupported("grant one privilege at a time")
-			}
+		if word == "connect" && parser.symbol(',') {
+			return unsupported("CONNECT is granted alone: grant table privileges in a statement of their own")
 		}
 		parser.position = mark
 		role, err := parser.identifier()
@@ -318,9 +326,54 @@ func (parser *scanner) grant(result *statement) error {
 	return nil
 }
 
-// selectTarget reads what SELECT is granted on: [TABLE] [schema.]table, or ALL TABLES IN SCHEMA schema.
-func (parser *scanner) selectTarget(result *statement) error {
-	result.action = actionGrantSelect
+// tablePrivileges reads the privileges of a table grant that starts with word: one of SELECT, INSERT, UPDATE,
+// DELETE, or a list of them, or ALL [PRIVILEGES], followed by ON. isTable is false (the scanner where it was) when
+// word starts no such list: a role's name, CONNECT.
+func (parser *scanner) tablePrivileges(word string) (privileges []string, isTable bool, err error) {
+	mark := parser.position
+	if word == "all" {
+		parser.keyword("privileges")
+		if !parser.keyword("on") {
+			parser.position = mark
+			return nil, false, nil
+		}
+		return []string{"select", "insert", "update", "delete"}, true, nil
+	}
+	if !tablePrivileges[word] {
+		return nil, false, nil
+	}
+	seen := map[string]bool{}
+	for {
+		if seen[word] {
+			return nil, true, syntaxError("privilege " + strings.ToUpper(word) + " is listed twice")
+		}
+		seen[word] = true
+		privileges = append(privileges, word)
+		if parser.symbol('(') {
+			return nil, true, unsupported("privileges on columns are not supported: grant on the whole table")
+		}
+		if parser.keyword("on") {
+			return privileges, true, nil
+		}
+		if !parser.symbol(',') {
+			return nil, true, syntaxError("expected ON after the privileges")
+		}
+		word = parser.word()
+		if word == "connect" {
+			return nil, true, unsupported("CONNECT is granted alone: grant table privileges in a statement of their own")
+		}
+		if otherPrivileges[word] || word == "all" {
+			return nil, true, unsupported("only SELECT, INSERT, UPDATE and DELETE on tables, and CONNECT on a database, can be granted")
+		}
+		if !tablePrivileges[word] {
+			return nil, true, syntaxError("expected a privilege after the comma")
+		}
+	}
+}
+
+// tableTarget reads what table privileges are granted on: [TABLE] [schema.]table, or ALL TABLES IN SCHEMA schema.
+func (parser *scanner) tableTarget(result *statement) error {
+	result.action = actionGrantTable
 	if parser.keyword("all") {
 		if !parser.keyword("tables") || !parser.keyword("in") || !parser.keyword("schema") {
 			return syntaxError("expected ALL TABLES IN SCHEMA")
@@ -339,7 +392,7 @@ func (parser *scanner) selectTarget(result *statement) error {
 	if word := parser.word(); word == "sequence" || word == "schema" || word == "database" || word == "function" ||
 		word == "procedure" || word == "routine" || word == "language" || word == "domain" || word == "type" ||
 		word == "foreign" || word == "tablespace" || word == "large" || word == "parameter" {
-		return unsupported("SELECT is granted on tables only")
+		return unsupported("SELECT, INSERT, UPDATE and DELETE are granted on tables only")
 	}
 	parser.position = mark
 	parser.keyword("table")
