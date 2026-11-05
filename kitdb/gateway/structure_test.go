@@ -70,16 +70,21 @@ func shapeOf(t *testing.T, path string) string {
 		shape = append(shape, query(`SELECT "table", "from", "to", on_update, on_delete FROM pragma_foreign_key_list(?)`, table)...)
 	}
 	shape = append(shape, query(`SELECT type, name FROM sqlite_schema WHERE type IN ('index', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY name`)...)
-	// the kinds that change what a value is (a plain integer's or text's kind changes nothing)
-	shape = append(shape, query(`SELECT table_name, column_name, kind, precision, scale FROM kitwork_columns
-		WHERE kind IN ('decimal', 'bool', 'json') ORDER BY table_name, column_name`)...)
+	// the kinds other than the one a column's storage gives, and the .searchable() weights
+	shape = append(shape, query(`SELECT table_name, column_name, kind, precision, scale, search_weight FROM kitwork_columns
+		WHERE kind NOT IN ('integer', 'text', 'float', 'blob') OR search_weight != 0 ORDER BY table_name, column_name`)...)
 	return strings.Join(shape, "\n")
 }
 
 // TestStructureFileMakesTheSameFile: a file's structure is written as PostgreSQL writes it (numeric(p, s), boolean,
 // json, bigserial, defaults as values), what the port cannot say after "-- SQLite:" (a CHECK on a decimal, a table
-// that is not STRICT, a partial index on a decimal, a view); a new file made from it has the same tables, columns,
-// keys, indexes and kinds, and its own structure is the same text, byte for byte.
+// that is not STRICT, a partial index on a decimal, a view), and the kinds the PostgreSQL types do not say after
+// "-- KitDB:" (a timestamp in milliseconds, a .searchable() weight); a new file made from it has the same tables,
+// columns, keys, indexes and kinds, and its own structure is the same text, byte for byte.
+//
+// CONTROL (05/11/2026, slice 4): without the rows of a translated table's unsaid kinds, "the structure: … holds no
+// "-- KitDB: the kinds its PostgreSQL types do not say""; with the translator's kinds written over those rows when the
+// file is made, "the new file differs" (users created datetime and name's weight 2 lost).
 //
 // The first statement after the header, which names the marker "-- SQLite:" in a line of its own, is translated as
 // any other (05/11/2026: it ran untranslated while a mention anywhere counted, the table then not STRICT).
@@ -97,7 +102,7 @@ func TestStructureFileMakesTheSameFile(t *testing.T) {
 	defer database.Close()
 	if _, err := database.Migrate(ctx, "test",
 		`CREATE TABLE accounts (id INTEGER PRIMARY KEY, balance INTEGER NOT NULL DEFAULT 0) STRICT`,
-		`CREATE TABLE users (id INTEGER PRIMARY KEY, "name" TEXT NOT NULL, "order" INTEGER, active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)), profile TEXT) STRICT`,
+		`CREATE TABLE users (id INTEGER PRIMARY KEY, "name" TEXT NOT NULL, "order" INTEGER, active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)), profile TEXT, created INTEGER) STRICT`,
 		`CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE, price INTEGER NOT NULL DEFAULT 150, note TEXT COLLATE NOCASE, picture BLOB, rate REAL, UNIQUE (user_id, note)) STRICT`,
 		`CREATE INDEX orders_user ON orders (user_id, price DESC)`,
 		`CREATE INDEX orders_cheap ON orders (id) WHERE price < 1000`,
@@ -109,9 +114,10 @@ func TestStructureFileMakesTheSameFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := database.Write(ctx, "test", func(transaction *kitdbsqlite.Transaction) error {
-		for _, row := range [][]any{{"accounts", "balance", "decimal", 14, 4}, {"users", "active", "bool", 0, 0}, {"users", "profile", "json", 0, 0}, {"orders", "price", "decimal", 10, 2},
-			{"ledger", "amount", "decimal", 12, 2}, {"users", "name", "text", 0, 0}} {
-			if _, err := transaction.Exec(`INSERT INTO kitwork_columns (table_name, column_name, kind, precision, scale) VALUES (?, ?, ?, ?, ?)`, row...); err != nil {
+		for _, row := range [][]any{{"accounts", "balance", "decimal", 14, 4, 0}, {"users", "active", "bool", 0, 0, 0}, {"users", "profile", "json", 0, 0, 0},
+			{"orders", "price", "decimal", 10, 2, 0}, {"ledger", "amount", "decimal", 12, 2, 0}, {"users", "name", "text", 0, 0, 2},
+			{"users", "created", "datetime", 0, 0, 0}, {"users", "order", "integer", 0, 0, 0}} {
+			if _, err := transaction.Exec(`INSERT INTO kitwork_columns (table_name, column_name, kind, precision, scale, search_weight) VALUES (?, ?, ?, ?, ?, ?)`, row...); err != nil {
 				return err
 			}
 		}
@@ -123,7 +129,8 @@ func TestStructureFileMakesTheSameFile(t *testing.T) {
 	for _, want := range []string{StructureHeader, "id bigserial PRIMARY KEY", `"order" bigint`, "active boolean NOT NULL DEFAULT true CHECK",
 		"profile json", "price numeric(10, 2) NOT NULL DEFAULT 1.50", "note text COLLATE NOCASE", "picture bytea", "rate double precision",
 		"-- SQLite: a CHECK reads a decimal column", "-- SQLite: a table that is not STRICT", "-- SQLite: its WHERE reads a decimal column",
-		"-- SQLite: a view", "CREATE INDEX orders_user ON orders (user_id, price DESC);"} {
+		"-- SQLite: a view", "CREATE INDEX orders_user ON orders (user_id, price DESC);",
+		"-- KitDB: the kinds its PostgreSQL types do not say", "('users', 'created', 'datetime', 0, 0, 0)", "('users', 'name', 'text', 0, 0, 2)"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("the structure:\n%s\nholds no %q", text, want)
 		}

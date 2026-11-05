@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -56,6 +57,17 @@ router.get((context) => {
 			t.Fatal(err)
 		}
 	}
+	// kitwork migrate first: a statement never makes its table (KITWORK_DATABASE.md "Database là gốc", slice 4)
+	plans, release, err := work.PlanAppMigrations(root, "acme", work.RootLayoutMultiTenant, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, plan := range plans {
+		if err := plan.Apply(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	release()
 	engine := New(root, 0, true, "")
 	closed := false
 	t.Cleanup(func() {

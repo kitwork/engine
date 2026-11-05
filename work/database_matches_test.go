@@ -23,7 +23,9 @@ func matchesPosts(t *testing.T) *ManagedDatabase {
 		goColumn{name: "body", builder: "text", modifiers: []string{"searchable"}},
 		goColumn{name: "published", builder: "boolean"},
 	)
-	return goManaged(t, tenant, map[string]value.Value{"posts": posts})
+	managed := goManaged(t, tenant, map[string]value.Value{"posts": posts})
+	migrateManagedForTest(t, managed)
+	return managed
 }
 
 func matchesInsert(t *testing.T, database *ManagedDatabase, title, body string, published bool) {

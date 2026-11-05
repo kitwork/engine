@@ -49,9 +49,11 @@ func newQueueApp(t *testing.T, files map[string]string) *queueApp {
 	return bootQueueApp(t, root)
 }
 
-// bootQueueApp boots the app acme of root, printing to a buffer the test reads as output.
+// bootQueueApp boots the app acme of root, printing to a buffer the test reads as output, after kitwork migrate has
+// added to its databases what its .shared/schema/ declares (KITWORK_DATABASE.md "Database là gốc", slice 4).
 func bootQueueApp(t *testing.T, root string) *queueApp {
 	t.Helper()
+	migrateAppAsItCan(t, root, "acme", RootLayoutMultiTenant)
 	q := &queueApp{root: root, runtime: app.NewRuntime("acme")}
 	q.output = captureOutput(t, func() {
 		q.app = NewAppTenantWithRuntimeLayout(root, "acme", RootLayoutMultiTenant, q.runtime)

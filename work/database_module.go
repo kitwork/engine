@@ -222,10 +222,10 @@ func appDatabasePath(t *Tenant, schema string) string {
 
 // catalogSchema declares the tables of connection("tên") on the database the host declared under that
 // name in app.databases. The statements are the same as on the app's own database; a SQLite file of the
-// host runs them, with additive migration as the app's own database has: at the first statement, a change that
-// loses data (a column dropped or retyped) fails the statement and the file is left as it is
-// (SchemaTable.ensureTable, refuseDestructiveMigration). A name the host did not declare is refused listing
-// the names there are. Every app on the host may name every entry: the catalogue is the host's.
+// host runs them, held against the declaration as the app's own database is (database_follows.go): what the file
+// lacks or has otherwise fails the statements, kitwork migrate adds what it lacks, the file is the root. A name the
+// host did not declare is refused listing the names there are. Every app on the host may name every entry: the
+// catalogue is the host's.
 func (c *ConnectionDeclaration) catalogSchema(tables value.Value) value.Value {
 	entry, declared := hostdatabase.CatalogEntry(c.name)
 	if !declared {

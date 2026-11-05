@@ -46,6 +46,7 @@ type columnKind struct {
 	scale     int
 	serial    bool
 	column    string // the column's name as kitwork_columns writes it (structure.go)
+	weight    int    // its .searchable() weight, search_weight of kitwork_columns (structure.go)
 }
 
 // kindChange is what a schema statement does to kitwork_columns.

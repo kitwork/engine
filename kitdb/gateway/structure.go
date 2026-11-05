@@ -22,7 +22,9 @@ import (
 // What the port's statements cannot say is written as SQLite's own, after a line "-- SQLite: why", and run as it is:
 // a table that is not STRICT, a CHECK or a partial index that reads a decimal (the stored integer is not the value),
 // a column of a type the port does not know, a view. Such a table's kinds follow it as rows of kitwork_columns, after
-// a line "-- KitDB:".
+// a line "-- KitDB:"; so do a translated table's kinds that its PostgreSQL types do not say (a timestamp kept in
+// milliseconds, a kitid, a .searchable() weight). The engine never writes kitwork_columns because the app declares a
+// column (KITWORK_DATABASE.md "Database là gốc", slice 4), so the file says every kind the database holds.
 
 // StructureHeader begins every structure file.
 const StructureHeader = `-- Cấu trúc của file database bên cạnh (bảng và chỉ mục, không có dòng dữ liệu), viết theo cách PostgreSQL viết.
@@ -89,8 +91,20 @@ func Structure(ctx context.Context, source structureQuerier) (string, error) {
 			text = strings.TrimSpace(current.text)
 		}
 		out.WriteString(text + ";\n")
-		if native != "" && current.kind == "table" && len(kinds[strings.ToLower(current.name)]) > 0 {
-			out.WriteString("-- KitDB: the kinds of its columns\n" + kindRows(current.name, kinds[strings.ToLower(current.name)]) + ";\n")
+		if current.kind != "table" {
+			continue
+		}
+		tableKinds := kinds[strings.ToLower(current.name)]
+		if native != "" && len(tableKinds) > 0 {
+			out.WriteString("-- KitDB: the kinds of its columns\n" + kindRows(current.name, tableKinds) + ";\n")
+			continue
+		}
+		unsaid, err := unsaidKinds(ctx, source, current.name, tableKinds)
+		if err != nil {
+			return "", err
+		}
+		if len(unsaid) > 0 {
+			out.WriteString("-- KitDB: the kinds its PostgreSQL types do not say\n" + kindRows(current.name, unsaid) + ";\n")
 		}
 	}
 	if tables == 0 {
@@ -109,9 +123,45 @@ func kindRows(table string, kinds map[string]columnKind) string {
 	values := make([]string, len(names))
 	for index, name := range names {
 		kind := kinds[name]
-		values[index] = fmt.Sprintf("(%s, %s, %s, %d, %d)", quoteLiteral(table), quoteLiteral(kind.column), quoteLiteral(kind.kind), kind.precision, kind.scale)
+		values[index] = fmt.Sprintf("(%s, %s, %s, %d, %d, %d)", quoteLiteral(table), quoteLiteral(kind.column), quoteLiteral(kind.kind),
+			kind.precision, kind.scale, kind.weight)
 	}
-	return "INSERT INTO kitwork_columns (table_name, column_name, kind, precision, scale) VALUES\n  " + strings.Join(values, ",\n  ")
+	return "INSERT INTO kitwork_columns (table_name, column_name, kind, precision, scale, search_weight) VALUES\n  " + strings.Join(values, ",\n  ")
+}
+
+// unsaidKinds are the kinds of a translated table that the PostgreSQL types the structure writes do not say: the
+// port makes a bigint's kind integer, a double precision's float, a text's text, a bytea's blob, and numeric(p, s),
+// boolean and json their own; any other kind, or a .searchable() weight, is written as a row.
+func unsaidKinds(ctx context.Context, source structureQuerier, table string, kinds map[string]columnKind) (map[string]columnKind, error) {
+	if len(kinds) == 0 {
+		return nil, nil
+	}
+	rows, err := source.QueryContext(ctx, `SELECT name, type FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return nil, err
+	}
+	storage := map[string]string{}
+	for rows.Next() {
+		var name, declared string
+		if err := rows.Scan(&name, &declared); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		storage[strings.ToLower(name)] = strings.ToUpper(strings.TrimSpace(declared))
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	implied := map[string]string{"INTEGER": "integer", "INT": "integer", "REAL": "float", "TEXT": "text", "BLOB": "blob"}
+	unsaid := map[string]columnKind{}
+	for column, kind := range kinds {
+		if kind.weight == 0 && (kind.kind == "decimal" || kind.kind == "bool" || kind.kind == "json" || implied[storage[column]] == kind.kind) {
+			continue // numeric(p, s), boolean, json, or the kind its storage gives
+		}
+		unsaid[column] = kind
+	}
+	return unsaid, nil
 }
 
 // structureKinds reads kitwork_columns, when the file has it: table → column → kind, lower case.
@@ -129,7 +179,24 @@ func structureKinds(ctx context.Context, source structureQuerier) (map[string]ma
 	if err != nil || held == 0 {
 		return kinds, err
 	}
-	rows, err = source.QueryContext(ctx, `SELECT table_name, column_name, kind, precision, scale FROM kitwork_columns`)
+	// search_weight came 31/10/2026; a file of before has none
+	weight := "0"
+	rows, err = source.QueryContext(ctx, `SELECT count(*) FROM pragma_table_info('kitwork_columns') WHERE name = 'search_weight'`)
+	if err != nil {
+		return nil, err
+	}
+	held = 0
+	if rows.Next() {
+		err = rows.Scan(&held)
+	}
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	if held > 0 {
+		weight = "search_weight"
+	}
+	rows, err = source.QueryContext(ctx, `SELECT table_name, column_name, kind, precision, scale, `+weight+` FROM kitwork_columns`)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +204,7 @@ func structureKinds(ctx context.Context, source structureQuerier) (map[string]ma
 	for rows.Next() {
 		var table, column string
 		var kind columnKind
-		if err := rows.Scan(&table, &column, &kind.kind, &kind.precision, &kind.scale); err != nil {
+		if err := rows.Scan(&table, &column, &kind.kind, &kind.precision, &kind.scale, &kind.weight); err != nil {
 			return nil, err
 		}
 		if kinds[strings.ToLower(table)] == nil {
@@ -391,11 +458,15 @@ func LoadStructure(ctx context.Context, writer StructureFileWriter, by, text str
 		return nil
 	}
 	_, err = writer.Write(ctx, by, func(transaction *kitdbsqlite.Transaction) error {
-		if err := writeKinds(transaction, schemaPlan{kinds: kinds}); err != nil {
-			return err
-		}
+		// the rows the file writes first: a kind its PostgreSQL type does not say stays over the one it does
 		for _, row := range rows {
 			if _, err := transaction.Exec(row); err != nil {
+				return err
+			}
+		}
+		for _, change := range kinds {
+			if _, err := transaction.Exec(`INSERT INTO kitwork_columns (table_name, column_name, kind, precision, scale) VALUES (?, ?, ?, ?, ?)
+				ON CONFLICT (table_name, column_name) DO NOTHING`, change.table, change.column, change.kind.kind, change.kind.precision, change.kind.scale); err != nil {
 				return err
 			}
 		}

@@ -23,11 +23,11 @@ import (
 // (the app's .database/<database>/<schema>.db, a host's file of connection("tên")) has one writer for the process,
 // engine/kitdb/sqlite's, which records each row a commit changed in kitwork_history in the same transaction and keeps
 // the anchors a moment is restored from. A statement that writes goes to the writer; one that reads goes to the file's
-// pool as before. The engine's own change of the file (a migration, the copy of a KitDB file) runs on the writer's
+// pool as before. The engine's own change of the file (kitwork migrate, database_migrate.go) runs on the writer's
 // connection (Maintain): a change of the schema or of an app's rows there commits a Barrier and an anchor, so a
 // restore never replays across it. The runs of jobs (kitwork_runs) are the engine's bookkeeping, written on the pool.
 //
-// The writer opens at the first statement on the file, before its tables are migrated. An app holds the files it
+// The writer opens at the first statement on the file, before its tables are checked (database_follows.go). An app holds the files it
 // opened until it closes; the last app that holds a file closes its writer and lets go of kitwork.db.lock.
 
 // historyResourceName is the app resource holding the files whose history the app's statements write.

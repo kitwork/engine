@@ -118,6 +118,14 @@ type managedApp struct {
 
 func newManagedApp(t *testing.T, files map[string]string) *managedApp {
 	t.Helper()
+	managed := newManagedAppAsIs(t, files)
+	migrateAppForTest(t, managed.root, "acme", RootLayoutMultiTenant)
+	return managed
+}
+
+// newManagedAppAsIs is newManagedApp before kitwork migrate: no database of the app is made.
+func newManagedAppAsIs(t *testing.T, files map[string]string) *managedApp {
+	t.Helper()
 	root := t.TempDir()
 	all := map[string]string{"acme/.shared/schema/shop.work": managedShopSchema}
 	for name, source := range files {
@@ -741,7 +749,7 @@ func failureOf(item value.Value) (string, string) {
 // naming a column the table has not, one with a literal of the wrong kind, and a call with too few
 // values are refused, and the app's .database/ is never made.
 func TestManagedDatabaseRuntimeValidationBeforeOpen(t *testing.T) {
-	shop := newManagedApp(t, map[string]string{"shop.example/router.work": `import * as router from "kitwork/router";`})
+	shop := newManagedAppAsIs(t, map[string]string{"shop.example/router.work": `import * as router from "kitwork/router";`})
 	tenant := shop.site("shop.example")
 	managed := goManaged(t, tenant, map[string]value.Value{"orders": goOrders(t)})
 	for template, want := range map[string]string{
@@ -842,6 +850,7 @@ func TestManagedDatabaseSQLiteParity(t *testing.T) {
 		)
 	}
 	kitdb := goManaged(t, tenant, map[string]value.Value{"items": items()})
+	migrateManagedForTest(t, kitdb)
 	declared := declareDbProxy(tenant, nil, "sqlite", value.New("parity.db"), value.New(map[string]value.Value{"items": items()}))
 	sqlite := newManagedDatabase(declared.V.(*dbProxy))
 
@@ -938,7 +947,7 @@ func withoutIDs(item any) any {
 // the name is written (a read opens a name as databaseRel reads it, so "./@application" is "@application").
 // It would otherwise open the app's database with its own schema and options, drop and token among them.
 func TestApplicationDatabaseNameIsReserved(t *testing.T) {
-	shop := newManagedApp(t, map[string]string{"shop.example/router.work": `import * as router from "kitwork/router";`})
+	shop := newManagedAppAsIs(t, map[string]string{"shop.example/router.work": `import * as router from "kitwork/router";`})
 	tenant := shop.site("shop.example")
 	legacy := &storageInternals{tenant: tenant}
 	users := goStruct(t, goColumn{name: "id", builder: "id"}, goColumn{name: "email", builder: "text"})
@@ -1023,6 +1032,7 @@ func TestManagedDatabaseSchemaFile(t *testing.T) {
 	if !ok {
 		t.Fatal(`connection().schema("billing").tables({ invoices }) is not a database`)
 	}
+	migrateManagedForTest(t, billing)
 	insert := `{"v":4,"action":"insert","table":"invoices","values":[{"column":"name","value":{"op":"hole","hole":0}}],"holes":[{"site":"a"}]}`
 	if created := billing.OnInvoke(statement.Method, value.New(insert), value.New("first")); created.Failed() {
 		t.Fatalf("insert: %v", created)
@@ -1077,6 +1087,7 @@ func TestManagedDatabaseSQLiteDecimal(t *testing.T) {
 		)
 	}
 	kitdb := goManaged(t, tenant, map[string]value.Value{"items": items()})
+	migrateManagedForTest(t, kitdb)
 	declared := declareDbProxy(tenant, nil, "sqlite", value.New("decimal.db"), value.New(map[string]value.Value{"items": items()}))
 	sqlite := newManagedDatabase(declared.V.(*dbProxy))
 
@@ -1143,7 +1154,8 @@ func TestManagedDatabaseSQLiteDecimal(t *testing.T) {
 }
 
 // A host's SQLite file that kept a decimal as its text, from before 29/10/2026, is left as it is: the first
-// statement fails saying so, and the column keeps its text (the change is kitwork migrate's, lát 7).
+// statement fails saying so, and the column keeps its text. The database is the root (KITWORK_DATABASE.md "Database
+// là gốc", slice 4): kitwork migrate does not change a column a table has either.
 func TestManagedDatabaseSQLiteDecimalTextIsRefused(t *testing.T) {
 	shop := newManagedApp(t, map[string]string{"shop.example/router.work": `import * as router from "kitwork/router";`})
 	tenant := shop.site("shop.example")
@@ -1170,7 +1182,7 @@ func TestManagedDatabaseSQLiteDecimalTextIsRefused(t *testing.T) {
 	declared.V.(*dbProxy).sqlitePath = path
 	ledger := newManagedDatabase(declared.V.(*dbProxy))
 	code, message := failureOf(ledger.OnInvoke(statement.Method, value.New(`{"v":4,"action":"list","table":"items"}`)))
-	if code != value.DatabaseCode || !strings.Contains(message, "cột amount là decimal lưu dạng chữ (cách trước 29/10/2026)") {
+	if code != value.DatabaseCode || !strings.Contains(message, "cột items.amount là decimal lưu dạng chữ (cách trước 29/10/2026)") {
 		t.Fatalf("a file of the old layout: %s %q", code, message)
 	}
 	var kind string
@@ -1179,12 +1191,12 @@ func TestManagedDatabaseSQLiteDecimalTextIsRefused(t *testing.T) {
 	}
 }
 
-// The app's SQLite file keeps the kind each column was declared with in kitwork_columns, written when the engine
-// first checks the table: what the file alone does not say (a decimal's scale, a boolean stored 0 or 1), which the
+// The app's SQLite file keeps the kind each column was declared with in kitwork_columns, written by kitwork migrate
+// (KITWORK_DATABASE.md "Database là gốc", slice 4: never by a statement): what the file alone does not say (a decimal's scale, a boolean stored 0 or 1), which the
 // PostgreSQL wire port reads to give 4.50 for 450 and true for 1 (KITWORK_KITDB.md câu 13.5), and a .searchable()
 // column's weight, which the port builds the table's full-text index from.
 //
-// CONTROL: with ensureTable not calling recordColumnKinds, "kitwork_columns: SQL logic error: no such table:
+// CONTROL: with applyGap not calling writeColumnKinds, "kitwork_columns: SQL logic error: no such table:
 // kitwork_columns (1)"; with writeColumnKinds writing 0 for every weight, "… name text 0 0 0 …, want … name text 0 0
 // 1 …".
 func TestManagedDatabaseRecordsColumnKinds(t *testing.T) {
@@ -1197,6 +1209,7 @@ func TestManagedDatabaseRecordsColumnKinds(t *testing.T) {
 		goColumn{name: "paid", builder: "boolean"},
 	)
 	database := goManaged(t, tenant, map[string]value.Value{"items": items})
+	migrateManagedForTest(t, database)
 	if counted := database.OnInvoke(statement.Method, value.New(`{"v":4,"action":"count","table":"items"}`)); counted.Failed() {
 		t.Fatalf("count: %v", counted)
 	}

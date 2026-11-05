@@ -90,6 +90,7 @@ func TestNamedConnectionRunsOnTheHostsSQLite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	migrateAppForTest(t, root, "acme", RootLayoutMultiTenant)
 	for _, stock := range [][]string{{"coffee", "2"}, {"tea", "9"}, {"milk", "4"}} {
 		status, body := managedPost(tenant, "/", url.Values{"item": {stock[0]}, "quantity": {stock[1]}})
 		if status != http.StatusOK || !strings.Contains(body, `"id":`) {
@@ -178,20 +179,21 @@ func TestNamedConnectionErrors(t *testing.T) {
 	}
 }
 
-// A host's database of connection("tên") applies no change that loses data (KITWORK_DATABASE.md mục 6): an
-// app whose struct drops a column the file has, or retypes one, fails its statement naming the change, and
-// the file keeps its columns and rows; a column added migrates as on the app's own database. Every app
-// that names the database must therefore declare the same table.
+// A host's database of connection("tên") is the root of its structure, as the app's own is (KITWORK_DATABASE.md
+// "Database là gốc", slice 4): an app whose table retypes a column the file has fails its statements naming it, and the
+// file keeps its columns and rows; a column the app adds fails them too, until kitwork migrate adds it, the rows
+// staying. A column the file has and the app does not declare is the database's own.
 func TestNamedConnectionRefusesALossOfData(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "host", "warehouse.db")
 	withCatalogue(t, map[string]hostdatabase.Config{"warehouse": {Type: "sqlite", Name: path}})
-	tenant, _, err := bootApp(t, map[string]string{
+	tenant, root, err := bootApp(t, map[string]string{
 		".shared/schema/warehouse.work": warehouseSchema,
 		"shop.example/router.work":      warehouseRoute,
 	}, "shop.example")
 	if err != nil {
 		t.Fatal(err)
 	}
+	migrateAppForTest(t, root, "acme", RootLayoutMultiTenant)
 	if status, body := managedPost(tenant, "/", url.Values{"item": {"coffee"}, "quantity": {"2"}}); status != http.StatusOK {
 		t.Fatalf("insert = %d %s", status, body)
 	}
@@ -218,10 +220,10 @@ router.get((context) => {
 		t.Fatal(err)
 	}
 	refused := answer(t, other, "")
-	const want = `bảng stocks trên connection("warehouse"): đổi kiểu cột quantity INTEGER→TEXT làm mất dữ liệu nên không chạy, database giữ nguyên; ` +
-		`đưa table về như database đang có (mọi app gọi tên warehouse cùng khai một bảng); đổi mất dữ liệu là việc của kitwork migrate, chưa có trong engine hôm nay (lát 7)`
+	const want = `database connection("warehouse") (warehouse.db) chưa khớp bảng .shared/schema/ khai (database là gốc: engine không tự tạo bảng, thêm cột); ` +
+		`khác database: cột stocks.quantity: database lưu INTEGER, code khai text (lưu TEXT); sửa table() theo database (kitwork migrate không đổi kiểu cột đã có)`
 	if refused["code"] != value.DatabaseCode || refused["message"] != want {
-		t.Fatalf("a struct that loses data: %v, want DATABASE %q", refused, want)
+		t.Fatalf("a table that retypes a column: %v, want DATABASE %q", refused, want)
 	}
 	file, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -253,11 +255,19 @@ router.get((context) => {
 		t.Fatalf("the row after the refusal: %q %v", item, err)
 	}
 
-	// a column added: it migrates, the rows stay
-	added, _, err := bootApp(t, declaring(`item: text().unique(), quantity: integer(), note: text().nullable()`), "depot.example")
+	// a column added: the statements fail until kitwork migrate adds it, the rows staying
+	added, addedRoot, err := bootApp(t, declaring(`item: text().unique(), quantity: integer(), note: text().nullable()`), "depot.example")
 	if err != nil {
 		t.Fatal(err)
 	}
+	if lacking := answer(t, added, ""); lacking["code"] != value.DatabaseCode ||
+		!strings.Contains(fmt.Sprint(lacking["message"]), "database chưa có: bảng stocks chưa có cột note text; thêm bằng kitwork migrate") {
+		t.Fatalf("a table that adds a column, before kitwork migrate: %v", lacking)
+	}
+	if live := columns(); live["note"] != "" {
+		t.Fatalf("a statement added the column: %v", live)
+	}
+	migrateAppForTest(t, addedRoot, "acme", RootLayoutMultiTenant)
 	if listed := answer(t, added, ""); count(t, listed, "rows") != 1 {
 		t.Fatalf("a struct that adds a column: %v, want the one row", listed)
 	}

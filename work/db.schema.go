@@ -1,7 +1,6 @@
 package work
 
 import (
-	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/json"
@@ -27,7 +26,7 @@ import (
 )
 
 // The schema'd database machinery: a schema maps table names to column specs (ColumnSpec, StructDef); the
-// engine migrates each table to match on first use and hands back a validated query on it (SchemaTable),
+// engine checks each table on first use and hands back a validated query on it (SchemaTable),
 // over SQLite (KitDB's ORM went with KROW, 03/11/2026). The spec's handle runs on it: connection().tables({ … }) of an app's
 // .shared/schema/ is a dbProxy, and every translated statement runs on one of its SchemaTables
 // (ManagedDatabase, database_managed.go). App code wrote this surface itself until 22/10/2026
@@ -37,12 +36,14 @@ import (
 // How it works:
 //   - db.<table> resolves via the VM's Proxy.OnGet — no VM changes.
 //   - create() generates the kitid PK + applies defaults; where()/orderBy() validate columns.
-//   - the table is migrated on first use, cached by schema hash — not re-checked per request.
+//   - the table is checked on first use, cached by schema hash — not re-checked per request: a file the engine keeps
+//     the history of (the app's database, connection("tên")) is held against the declaration and never changed by it
+//     (database_follows.go, kitwork migrate in database_migrate.go); a file of the test-only module is migrated.
 //   - the SQLite engine is modernc.
 //
-// Migration (see migrate() below): additive ADD COLUMN with default backfill runs automatically; type
-// changes and column drops are DESTRUCTIVE (rebuild + CAST / drop) and run ONLY on a proxy that allows them
-// (allowDrop); the spec's handle never does, so a destructive change is refused (`kitwork migrate` is open).
+// Migration (see migrate() below, the test-only module's): additive ADD COLUMN with default backfill runs
+// automatically; type changes and column drops are DESTRUCTIVE (rebuild + CAST / drop) and run ONLY on a proxy that
+// allows them (allowDrop). The spec's handle never migrates (KITWORK_DATABASE.md "Database là gốc", slice 4).
 // Known limits: the rebuild does not restore indexes/triggers/FKs (the DSL declares none).
 
 // ---- column DSL: kitid()/text()/integer()/datetime() + chainable modifiers ----
@@ -1058,9 +1059,9 @@ func (t *SchemaTable) ready() (value.Value, bool) {
 		return value.Value{}, true
 	}
 	if err := t.ensureTable(); err != nil {
-		var destructive *destructiveMigrationError
-		if errors.As(err, &destructive) {
-			return value.InvalidFailure(value.DatabaseCode, destructive.Error()), false
+		var gap *databaseGapError
+		if errors.As(err, &gap) {
+			return value.InvalidFailure(value.DatabaseCode, gap.Error()), false
 		}
 		return value.InvalidFailure(value.DatabaseCode, fmt.Sprintf("db: table %q migration failed: %v", t.table, err)), false
 	}
@@ -1337,9 +1338,9 @@ func (t *SchemaTable) Plan(_ ...value.Value) value.Value {
 	return value.New(out)
 }
 
-// ensureTable runs the migration once per (engine, file, table, SCHEMA HASH). The hash in the key is
-// what makes it react to schema changes: edit the schema (add a column) and the key changes, so a
-// hot-reload re-runs migrate() and ALTERs the live table — not just first boot.
+// ensureTable checks the table once per (engine, file, table, SCHEMA HASH). The hash in the key is what makes it
+// react to schema changes: edit the schema (add a column) and the key changes, so a hot reload holds the file against
+// the new declaration (the app's database, connection("tên")), or migrates it (the test-only module's files).
 func (t *SchemaTable) ensureTable() error {
 	// Migrate EVERY table in this database, not just the one being queried, so a foreign key's target
 	// table exists before any insert (SQLite allows creating a child before its parent, but the parent
@@ -1359,17 +1360,18 @@ func (t *SchemaTable) ensureTable() error {
 		return nil
 	}
 	if t.keepsHistory() {
-		// a file whose history the engine keeps is migrated on its writer's connection: a change of the schema
-		// commits a Barrier and an anchor, so a restore never replays across it (database_history.go)
-		database, err := t.tenant.historyDatabase(t.sqliteFile())
-		if err != nil {
+		// a file whose history the engine keeps is the database the app declares tables on, the root of its
+		// structure (KITWORK_DATABASE.md "Database là gốc", slice 4): its tables are held against the declaration,
+		// never made to follow it (database_follows.go). The writer opens first, so a new machine's file is made
+		// from its structure file (database_history.go).
+		if _, err := t.tenant.historyDatabase(t.sqliteFile()); err != nil {
 			return err
 		}
-		ctx := context.Background()
-		_, err = database.Maintain(ctx, "engine", func(conn *sql.Conn) error {
-			return t.migrateTables(connRunner{ctx: ctx, conn: conn}, tables, pending)
-		})
-		return err
+		db := t.source().db()
+		if db == nil {
+			return fmt.Errorf("connection unavailable")
+		}
+		return t.checkTables(db, tables, pending)
 	}
 	db := t.source().db()
 	if db == nil {
@@ -1393,13 +1395,6 @@ func (t *SchemaTable) ensuredKey(name string, cols map[string]*ColumnSpec) strin
 func (t *SchemaTable) migrateTables(db schemaRunner, tables map[string]map[string]*ColumnSpec, pending []string) error {
 	for _, name := range pending {
 		cols := tables[name]
-		// The host's database of connection("tên") applies no change that loses data: the statement fails
-		// naming it, and nothing applies (the app's KitDB refuses the same way).
-		if t.sqlitePath != "" {
-			if err := refuseDestructiveMigration(db, t.dbName, name, cols); err != nil {
-				return err
-			}
-		}
 		// Do NOT cache on failure: a migration that could not apply (e.g. the ALTER did not take because
 		// another process held the database) must be RETRIED on the next request, not silently marked done.
 		if err := migrate(db, name, cols, t.allowDrop); err != nil {
@@ -1968,49 +1963,6 @@ func checkpointWAL(db schemaRunner) {
 	_, _ = db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
 }
 
-// destructiveMigrationError is a change of a host's database of connection("tên") that would lose data:
-// a column the struct no longer has, or one whose type it changed. Nothing of the migration applies.
-type destructiveMigrationError struct {
-	connection string // the host's name of the database
-	table      string
-	changes    []string
-}
-
-func (e *destructiveMigrationError) Error() string {
-	return fmt.Sprintf(`bảng %s trên connection("%s"): %s làm mất dữ liệu nên không chạy, database giữ nguyên; `+
-		`đưa table về như database đang có (mọi app gọi tên %s cùng khai một bảng); đổi mất dữ liệu là việc của kitwork migrate, chưa có trong engine hôm nay (lát 7)`,
-		e.table, e.connection, strings.Join(e.changes, ", "), e.connection)
-}
-
-// refuseDestructiveMigration checks a table of a host's database of connection("tên") against the live file
-// before migrate() runs (KITWORK_DATABASE.md mục 6: what loses data never applies by itself). An addition
-// passes, to migrate as on the app's own database; a column dropped or retyped is the error.
-func refuseDestructiveMigration(db schemaRunner, name, table string, columns map[string]*ColumnSpec) error {
-	if noRunner(db) {
-		return fmt.Errorf("connection unavailable")
-	}
-	current, err := tableColumns(db, table)
-	if err != nil {
-		return fmt.Errorf("introspect %q: %w", table, err)
-	}
-	var changes []string
-	for _, step := range planMigration(current, columns, false) {
-		switch {
-		case step.Action == "retype" && step.To == "INTEGER" && sameType(step.From, "TEXT") && columns[step.Column] != nil && columns[step.Column].kind == "decimal":
-			// written before 29/10/2026, when SQLite kept a decimal as its text (db.sqlite_decimal.go)
-			changes = append(changes, fmt.Sprintf("cột %s là decimal lưu dạng chữ (cách trước 29/10/2026), nay SQLite lưu decimal là số nguyên nhân 10^số_lẻ", step.Column))
-		case step.Action == "retype":
-			changes = append(changes, fmt.Sprintf("đổi kiểu cột %s %s→%s", step.Column, step.From, step.To))
-		case step.Action == "drop":
-			changes = append(changes, fmt.Sprintf("bỏ cột %s", step.Column))
-		}
-	}
-	if len(changes) == 0 {
-		return nil
-	}
-	return &destructiveMigrationError{connection: strings.TrimPrefix(name, catalogDatabasePrefix), table: table, changes: changes}
-}
-
 func migrate(db schemaRunner, table string, columns map[string]*ColumnSpec, allowDrop bool) (err error) {
 	if noRunner(db) {
 		return fmt.Errorf("connection unavailable")
@@ -2402,6 +2354,8 @@ func schemaHash(columns map[string]*ColumnSpec) string {
 	for pos, name := range orderedColumns(columns) {
 		c := columns[name]
 		fmt.Fprintf(h, "%d:%s|%s|%t|%t|%t|%t;", pos, name, c.kind, c.primary, c.notNull, c.unique, c.defaultNow)
+		// what the file must agree with too (database_follows.go): a decimal's scale, a .searchable() weight
+		fmt.Fprintf(h, "%d,%d,%d;", c.precision, c.scale, declaredWeight(c))
 		if c.fk != nil {
 			fmt.Fprintf(h, "ref:%s.%s|%s|%d|%s|%s;", c.fk.table, c.fk.column, c.fk.name, c.fk.pos, c.fk.onDelete, c.fk.onUpdate)
 		}

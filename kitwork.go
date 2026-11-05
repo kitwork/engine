@@ -450,6 +450,37 @@ func Check(configFile ...string) (core.CheckReport, error) {
 	), nil
 }
 
+// PlanMigrations is kitwork migrate's plan (KITWORK_DATABASE.md "Database là gốc", slice 4): every database the
+// apps under the manifest's root declare tables on, held against its file; each plan's Apply adds what the file lacks.
+// release lets go of the files' writers; nothing changes until a plan applies.
+func PlanMigrations(configFile ...string) (plans []*work.DatabaseMigration, release func(), err error) {
+	cfg, err := commandConfig(configFile...)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := validateAppDatabaseConfigs(cfg.AppDatabases); err != nil {
+		return nil, nil, err
+	}
+	applyDatabaseManifest(cfg)
+	work.AllowLocal = cfg.AllowLocal
+	var releases []func()
+	release = func() {
+		for index := len(releases) - 1; index >= 0; index-- {
+			releases[index]()
+		}
+	}
+	for _, identity := range work.MigrationApps(cfg.Root, cfg.RootLayout) {
+		found, releaseApp, err := work.PlanAppMigrations(cfg.Root, identity, cfg.RootLayout, cfg.SharedEnvironment)
+		if err != nil {
+			release()
+			return nil, nil, fmt.Errorf("app %s: %w", identity, err)
+		}
+		releases = append(releases, releaseApp)
+		plans = append(plans, found...)
+	}
+	return plans, release, nil
+}
+
 // applyDatabaseManifest hands the engine what application.work says an app's .shared/schema/ may reach
 // (KITWORK_DATABASE.md mục 1): the app.databases catalogue, which connection("tên") picks from, and
 // app.policy({ tenantConnections }), which turns connect() off, and app.history({ days }), how long the history
