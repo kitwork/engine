@@ -1,19 +1,14 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"database/sql"
-	"encoding/binary"
 	"errors"
 	"fmt"
-	"hash/maphash"
-	"io"
 	"io/fs"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -22,51 +17,33 @@ import (
 	kitdb "github.com/kitwork/engine/kitdb/sqlite"
 )
 
-// cmdAnchor measures what an anchor of the history costs on a file the size of shopping's: the anchor written today,
-// a whole copy (kitdb/sqlite Anchor: VACUUM INTO, the history cut to its last commit, VACUUM), against an anchor that
-// keeps only the pages changed since the one before it, over a base that is a byte copy of the file. Between anchors
-// it writes through the engine's writer, so the history grows as an app's would: scattered updates, updates on a hot
-// set of rows, inserts. Then it restores the last commit both ways. Evidence for docs/KITWORK_KITDB.md mục 5 of the
-// Kitwork repository (04/11/2026).
+// cmdAnchor measures the engine's anchors on a file the size of shopping's (kitdb/sqlite, KITWORK_KITDB.md mục 5, câu
+// 13.9 of the Kitwork repository): the first one a base, every page of the file read through sqlite_dbpage in one read
+// transaction and copied; every later one the pages changed since, found by the hashes of the anchor before. Between
+// anchors it writes through the engine's writer, so the history grows as an app's would: scattered updates, updates
+// on a hot set of rows, inserts. Then moments are restored from the base and the pages after it and compared with
+// the file as it was, and Retain folds the oldest anchors into the base. Evidence for KITWORK_KITDB.md mục 5
+// (05/11/2026); the anchor measured on 04/11/2026, a whole copy, is in RESULTS_2026-11-04.md.
 //
-// directory holds work.db, a copy of .database/shopping/kitwork.db, which is written to; base.db, the page deltas
-// and the restored files are written beside it, at most about four times the file's size with SQLite's temporary
-// copy of a VACUUM.
+// directory holds work.db, a copy of .database/shopping/kitwork.db, which is written to; the anchors and the restored
+// files are written beside it, at most about three times the file's size.
 func cmdAnchor(directory string) {
 	ctx := context.Background()
 	work := filepath.Join(directory, "work.db")
-	base := filepath.Join(directory, "base.db")
-	for _, path := range []string{base, work + ".history"} {
-		if _, err := os.Stat(path); err == nil {
-			panic(fmt.Sprintf("%s exists: anchor runs once on a fresh copy", path))
-		}
+	history := work + ".history"
+	if _, err := os.Stat(history); err == nil {
+		panic(fmt.Sprintf("%s exists: anchor runs once on a fresh copy", history))
 	}
 	checkpointFile(work)
 	pageSize, pageCount, rowCount := fileGeometry(work)
 	fmt.Printf("work.db: %d pages of %d bytes (%s), %d rows of shopping\n\n", pageCount, pageSize,
 		gigabytes(int64(pageCount)*int64(pageSize)), rowCount)
 
-	seed := maphash.MakeSeed()
 	start := time.Now()
-	hashes := hashPages(work, pageSize, seed)
-	read := time.Since(start)
-	fmt.Printf("reading every page from the file:                 %s (%s/s)\n", duration(read), gigabytes(int64(float64(len(hashes)*pageSize)/read.Seconds())))
-	start = time.Now()
-	through := hashDBPages(work, len(hashes), seed)
-	fmt.Printf("reading every page through sqlite_dbpage:         %s, one read transaction\n", duration(time.Since(start)))
-	if len(changedPages(hashes, through)) != 0 {
-		panic("sqlite_dbpage and the file disagree")
-	}
-	start = time.Now()
-	copyBytes(work, base)
-	fmt.Printf("a byte copy of the file (the pages' base):        %s\n", duration(time.Since(start)))
-	start = time.Now()
-	database, err := kitdb.Open(ctx, work, kitdb.Options{}) // a file without an anchor gets one as it opens
+	database, err := kitdb.Open(ctx, work, kitdb.Options{}) // a file without an anchor gets one as it opens: a base
 	must(err)
-	whole := time.Since(start)
-	must(database.Close())
-	wholeSize := directorySize(work + ".history")
-	fmt.Printf("today's anchor (VACUUM INTO, history cut, VACUUM): %s, %s\n\n", duration(whole), gigabytes(wholeSize))
+	fmt.Printf("the first anchor, a base (Open): %s, %s; pages.hashes %s\n\n", duration(time.Since(start)),
+		gigabytes(newestSize(history, ".base")), gigabytes(fileSize(filepath.Join(history, "pages.hashes"))))
 
 	columns := make([]string, len(shoppingColumns))
 	for position, column := range shoppingColumns {
@@ -102,68 +79,109 @@ func cmdAnchor(directory string) {
 		{"100,000 inserts", insert, arguments(100000, copied)},
 	}
 
-	fmt.Printf("%-36s %9s %10s %10s %8s %8s  %s\n", "between two anchors", "writes/s", "pages", "delta", "scan", "write", "pages by owner")
-	var deltas []string
-	var deltaTotal int64
-	for index, step := range steps {
-		database, err := kitdb.Open(ctx, work, kitdb.Options{})
-		must(err)
+	fmt.Printf("%-36s %9s %10s %10s\n", "then", "writes/s", "anchor", ".pages")
+	type anchored struct {
+		revision uint64
+		digest   string
+	}
+	var anchors []anchored
+	for _, step := range steps {
 		start := time.Now()
 		runWrites(ctx, database, step.query, step.arguments)
 		rate := float64(len(step.arguments)) / time.Since(start).Seconds()
-		must(database.Close())
-		checkpointFile(work)
 		start = time.Now()
-		next := hashPages(work, pageSize, seed)
-		scan := time.Since(start)
-		changed := changedPages(hashes, next)
-		delta := filepath.Join(directory, fmt.Sprintf("delta-%d.pages", index+1))
-		start = time.Now()
-		size := writeDelta(work, delta, pageSize, changed, len(next))
-		written := time.Since(start)
-		deltas = append(deltas, delta)
-		deltaTotal += size
-		fmt.Printf("%-36s %9.0f %10d %10s %8s %8s  %s\n", step.name, rate, len(changed), gigabytes(size), duration(scan),
-			duration(written), pageOwners(work, changed))
-		hashes = next
+		revision, err := database.Anchor(ctx)
+		must(err)
+		took := time.Since(start)
+		anchors = append(anchors, anchored{revision, rowsDigest(work)})
+		fmt.Printf("%-36s %9.0f %10s %10s\n", step.name, rate, duration(took), gigabytes(newestSize(history, ".pages")))
 	}
-	historyRows, historyBytes := historySize(work)
-	fmt.Printf("\nthe history now: %d commits, %s of changes\n\n", historyRows, gigabytes(historyBytes))
+	fmt.Printf("\nthe anchors now: %s: %s\n\n", gigabytes(directorySize(history)), anchorNames(history))
 
-	database, err = kitdb.Open(ctx, work, kitdb.Options{})
-	must(err)
-	restored := filepath.Join(directory, "restored-whole.db")
+	// The base and the .pages it chains: each moment restores, the newest through every .pages.
+	restore := func(label string, want anchored) {
+		target := filepath.Join(directory, "restored.db")
+		moment := revisionMoment(ctx, database, want.revision)
+		start := time.Now()
+		revision, err := database.Restore(ctx, moment, target)
+		must(err)
+		took := time.Since(start)
+		got := rowsDigest(target)
+		same := "the same rows"
+		if revision != want.revision || got != want.digest {
+			same = fmt.Sprintf("DIFFERENT: revision %d, %s against %s", revision, got, want.digest)
+		}
+		fmt.Printf("restore %-40s %10s, %s\n", label, duration(took), same)
+		removeDatabase(target)
+	}
+	restore("at the second anchor (base + 2 .pages)", anchors[1])
+	restore("at the last anchor (base + 5 .pages)", anchors[len(anchors)-1])
+
+	// Retain as a day after the third anchor with a day kept: the base takes in the first three .pages.
+	moment := revisionMoment(ctx, database, anchors[2].revision)
 	start = time.Now()
-	revision, err := database.Restore(ctx, time.Now(), restored)
+	kept, err := database.Retain(ctx, moment.Add(24*time.Hour), kitdb.Retention{Keep: 24 * time.Hour, Every: 1000 * time.Hour})
 	must(err)
-	fmt.Printf("restore today (copy the anchor, replay every commit since): %s, revision %d\n", duration(time.Since(start)), revision)
+	fmt.Printf("\nRetain, the base taking in three .pages and the history before them let go: %s, kept from revision %d\n",
+		duration(time.Since(start)), kept)
+	fmt.Printf("the anchors now: %s: %s\n\n", gigabytes(directorySize(history)), anchorNames(history))
+	restore("at the third anchor (the folded base)", anchors[2])
+	restore("at the last anchor (base + 2 .pages)", anchors[len(anchors)-1])
 	must(database.Close())
-	want := rowsDigest(work)
-	if got := rowsDigest(restored); got != want {
-		panic(fmt.Sprintf("the restored file reads %s, the file %s", got, want))
-	}
-	removeDatabase(restored)
+}
 
-	restored = filepath.Join(directory, "restored-pages.db")
-	start = time.Now()
-	copyBytes(base, restored)
-	copying := time.Since(start)
-	start = time.Now()
-	for _, delta := range deltas {
-		applyDelta(restored, delta)
+// revisionMoment is the moment of revision's commit.
+func revisionMoment(ctx context.Context, database *kitdb.Database, revision uint64) time.Time {
+	var moment time.Time
+	found := false
+	must(database.Changes(ctx, revision-1, func(commit kitdb.Commit) error {
+		if commit.Revision == revision {
+			moment, found = commit.At, true
+		}
+		return nil
+	}))
+	if !found {
+		panic(fmt.Sprintf("revision %d is not in the history", revision))
 	}
-	applying := time.Since(start)
-	fmt.Printf("restore by pages (copy the base, write the deltas):         %s + %s\n", duration(copying), duration(applying))
-	if len(changedPages(hashes, hashPages(restored, pageSize, seed))) != 0 {
-		panic("the pages restored differ from the file")
+	return moment
+}
+
+func fileSize(path string) int64 {
+	info, err := os.Stat(path)
+	must(err)
+	return info.Size()
+}
+
+// newestSize is the size of the newest anchor file of the extension: the names sort by revision.
+func newestSize(history, extension string) int64 {
+	entries, err := os.ReadDir(history)
+	must(err)
+	var newest string
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), extension) {
+			newest = entry.Name()
+		}
 	}
-	if got := rowsDigest(restored); got != want {
-		panic(fmt.Sprintf("the pages restored read %s, the file %s", got, want))
+	return fileSize(filepath.Join(history, newest))
+}
+
+// anchorNames lists the anchor files by revision and kind, with each one's size.
+func anchorNames(history string) string {
+	entries, err := os.ReadDir(history)
+	must(err)
+	var names []string
+	for _, entry := range entries {
+		name := entry.Name()
+		info, err := entry.Info()
+		must(err)
+		if strings.IndexByte(name, '-') == 20 {
+			var revision uint64
+			fmt.Sscanf(name[:20], "%d", &revision)
+			name = fmt.Sprintf("%d%s", revision, filepath.Ext(name))
+		}
+		names = append(names, fmt.Sprintf("%s %s", name, gigabytes(info.Size())))
 	}
-	removeDatabase(restored)
-	fmt.Printf("both restores read %s; the pages restored are the file byte for byte\n\n", want)
-	fmt.Printf("kept as anchors: today one whole copy a day of commits, %s each; by pages the base %s and %s for the %d deltas\n",
-		gigabytes(wholeSize), gigabytes(int64(pageCount)*int64(pageSize)), gigabytes(deltaTotal), len(deltas))
+	return strings.Join(names, ", ")
 }
 
 func gigabytes(size int64) string {
@@ -198,71 +216,6 @@ func fileGeometry(path string) (pageSize, pageCount int, rows int64) {
 	must(db.QueryRow(`PRAGMA page_count`).Scan(&pageCount))
 	must(db.QueryRow(`SELECT max(rowid) FROM shopping`).Scan(&rows))
 	return pageSize, pageCount, rows
-}
-
-// hashPages reads the file page by page: page n is hashes[n-1].
-func hashPages(path string, pageSize int, seed maphash.Seed) []uint64 {
-	file, err := os.Open(path)
-	must(err)
-	defer file.Close()
-	info, err := file.Stat()
-	must(err)
-	hashes := make([]uint64, int(info.Size()/int64(pageSize)))
-	buffer := make([]byte, 64*pageSize)
-	for first := 0; first < len(hashes); first += 64 {
-		count := min(64, len(hashes)-first)
-		_, err := io.ReadFull(file, buffer[:count*pageSize])
-		must(err)
-		for position := range count {
-			hashes[first+position] = maphash.Bytes(seed, buffer[position*pageSize:(position+1)*pageSize])
-		}
-	}
-	return hashes
-}
-
-// hashDBPages reads every page through sqlite_dbpage in one read transaction: what a live file's pages are at one
-// revision without stopping its writer.
-func hashDBPages(path string, count int, seed maphash.Seed) []uint64 {
-	db := openSQLite(path, "&mode=ro")
-	defer db.Close()
-	tx, err := db.Begin()
-	must(err)
-	defer tx.Rollback()
-	rows, err := tx.Query(`SELECT pgno, data FROM sqlite_dbpage`)
-	must(err)
-	defer rows.Close()
-	hashes := make([]uint64, count)
-	for rows.Next() {
-		var number int
-		var data sql.RawBytes
-		must(rows.Scan(&number, &data))
-		hashes[number-1] = maphash.Bytes(seed, data)
-	}
-	must(rows.Err())
-	return hashes
-}
-
-// changedPages lists the pages whose bytes differ, and every page after the end of before.
-func changedPages(before, after []uint64) []uint32 {
-	var changed []uint32
-	for position := range after {
-		if position >= len(before) || before[position] != after[position] {
-			changed = append(changed, uint32(position+1))
-		}
-	}
-	return changed
-}
-
-func copyBytes(source, target string) {
-	input, err := os.Open(source)
-	must(err)
-	defer input.Close()
-	output, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-	must(err)
-	_, err = io.Copy(output, input)
-	must(err)
-	must(output.Sync())
-	must(output.Close())
 }
 
 func directorySize(path string) int64 {
@@ -305,108 +258,6 @@ func runWrites(ctx context.Context, database *kitdb.Database, query string, argu
 	}
 	wait.Wait()
 	must(failure)
-}
-
-// writeDelta keeps the changed pages of source: the page size and the page count, then each page's number and bytes.
-func writeDelta(source, target string, pageSize int, changed []uint32, pageCount int) int64 {
-	input, err := os.Open(source)
-	must(err)
-	defer input.Close()
-	output, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-	must(err)
-	writer := bufio.NewWriterSize(output, 1<<20)
-	header := binary.BigEndian.AppendUint32(binary.BigEndian.AppendUint32(nil, uint32(pageSize)), uint32(pageCount))
-	_, err = writer.Write(header)
-	must(err)
-	page := make([]byte, pageSize)
-	for _, number := range changed {
-		_, err := input.ReadAt(page, int64(number-1)*int64(pageSize))
-		must(err)
-		_, err = writer.Write(binary.BigEndian.AppendUint32(nil, number))
-		must(err)
-		_, err = writer.Write(page)
-		must(err)
-	}
-	must(writer.Flush())
-	must(output.Sync())
-	info, err := output.Stat()
-	must(err)
-	must(output.Close())
-	return info.Size()
-}
-
-func applyDelta(target, delta string) {
-	input, err := os.Open(delta)
-	must(err)
-	defer input.Close()
-	reader := bufio.NewReaderSize(input, 1<<20)
-	header := make([]byte, 8)
-	_, err = io.ReadFull(reader, header)
-	must(err)
-	pageSize, pageCount := int64(binary.BigEndian.Uint32(header)), int64(binary.BigEndian.Uint32(header[4:]))
-	output, err := os.OpenFile(target, os.O_RDWR, 0)
-	must(err)
-	page := make([]byte, pageSize)
-	number := make([]byte, 4)
-	for {
-		if _, err := io.ReadFull(reader, number); errors.Is(err, io.EOF) {
-			break
-		} else {
-			must(err)
-		}
-		_, err := io.ReadFull(reader, page)
-		must(err)
-		_, err = output.WriteAt(page, int64(binary.BigEndian.Uint32(number)-1)*pageSize)
-		must(err)
-	}
-	must(output.Truncate(pageCount * pageSize))
-	must(output.Sync())
-	must(output.Close())
-}
-
-// pageOwners names the b-tree each changed page belongs to (dbstat); a page in none is on the free list.
-func pageOwners(path string, changed []uint32) string {
-	wanted := make(map[uint32]bool, len(changed))
-	for _, number := range changed {
-		wanted[number] = true
-	}
-	db := openSQLite(path, "&mode=ro")
-	defer db.Close()
-	rows, err := db.Query(`SELECT pageno, name FROM dbstat`)
-	must(err)
-	defer rows.Close()
-	owners := map[string]int{}
-	found := 0
-	for rows.Next() {
-		var number uint32
-		var name string
-		must(rows.Scan(&number, &name))
-		if wanted[number] {
-			owners[name]++
-			found++
-		}
-	}
-	must(rows.Err())
-	if found < len(changed) {
-		owners["free list"] = len(changed) - found
-	}
-	names := make([]string, 0, len(owners))
-	for name := range owners {
-		names = append(names, name)
-	}
-	sort.Slice(names, func(i, j int) bool { return owners[names[i]] > owners[names[j]] })
-	parts := make([]string, len(names))
-	for position, name := range names {
-		parts[position] = fmt.Sprintf("%s %d", name, owners[name])
-	}
-	return strings.Join(parts, ", ")
-}
-
-func historySize(path string) (rows, size int64) {
-	db := openSQLite(path, "&mode=ro")
-	defer db.Close()
-	must(db.QueryRow(`SELECT count(*), coalesce(sum(length(changes)), 0) FROM kitwork_history`).Scan(&rows, &size))
-	return rows, size
 }
 
 // rowsDigest is what a restore must give back: the rows' count, the sums the writes moved, the last row and the

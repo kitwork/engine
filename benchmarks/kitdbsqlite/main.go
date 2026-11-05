@@ -6,7 +6,7 @@
 //	kitdbsqlite query <main.db> <query>             one read-only SQLite query
 //	kitdbsqlite decimal                             what a decimal kept as TEXT does in SQLite
 //	kitdbsqlite idlayout <directory> <rows>         what id() and uuid() cost as a table's key
-//	kitdbsqlite anchor <directory>                  what an anchor of the history costs: a whole copy or the pages changed
+//	kitdbsqlite anchor <directory>                  the engine's anchors: a base, then the pages changed; restores, the fold
 //	kitdbsqlite at <directory>                      at() going backward from the live file against the restore it runs today
 //	kitdbsqlite changeset <directory>               SQLite's changesets of the same writes against kitwork_history
 //
