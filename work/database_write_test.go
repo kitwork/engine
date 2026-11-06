@@ -9,11 +9,11 @@ import (
 	"testing"
 )
 
-const writeShopSchema = `import { table, id, text, decimal, integer, date } from "kitwork/schema";
+const writeShopSchema = `import { table, id, string, decimal, integer, date } from "kitwork/schema";
 import { connection } from "kitwork/database";
 
-const orders = table({ id: id(), email: text().unique(), item: text(), amount: decimal(12, 2), note: text().nullable() });
-const clickDays = table({ id: id(), linkId: text().unique("linkDay"), day: date().unique("linkDay"), count: integer() });
+const orders = table({ id: id(), email: string().unique(), item: string(), amount: decimal(12, 2), note: string().nullable() });
+const clickDays = table({ id: id(), linkId: string().unique("linkDay"), day: date().unique("linkDay"), count: integer() });
 
 export const db = connection().tables({ orders, clickDays });
 `

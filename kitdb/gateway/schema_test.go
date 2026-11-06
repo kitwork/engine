@@ -135,8 +135,8 @@ func TestSchemaStatementsThroughThePort(t *testing.T) {
 
 // TestSchemaStatementsTakeTheEnginesKinds: the port's schema statements say every kind of the engine's table() in
 // PostgreSQL's words (KITWORK_DATABASE.md "Database là gốc"): kitid, KitDB's own domain, whose CREATE DOMAIN kitid AS
-// text is taken and does nothing; date; timestamptz, the engine's timestamp(). timestamp without a time zone, time and
-// uuid stay text. Any other domain is refused.
+// text is taken and does nothing; date; timestamptz, the engine's timestamp(); uuid, the engine's uuid() (06/11/2026).
+// timestamp without a time zone and time stay text. Any other domain is refused.
 //
 // CONTROL (05/11/2026): with typeOf mapping date to text as before, "kinds of events "at:datetime day:text id:kitid
 // local:text ref:text starts:text"".
@@ -151,7 +151,7 @@ func TestSchemaStatementsTakeTheEnginesKinds(t *testing.T) {
 	refused(t, session, `CREATE DOMAIN money AS numeric(12, 2)`, "0A000", "the one domain is KitDB's own")
 	run(t, session, `CREATE TABLE events (id kitid PRIMARY KEY NOT NULL, day date NOT NULL, at timestamptz, `+
 		`local timestamp without time zone, starts time, ref uuid)`)
-	if got := kindsOf(t, fixture.publicDB, "events"); got != "at:datetime day:date id:kitid local:text ref:text starts:text" {
+	if got := kindsOf(t, fixture.publicDB, "events"); got != "at:datetime day:date id:kitid local:text ref:uuid starts:text" {
 		t.Fatalf("kinds of events %q", got)
 	}
 	definition := stored(t, fixture.publicDB, `SELECT sql FROM sqlite_schema WHERE name = 'events'`).(string)

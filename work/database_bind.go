@@ -319,9 +319,13 @@ func bindValue(column string, spec *ColumnSpec, item value.Value, site string) (
 			column, kindSpelling(spec, kind), site))
 	}
 	switch kind {
-	case "id", "text", "kitid", "uuid", "varchar", "char":
+	case "id", "string", "text", "kitid", "varchar", "char":
 		if item.K != value.String {
 			return value.Value{}, wrong("chuỗi")
+		}
+	case "uuid":
+		if item.K != value.String || !validUUID(item.String()) {
+			return value.Value{}, wrong("UUID (8-4-4-4-12 chữ số hệ 16)")
 		}
 	case "date":
 		if item.K != value.String {
@@ -356,6 +360,27 @@ func bindValue(column string, spec *ColumnSpec, item value.Value, site string) (
 		}
 	}
 	return coerceWrite(spec.kind, item), value.Value{}
+}
+
+// validUUID reports a UUID as PostgreSQL's uuid reads it in its usual form: 32 hexadecimal digits in groups of 8, 4,
+// 4, 4 and 12, any case (kept lower case: coerceWrite).
+func validUUID(text string) bool {
+	if len(text) != 36 {
+		return false
+	}
+	for index, character := range text {
+		switch index {
+		case 8, 13, 18, 23:
+			if character != '-' {
+				return false
+			}
+		default:
+			if !('0' <= character && character <= '9' || 'a' <= character && character <= 'f' || 'A' <= character && character <= 'F') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // kindSpelling is a column's kind as the schema writes it.

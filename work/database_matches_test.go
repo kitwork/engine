@@ -19,8 +19,8 @@ func matchesPosts(t *testing.T) *ManagedDatabase {
 	tenant := shop.site("shop.example")
 	posts := goStruct(t,
 		goColumn{name: "id", builder: "id"},
-		goColumn{name: "title", builder: "text", modifiers: []string{"searchable"}},
-		goColumn{name: "body", builder: "text", modifiers: []string{"searchable"}},
+		goColumn{name: "title", builder: "string", modifiers: []string{"searchable"}},
+		goColumn{name: "body", builder: "string", modifiers: []string{"searchable"}},
 		goColumn{name: "published", builder: "boolean"},
 	)
 	managed := goManaged(t, tenant, map[string]value.Value{"posts": posts})
@@ -154,10 +154,10 @@ func TestManagedDatabaseMatches(t *testing.T) {
 //
 // CONTROL: with the compiler not reading matches, the route fails to compile ("không dịch được `posts.matches(q)`").
 func TestMatchesFromAnAppsRoute(t *testing.T) {
-	schema := `import { table, id, text, boolean } from "kitwork/schema";
+	schema := `import { table, id, string, boolean } from "kitwork/schema";
 import { connection } from "kitwork/database";
 
-const posts = table({ id: id(), title: text().searchable(), body: text().searchable(), published: boolean() });
+const posts = table({ id: id(), title: string().searchable(), body: string().searchable(), published: boolean() });
 
 export const blog = connection().tables({ posts });
 `

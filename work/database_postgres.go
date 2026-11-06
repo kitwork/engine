@@ -187,6 +187,8 @@ func postgresType(spec *ColumnSpec) string {
 	switch spec.kind {
 	case "kitid":
 		return "kitid" // KitDB's own domain
+	case "uuid":
+		return "uuid"
 	case "text":
 		return "text"
 	case "integer":

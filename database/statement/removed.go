@@ -15,7 +15,7 @@ import (
 const schemaFile = "app/.shared/schema/<tên>.work"
 
 // columnWords lists the column builders of kitwork/schema, for an error that points to them.
-const columnWords = "id(), text(), integer(), float(), decimal(12, 2), boolean(), date(), json(), timestamp()"
+const columnWords = "id(), string(), uuid(), integer(), float(), decimal(12, 2), boolean(), date(), json(), timestamp()"
 
 const (
 	declareDatabase = "database của app khai export const db = connection().tables({ bảng }) trong " + schemaFile
@@ -58,12 +58,12 @@ var removedWords = map[string]string{
 
 // spelledColumns are the column builders the older module had under the spec's own name.
 var spelledColumns = map[string]bool{
-	"id": true, "text": true, "integer": true, "float": true, "decimal": true, "boolean": true, "date": true, "json": true,
+	"id": true, "string": true, "uuid": true, "integer": true, "float": true, "decimal": true, "boolean": true, "date": true, "json": true,
 }
 
 // otherColumns are the column builders of the older module that the spec's vocabulary has not.
 var otherColumns = map[string]bool{
-	"uuid": true, "serial": true, "varchar": true, "char": true, "choice": true, "time": true, "year": true,
+	"serial": true, "varchar": true, "char": true, "choice": true, "time": true, "year": true,
 	"month": true, "day": true, "array": true, "blob": true, "bytes": true, "ip": true, "mac": true, "vector": true,
 }
 

@@ -56,10 +56,10 @@ func withCatalogue(t *testing.T, entries map[string]hostdatabase.Config) {
 	t.Cleanup(hostdatabase.SetCatalog(entries))
 }
 
-const warehouseSchema = `import { table, id, text, integer } from "kitwork/schema";
+const warehouseSchema = `import { table, id, string, integer } from "kitwork/schema";
 import { connection } from "kitwork/database";
 
-const stocks = table({ id: id(), item: text().unique(), quantity: integer() });
+const stocks = table({ id: id(), item: string().unique(), quantity: integer() });
 
 export const warehouse = connection("warehouse").tables({ stocks });
 `
@@ -209,19 +209,19 @@ router.get((context) => {
 `
 	declaring := func(columns string) map[string]string {
 		return map[string]string{
-			".shared/schema/warehouse.work": strings.Replace(warehouseSchema, `item: text().unique(), quantity: integer()`, columns, 1),
+			".shared/schema/warehouse.work": strings.Replace(warehouseSchema, `item: string().unique(), quantity: integer()`, columns, 1),
 			"depot.example/router.work":     listing,
 		}
 	}
 
 	// quantity retyped: refused, nothing applied; item, which this app does not declare, is the database's own and stays
-	other, _, err := bootApp(t, declaring(`quantity: text()`), "depot.example")
+	other, _, err := bootApp(t, declaring(`quantity: string()`), "depot.example")
 	if err != nil {
 		t.Fatal(err)
 	}
 	refused := answer(t, other, "")
 	const want = `database connection("warehouse") (warehouse.db) chưa khớp bảng .shared/schema/ khai (database là gốc: engine không tự tạo bảng, thêm cột); ` +
-		`khác database: cột stocks.quantity: database lưu INTEGER, code khai text (lưu TEXT) (đổi cách lưu cần dựng lại bảng, chưa có); ` +
+		`khác database: cột stocks.quantity: database lưu INTEGER, code khai string (lưu TEXT) (đổi cách lưu cần dựng lại bảng, chưa có); ` +
 		`sửa table() theo database, hay khi chỉ số lẻ của một cột số khác, để kitwork migrate viết lại giá trị (nó hỏi)`
 	if refused["code"] != value.DatabaseCode || refused["message"] != want {
 		t.Fatalf("a table that retypes a column: %v, want DATABASE %q", refused, want)
@@ -257,12 +257,12 @@ router.get((context) => {
 	}
 
 	// a column added: the statements fail until kitwork migrate adds it, the rows staying
-	added, addedRoot, err := bootApp(t, declaring(`item: text().unique(), quantity: integer(), note: text().nullable()`), "depot.example")
+	added, addedRoot, err := bootApp(t, declaring(`item: string().unique(), quantity: integer(), note: string().nullable()`), "depot.example")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if lacking := answer(t, added, ""); lacking["code"] != value.DatabaseCode ||
-		!strings.Contains(fmt.Sprint(lacking["message"]), "database chưa có: cột note text của bảng stocks; thêm bằng kitwork migrate") {
+		!strings.Contains(fmt.Sprint(lacking["message"]), "database chưa có: cột note string của bảng stocks; thêm bằng kitwork migrate") {
 		t.Fatalf("a table that adds a column, before kitwork migrate: %v", lacking)
 	}
 	if live := columns(); live["note"] != "" {
@@ -294,7 +294,7 @@ func TestDatabaseModuleOldWordsAreErrors(t *testing.T) {
 		"kitdb":     "database.kitdb đã bỏ: database của app khai export const db = connection().tables({ bảng }) trong app/.shared/schema/<tên>.work; mở KitDB ra ngoài qua PostgreSQL wire (token, access) là app.database(path, { port }) của host trong application.work",
 		"sqlite":    `database.sqlite đã bỏ: SQLite là connection("tên")`,
 		"struct":    `database.struct đã bỏ: bảng khai bằng table() của "kitwork/schema"`,
-		"text":      `database.text đã bỏ: kiểu cột import từ "kitwork/schema"`,
+		"text":      `database.text đã bỏ: kiểu cột của "kitwork/schema", chỉ trong app/.shared/schema/: viết string()`,
 		"kitid":     "database.kitid đã bỏ: kiểu cột của \"kitwork/schema\", chỉ trong app/.shared/schema/: viết id()",
 		"entity":    "database.entity đã bỏ: mỗi app có database của nó",
 		"system":    "database.system đã bỏ: mỗi app có database của nó",

@@ -23,9 +23,9 @@ func TestDatabaseOldSpellingsAreCompileErrors(t *testing.T) {
 		{"import { collection } from \"kitwork\";\n", "import { collection", `import { collection } from "kitwork" đã bỏ: engine gỡ ngày 01/11/2026: nội dung cần tìm là một bảng của app, cột .searchable()`},
 		{"import { open as file } from \"kitwork/database\";\n", "import { open", `import { open } from "kitwork/database" đã bỏ: database của app khai`},
 		{"import { struct, text } from \"kitwork/database\";\n", "import { struct", `import { struct } from "kitwork/database" đã bỏ: bảng khai bằng table() của "kitwork/schema"`},
-		{"import { text } from \"kitwork/database\";\n", "import { text", `import { text } from "kitwork/database" đã bỏ: kiểu cột import từ "kitwork/schema": import { text } from "kitwork/schema"`},
+		{"import { text } from \"kitwork/database\";\n", "import { text", `import { text } from "kitwork/database" đã bỏ: kiểu cột của "kitwork/schema", chỉ trong app/.shared/schema/: viết string()`},
 		{"import { kitid } from \"kitwork/database\";\n", "import { kitid", `import { kitid } from "kitwork/database" đã bỏ: kiểu cột của "kitwork/schema", chỉ trong app/.shared/schema/: viết id()`},
-		{"import { choice } from \"kitwork/database\";\n", "import { choice", `choice() không có trong kiểu cột của "kitwork/schema": id(), text()`},
+		{"import { choice } from \"kitwork/database\";\n", "import { choice", `choice() không có trong kiểu cột của "kitwork/schema": id(), string()`},
 		{"import { entity } from \"kitwork/database\";\n", "import { entity", "ai thấy dòng nào là policy()"},
 		{"import { system } from \"kitwork/database\";\n", "import { system", "ai thấy dòng nào là policy()"},
 		{"import { atomic } from \"kitwork/database\";\n", "import { atomic", "giao dịch là db.transaction((database) => …)"},
@@ -33,7 +33,7 @@ func TestDatabaseOldSpellingsAreCompileErrors(t *testing.T) {
 		{"import { where } from \"kitwork/database\";\n", "import { where", `import { db } from "app/.shared/schema/<tên>.work" rồi db.list((bảng) => …)`},
 		{"import * as database from \"kitwork/database\";\nconst db2 = database.kitdb(\"app.kitdb\", {});\n", "kitdb(", "database.kitdb đã bỏ: database của app khai"},
 		{"import { database } from \"kitwork\";\nconst rows = database.table(\"users\").list();\n", "table(", "database.table đã bỏ: câu viết trên database khai trong app/.shared/schema/"},
-		{"import { database } from \"kitwork\";\nconst { text, int } = database;\n", "text,", `database.text đã bỏ: kiểu cột import từ "kitwork/schema"`},
+		{"import { database } from \"kitwork\";\nconst { text, int } = database;\n", "text,", `database.text đã bỏ: kiểu cột của "kitwork/schema", chỉ trong app/.shared/schema/: viết string()`},
 		{"import * as database from \"kitwork/database\";\nconst tx = database.atomic;\n", "atomic;", "database.atomic đã bỏ: giao dịch là db.transaction"},
 	} {
 		for name, source := range map[string]string{"with a database": importDB + test.source, "without one": test.source} {
@@ -45,7 +45,7 @@ func TestDatabaseOldSpellingsAreCompileErrors(t *testing.T) {
 	}
 
 	// in a schema file the import is refused at its name, not later at the line that calls it
-	schema := "import { table, id, text } from \"kitwork/schema\";\nimport { connection, kitdb } from \"kitwork/database\";\nconst orders = table({ id: id(), email: text() });\nexport const db = connection().tables({ orders });\nexport const old = kitdb(\"old.kitdb\", { orders });\n"
+	schema := "import { table, id, string } from \"kitwork/schema\";\nimport { connection, kitdb } from \"kitwork/database\";\nconst orders = table({ id: id(), email: string() });\nexport const db = connection().tables({ orders });\nexport const old = kitdb(\"old.kitdb\", { orders });\n"
 	_, err := compileRoute(t, importDB+"const all = db.list((orders) => orders);\n", map[string]string{".shared/schema/shop.work": schema})
 	if err == nil || !strings.HasPrefix(err.Error(), "../.shared/schema/shop.work:2:1: ") || !strings.Contains(err.Error(), `import { kitdb } from "kitwork/database" đã bỏ`) {
 		t.Errorf("kitdb imported into a schema file: %v", err)
@@ -107,7 +107,7 @@ func TestDatabaseConnectHandle(t *testing.T) {
 // connection("warehouse") declares a database the host names in app.databases: the compiler reads its
 // tables as it reads the app's own and translates its statements the same way.
 func TestDatabaseNamedConnectionTranslates(t *testing.T) {
-	warehouse := "import { table, id, text, integer } from \"kitwork/schema\";\nimport { connection } from \"kitwork/database\";\n\nconst stocks = table({ id: id(), item: text().unique(), quantity: integer() });\n\nexport const warehouse = connection(\"warehouse\").tables({ stocks });\n"
+	warehouse := "import { table, id, string, integer } from \"kitwork/schema\";\nimport { connection } from \"kitwork/database\";\n\nconst stocks = table({ id: id(), item: string().unique(), quantity: integer() });\n\nexport const warehouse = connection(\"warehouse\").tables({ stocks });\n"
 	files := map[string]string{".shared/schema/warehouse.work": warehouse}
 	source := "import { warehouse } from \"app/.shared/schema/warehouse.work\";\nconst low = warehouse.list((stocks) => stocks.quantity < 5);\n"
 	bytecode, err := compileRoute(t, source, files)

@@ -20,7 +20,8 @@ type Builder struct {
 // Builders are the column builders of kitwork/schema the engine has today (KITWORK_DATABASE.md mục 1).
 var Builders = map[string]Builder{
 	"id":        {Kind: "id", Primary: true},
-	"text":      {Kind: "text"},
+	"string":    {Kind: "string"}, // text() until 06/11/2026
+	"uuid":      {Kind: "uuid"},   // a UUID of any column, not generated (06/11/2026); the key's is id("uuid")
 	"integer":   {Kind: "integer"},
 	"float":     {Kind: "float"},
 	"decimal":   {Kind: "decimal", Parameters: 2},
@@ -36,7 +37,7 @@ var BuildersNotYet = map[string]int{
 	"computed": 9,
 }
 
-// Modifier is a modifier of a column (text().nullable()).
+// Modifier is a modifier of a column (string().nullable()).
 type Modifier struct {
 	// OnlyTimestamp: valid only after timestamp().
 	OnlyTimestamp bool
@@ -65,6 +66,7 @@ var LegacyBuilders = map[string]string{
 	"now":      "viết timestamp().created()",
 	"updated":  "viết timestamp().updated()",
 	"ref":      "khoá ngoại viết userId: users.id (chưa có trong engine hôm nay, lát 5)",
+	"text":     "viết string() (đổi tên 06/11/2026: string là kiểu giá trị JavaScript nó đọc ra)",
 }
 
 // NumberBuilder is the error of number(), which the spec has not (KITWORK_DATABASE.md mục 1).

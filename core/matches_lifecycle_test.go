@@ -26,10 +26,10 @@ func TestMatchesIndexOutlivesAReloadAndClosesWithTheEngine(t *testing.T) {
 	root := t.TempDir()
 	app := filepath.Join(root, "acme")
 	site := filepath.Join(app, "localhost")
-	schema := `import { table, id, text } from "kitwork/schema";
+	schema := `import { table, id, string } from "kitwork/schema";
 import { connection } from "kitwork/database";
 
-const posts = table({ id: id(), title: text().searchable() });
+const posts = table({ id: id(), title: string().searchable() });
 
 export const blog = connection().tables({ posts });
 `

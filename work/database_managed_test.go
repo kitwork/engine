@@ -24,10 +24,10 @@ import (
 )
 
 // managedShopSchema is the schema of KITWORK_DATABASE.md's first slice, as the spec writes it.
-const managedShopSchema = `import { table, id, text, decimal, date, timestamp } from "kitwork/schema";
+const managedShopSchema = `import { table, id, string, decimal, date, timestamp } from "kitwork/schema";
 import { connection } from "kitwork/database";
 
-const orders = table({ id: id(), email: text(), item: text(), amount: decimal(12, 2), note: text().nullable(), day: date().index(), createdAt: timestamp().created() });
+const orders = table({ id: id(), email: string(), item: string(), amount: decimal(12, 2), note: string().nullable(), day: date().index(), createdAt: timestamp().created() });
 
 export const db = connection().tables({ orders });
 `
@@ -578,7 +578,7 @@ router.get((context) => {
 			t.Fatalf("%s: %v %s", what, err, body)
 		}
 		if result.OK || result.Error.Code != value.InvalidArgumentCode ||
-			!strings.Contains(result.Error.Message, "cột item là text(): giá trị ở router.work:") ||
+			!strings.Contains(result.Error.Message, "cột item là string(): giá trị ở router.work:") ||
 			!strings.Contains(result.Error.Message, "không phải chuỗi UTF-8") ||
 			strings.Contains(result.Error.Message, "s?a") || strings.ContainsRune(result.Error.Message, utf8.RuneError) {
 			t.Errorf("%s: %s, want INVALID_ARGUMENT naming the column item and where it is written, not the value", what, body)
@@ -652,7 +652,7 @@ router.get((context) => {
 			t.Fatalf("%s: %v %s", what, err, body)
 		}
 		if result.OK || result.Error.Code != value.InvalidArgumentCode ||
-			!strings.Contains(result.Error.Message, "cột item là text(): giá trị ở router.work:") ||
+			!strings.Contains(result.Error.Message, "cột item là string(): giá trị ở router.work:") ||
 			!strings.Contains(result.Error.Message, "chứa ký tự NUL (byte 0)") ||
 			strings.Contains(result.Error.Message, "phê") {
 			t.Errorf("%s: %s, want INVALID_ARGUMENT naming the column item and where it is written, not the value", what, body)
@@ -693,7 +693,7 @@ func goStruct(t *testing.T, columns ...goColumn) value.Value {
 	t.Helper()
 	schema := &SchemaModule{}
 	builders := map[string]value.Value{
-		"id": schema.Id(), "text": schema.Text(), "integer": schema.Integer(), "float": schema.Float(),
+		"id": schema.Id(), "string": schema.String(), "integer": schema.Integer(), "float": schema.Float(),
 		"decimal": schema.Decimal(), "boolean": schema.Boolean(), "date": schema.Date(), "json": schema.Json(),
 		"timestamp": schema.Timestamp(),
 	}
@@ -716,10 +716,10 @@ func goStruct(t *testing.T, columns ...goColumn) value.Value {
 func goOrders(t *testing.T) value.Value {
 	return goStruct(t,
 		goColumn{name: "id", builder: "id"},
-		goColumn{name: "email", builder: "text"},
-		goColumn{name: "item", builder: "text"},
+		goColumn{name: "email", builder: "string"},
+		goColumn{name: "item", builder: "string"},
 		goColumn{name: "amount", builder: "decimal", arguments: []value.Value{value.New(12), value.New(2)}},
-		goColumn{name: "note", builder: "text", modifiers: []string{"nullable"}},
+		goColumn{name: "note", builder: "string", modifiers: []string{"nullable"}},
 		goColumn{name: "day", builder: "date", modifiers: []string{"index"}},
 		goColumn{name: "createdAt", builder: "timestamp", modifiers: []string{"created"}},
 	)
@@ -798,11 +798,11 @@ func TestManagedDatabaseRefusesUntranslatedCalls(t *testing.T) {
 // Both give the same tables, columns, order and kinds, so a name the compiler let through is one the
 // engine knows.
 func TestManagedDatabaseCatalogParity(t *testing.T) {
-	schema := `import { table, id, text, integer, float, decimal, boolean, date, json, timestamp } from "kitwork/schema";
+	schema := `import { table, id, string, integer, float, decimal, boolean, date, json, timestamp } from "kitwork/schema";
 import { connection } from "kitwork/database";
 
-const users = table({ id: id(), email: text().unique(), name: text().searchable(), role: text().default("customer"), active: boolean().default(true), createdAt: timestamp().created(), updatedAt: timestamp().updated() });
-const orders = table({ id: id(), item: text(), quantity: integer(), weight: float().nullable(), amount: decimal(12, 2).index("day_amount"), note: text().nullable(), day: date().index().index("day_amount"), meta: json().nullable(), createdAt: timestamp().created() });
+const users = table({ id: id(), email: string().unique(), name: string().searchable(), role: string().default("customer"), active: boolean().default(true), createdAt: timestamp().created(), updatedAt: timestamp().updated() });
+const orders = table({ id: id(), item: string(), quantity: integer(), weight: float().nullable(), amount: decimal(12, 2).index("day_amount"), note: string().nullable(), day: date().index().index("day_amount"), meta: json().nullable(), createdAt: timestamp().created() });
 
 export const db = connection().tables({ users, orders });
 `
@@ -843,10 +843,10 @@ func TestManagedDatabaseSQLiteParity(t *testing.T) {
 	items := func() value.Value {
 		return goStruct(t,
 			goColumn{name: "id", builder: "id"},
-			goColumn{name: "name", builder: "text"},
+			goColumn{name: "name", builder: "string"},
 			goColumn{name: "n", builder: "integer"},
 			goColumn{name: "day", builder: "date"},
-			goColumn{name: "note", builder: "text", modifiers: []string{"nullable"}},
+			goColumn{name: "note", builder: "string", modifiers: []string{"nullable"}},
 		)
 	}
 	kitdb := goManaged(t, tenant, map[string]value.Value{"items": items()})
@@ -950,7 +950,7 @@ func TestApplicationDatabaseNameIsReserved(t *testing.T) {
 	shop := newManagedAppAsIs(t, map[string]string{"shop.example/router.work": `import * as router from "kitwork/router";`})
 	tenant := shop.site("shop.example")
 	legacy := &storageInternals{tenant: tenant}
-	users := goStruct(t, goColumn{name: "id", builder: "id"}, goColumn{name: "email", builder: "text"})
+	users := goStruct(t, goColumn{name: "id", builder: "id"}, goColumn{name: "email", builder: "string"})
 	for _, name := range []string{"@application", "/@application", "./@application", `\@application`, "x/../@application", " @application", "@other"} {
 		declared := legacy.Sqlite(value.New(name), value.New(map[string]value.Value{"users": users}),
 			value.New(map[string]value.Value{"drop": value.New(true)}))
@@ -982,7 +982,7 @@ func TestSchemaModuleRefusesOlderSpellings(t *testing.T) {
 
 	older := schema.Table().Call("table", value.New(map[string]value.Value{
 		"id":    schema.Id().Call("id"),
-		"email": schema.Text().Call("text").Invoke("notNull"),
+		"email": schema.String().Call("text").Invoke("notNull"),
 	}))
 	if code, message := failureOf(declare(map[string]value.Value{"users": older})); code != value.InvalidArgumentCode ||
 		message != "bảng users, cột email: .notNull() là cách viết cũ: cột bắt buộc là mặc định; cột được bỏ trống viết .nullable()" {
@@ -990,14 +990,14 @@ func TestSchemaModuleRefusesOlderSpellings(t *testing.T) {
 	}
 	searched := schema.Table().Call("table", value.New(map[string]value.Value{
 		"id":    schema.Id().Call("id"),
-		"email": schema.Text().Call("text").Invoke("search"),
+		"email": schema.String().Call("text").Invoke("search"),
 	}))
 	if code, message := failureOf(declare(map[string]value.Value{"users": searched})); code != value.InvalidArgumentCode ||
 		message != "bảng users, cột email: .search() là cách viết cũ: viết .searchable(): search là phương thức của chuỗi JavaScript" {
 		t.Errorf("text().search(): %s %q", code, message)
 	}
 
-	users := goStruct(t, goColumn{name: "id", builder: "id"}, goColumn{name: "email", builder: "text"})
+	users := goStruct(t, goColumn{name: "id", builder: "id"}, goColumn{name: "email", builder: "string"})
 	foreign := schema.Table().Call("table", value.New(map[string]value.Value{
 		"id":     schema.Id().Call("id"),
 		"userId": users.Get("id"),
@@ -1022,7 +1022,7 @@ func TestSchemaModuleRefusesOlderSpellings(t *testing.T) {
 func TestManagedDatabaseSchemaFile(t *testing.T) {
 	shop := newManagedApp(t, map[string]string{"shop.example/router.work": `import * as router from "kitwork/router";`})
 	tenant := shop.site("shop.example")
-	invoices := goStruct(t, goColumn{name: "id", builder: "id"}, goColumn{name: "name", builder: "text"})
+	invoices := goStruct(t, goColumn{name: "id", builder: "id"}, goColumn{name: "name", builder: "string"})
 	picked := (&ConnectionDeclaration{tenant: tenant}).OnInvoke("schema", value.New("billing"))
 	declaration, ok := picked.V.(*ConnectionDeclaration)
 	if !ok {
@@ -1082,7 +1082,7 @@ func TestManagedDatabaseSQLiteDecimal(t *testing.T) {
 	items := func() value.Value {
 		return goStruct(t,
 			goColumn{name: "id", builder: "id"},
-			goColumn{name: "name", builder: "text"},
+			goColumn{name: "name", builder: "string"},
 			goColumn{name: "amount", builder: "decimal", arguments: []value.Value{value.New(12), value.New(2)}},
 		)
 	}
@@ -1175,7 +1175,7 @@ func TestManagedDatabaseSQLiteDecimalTextIsRefused(t *testing.T) {
 	}
 	items := goStruct(t,
 		goColumn{name: "id", builder: "id"},
-		goColumn{name: "name", builder: "text"},
+		goColumn{name: "name", builder: "string"},
 		goColumn{name: "amount", builder: "decimal", arguments: []value.Value{value.New(12), value.New(2)}},
 	)
 	declared := declareDbProxy(tenant, nil, "sqlite", value.New(catalogDatabaseName("ledger")), value.New(map[string]value.Value{"items": items}))
@@ -1204,7 +1204,7 @@ func TestManagedDatabaseRecordsColumnKinds(t *testing.T) {
 	tenant := shop.site("shop.example")
 	items := goStruct(t,
 		goColumn{name: "id", builder: "id"},
-		goColumn{name: "name", builder: "text", modifiers: []string{"searchable"}},
+		goColumn{name: "name", builder: "string", modifiers: []string{"searchable"}},
 		goColumn{name: "amount", builder: "decimal", arguments: []value.Value{value.New(12), value.New(2)}},
 		goColumn{name: "paid", builder: "boolean"},
 	)

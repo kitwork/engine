@@ -10,8 +10,8 @@ import (
 // kitwork/schema (KITWORK_DATABASE.md mục 1): table and the column builders an app's .shared/schema/
 // declares its tables with.
 //
-//	import { table, id, text, decimal, date, timestamp } from "kitwork/schema";
-//	const orders = table({ id: id(), email: text(), amount: decimal(12, 2), note: text().nullable(),
+//	import { table, id, string, decimal, date, timestamp } from "kitwork/schema";
+//	const orders = table({ id: id(), email: string(), amount: decimal(12, 2), note: string().nullable(),
 //	  day: date().index(), createdAt: timestamp().created() });
 //
 // Each builder is a getter giving a function, so a destructured import is the function itself. A column
@@ -36,7 +36,8 @@ func (m *SchemaModule) Struct() value.Value {
 }
 
 func (m *SchemaModule) Id() value.Value        { return schemaColumn("id") }
-func (m *SchemaModule) Text() value.Value      { return schemaColumn("text") }
+func (m *SchemaModule) String() value.Value    { return schemaColumn("string") }
+func (m *SchemaModule) Uuid() value.Value      { return schemaColumn("uuid") }
 func (m *SchemaModule) Integer() value.Value   { return schemaColumn("integer") }
 func (m *SchemaModule) Float() value.Value     { return schemaColumn("float") }
 func (m *SchemaModule) Decimal() value.Value   { return schemaColumn("decimal") }
@@ -44,6 +45,13 @@ func (m *SchemaModule) Boolean() value.Value   { return schemaColumn("boolean") 
 func (m *SchemaModule) Date() value.Value      { return schemaColumn("date") }
 func (m *SchemaModule) Json() value.Value      { return schemaColumn("json") }
 func (m *SchemaModule) Timestamp() value.Value { return schemaColumn("timestamp") }
+
+// Text is the word string replaced on 06/11/2026: its call is the error that says so.
+func (m *SchemaModule) Text() value.Value {
+	return value.NewFunc(func(_ ...value.Value) value.Value {
+		return value.InvalidFailure(value.InvalidArgumentCode, "text() là cách viết cũ: "+statement.LegacyBuilders["text"])
+	})
+}
 
 // Bigint and Computed are words of the spec the engine does not have yet: their call is the error that
 // says so, never a column of another kind.
@@ -53,7 +61,8 @@ func (m *SchemaModule) Computed() value.Value { return schemaColumnNotYet("compu
 // schemaKinds maps a builder of the spec to the kind the storage layer knows it by.
 var schemaKinds = map[string]string{
 	"id":        "kitid",
-	"text":      "text",
+	"string":    "text", // a string kept as SQLite's TEXT, PostgreSQL's text
+	"uuid":      "uuid",
 	"integer":   "integer",
 	"float":     "float",
 	"decimal":   "decimal",

@@ -21,9 +21,9 @@ import (
 // call, a database the app declares in .shared/schema/; the app's own by default.
 
 // jobsSchema declares the host's database jobs in the app: a table, since schema({ … }) takes one at least.
-const jobsSchema = `import { table, id, text } from "kitwork/schema";
+const jobsSchema = `import { table, id, string } from "kitwork/schema";
 import { connection } from "kitwork/database";
-const letters = table({ id: id(), email: text() });
+const letters = table({ id: id(), email: string() });
 export const jobs = connection("jobs").tables({ letters });
 `
 
@@ -593,7 +593,7 @@ router.post((context) => {
 	}
 
 	q.close()
-	writeQueueApp(t, q.root, map[string]string{".shared/schema/jobs.work": strings.Replace(jobsSchema, "email: text() }", "email: text(), note: text().nullable() }", 1)})
+	writeQueueApp(t, q.root, map[string]string{".shared/schema/jobs.work": strings.Replace(jobsSchema, "email: string() }", "email: string(), note: string().nullable() }", 1)})
 	again := bootQueueApp(t, q.root)
 	again.serve(t, http.MethodPost, "/letter", url.Values{"email": {"binh@example.com"}})
 	if columns := fileRows(t, path, `SELECT name FROM pragma_table_info('letters') ORDER BY cid`); strings.Join(columns, ",") != "id,email,note" {

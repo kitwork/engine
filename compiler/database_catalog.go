@@ -219,12 +219,12 @@ func (reader *schemaReader) readTable(e Expression) *statement.Table {
 		return nil
 	}
 	if len(arguments) != 1 {
-		reader.fail(token, "table nhận một object cột: table({ id: id(), name: text() })")
+		reader.fail(token, "table nhận một object cột: table({ id: id(), name: string() })")
 		return nil
 	}
 	fields, ok := arguments[0].(*ObjectLiteral)
 	if !ok {
-		reader.fail(token, "table nhận một object cột viết ngay trong lời gọi: table({ id: id(), name: text() })")
+		reader.fail(token, "table nhận một object cột viết ngay trong lời gọi: table({ id: id(), name: string() })")
 		return nil
 	}
 	table := &statement.Table{}
@@ -237,7 +237,7 @@ func (reader *schemaReader) readTable(e Expression) *statement.Table {
 		}
 		name, nameToken, ok := objectKeyName(entry.Key)
 		if !ok {
-			reader.fail(fields.Token, "tên cột viết bằng chữ: table({ email: text() })")
+			reader.fail(fields.Token, "tên cột viết bằng chữ: table({ email: string() })")
 			return nil
 		}
 		if seen[name] {
@@ -273,7 +273,7 @@ func (reader *schemaReader) readTable(e Expression) *statement.Table {
 	return table
 }
 
-// readColumn reads one column: a builder of kitwork/schema, then its modifiers (text().nullable()).
+// readColumn reads one column: a builder of kitwork/schema, then its modifiers (string().nullable()).
 func (reader *schemaReader) readColumn(name string, e Expression) (statement.Column, bool) {
 	column := statement.Column{Name: name}
 	var modifiers []*MethodCallExpression
@@ -285,7 +285,7 @@ func (reader *schemaReader) readColumn(name string, e Expression) (statement.Col
 		}
 		if namespace, isName := call.Object.(*Identifier); isName {
 			if word, found := reader.words[namespace.Value]; found && word.imported == "" {
-				break // schema.text(): the builder itself
+				break // schema.string(): the builder itself
 			}
 		}
 		modifiers = append(modifiers, call)
@@ -308,7 +308,7 @@ func (reader *schemaReader) readColumn(name string, e Expression) (statement.Col
 		if at.Source == "" {
 			at = expressionToken(base)
 		}
-		reader.fail(at, fmt.Sprintf("cột %s viết bằng một kiểu của kitwork/schema: id(), text(), integer(), float(), decimal(12, 2), boolean(), date(), json(), timestamp()", column.Name))
+		reader.fail(at, fmt.Sprintf("cột %s viết bằng một kiểu của kitwork/schema: id(), string(), uuid(), integer(), float(), decimal(12, 2), boolean(), date(), json(), timestamp()", column.Name))
 		return column, false
 	}
 	builder, known := statement.Builders[word.imported]
@@ -327,7 +327,7 @@ func (reader *schemaReader) readColumn(name string, e Expression) (statement.Col
 		reader.fail(token, fmt.Sprintf(`%s() import từ "kitwork/schema"`, word.imported))
 		return column, false
 	default:
-		reader.fail(token, fmt.Sprintf("%s() không phải kiểu cột của kitwork/schema: id(), text(), integer(), float(), decimal(12, 2), boolean(), date(), json(), timestamp()", word.imported))
+		reader.fail(token, fmt.Sprintf("%s() không phải kiểu cột của kitwork/schema: id(), string(), uuid(), integer(), float(), decimal(12, 2), boolean(), date(), json(), timestamp()", word.imported))
 		return column, false
 	}
 	column.Kind = builder.Kind

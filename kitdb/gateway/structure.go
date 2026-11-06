@@ -210,7 +210,7 @@ func unsaidKinds(ctx context.Context, source structureQuerier, table string, kin
 	unsaid := map[string]columnKind{}
 	for column, kind := range kinds {
 		said := kind.kind == "decimal" || kind.kind == "bool" || kind.kind == "json" || implied[storage[column]] == kind.kind ||
-			storage[column] == "TEXT" && (kind.kind == "kitid" || kind.kind == "date" || kind.kind == "datetime")
+			storage[column] == "TEXT" && (kind.kind == "kitid" || kind.kind == "date" || kind.kind == "datetime" || kind.kind == "uuid")
 		if said {
 			continue // numeric(p, s), boolean, json, kitid, date, timestamptz, or the kind its storage gives
 		}
@@ -395,6 +395,8 @@ func renderTable(text string, kinds map[string]columnKind) (string, string) {
 			written = "kitid"
 		case found && kind.kind == "date" && storage == "TEXT":
 			written = "date"
+		case found && kind.kind == "uuid" && storage == "TEXT":
+			written = "uuid"
 		case found && kind.kind == "datetime" && storage == "TEXT":
 			written = "timestamptz"
 		case storage == "INTEGER" && primary && len(rest) > 1 && rest[0].word() == "PRIMARY" && rest[1].word() == "KEY":

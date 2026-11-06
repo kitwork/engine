@@ -8,12 +8,12 @@ import (
 )
 
 // writeSchema has a column unique alone (email), a group unique together (linkId, day) and a table with neither.
-const writeSchema = `import { table, id, text, integer, decimal, date } from "kitwork/schema";
+const writeSchema = `import { table, id, string, integer, decimal, date } from "kitwork/schema";
 import { connection } from "kitwork/database";
 
-const orders = table({ id: id(), email: text().unique(), item: text(), amount: decimal(12, 2), stock: integer(), note: text().nullable() });
-const clickDays = table({ id: id(), linkId: text().unique("linkDay"), day: date().unique("linkDay"), count: integer() });
-const notes = table({ id: id(), body: text() });
+const orders = table({ id: id(), email: string().unique(), item: string(), amount: decimal(12, 2), stock: integer(), note: string().nullable() });
+const clickDays = table({ id: id(), linkId: string().unique("linkDay"), day: date().unique("linkDay"), count: integer() });
+const notes = table({ id: id(), body: string() });
 
 export const db = connection().tables({ orders, clickDays, notes });
 `
@@ -80,7 +80,7 @@ func TestDatabaseWriteErrors(t *testing.T) {
 		{`db.update((orders) => ({ note: "x" }));`, "update cần điều kiện: db.where((orders) => …).update((orders) => ({ … }))"},
 		{`db.where((orders) => orders.email === email).orderBy((orders) => orders.stock).delete();`, "orderBy không đi với delete"},
 		{`db.where((orders) => orders.email === email).update((orders) => ({ amount: orders.amount * 2 }));`, "phép * trên cột chưa có trong engine hôm nay"},
-		{`db.where((orders) => orders.email === email).update((orders) => ({ item: orders.amount }));`, "cột item là text(), orders.amount là decimal(12, 2)"},
+		{`db.where((orders) => orders.email === email).update((orders) => ({ item: orders.amount }));`, "cột item là string(), orders.amount là decimal(12, 2)"},
 		{`db.where((orders) => orders.email === email).update((orders) => ({ item: orders.item + "x" }));`, "+ và - trong dữ liệu là phép tính số"},
 		{`db.where((orders) => orders.email === email).update((orders) => ({ id: "x" }));`, "id là id(), engine sinh lúc insert"},
 		{`db.upsert((notes) => ({ body: "x" }));`, "upsert vào notes cần một đích so trùng: bảng không có cột .unique()"},

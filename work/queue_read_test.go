@@ -259,9 +259,9 @@ func TestQueueRunsLiveInTheAppDatabase(t *testing.T) {
 	files := map[string]string{
 		".shared/email.work":       emailLibrary,
 		".shared/queue/camOn.work": camOnJob,
-		".shared/schema/shop.work": `import { table, id, text, integer } from "kitwork/schema";
+		".shared/schema/shop.work": `import { table, id, string, integer } from "kitwork/schema";
 import { connection } from "kitwork/database";
-const orders = table({ id: id(), email: text(), amount: integer() });
+const orders = table({ id: id(), email: string(), amount: integer() });
 export const db = connection().tables({ orders });
 `,
 		"localhost/order/router.work": `import * as router from "kitwork/router";

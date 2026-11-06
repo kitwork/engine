@@ -18,7 +18,7 @@ import (
 // (title)), on a file whose kitwork_columns, from before 31/10/2026, had no search_weight yet; nothing is left.
 //
 // CONTROL (05/11/2026): with the statements not naming their schema, "through the port: .database/application/
-// billing.db: sau các câu qua the test's port, database vẫn chưa có: bảng receipts (id id, code text)" (made in
+// billing.db: sau các câu qua the test's port, database vẫn chưa có: bảng receipts (id id, code string)" (made in
 // public); with the port not adding search_weight to an old kitwork_columns, "through the port: … CREATE INDEX
 // notes_search ON notes USING search (title): pq: gateway: the schema changed, its column kinds were not written: no
 // such column: search_weight"; with the host's database not named by its folder, "portDatabaseOf(…shopping/kitwork.db) = "" false, want
@@ -39,17 +39,17 @@ func TestMigrateThroughThePort(t *testing.T) {
 	}
 
 	for name, source := range map[string]string{
-		"shop.work": `import { table, id, text, decimal, timestamp } from "kitwork/schema";
+		"shop.work": `import { table, id, string, decimal, timestamp } from "kitwork/schema";
 import { connection } from "kitwork/database";
 
-const notes = table({ id: id(), title: text().searchable(), amount: decimal(12, 2), createdAt: timestamp().created() });
+const notes = table({ id: id(), title: string().searchable(), amount: decimal(12, 2), createdAt: timestamp().created() });
 
 export const db = connection().tables({ notes });
 `,
-		"billing.work": `import { table, id, text } from "kitwork/schema";
+		"billing.work": `import { table, id, string } from "kitwork/schema";
 import { connection } from "kitwork/database";
 
-const receipts = table({ id: id(), code: text().unique() });
+const receipts = table({ id: id(), code: string().unique() });
 
 export const billing = connection().schema("billing").tables({ receipts });
 `,
@@ -124,10 +124,10 @@ func TestMigrateRenamesThroughThePort(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(`import { table, id, text, decimal, boolean } from "kitwork/schema";
+	if err := os.WriteFile(path, []byte(`import { table, id, string, decimal, boolean } from "kitwork/schema";
 import { connection } from "kitwork/database";
 
-const orders = table({ id: id(), email: text(), total: decimal(12, 2), paid: boolean() });
+const orders = table({ id: id(), email: string(), total: decimal(12, 2), paid: boolean() });
 
 export const db = connection().tables({ orders });
 `), 0o644); err != nil {

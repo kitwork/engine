@@ -19,10 +19,10 @@ import (
 func TestCheckSaysWhatADatabaseLacks(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{
-		filepath.Join(root, "acme", ".shared", "schema", "shop.work"): `import { table, id, text } from "kitwork/schema";
+		filepath.Join(root, "acme", ".shared", "schema", "shop.work"): `import { table, id, string } from "kitwork/schema";
 import { connection } from "kitwork/database";
 
-const orders = table({ id: id(), email: text() });
+const orders = table({ id: id(), email: string() });
 
 export const db = connection().tables({ orders });
 `,
@@ -41,7 +41,7 @@ router.get((context) => context.text("ok"));`,
 	report := CheckWithLayout(root, 0, work.RootLayoutMultiTenant)
 	found := false
 	for _, issue := range report.Issues {
-		if issue.Stage == "database" && strings.Contains(issue.Error(), "acme: database (.database/application/kitwork.db): chưa có bảng orders (id id, email text); chạy kitwork migrate") {
+		if issue.Stage == "database" && strings.Contains(issue.Error(), "acme: database (.database/application/kitwork.db): chưa có bảng orders (id id, email string); chạy kitwork migrate") {
 			found = true
 		}
 	}

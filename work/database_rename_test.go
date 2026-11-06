@@ -10,7 +10,7 @@ import (
 
 // renameSchema is the shop's schema of one table with the columns given.
 func renameSchema(table, columns string) string {
-	return `import { table, id, text, integer, decimal } from "kitwork/schema";
+	return `import { table, id, string, integer, decimal } from "kitwork/schema";
 import { connection } from "kitwork/database";
 
 const ` + table + ` = table({ ` + columns + ` });
@@ -93,8 +93,8 @@ func fileText(t *testing.T, path, query string) string {
 //
 // CONTROL (05/11/2026): with renameCandidates finding none, "the question of a renamed column: <nil>".
 func TestMigrateAsksAboutARenamedColumn(t *testing.T) {
-	const v1 = `id: id(), email: text(), amount: decimal(12, 2)`
-	const v2 = `id: id(), email: text(), total: decimal(12, 2)`
+	const v1 = `id: id(), email: string(), amount: decimal(12, 2)`
+	const v2 = `id: id(), email: string(), total: decimal(12, 2)`
 	insert := []string{`INSERT INTO orders (id, email, amount) VALUES ('a', 'an@example.com', 1250), ('b', 'binh@example.com', 300)`}
 	for _, test := range []struct {
 		option     int
@@ -146,9 +146,9 @@ func TestMigrateAsksAboutARenamedColumn(t *testing.T) {
 //
 // CONTROL (05/11/2026): with holdsColumns refusing every table, "the question of a renamed table: <nil>".
 func TestMigrateAsksAboutARenamedTable(t *testing.T) {
-	managed, path := renameApp(t, "customers", `id: id(), name: text(), visits: integer()`,
+	managed, path := renameApp(t, "customers", `id: id(), name: string(), visits: integer()`,
 		`INSERT INTO customers (id, name, visits) VALUES ('a', 'An', 3)`)
-	plan, release := planOf(t, managed, "clients", `id: id(), name: text(), visits: integer()`)
+	plan, release := planOf(t, managed, "clients", `id: id(), name: string(), visits: integer()`)
 	defer release()
 	question := plan.Question()
 	if question == nil || question.Text != ".database/application/kitwork.db: bảng clients mới; database có bảng customers mà code không khai, có đủ các cột của nó" ||

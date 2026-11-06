@@ -751,7 +751,7 @@ func (t *translator) matches(node *MethodCallExpression) *statement.Node {
 			return nil
 		}
 		if !t.table.Searchable() {
-			t.fail(node.Method.Token, "bảng %s không có cột .searchable(): matches tìm trên cột khai như title: text().searchable() trong .shared/schema/", t.table.Name)
+			t.fail(node.Method.Token, "bảng %s không có cột .searchable(): matches tìm trên cột khai như title: string().searchable() trong .shared/schema/", t.table.Name)
 			return nil
 		}
 	case *MemberExpression:
@@ -763,7 +763,7 @@ func (t *translator) matches(node *MethodCallExpression) *statement.Node {
 			return nil
 		}
 		if declared, _ := t.table.Column(name); declared == nil || !declared.Search {
-			t.fail(node.Method.Token, "cột %s.%s không có .searchable(): matches tìm trên cột khai %s: text().searchable() trong .shared/schema/",
+			t.fail(node.Method.Token, "cột %s.%s không có .searchable(): matches tìm trên cột khai %s: string().searchable() trong .shared/schema/",
 				t.table.Name, name, name)
 			return nil
 		}

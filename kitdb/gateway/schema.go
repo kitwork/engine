@@ -301,10 +301,12 @@ func (c *schemaCursor) typeOf(column string) (columnKind, error) {
 		return columnKind{storage: "TEXT", kind: "kitid"}, nil // KitDB's own domain (kitidDomain)
 	case "DATE":
 		return columnKind{storage: "TEXT", kind: "date"}, nil
+	case "UUID":
+		return columnKind{storage: "TEXT", kind: "uuid"}, nil
 	case "TIMESTAMPTZ", "TIMESTAMP WITH ZONE":
 		return columnKind{storage: "TEXT", kind: "datetime"}, nil // the engine's timestamp(): RFC 3339 text in UTC
 	case "TEXT", "VARCHAR", "CHARACTER VARYING", "CHAR", "CHARACTER", "BPCHAR", "CITEXT", "NAME",
-		"TIMESTAMP", "TIMESTAMP ZONE", "TIME", "TIMETZ", "TIME ZONE", "TIME WITH ZONE", "UUID", "INTERVAL":
+		"TIMESTAMP", "TIMESTAMP ZONE", "TIME", "TIMETZ", "TIME ZONE", "TIME WITH ZONE", "INTERVAL":
 		return columnKind{storage: "TEXT", kind: "text"}, nil
 	case "JSON", "JSONB":
 		return columnKind{storage: "TEXT", kind: "json"}, nil

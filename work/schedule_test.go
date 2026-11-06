@@ -323,7 +323,7 @@ func TestScheduleConfigFile(t *testing.T) {
 	}
 	q := newQueueApp(t, map[string]string{
 		".schedule/config.work":    head + "import { db } from \"app/.shared/schema/shop.work\";\n\nschedule.keep(\"2d\");\nschedule.session({ role: \"system\" });\nschedule.database(db);\n",
-		".shared/schema/shop.work": "import { table, id, text } from \"kitwork/schema\";\nimport { connection } from \"kitwork/database\";\nconst notes = table({ id: id(), body: text() });\nexport const db = connection().tables({ notes });\n",
+		".shared/schema/shop.work": "import { table, id, string } from \"kitwork/schema\";\nimport { connection } from \"kitwork/database\";\nconst notes = table({ id: id(), body: string() });\nexport const db = connection().tables({ notes });\n",
 		".schedule/heartbeat.work": heartbeat,
 	})
 	if got := keep(q); got != 48*time.Hour {

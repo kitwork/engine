@@ -516,6 +516,10 @@ func coerceWrite(kind string, v value.Value) value.Value {
 		if v.K == value.Number {
 			return value.New(numText(v.N)) // exact-as-authored text; pass a string for full precision
 		}
+	case "uuid":
+		if v.K == value.String {
+			return value.New(strings.ToLower(v.String())) // one spelling, so === and the index find it
+		}
 	}
 	return v
 }
@@ -576,7 +580,7 @@ func autoValue(spec *ColumnSpec) (value.Value, bool) {
 	switch {
 	case spec.kind == "kitid":
 		return value.New(id.Entity()), true
-	case spec.kind == "uuid":
+	case spec.kind == "uuid" && spec.primary: // a uuid() of another column is the caller's, never made up
 		return value.New(uuidV4()), true
 	case spec.defaultNow:
 		return value.New(nowT.Format(time.RFC3339)), true

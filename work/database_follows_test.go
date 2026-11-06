@@ -38,7 +38,7 @@ router.get((context) => {
 
 // followsSchema is the shop's schema with the columns of orders given.
 func followsSchema(columns string) string {
-	return `import { table, id, text, integer, float, decimal, boolean, date, json, timestamp } from "kitwork/schema";
+	return `import { table, id, string, integer, float, decimal, boolean, date, json, timestamp } from "kitwork/schema";
 import { connection } from "kitwork/database";
 
 const orders = table({ ` + columns + ` });
@@ -109,14 +109,14 @@ func textRowsOf(rows *sql.Rows) ([]string, error) {
 // against kitwork_columns, "decimal(12, 4) against the file's (12, 2): map[rows:[map[amount:0.125 …]]]", 12.50 read as
 // 0.125.
 func TestStatementsFollowTheDatabase(t *testing.T) {
-	v1 := `id: id(), email: text().unique(), amount: decimal(12, 2), day: date().index()`
+	v1 := `id: id(), email: string().unique(), amount: decimal(12, 2), day: date().index()`
 	managed := newManagedAppAsIs(t, map[string]string{".shared/schema/shop.work": followsSchema(v1), "shop.example/router.work": followsRoute})
 	path := filepath.Join(managed.root, "acme", ".database", "application", "kitwork.db")
 	tenant := managed.site("shop.example")
 
 	refused := followsPost(t, tenant, "an@example.com")
 	const lacking = "database .database/application/kitwork.db chưa khớp bảng .shared/schema/ khai (database là gốc: engine không tự tạo bảng, thêm cột); " +
-		"database chưa có: bảng orders (id id, email text, amount decimal(12, 2), day date); thêm bằng kitwork migrate"
+		"database chưa có: bảng orders (id id, email string, amount decimal(12, 2), day date); thêm bằng kitwork migrate"
 	if refused["code"] != "DATABASE" || !strings.HasPrefix(refused["message"].(string), lacking) {
 		t.Fatalf("a statement before kitwork migrate answered %v, want DATABASE %q…", refused, lacking)
 	}
@@ -130,10 +130,10 @@ func TestStatementsFollowTheDatabase(t *testing.T) {
 	}
 
 	// a column the declaration adds: refused until kitwork migrate, the file untouched
-	v2 := v1 + `, note: text().nullable()`
+	v2 := v1 + `, note: string().nullable()`
 	writeAppTree(t, managed.root, map[string]string{"acme/.shared/schema/shop.work": followsSchema(v2), "acme/two.example/router.work": followsRoute})
 	tenant = managed.site("two.example") // another site of the app, booted on the declaration as it is now
-	if refused := answer(t, tenant, ""); refused["code"] != "DATABASE" || !strings.Contains(refused["message"].(string), "database chưa có: cột note text của bảng orders;") {
+	if refused := answer(t, tenant, ""); refused["code"] != "DATABASE" || !strings.Contains(refused["message"].(string), "database chưa có: cột note string của bảng orders;") {
 		t.Fatalf("a column the file lacks: %v", refused)
 	}
 	file, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?mode=ro")
@@ -203,10 +203,10 @@ func TestStatementsFollowTheDatabase(t *testing.T) {
 // writing no search index (CREATE INDEX … USING search), "the clone said "[database] kitwork.db tạo từ kitwork.db.sql …
 // [database] .database/application/kitwork.db: câu vẫn chạy; kitwork migrate sẽ ghi thêm …"" (title's weight lost).
 func TestANewMachineServesFromTheStructureFile(t *testing.T) {
-	schema := `import { table, id, text, timestamp } from "kitwork/schema";
+	schema := `import { table, id, string, timestamp } from "kitwork/schema";
 import { connection } from "kitwork/database";
 
-const posts = table({ id: id(), title: text().searchable(), createdAt: timestamp().created() });
+const posts = table({ id: id(), title: string().searchable(), createdAt: timestamp().created() });
 
 export const db = connection().tables({ posts });
 `
@@ -270,7 +270,7 @@ router.get((context) => context.json({ rows: db.list((posts) => posts.title !== 
 // CONTROL (05/11/2026): with checkTable holding a kind of kitwork_columns other than decimal as a difference, "the
 // table made through the port: map[code:DATABASE message:… khác database: cột orders.id: database ghi text; …]".
 func TestATableMadeThroughThePortServesTheApp(t *testing.T) {
-	v1 := `id: id(), email: text().unique(), amount: decimal(12, 2), day: date()`
+	v1 := `id: id(), email: string().unique(), amount: decimal(12, 2), day: date()`
 	managed := newManagedAppAsIs(t, map[string]string{".shared/schema/shop.work": followsSchema(v1), "shop.example/router.work": followsRoute})
 	path := filepath.Join(managed.root, "acme", ".database", "application", "kitwork.db")
 	writer, release, err := OpenWriter(path)
@@ -323,7 +323,7 @@ func TestATableMadeThroughThePortServesTheApp(t *testing.T) {
 // the clone's database"; with a missing file held as a file of no table even beside its structure file, "the clone
 // lacks [bảng orders (id id, email text, amount decimal(12, 2))]".
 func TestCheckAppDatabasesReadsOnly(t *testing.T) {
-	v1 := `id: id(), email: text().unique(), amount: decimal(12, 2)`
+	v1 := `id: id(), email: string().unique(), amount: decimal(12, 2)`
 	root := t.TempDir()
 	writeAppTree(t, root, map[string]string{"acme/.shared/schema/shop.work": followsSchema(v1)})
 	folder := filepath.Join(root, "acme", ".database")
@@ -358,13 +358,13 @@ func TestCheckAppDatabasesReadsOnly(t *testing.T) {
 	}
 
 	// a column the declaration adds
-	writeAppTree(t, root, map[string]string{"acme/.shared/schema/shop.work": followsSchema(v1 + `, note: text().nullable()`)})
+	writeAppTree(t, root, map[string]string{"acme/.shared/schema/shop.work": followsSchema(v1 + `, note: string().nullable()`)})
 	plans, err = CheckAppDatabases(root, "acme", RootLayoutMultiTenant, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	said := captureOutput(t, func() { plans[0].Say() })
-	if !strings.Contains(said, "[database] .database/application/kitwork.db (app acme) chưa có: cột note text của bảng orders; câu trên database này lỗi tới khi thêm: dừng server rồi chạy go run . migrate") {
+	if !strings.Contains(said, "[database] .database/application/kitwork.db (app acme) chưa có: cột note string của bảng orders; câu trên database này lỗi tới khi thêm: dừng server rồi chạy go run . migrate") {
 		t.Fatalf("the boot said %q", said)
 	}
 	file, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(folder, "application", "kitwork.db"))+"?mode=ro")
@@ -391,7 +391,7 @@ func TestCheckAppDatabasesReadsOnly(t *testing.T) {
 // SQLite: CREATE TABLE IF NOT EXISTS \"orders\" …"]"; with the error naming no statement, "a column the file lacks:
 // map[code:DATABASE message:… hay bằng câu đổi schema qua cổng database]".
 func TestMigrateWritesPostgreSQL(t *testing.T) {
-	v1 := `id: id(), email: text().unique(), amount: decimal(12, 2), day: date().index(), data: json().nullable(), ` +
+	v1 := `id: id(), email: string().unique(), amount: decimal(12, 2), day: date().index(), data: json().nullable(), ` +
 		`rate: float().nullable(), count: integer().nullable(), paid: boolean().default(false), createdAt: timestamp().created()`
 	managed := newManagedAppAsIs(t, map[string]string{".shared/schema/shop.work": followsSchema(v1), "shop.example/router.work": followsRoute})
 	path := filepath.Join(managed.root, "acme", ".database", "application", "kitwork.db")
@@ -434,7 +434,7 @@ func TestMigrateWritesPostgreSQL(t *testing.T) {
 	}
 
 	// a column added: an ALTER TABLE, named by the statement that meets the file first
-	writeAppTree(t, managed.root, map[string]string{"acme/.shared/schema/shop.work": followsSchema(v1 + `, note: text().nullable()`),
+	writeAppTree(t, managed.root, map[string]string{"acme/.shared/schema/shop.work": followsSchema(v1 + `, note: string().nullable()`),
 		"acme/two.example/router.work": followsRoute})
 	tenant = managed.site("two.example")
 	if refused := answer(t, tenant, ""); refused["code"] != "DATABASE" ||
@@ -482,7 +482,7 @@ func TestMigrateWritesSQLiteWherePostgreSQLCannot(t *testing.T) {
 // kitwork.db: kitwork.db đang được một tiến trình khác ghi (kitwork.db.lock)…"; with a held plan applied as any other,
 // "a held file applied without a port: kitwork.db đang được một tiến trình khác ghi …" (no word of the server).
 func TestAHeldFileAppliesThroughAPort(t *testing.T) {
-	v1 := `id: id(), email: text().unique(), amount: decimal(12, 2), day: date().index()`
+	v1 := `id: id(), email: string().unique(), amount: decimal(12, 2), day: date().index()`
 	managed := newManagedAppAsIs(t, map[string]string{".shared/schema/shop.work": followsSchema(v1)})
 	path := filepath.Join(managed.root, "acme", ".database", "application", "kitwork.db")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -529,7 +529,7 @@ func TestAHeldFileAppliesThroughAPort(t *testing.T) {
 // for a second searchable column: [], []".
 func TestMigrateWritesTheSearchIndex(t *testing.T) {
 	schema := func(columns string) string {
-		return `import { table, id, text } from "kitwork/schema";
+		return `import { table, id, string } from "kitwork/schema";
 import { connection } from "kitwork/database";
 
 const posts = table({ ` + columns + ` });
@@ -537,7 +537,7 @@ const posts = table({ ` + columns + ` });
 export const db = connection().tables({ posts });
 `
 	}
-	managed := newManagedAppAsIs(t, map[string]string{".shared/schema/shop.work": schema(`id: id(), title: text().searchable(), body: text()`)})
+	managed := newManagedAppAsIs(t, map[string]string{".shared/schema/shop.work": schema(`id: id(), title: string().searchable(), body: string()`)})
 	path := filepath.Join(managed.root, "acme", ".database", "application", "kitwork.db")
 	plans := migrateAppForTest(t, managed.root, "acme", RootLayoutMultiTenant)
 	if got := plans[0].Statements[len(plans[0].Statements)-1]; got != "CREATE INDEX posts_search ON posts USING search (title);" {
@@ -564,7 +564,7 @@ export const db = connection().tables({ posts });
 		t.Fatalf("weights %q", got)
 	}
 
-	writeAppTree(t, managed.root, map[string]string{"acme/.shared/schema/shop.work": schema(`id: id(), title: text().searchable(), body: text().searchable()`)})
+	writeAppTree(t, managed.root, map[string]string{"acme/.shared/schema/shop.work": schema(`id: id(), title: string().searchable(), body: string().searchable()`)})
 	plans = migrateAppForTest(t, managed.root, "acme", RootLayoutMultiTenant)
 	if strings.Join(plans[0].Statements, " ") != "DROP INDEX posts_search; CREATE INDEX posts_search ON posts USING search (title, body);" ||
 		strings.Join(plans[0].Write, "; ") != "chỉ mục tìm kiếm posts_search của bảng posts (title, body)" {

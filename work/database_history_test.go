@@ -138,10 +138,10 @@ func TestAppWritesKeepTheHistory(t *testing.T) {
 // CONTROL (03/11/2026): with the triggers left, the writer does not open: "insert = 500 Internal Server Error".
 func TestAppFileLosesTheSearchTriggers(t *testing.T) {
 	managed := newManagedApp(t, map[string]string{
-		".shared/schema/shop.work": `import { table, id, text } from "kitwork/schema";
+		".shared/schema/shop.work": `import { table, id, string } from "kitwork/schema";
 import { connection } from "kitwork/database";
 
-const posts = table({ id: id(), title: text().searchable() });
+const posts = table({ id: id(), title: string().searchable() });
 
 export const db = connection().tables({ posts });
 `,

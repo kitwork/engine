@@ -76,7 +76,7 @@ func TestFolderConfigRunsItsCalls(t *testing.T) {
 		t.Fatalf("calls = %q, want parallel(4) keep(30d)", got)
 	}
 
-	const schema = "import { table, id, text } from \"kitwork/schema\";\nimport { connection } from \"kitwork/database\";\nconst orders = table({ id: id(), email: text() });\nexport const db = connection().tables({ orders });\n"
+	const schema = "import { table, id, string } from \"kitwork/schema\";\nimport { connection } from \"kitwork/database\";\nconst orders = table({ id: id(), email: string() });\nexport const db = connection().tables({ orders });\n"
 	if _, err := compileInApp(t, map[string]string{
 		".schedule/config.work":     "import * as schedule from \"kitwork/schedule\";\nimport { db } from \"app/.shared/schema/shop.work\";\n\nschedule.keep(\"7d\");\nschedule.session({ role: \"system\" });\nschedule.database(db);\n",
 		".shared/schema/shop.work":  schema,
@@ -209,8 +209,8 @@ func TestFolderConfigCallsOnlyAtTheTopOfTheirConfig(t *testing.T) {
 // knowing the three names, "application" and "files" got the hint `connection("application").schema(…)`; with
 // anything but a name or a literal let through as a value, -1, k + 1 and all.a compiled (got <nil>).
 func TestFolderConfigDatabaseTakesADatabaseOfTheSchema(t *testing.T) {
-	const schema = "import { table, id, text } from \"kitwork/schema\";\nimport { connection, connect } from \"kitwork/database\";\n" +
-		"const orders = table({ id: id(), email: text() });\nconst letters = table({ id: id(), email: text() });\n" +
+	const schema = "import { table, id, string } from \"kitwork/schema\";\nimport { connection, connect } from \"kitwork/database\";\n" +
+		"const orders = table({ id: id(), email: string() });\nconst letters = table({ id: id(), email: string() });\n" +
 		"export const db = connection().tables({ orders });\nexport const jobs = connection(\"jobs\").tables({ letters });\n" +
 		"export const crm = connect({ postgresql: \"postgresql://user:secret@crm.example:5432/crm\" });\n"
 	const queueHead = "import * as queue from \"kitwork/queue\";\nimport { db, jobs, crm } from \"app/.shared/schema/shop.work\";\n"

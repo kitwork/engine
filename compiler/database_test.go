@@ -15,10 +15,10 @@ import (
 )
 
 // shopSchema is the schema of KITWORK_DATABASE.md's slice 1, as the spec writes it.
-const shopSchema = `import { table, id, text, decimal, date, timestamp } from "kitwork/schema";
+const shopSchema = `import { table, id, string, decimal, date, timestamp } from "kitwork/schema";
 import { connection } from "kitwork/database";
 
-const orders = table({ id: id(), email: text(), item: text(), amount: decimal(12, 2), note: text().nullable(), day: date().index(), createdAt: timestamp().created() });
+const orders = table({ id: id(), email: string(), item: string(), amount: decimal(12, 2), note: string().nullable(), day: date().index(), createdAt: timestamp().created() });
 
 export const db = connection().tables({ orders });
 `
@@ -328,21 +328,23 @@ func TestDatabaseGrammarErrors(t *testing.T) {
 func TestDatabaseSchemaModuleRules(t *testing.T) {
 	route := importDB + "const all = db.list((orders) => orders);\n"
 	schema := func(columns, declaration string) string {
-		return "import { table, id, text, decimal, date, timestamp, kitid, number, bigint, computed } from \"kitwork/schema\";\n" +
+		return "import { table, id, string, uuid, text, decimal, date, timestamp, kitid, number, bigint, computed } from \"kitwork/schema\";\n" +
 			"import { connection, connect } from \"kitwork/database\";\n" +
-			"const users = table({ id: id(), name: text() });\n" +
+			"const users = table({ id: id(), name: string() });\n" +
 			"const orders = table({ " + columns + " });\n" +
 			declaration + "\n"
 	}
 	exported := "export const db = connection().tables({ orders });"
-	columns := "id: id(), email: text()"
+	columns := "id: id(), email: string()"
 	for _, test := range []struct {
 		name, source, marker, want string
 	}{
-		{"kitid", schema("id: kitid(), email: text()", exported), "kitid()", "kitid() là cách viết cũ: viết id()"},
-		{"notNull", schema("id: id(), email: text().notNull()", exported), "notNull", ".notNull() là cách viết cũ: cột bắt buộc là mặc định"},
-		{"search", schema("id: id(), email: text().search()", exported), "search", ".search() là cách viết cũ: viết .searchable(): search là phương thức của chuỗi JavaScript"},
-		{"searchable with a weight", schema("id: id(), email: text().searchable({ weight: 3 })", exported), "searchable", ".searchable() không nhận đối số"},
+		{"kitid", schema("id: kitid(), email: string()", exported), "kitid()", "kitid() là cách viết cũ: viết id()"},
+		{"text", schema("id: id(), email: text()", exported), "text()", "text() là cách viết cũ: viết string() (đổi tên 06/11/2026: string là kiểu giá trị JavaScript nó đọc ra)"},
+		{"uuid with an argument", schema("id: id(), paymentId: uuid(7)", exported), "uuid(", "uuid() không nhận đối số"},
+		{"notNull", schema("id: id(), email: string().notNull()", exported), "notNull", ".notNull() là cách viết cũ: cột bắt buộc là mặc định"},
+		{"search", schema("id: id(), email: string().search()", exported), "search", ".search() là cách viết cũ: viết .searchable(): search là phương thức của chuỗi JavaScript"},
+		{"searchable with a weight", schema("id: id(), email: string().searchable({ weight: 3 })", exported), "searchable", ".searchable() không nhận đối số"},
 		{"number", schema("id: id(), total: number()", exported), "number()", "number() không có"},
 		{"bigint", schema("id: id(), total: bigint()", exported), "bigint()", "bigint() chưa có trong engine hôm nay (lát 9)"},
 		{"computed", schema("id: id(), total: computed((orders) => 1)", exported), "computed(", "computed() chưa có trong engine hôm nay (lát 9)"},
@@ -364,10 +366,10 @@ func TestDatabaseSchemaModuleRules(t *testing.T) {
 		{"KITWORK_ table", schema(columns, `export const db = connection("jobs").tables({ KITWORK_RUNS: orders });`), "KITWORK_RUNS", "KITWORK_RUNS: tiền tố kitwork_ hay _kitwork_ (viết hoa hay thường) là của bảng engine"},
 		{"_kitwork_ table", schema(columns, `export const db = connection("jobs").tables({ _kitwork_migrations: orders });`), "_kitwork_migrations", "_kitwork_migrations: tiền tố kitwork_ hay _kitwork_ (viết hoa hay thường) là của bảng engine"},
 		{"a table twice in two cases", schema(columns, `export const db = connection().tables({ orders, Orders: users });`), "Orders:", "bảng Orders khai hai lần: orders là cùng tên, tên bảng không phân biệt chữ hoa, thường"},
-		{"created on text", schema("id: id(), note: text().created()", exported), "created", ".created() chỉ đi sau timestamp()"},
+		{"created on text", schema("id: id(), note: string().created()", exported), "created", ".created() chỉ đi sau timestamp()"},
 		{"spread", schema("...users", exported), "{ ...users", "table({ ...x }) chưa có trong engine hôm nay"},
 		{"helper", schema(columns, "const helper = 5;\n"+exported), "helper", "file trong .shared/schema/ chỉ khai table và connection(): helper"},
-		{"no id", schema("email: text()", exported), "table({ email", "bảng không có id() chưa có trong engine hôm nay"},
+		{"no id", schema("email: string()", exported), "table({ email", "bảng không có id() chưa có trong engine hôm nay"},
 		{"no tables", schema(columns, `export const db = connection();`), "db = connection", "câu chưa kết thúc"},
 		// the words of 29/10/2026: table({ … }) for struct({ … }), .tables({ … }) for .schema({ … }), .schema("tên")
 		{"struct", strings.NewReplacer("{ table,", "{ struct,", " = table(", " = struct(").Replace(schema(columns, exported)), "struct(", "struct({ … }) đổi thành table({ … })"},
@@ -397,7 +399,7 @@ func TestDatabaseSchemaModuleRules(t *testing.T) {
 
 	// outside .shared/schema/: at the import
 	for _, line := range []string{
-		`import { table, text } from "kitwork/schema";`,
+		`import { table, string } from "kitwork/schema";`,
 		`import { connection } from "kitwork/database";`,
 		`import * as schema from "kitwork/schema";`,
 	} {
@@ -435,7 +437,7 @@ func TestDatabaseSchemaModuleRules(t *testing.T) {
 		}
 	}
 	// in .shared/schema/ the names declare, as the imports do
-	namespaces := "import * as schema from \"kitwork/schema\";\nimport * as database from \"kitwork/database\";\nconst orders = schema.table({ id: schema.id(), email: schema.text() });\nexport const db = database.connection().tables({ orders });\n"
+	namespaces := "import * as schema from \"kitwork/schema\";\nimport * as database from \"kitwork/database\";\nconst orders = schema.table({ id: schema.id(), email: schema.string() });\nexport const db = database.connection().tables({ orders });\n"
 	if _, err := compileRoute(t, route, map[string]string{".shared/schema/shop.work": namespaces}); err != nil {
 		t.Errorf("a schema file written with namespaces: %v", err)
 	}
@@ -625,7 +627,7 @@ func TestDatabaseFileCacheSeesSchemaEdits(t *testing.T) {
 	if first.Program.Checksum() != second.Program.Checksum() {
 		t.Fatalf("a second compile gave another program")
 	}
-	renamed := strings.Replace(shopSchema, "email: text()", "mail: text()", 1)
+	renamed := strings.Replace(shopSchema, "email: string()", "mail: string()", 1)
 	if err := os.WriteFile(filepath.Join(root, ".shared", "schema", "shop.work"), []byte(renamed), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -645,11 +647,11 @@ func TestStatementVersionPairsWithSchema(t *testing.T) {
 	}
 }
 
-const postsSchema = `import { table, id, text, boolean } from "kitwork/schema";
+const postsSchema = `import { table, id, string, boolean } from "kitwork/schema";
 import { connection } from "kitwork/database";
 
-const posts = table({ id: id(), title: text().searchable(), body: text().searchable(), author: text(), published: boolean() });
-const tags = table({ id: id(), name: text() });
+const posts = table({ id: id(), title: string().searchable(), body: string().searchable(), author: string(), published: boolean() });
+const tags = table({ id: id(), name: string() });
 
 export const blog = connection().tables({ posts, tags });
 `
@@ -681,7 +683,7 @@ func TestDatabaseMatches(t *testing.T) {
 	for _, test := range []struct{ line, want string }{
 		{`blog.list((posts) => posts.matches(q) || posts.published === true);`, "matches dưới || hay dưới ! của nhiều điều kiện chưa có trong engine hôm nay"},
 		{`blog.list((posts) => !(posts.matches(q) && posts.published === true));`, "matches dưới || hay dưới ! của nhiều điều kiện"},
-		{`blog.list((posts) => posts.author.matches(q));`, "cột posts.author không có .searchable(): matches tìm trên cột khai author: text().searchable()"},
+		{`blog.list((posts) => posts.author.matches(q));`, "cột posts.author không có .searchable(): matches tìm trên cột khai author: string().searchable()"},
 		{`blog.list((tags) => tags.matches(q));`, "bảng tags không có cột .searchable()"},
 		{`blog.list((posts) => posts.matches(q, { any: true }));`, "matches(chữ, { … }) chưa có trong engine hôm nay"},
 		{`blog.list((posts) => posts.matches(5));`, "matches nhận một chuỗi"},
@@ -695,7 +697,7 @@ func TestDatabaseMatches(t *testing.T) {
 			t.Errorf("%s\n  got  %v\n  want %s", test.line, err, test.want)
 		}
 	}
-	reserved := map[string]string{".shared/schema/blog.work": strings.Replace(postsSchema, "author: text()", "score: text()", 1)}
+	reserved := map[string]string{".shared/schema/blog.work": strings.Replace(postsSchema, "author: string()", "score: string()", 1)}
 	if _, err := compileRoute(t, head+"blog.list((posts) => posts.matches(q));\n", reserved); err == nil ||
 		!strings.Contains(err.Error(), "cột score: bảng có cột .searchable() không có cột tên score hay snippet") {
 		t.Errorf("a column score beside a .searchable() one: %v", err)
