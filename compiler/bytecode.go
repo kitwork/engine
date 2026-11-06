@@ -77,7 +77,20 @@ func prepareFile(appRoot string, paths ...string) (*Program, []string, map[strin
 	// (router_rules.go): a router.work and a site's config.work by them, any other .work file refuses the router
 	routerKind := routerFileOf(appRoot, entryAbs)
 	var routerCalls *RouterCalls
+	var designCalls *DesignCalls
+	// kitwork/design is a design.work's alone (design.go): any other .work file refuses it
+	if strings.HasSuffix(sourceName, ".work") && !IsDesignFile(entryAbs) {
+		if err := refuseDesignImport(prog, data); err != nil {
+			return nil, nil, nil, err
+		}
+	}
 	switch {
+	case IsDesignFile(entryAbs):
+		// a design.work by its rules (design.go), which refuse every module of Kitwork but kitwork/design, the
+		// router among them
+		if designCalls, err = readDesignFile(prog, data); err != nil {
+			return nil, nil, nil, err
+		}
 	case routerKind != notRouterFile:
 		if routerCalls, err = readRouterFile(prog, routerKind, routerDepth(appRoot, entryAbs), data, routerPlace{appRoot: appRoot, file: entryAbs}); err != nil {
 			return nil, nil, nil, err
@@ -108,6 +121,7 @@ func prepareFile(appRoot string, paths ...string) (*Program, []string, map[strin
 	prog.Router = routerKind == routerWorkFile
 	prog.RouterConfig = routerKind == routerConfigFile
 	prog.RouterCalls = routerCalls
+	prog.DesignCalls = designCalls
 	return prog, files, sources, nil
 }
 

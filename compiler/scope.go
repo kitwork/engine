@@ -113,6 +113,9 @@ type binding struct {
 	fileModule bool
 	// routerModule: a name bound to the module kitwork/router itself (compiler/router.go).
 	routerModule bool
+	// designModule: the name of a design.work's import line, the module kitwork/design itself
+	// (compiler/design.go).
+	designModule bool
 	// parameterPart: a name a destructured parameter gives (({ request }) => …), which routineRequest
 	// reads as the parameter it is.
 	parameterPart bool
@@ -254,6 +257,11 @@ type resolver struct {
 	// folderCalls: the program is a config.work of .shared/queue/ or of .schedule/, and these the calls of its
 	// folder written right (folder_config.go); nil for any other program, where every such call is refused.
 	folderCalls *FolderCalls
+	// designCalls: the program is a design.work, and these the design.<word>(…) lines it writes at its top
+	// level (readDesignFile); nil for any other program. The design is let through only at the head of one
+	// (designUse).
+	designCalls *DesignCalls
+	designUse   bool
 	// functionScopes gives each function literal read so far its scope: an import reads what its module
 	// returns (environment.go).
 	functionScopes map[*FunctionLiteral]*functionScope
@@ -289,6 +297,7 @@ func (c *Compiler) resolveObserved(
 		inRouterFile:   program.Router || program.RouterConfig,
 		routerCalls:    program.RouterCalls,
 		folderCalls:    program.FolderCalls,
+		designCalls:    program.DesignCalls,
 		functionScopes: map[*FunctionLiteral]*functionScope{},
 	}
 	r.databases = r.bundle != nil && len(r.bundle.Imports) > 0
@@ -406,6 +415,7 @@ func (r *resolver) hoist(statements []Statement) {
 				r.markStorage(node, name, declared)
 				r.markFile(node, name, declared)
 				r.markRouter(node, name, declared)
+				r.markDesign(node, declared)
 				r.markEnvironment(node, name, declared)
 				if declared != nil && node.Function {
 					declared.constant = false
@@ -511,6 +521,9 @@ func (r *resolver) reference(name *Identifier, write bool) {
 		return
 	}
 	if r.routerRead(name, found) {
+		return
+	}
+	if r.designRead(name, found) {
 		return
 	}
 	if found.kitworkEnvironment && !r.environmentUse {
@@ -776,6 +789,9 @@ func (r *resolver) expression(expression Expression) {
 		if r.routerMember(node.Object, node.Property, false) {
 			return
 		}
+		if r.designMember(node.Object, node.Property) {
+			return
+		}
 		r.expression(node.Object)
 	case *IndexExpression:
 		if r.environmentIndex(node) {
@@ -861,6 +877,9 @@ func (r *resolver) expression(expression Expression) {
 			return
 		}
 		if r.routerCall(node) {
+			return
+		}
+		if r.designCall(node) {
 			return
 		}
 		r.expression(node.Object)

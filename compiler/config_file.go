@@ -49,6 +49,10 @@ func CompileConfigFileInApp(appRoot, path string) (*Bytecode, error) {
 	} else if err := refuseRouterImport(prog, data); err != nil {
 		return nil, err
 	}
+	// a config.work never declares its folder's look: that is its design.work's (design.go)
+	if err := refuseDesignImport(prog, data); err != nil {
+		return nil, err
+	}
 	files := []string{absolute}
 	sources := map[string]string{sourceName: string(data)}
 	if hasRelativeImports(prog) {

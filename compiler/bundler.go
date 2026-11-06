@@ -277,6 +277,10 @@ func (b *bundler) ensureModule(absPath string) (string, error) {
 		if err := refuseRouterImport(prog, src); err != nil {
 			return "", err
 		}
+		// nor a design.work: a file bundled into another never declares a folder's look (design.go)
+		if err := refuseDesignImport(prog, src); err != nil {
+			return "", err
+		}
 	}
 	if b.rewrite != nil && absPath == b.entry {
 		b.rewrite(prog)

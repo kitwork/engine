@@ -839,6 +839,10 @@ type TreeKitWork struct {
 // (uiRouter, router_vocabulary.go); a template's is the folder itself, every old word with it.
 func (tw *TreeKitWork) Router() value.Value {
 	if folder := tw.node.folder; folder != nil && folder.ui {
+		if folder.running == compiler.DesignFile {
+			// design.work reaches Kitwork through kitwork/design alone (router_design.go)
+			return routerFailure(compiler.DesignImportOther(`import * as router from "kitwork/router"`))
+		}
 		return value.New(&uiRouter{folder: folder})
 	}
 	return value.New(tw.node.folder)
@@ -931,21 +935,30 @@ func (n *RouteNode) uiFolder(routerFile string) bool {
 	return root.folder != nil && root.folder.ui
 }
 
-// compileUIFolder builds a Kitwork UI folder: at a site's root the app's config.work first, as the parent
-// of the site (appRouterConfig, seed), then the folder's own config.work, then its router.work, each run
-// into the same FolderRouter, so the calls of config.work come first (KITWORK_ROUTER.md mục 4, 12).
-// config.work is watched even when absent: one appearing, changing or going builds the generation again.
+// compileUIFolder builds a Kitwork UI folder: at a site's root the app's design.work and config.work first, as
+// the parent of the site (appRouterFiles, seed), then the folder's own design.work (KITWORK_DESIGN.md), its
+// config.work, then its router.work, each run into the same FolderRouter, so the calls of design.work come first,
+// then those of config.work (KITWORK_ROUTER.md mục 4, 12). design.work and config.work are watched even when
+// absent: one appearing, changing or going builds the generation again. A design.work where no folder's look is
+// declared (.shared/, .schedule/, .database/, assets/) stops the site at boot (router_design.go).
 func (n *RouteNode) compileUIFolder(t *Tenant, fr *FolderRouter, routerFile string) error {
 	fr.ui = true // router.highlight reads Kitwork UI's grammar; the router answers its words only
+	designFile := filepath.Join(n.diskPath(), compiler.DesignFile)
 	configFile := filepath.Join(n.diskPath(), compiler.RouterConfigFile)
-	n.srcFiles = append(n.srcFiles, configFile)
+	n.srcFiles = append(n.srcFiles, designFile, configFile)
+	if err := designInAssets(t.resolveApp(), n.diskPath()); err != nil {
+		return err
+	}
 	if n.parent == nil {
+		if err := misplacedDesign(t.resolveApp(), t.resolveApp(), n.diskPath()); err != nil {
+			return err
+		}
 		// A Kitwork UI site swaps only <content /> between pages by default; router.reload(true) in it
 		// loads every page whole instead.
 		t.presentation().SetDrive(true)
 		fr.appRoot = sameFolder(n.diskPath(), t.resolveApp())
 		if !fr.appRoot {
-			collector, files, err := t.appRouterConfig(false)
+			collector, files, err := t.appRouterFiles(false, compiler.DesignFile, compiler.RouterConfigFile)
 			n.srcFiles = append(n.srcFiles, files...)
 			if err != nil {
 				return err
@@ -956,6 +969,15 @@ func (n *RouteNode) compileUIFolder(t *Tenant, fr *FolderRouter, routerFile stri
 					return err
 				}
 			}
+		}
+	}
+	if fileExists(designFile) {
+		bc, err := fr.runRouterFile(t, designFile)
+		if bc != nil {
+			n.srcFiles = append(n.srcFiles, bc.Files...)
+		}
+		if err != nil {
+			return err
 		}
 	}
 	if fileExists(configFile) {
@@ -991,17 +1013,19 @@ func sameFolder(one, other string) bool {
 	return filepath.Clean(first) == filepath.Clean(second)
 }
 
-// runRouterFile compiles and runs one router file of the folder (router.kitwork.js, router.work or a
-// config.work) into it, then says what the run left to say: an error stops the generation with the file
+// runRouterFile compiles and runs one router file of the folder (router.kitwork.js, router.work, a config.work
+// or a design.work) into it, then says what the run left to say: an error stops the generation with the file
 // from the site's root, a template's warnings are printed. The bytecode is given whenever the file compiled,
-// so its sources are watched even when it then fails.
+// so its sources are watched even when it then fails. Only the router file's bytecode is the folder's, the one a
+// door's handler runs in at request time: a design.work declares values alone.
 func (f *FolderRouter) runRouterFile(t *Tenant, file string) (*compiler.Bytecode, error) {
 	relative := strings.TrimPrefix(file, t.resolve()+string(filepath.Separator))
+	kind := routerFileKind(file)
 	bc, err := t.compileFile(file)
 	if err != nil {
-		return nil, fmt.Errorf("compile router %s: %w", relative, err)
+		return nil, fmt.Errorf("compile %s %s: %w", kind, relative, err)
 	}
-	if filepath.Base(file) != compiler.RouterConfigFile {
+	if base := filepath.Base(file); base != compiler.RouterConfigFile && base != compiler.DesignFile {
 		f.bytecode = bc
 	}
 	// every environment.require("KEY") of the folder's code against the app's environment, before it
@@ -1015,7 +1039,7 @@ func (f *FolderRouter) runRouterFile(t *Tenant, file string) (*compiler.Bytecode
 		defer func() { f.running = "" }()
 	}
 	if err := runFolderRouter(t, f.node, bc); err != nil {
-		return bc, fmt.Errorf("initialize router %s: %w", relative, err)
+		return bc, fmt.Errorf("initialize %s %s: %w", kind, relative, err)
 	}
 	if f.redeclared != nil {
 		return bc, fmt.Errorf("router %s: %w", relative, f.redeclared)

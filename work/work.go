@@ -116,6 +116,9 @@ func (w *KitWork) MissingMember(name string) value.Value {
 		return value.InvalidFailure(value.InvalidArgumentCode, compiler.SSERemoved)
 	case "env":
 		return value.InvalidFailure(value.InvalidArgumentCode, compiler.EnvironmentRenamed)
+	case "design":
+		// kitwork/design is a design.work's alone, read through the folder's kitwork() (router_design.go)
+		return value.InvalidFailure(value.InvalidArgumentCode, compiler.DesignImportOutside)
 	}
 	return value.Value{K: value.Nil}
 }

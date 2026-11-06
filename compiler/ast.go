@@ -56,6 +56,9 @@ type Program struct {
 	// FolderCalls: the program is a config.work of .shared/queue/ or of .schedule/, and these are the calls of
 	// its folder it makes, each a line of its own at the top level (folder_config.go); nil for any other.
 	FolderCalls *FolderCalls
+	// DesignCalls: the program is a design.work (KITWORK_DESIGN.md), and these are the design.<word>(…) lines
+	// it writes at its top level, read before anything is bundled (readDesignFile); nil for any other program.
+	DesignCalls *DesignCalls
 }
 
 // ExportAlias is `export { local as exported }`: Token is where exported is written.

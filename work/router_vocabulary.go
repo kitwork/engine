@@ -37,10 +37,6 @@ import (
 	"github.com/kitwork/engine/value"
 )
 
-// appRouterConfigName is the app's config.work as a message names it: app/ is the app's folder as an import
-// writes it (KITWORK_UI.md mục 4), app/ for one app, apps/<identity>/ for many.
-const appRouterConfigName = "app/" + compiler.RouterConfigFile
-
 // routerCorsMissing is the boot error of router.cors(…): a word of the table whose rules are still open.
 const routerCorsMissing = "router.cors(…) chưa có trong engine: luật nhận request từ trang của site khác còn mở (KITWORK_ROUTER.md mục 14); hôm nay route của router.work từ chối mọi request đổi dữ liệu đến từ trang của site khác, và chưa có cách mở"
 
@@ -108,7 +104,7 @@ func (f *FolderRouter) call(word compiler.RouterWord, args []value.Value) value.
 	}
 	result := value.Value{K: value.Nil}
 	if f.app && word.Word != "timezone" {
-		f.seeds = append(f.seeds, routerSeed{word: word.Word, args: append([]value.Value(nil), args...), at: at})
+		f.seeds = append(f.seeds, routerSeed{word: word.Word, args: append([]value.Value(nil), args...), at: at, file: f.running})
 	} else {
 		result = f.apply(word.Word, args)
 	}
@@ -191,6 +187,14 @@ func (f *FolderRouter) once(word string, at runtime.SourceLocation) string {
 	if !twice {
 		f.nearest[word] = place
 		return ""
+	}
+	if first.file == compiler.DesignFile || place.file == compiler.DesignFile {
+		// design.<word> of the folder's design.work and router.<word> of its config.work or router.work are one
+		// call (router_design.go)
+		if first.file == place.file {
+			return compiler.DesignCallTwice(word, fmt.Sprintf("dòng %d", first.line), fmt.Sprintf("dòng %d", place.line))
+		}
+		return compiler.DesignCallTwice(word, designCallPlace(word, first), designCallPlace(word, place))
 	}
 	if first.file == place.file {
 		return compiler.RouterCallTwice(word, fmt.Sprintf("dòng %d", first.line), fmt.Sprintf("dòng %d", place.line))
@@ -501,19 +505,29 @@ func firstNullHint(args []value.Value) string {
 // (KITWORK_ROUTER.md mục 4).
 type routerCallResult struct {
 	word string
+	// module is "design" for a call of design.work (router_design.go), "" for router.<word>
+	module string
+}
+
+// chained is the error of next chained after the call.
+func (r *routerCallResult) chained(next string) value.Value {
+	if r.module == "design" {
+		return routerFailure(compiler.DesignCallChained(r.word, next))
+	}
+	return routerFailure(compiler.RouterCallChained(r.word, next))
 }
 
 func (r *routerCallResult) OnGet(key string) value.Value {
-	return routerFailure(compiler.RouterCallChained(r.word, "."+key))
+	return r.chained("." + key)
 }
 
 func (r *routerCallResult) OnCompare(_ string, _ value.Value) value.Value { return value.NewNil() }
 
 func (r *routerCallResult) OnInvoke(method string, _ ...value.Value) value.Value {
 	if method == "" {
-		return routerFailure(compiler.RouterCallChained(r.word, "(…)"))
+		return r.chained("(…)")
 	}
-	return routerFailure(compiler.RouterCallChained(r.word, "."+method+"(…)"))
+	return r.chained("." + method + "(…)")
 }
 
 // uiDoor is a door of a Kitwork UI folder as its router.work chains it: the four rules of a route and nothing
@@ -581,6 +595,8 @@ type routerSeed struct {
 	word string
 	args []value.Value
 	at   runtime.SourceLocation
+	// file is the app's file the call is written in: design.work or config.work
+	file string
 }
 
 // seed starts a site's root from the app's config.work (KITWORK_ROUTER.md mục 4, 24/10/2026): each call it
@@ -592,11 +608,19 @@ type routerSeed struct {
 func (f *FolderRouter) seed(app *FolderRouter) error {
 	defer func() { f.callSite = nil }()
 	for _, call := range app.seeds {
+		file := call.file
+		if file == "" {
+			file = compiler.RouterConfigFile
+		}
 		at := call.at
-		at.File = appRouterConfigName // where router.highlight says a kind's colour is set (place)
+		at.File = "app/" + file // where router.highlight says a kind's colour is set (place)
 		f.callSite = func() runtime.SourceLocation { return at }
 		if result := f.apply(call.word, call.args); result.K == value.Invalid {
-			return fmt.Errorf("initialize router %s: %s:%d:%d: %s", appRouterConfigName, compiler.RouterConfigFile, call.at.Line, call.at.Column, result.Text())
+			message := result.Text()
+			if file == compiler.DesignFile {
+				message = designSpelling(message)
+			}
+			return fmt.Errorf("initialize %s app/%s: %s:%d:%d: %s", routerFileKind(file), file, file, call.at.Line, call.at.Column, message)
 		}
 	}
 	return nil
@@ -608,29 +632,49 @@ func (f *FolderRouter) seed(app *FolderRouter) error {
 // the app's folder is a site's root too, so the file takes a site's words as well. The collector is nil when
 // the app has no config.work; files are what the tenant watches for it, the file itself even when absent.
 func (t *Tenant) appRouterConfig(appRoot bool) (*FolderRouter, []string, error) {
-	file := t.resolveApp(compiler.RouterConfigFile)
-	files := []string{file}
-	if !fileExists(file) {
-		return nil, files, nil
-	}
-	bc, err := t.compileFile(file)
-	if err != nil {
-		return nil, files, fmt.Errorf("compile router %s: %w", appRouterConfigName, err)
-	}
-	files = append(files, bc.Files...)
-	if missing := t.missingEnvironment(bc); missing != nil {
-		missing.placeEntry(compiler.RouterConfigFile, appRouterConfigName)
-		return nil, files, missing
-	}
-	node := &RouteNode{base: t.resolveApp()}
-	collector := &FolderRouter{
-		tenant: t, node: node,
-		methods: map[string]*FolderMethod{}, outputs: map[string]*FolderMethod{}, meta: map[string]value.Value{},
-		ui: true, app: true, appRoot: appRoot, running: compiler.RouterConfigFile,
-	}
-	node.folder = collector
-	if err := runFolderRouter(t, node, bc); err != nil {
-		return nil, files, fmt.Errorf("initialize router %s: %w", appRouterConfigName, err)
+	return t.appRouterFiles(appRoot, compiler.RouterConfigFile)
+}
+
+// appRouterFiles hears the files of the app's folder named, in order, into one collector (appRouterConfig): a
+// site's root hears the app's design.work, then its config.work (KITWORK_DESIGN.md mục 2: the app's look is the
+// parent of every site's), so a word whose nearest folder wins written in both is the error naming both. The
+// collector is nil when the app has none of them; files are what the tenant watches, each file even when absent.
+func (t *Tenant) appRouterFiles(appRoot bool, names ...string) (*FolderRouter, []string, error) {
+	var files []string
+	var collector *FolderRouter
+	for _, name := range names {
+		file := t.resolveApp(name)
+		files = append(files, file)
+		if !fileExists(file) {
+			continue
+		}
+		// app/ is the app's folder as an import writes it (KITWORK_UI.md mục 4), app/ for one app,
+		// apps/<identity>/ for many
+		kind, written := routerFileKind(name), "app/"+name
+		bc, err := t.compileFile(file)
+		if err != nil {
+			return nil, files, fmt.Errorf("compile %s %s: %w", kind, written, err)
+		}
+		files = append(files, bc.Files...)
+		if missing := t.missingEnvironment(bc); missing != nil {
+			missing.placeEntry(name, written)
+			return nil, files, missing
+		}
+		if collector == nil {
+			node := &RouteNode{base: t.resolveApp()}
+			collector = &FolderRouter{
+				tenant: t, node: node,
+				methods: map[string]*FolderMethod{}, outputs: map[string]*FolderMethod{}, meta: map[string]value.Value{},
+				ui: true, app: true, appRoot: appRoot,
+			}
+			node.folder = collector
+		}
+		collector.running = name
+		err = runFolderRouter(t, collector.node, bc)
+		collector.running = compiler.RouterConfigFile
+		if err != nil {
+			return nil, files, fmt.Errorf("initialize %s %s: %w", kind, written, err)
+		}
 	}
 	return collector, files, nil
 }
