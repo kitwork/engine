@@ -71,8 +71,8 @@ func shapeOf(t *testing.T, path string) string {
 	}
 	shape = append(shape, query(`SELECT type, name FROM sqlite_schema WHERE type IN ('index', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY name`)...)
 	// the kinds other than the one a column's storage gives, and the .searchable() weights
-	shape = append(shape, query(`SELECT table_name, column_name, kind, precision, scale, search_weight FROM kitwork_columns
-		WHERE kind NOT IN ('integer', 'text', 'float', 'blob') OR search_weight != 0 ORDER BY table_name, column_name`)...)
+	shape = append(shape, query(`SELECT table_name, column_name, kind, precision, scale, search_weight, transform, readonly FROM kitwork_columns
+		WHERE kind NOT IN ('integer', 'text', 'float', 'blob') OR search_weight != 0 OR transform != '' OR readonly != 0 ORDER BY table_name, column_name`)...)
 	return strings.Join(shape, "\n")
 }
 
@@ -97,6 +97,10 @@ func shapeOf(t *testing.T, path string) string {
 //
 // CONTROL (05/11/2026): with the marker found anywhere in the text before a statement, "the new file differs"
 // (accounts made as written, "balance numeric(14, 4)", not STRICT).
+//
+// A column's rules (engine2's kitwork migrate, 06/11/2026), a transform's steps and a column set once, are what no
+// PostgreSQL type says: their rows carry them, and a structure with none is written as before. CONTROL (06/11/2026):
+// with kindRows leaving the rules out, the structure "holds no "('events', 'day', 'date', 0, 0, 'trim', 0)"".
 func TestStructureFileMakesTheSameFile(t *testing.T) {
 	ctx := context.Background()
 	directory := t.TempDir()
@@ -129,6 +133,12 @@ func TestStructureFileMakesTheSameFile(t *testing.T) {
 				return err
 			}
 		}
+		// the rules (engine2's kitwork migrate, 06/11/2026): a column a transform keeps, a column set once
+		for _, row := range [][]any{{"events", "day", "date", "trim", 0}, {"orders", "user_id", "integer", "", 1}} {
+			if _, err := transaction.Exec(`INSERT OR REPLACE INTO kitwork_columns (table_name, column_name, kind, precision, scale, transform, readonly) VALUES (?, ?, ?, 0, 0, ?, ?)`, row...); err != nil {
+				return err
+			}
+		}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -140,7 +150,8 @@ func TestStructureFileMakesTheSameFile(t *testing.T) {
 		"-- SQLite: a view", "CREATE INDEX orders_user ON orders (user_id, price DESC);",
 		"-- KitDB: the kinds its PostgreSQL types do not say", "('users', 'created', 'datetime', 0, 0)",
 		"CREATE INDEX users_search ON users USING search (name) WITH (name = 2);", "CREATE DOMAIN kitid AS text;",
-		"id kitid PRIMARY KEY NOT NULL", "day date NOT NULL", "at timestamptz"} {
+		"id kitid PRIMARY KEY NOT NULL", "day date NOT NULL", "at timestamptz",
+		"('events', 'day', 'date', 0, 0, 'trim', 0)", "('orders', 'user_id', 'integer', 0, 0, '', 1)"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("the structure:\n%s\nholds no %q", text, want)
 		}

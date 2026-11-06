@@ -40,7 +40,7 @@ import (
 // wrote is refused.
 
 // columnsTable is kitwork_columns as the engine makes it (work/db.sqlite_columns.go).
-const columnsTable = `CREATE TABLE IF NOT EXISTS kitwork_columns (table_name TEXT NOT NULL, column_name TEXT NOT NULL, kind TEXT NOT NULL, precision INTEGER NOT NULL, scale INTEGER NOT NULL, search_weight INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (table_name, column_name))`
+const columnsTable = `CREATE TABLE IF NOT EXISTS kitwork_columns (table_name TEXT NOT NULL, column_name TEXT NOT NULL, kind TEXT NOT NULL, precision INTEGER NOT NULL, scale INTEGER NOT NULL, search_weight INTEGER NOT NULL DEFAULT 0, transform TEXT NOT NULL DEFAULT '', readonly INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (table_name, column_name))`
 
 // columnKind is what a column's PostgreSQL type becomes: its SQLite storage and the engine's kind.
 type columnKind struct {
@@ -51,6 +51,9 @@ type columnKind struct {
 	serial    bool
 	column    string // the column's name as kitwork_columns writes it (structure.go)
 	weight    int    // its .searchable() weight, search_weight of kitwork_columns (structure.go)
+	// its rules (structure.go, write.go's ColumnRules): a transform's steps, "trim,toLowerCase"; set once, at an insert
+	transform string
+	readonly  bool
 }
 
 // kindChange is what a schema statement does to kitwork_columns.
