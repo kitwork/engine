@@ -379,7 +379,7 @@ func translateConstraints(tokens []token, schema, column string, kind columnKind
 					end++
 				}
 				if literal, ok := literalText(tokens[index+1 : end]); ok {
-					stored, err := conversion{column: column, decimal: kind.kind == "decimal", precision: kind.precision, scale: kind.scale}.convert(literal)
+					stored, err := conversion{column: column, decimal: kind.kind == "decimal", boolean: kind.kind == "bool", precision: kind.precision, scale: kind.scale}.convert(literal)
 					if err != nil {
 						return "", false, err
 					}

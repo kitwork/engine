@@ -57,6 +57,14 @@ type Columns interface {
 	Column(schema, table, column string) (kind string, precision, scale int, found bool)
 }
 
+// ColumnRules is what a Columns may also say of a column (KITWORK_SCHEMA.md mục 5): the transform the database takes
+// every value written into it through, its steps in order (trim, toLowerCase, toUpperCase, as JavaScript's), and
+// whether it is set once, at an insert (.readonly()). A write through the port keeps both, as the engine's own
+// statements do, so every client is held to them.
+type ColumnRules interface {
+	Rules(schema, table, column string) (transform []string, readonly bool)
+}
+
 // Options bounds what one statement may return, names the session's user and receives what fails.
 type Options struct {
 	MaxRows  int   // 10000 when zero or less

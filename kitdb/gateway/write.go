@@ -355,12 +355,21 @@ func (session *Session) foreignKeyActions(ctx context.Context, schema, table str
 	return strings.Join(actions, ", "), nil
 }
 
-// conversion is how a column's value becomes what the file holds: a decimal of a positive scale, a boolean.
+// conversion is how a column's value becomes what the file holds: a decimal of a positive scale, a boolean, a text
+// through its transform; and a column an update never sets (readonly).
 type conversion struct {
 	column    string
 	decimal   bool
+	boolean   bool
 	precision int
 	scale     int
+	transform []string
+	readonly  bool
+}
+
+// changes reports a conversion that changes the value written (not readonly alone).
+func (target conversion) changes() bool {
+	return target.decimal || target.boolean || len(target.transform) > 0
 }
 
 // conversions are the columns of table whose values the file holds otherwise than written, by lower-case name.
@@ -370,14 +379,22 @@ func (session *Session) conversions(schema, table string) (map[string]conversion
 		return nil, nil
 	}
 	result := map[string]conversion{}
+	rules, _ := session.columns.(ColumnRules)
 	for _, column := range found.columns {
 		kind, precision, scale, known := session.columns.Column(schema, table, column)
+		target := conversion{column: column}
 		switch {
 		case !known:
 		case kind == "decimal" && scale > 0:
-			result[strings.ToLower(column)] = conversion{column: column, decimal: true, precision: precision, scale: scale}
+			target.decimal, target.precision, target.scale = true, precision, scale
 		case kind == "bool":
-			result[strings.ToLower(column)] = conversion{column: column}
+			target.boolean = true
+		}
+		if rules != nil && known {
+			target.transform, target.readonly = rules.Rules(schema, table, column)
+		}
+		if target.changes() || target.readonly {
+			result[strings.ToLower(column)] = target
 		}
 	}
 	return result, found.columns
@@ -436,6 +453,9 @@ func convertValues(parsed statement, conversions map[string]conversion, columns 
 	assigned := map[int]bool{} // token indexes that name a converted column as a target, or excluded.column
 	converted := map[int]conversion{}
 	convertValue := func(from, to int, target conversion) error {
+		if !target.changes() {
+			return nil // readonly alone: an insert sets it as written
+		}
 		value := tokens[from:to]
 		switch {
 		case len(value) == 1 && (value[0].word() == "NULL" || value[0].word() == "DEFAULT"):
@@ -480,6 +500,14 @@ func convertValues(parsed statement, conversions map[string]conversion, columns 
 			depth++
 		}
 	}
+	// a row replaced is deleted and inserted again: a column set once would change
+	if parsed.verb == "REPLACE" || orReplace(tokens) {
+		for _, target := range conversions {
+			if target.readonly {
+				return nil, pgwire.NewError("42501", fmt.Sprintf("column %s is .readonly(), set once at an insert: INSERT OR REPLACE would set it again; write an UPDATE of the other columns", target.column))
+			}
+		}
+	}
 	// SET col = value, … at depth 0 (UPDATE, an upsert's DO UPDATE SET), up to the clause that follows
 	for index, candidate := range tokens {
 		if candidate.word() != "SET" || depthAt[index] != 0 {
@@ -505,6 +533,9 @@ func convertValues(parsed statement, conversions map[string]conversion, columns 
 					valueTo++
 				}
 				if target, found := conversions[strings.ToLower(identifierText(name))]; found && valueFrom < valueTo {
+					if target.readonly {
+						return nil, pgwire.NewError("42501", fmt.Sprintf("column %s is .readonly(), set once at an insert: an update does not set it", target.column))
+					}
 					assigned[position] = true
 					if err := convertValue(valueFrom, valueTo, target); err != nil {
 						return nil, err
@@ -551,7 +582,7 @@ func convertValues(parsed statement, conversions map[string]conversion, columns 
 			}
 			convertedTargets := false
 			for _, name := range targets {
-				if _, found := conversions[strings.ToLower(name)]; found {
+				if target, found := conversions[strings.ToLower(name)]; found && target.changes() {
 					convertedTargets = true
 				}
 			}
@@ -585,8 +616,8 @@ func convertValues(parsed statement, conversions map[string]conversion, columns 
 					break
 				}
 			} else if convertedTargets && position < len(tokens) && tokens[position].word() != "DEFAULT" {
-				return nil, pgwire.NewError("0A000", "a column the file holds otherwise than written (a decimal, a boolean) takes "+
-					"its value from INSERT … VALUES through the port, not from a SELECT")
+				return nil, pgwire.NewError("0A000", "a column the file holds otherwise than written (a decimal, a boolean, a text "+
+					"with a transform) takes its value from INSERT … VALUES through the port, not from a SELECT")
 			}
 		}
 	}
@@ -613,6 +644,41 @@ func convertValues(parsed statement, conversions map[string]conversion, columns 
 	return splices, nil
 }
 
+// orReplace reports INSERT OR REPLACE.
+func orReplace(tokens []token) bool {
+	for index := 0; index+2 < len(tokens); index++ {
+		if tokens[index].word() == "INSERT" && tokens[index+1].word() == "OR" && tokens[index+2].word() == "REPLACE" {
+			return true
+		}
+	}
+	return false
+}
+
+// transformed is text through a transform's steps, each as JavaScript's (and engine2's value.Trim, ToLowerCase,
+// ToUpperCase): trim takes off JavaScript's white space and line terminators, the two cases are Go's mapping.
+func transformed(steps []string, text string) string {
+	for _, step := range steps {
+		switch step {
+		case "trim":
+			text = strings.TrimFunc(text, javaScriptSpace)
+		case "toLowerCase":
+			text = strings.ToLower(text)
+		case "toUpperCase":
+			text = strings.ToUpper(text)
+		}
+	}
+	return text
+}
+
+// javaScriptSpace is a character String.prototype.trim takes off: WhiteSpace and LineTerminator of ECMAScript.
+func javaScriptSpace(c rune) bool {
+	switch c {
+	case '\t', '\n', '\v', '\f', '\r', ' ', 0x00A0, 0x1680, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000, 0xFEFF:
+		return true
+	}
+	return c >= 0x2000 && c <= 0x200A
+}
+
 // isClauseWord reports a word that ends a SET list.
 func isClauseWord(word string) bool {
 	switch word {
@@ -636,14 +702,20 @@ func literalText(value []token) (string, bool) {
 }
 
 func (target conversion) describe() string {
-	if target.decimal {
+	switch {
+	case target.decimal:
 		return fmt.Sprintf("decimal(%d, %d)", target.precision, target.scale)
+	case target.boolean:
+		return "boolean"
 	}
-	return "boolean"
+	return "text with a transform (" + strings.Join(target.transform, ", ") + ")"
 }
 
 // convert is a literal's text as the file holds the column's value, written as SQL.
 func (target conversion) convert(text string) (string, error) {
+	if len(target.transform) > 0 && !target.decimal && !target.boolean {
+		return "'" + strings.ReplaceAll(transformed(target.transform, text), "'", "''") + "'", nil
+	}
 	if !target.decimal {
 		value, err := booleanValue(text, target.column)
 		if err != nil {
@@ -660,6 +732,12 @@ func (target conversion) convert(text string) (string, error) {
 
 // convertArgument is a parameter's value as the file holds the column's.
 func (target conversion) convertArgument(argument any) (any, error) {
+	if len(target.transform) > 0 && !target.decimal && !target.boolean {
+		if text, ok := argument.(string); ok {
+			return transformed(target.transform, text), nil
+		}
+		return argument, nil
+	}
 	switch value := argument.(type) {
 	case nil:
 		return nil, nil
