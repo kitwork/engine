@@ -71,8 +71,9 @@ func shapeOf(t *testing.T, path string) string {
 	}
 	shape = append(shape, query(`SELECT type, name FROM sqlite_schema WHERE type IN ('index', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY name`)...)
 	// the kinds other than the one a column's storage gives, and the .searchable() weights
-	shape = append(shape, query(`SELECT table_name, column_name, kind, precision, scale, search_weight, transform, readonly FROM kitwork_columns
-		WHERE kind NOT IN ('integer', 'text', 'float', 'blob') OR search_weight != 0 OR transform != '' OR readonly != 0 ORDER BY table_name, column_name`)...)
+	shape = append(shape, query(`SELECT table_name, column_name, kind, precision, scale, search_weight, transform, readonly, minimum, maximum, choices FROM kitwork_columns
+		WHERE kind NOT IN ('integer', 'text', 'float', 'blob') OR search_weight != 0 OR transform != '' OR readonly != 0 OR minimum != '' OR maximum != '' OR choices != ''
+		ORDER BY table_name, column_name`)...)
 	return strings.Join(shape, "\n")
 }
 
@@ -141,6 +142,13 @@ func TestStructureFileMakesTheSameFile(t *testing.T) {
 				return err
 			}
 		}
+		// what a value is held to (engine2's kitwork migrate, 07/11/2026): a decimal's bounds, a text's words
+		if _, err := transaction.Exec(`UPDATE kitwork_columns SET minimum = '0', maximum = '1000' WHERE table_name = 'accounts' AND column_name = 'balance'`); err != nil {
+			return err
+		}
+		if _, err := transaction.Exec(`INSERT INTO kitwork_columns (table_name, column_name, kind, precision, scale, choices) VALUES ('orders', 'note', 'text', 0, 0, '["a","b"]')`); err != nil {
+			return err
+		}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -153,8 +161,9 @@ func TestStructureFileMakesTheSameFile(t *testing.T) {
 		"-- KitDB: the kinds its PostgreSQL types do not say", "('users', 'created', 'datetime', 0, 0)",
 		"CREATE INDEX users_search ON users USING search (name) WITH (name = 2);", "CREATE DOMAIN kitid AS text;",
 		"id kitid PRIMARY KEY NOT NULL", "day date NOT NULL", "at timestamptz",
-		"('events', 'day', 'date', 0, 0, 'trim', 0)", "('orders', 'user_id', 'integer', 0, 0, '', 1)",
-		"low numeric(15, 2) NOT NULL CONSTRAINT prices_low_check CHECK (low >= -1.5 AND low <= 1000000)", "qty bigint CHECK (qty >= 1 AND qty <> 7)"} {
+		"('events', 'day', 'date', 0, 0, 'trim', 0)", "('orders', 'user_id', 'integer', 0, 0, '', 1, '', '', '')",
+		"low numeric(15, 2) NOT NULL CONSTRAINT prices_low_check CHECK (low >= -1.5 AND low <= 1000000)", "qty bigint CHECK (qty >= 1 AND qty <> 7)",
+		"('accounts', 'balance', 'decimal', 14, 4, '', 0, '0', '1000', '')", `('orders', 'note', 'text', 0, 0, '', 0, '', '', '["a","b"]')`} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("the structure:\n%s\nholds no %q", text, want)
 		}

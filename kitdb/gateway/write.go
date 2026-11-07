@@ -2,13 +2,16 @@ package gateway
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
+	"math/big"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kitwork/engine/kitdb/pgwire"
 	kitdbsqlite "github.com/kitwork/engine/kitdb/sqlite"
@@ -80,6 +83,7 @@ type writeBlock struct {
 type blockStatement struct {
 	text      string
 	arguments []any
+	checks    *rowChecks
 	end       bool
 	commit    bool
 	reply     chan blockReply
@@ -168,6 +172,7 @@ func (session *Session) write(ctx context.Context, parsed statement, parameters 
 	// when one is open; outside a block that transaction ends before the writer writes, so a file not yet in WAL mode
 	// is not held by it.
 	var schema, text string
+	var checks *rowChecks
 	prepare := func() error {
 		if err := session.refreshSchemas(ctx); err != nil {
 			return err
@@ -177,7 +182,7 @@ func (session *Session) write(ctx context.Context, parsed statement, parameters 
 		if schema, table, err = session.authorizeWrite(ctx, parsed, shape, arguments); err != nil {
 			return err
 		}
-		text, arguments, err = session.fileStatement(parsed, schema, table, arguments)
+		text, arguments, checks, err = session.fileStatement(parsed, schema, table, arguments)
 		return err
 	}
 	if session.transaction == pgwire.TransactionIdle {
@@ -197,9 +202,9 @@ func (session *Session) write(ctx context.Context, parsed statement, parameters 
 	}
 	var affected int64
 	if session.transaction == pgwire.TransactionActive {
-		affected, err = session.writeInBlock(ctx, schema, text, arguments)
+		affected, err = session.writeInBlock(ctx, schema, text, arguments, checks)
 	} else {
-		affected, err = session.writeAlone(ctx, schema, text, arguments)
+		affected, err = session.writeAlone(ctx, schema, text, arguments, checks)
 	}
 	if err != nil {
 		return pgwire.Result{}, err
@@ -407,8 +412,10 @@ type textSplice struct {
 }
 
 // fileStatement is the statement as the writer runs it on the file: its schema's name made main, the values of the
-// columns the file holds otherwise made the file's.
-func (session *Session) fileStatement(parsed statement, schema, table string, arguments []any) (string, []any, error) {
+// columns the file holds otherwise made the file's, and, for a table whose columns are held to checks (ColumnChecks),
+// RETURNING the rows' values of those columns, after its last word (a comment after it stays a comment), with what
+// reads them.
+func (session *Session) fileStatement(parsed statement, schema, table string, arguments []any) (string, []any, *rowChecks, error) {
 	tokens := parsed.tokens
 	var splices []textSplice
 	for index := 0; index+1 < len(tokens); index++ {
@@ -422,9 +429,28 @@ func (session *Session) fileStatement(parsed statement, schema, table string, ar
 	if len(conversions) > 0 {
 		converted, err := convertValues(parsed, conversions, columns, arguments)
 		if err != nil {
-			return "", nil, err
+			return "", nil, nil, err
 		}
 		splices = append(splices, converted...)
+	}
+	checks := session.checksOf(schema, table, columns)
+	if checks != nil && parsed.verb != "DELETE" {
+		last := -1
+		for index, current := range tokens {
+			if current.kind != tokenSemicolon {
+				last = index
+			}
+		}
+		if last >= 0 {
+			written := make([]string, len(checks.columns))
+			for index, column := range checks.columns {
+				written[index] = quoteIdentifier(column.name)
+			}
+			at := tokens[last].end
+			splices = append(splices, textSplice{from: at, to: at, text: " RETURNING " + strings.Join(written, ", ")})
+		}
+	} else {
+		checks = nil
 	}
 	text := parsed.text
 	// applied from the end, so the earlier positions stay right; splices never overlap
@@ -432,7 +458,119 @@ func (session *Session) fileStatement(parsed statement, schema, table string, ar
 	for index := len(splices) - 1; index >= 0; index-- {
 		text = text[:splices[index].from] + splices[index].text + text[splices[index].to:]
 	}
-	return text, arguments, nil
+	return text, arguments, checks, nil
+}
+
+// rowChecks are the checks of a table's columns a write's rows are held to, in the order RETURNING reads them.
+type rowChecks struct {
+	table   string
+	columns []columnCheck
+}
+
+// columnCheck is one column's check, with how the file holds its value: a decimal as its value × 10^scale.
+type columnCheck struct {
+	name    string
+	kind    string
+	scale   int
+	check   Check
+	minimum *big.Rat
+	maximum *big.Rat
+}
+
+// checksOf are the checks of table's columns (ColumnChecks), nil for a table of none.
+func (session *Session) checksOf(schema, table string, columns []string) *rowChecks {
+	held, ok := session.columns.(ColumnChecks)
+	if !ok {
+		return nil
+	}
+	found := &rowChecks{table: table}
+	for _, column := range columns {
+		check, has := held.Check(schema, table, column)
+		if !has || check.Minimum == "" && check.Maximum == "" && len(check.Choices) == 0 {
+			continue
+		}
+		kind, _, scale, _ := session.columns.Column(schema, table, column)
+		entry := columnCheck{name: column, kind: kind, scale: scale, check: check}
+		if check.Minimum != "" {
+			entry.minimum, _ = new(big.Rat).SetString(check.Minimum)
+		}
+		if check.Maximum != "" {
+			entry.maximum, _ = new(big.Rat).SetString(check.Maximum)
+		}
+		found.columns = append(found.columns, entry)
+	}
+	if len(found.columns) == 0 {
+		return nil
+	}
+	return found
+}
+
+// row holds one returned row to the checks: a value outside one is 23514, as PostgreSQL's CHECK answers.
+func (checks *rowChecks) row(rows *sql.Rows) error {
+	values := make([]any, len(checks.columns))
+	pointers := make([]any, len(values))
+	for index := range values {
+		pointers[index] = &values[index]
+	}
+	if err := rows.Scan(pointers...); err != nil {
+		return err
+	}
+	for index, column := range checks.columns {
+		if !column.holds(values[index]) {
+			return pgwire.NewError("23514", fmt.Sprintf("new row for relation %q violates check constraint %q", checks.table, checks.table+"_"+column.name+"_check"))
+		}
+	}
+	return nil
+}
+
+// holds says the column's value keeps its check: null always (as SQL's CHECK), a text's length in characters and its
+// words, a number's value (a decimal's stored integer read as its value).
+func (column columnCheck) holds(value any) bool {
+	if value == nil {
+		return true
+	}
+	if text, isText := value.(string); isText {
+		if column.kind != "text" && column.kind != "" {
+			return true // a kind the file holds as text whose bounds are no length: a date, a uuid
+		}
+		if len(column.check.Choices) > 0 && !slices.Contains(column.check.Choices, text) {
+			return false
+		}
+		length := new(big.Rat).SetInt64(int64(utf8.RuneCountInString(text)))
+		return within(length, column.minimum, column.maximum)
+	}
+	var number *big.Rat
+	switch typed := value.(type) {
+	case int64:
+		number = new(big.Rat).SetInt64(typed)
+		if column.kind == "decimal" && column.scale > 0 {
+			number.Quo(number, new(big.Rat).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(column.scale)), nil)))
+		}
+	case float64:
+		number = new(big.Rat)
+		if number.SetFloat64(typed) == nil {
+			return false // NaN, an infinity
+		}
+	default:
+		return true
+	}
+	return within(number, column.minimum, column.maximum)
+}
+
+func within(value, minimum, maximum *big.Rat) bool {
+	return (minimum == nil || value.Cmp(minimum) >= 0) && (maximum == nil || value.Cmp(maximum) <= 0)
+}
+
+// execute runs a statement in the writer's request: held to the table's checks when it has some.
+func execute(transaction *kitdbsqlite.Transaction, text string, arguments []any, checks *rowChecks) (int64, error) {
+	if checks != nil {
+		return transaction.ExecReturning(text, checks.row, arguments...)
+	}
+	result, err := transaction.Exec(text, arguments...)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 // identifierText is an identifier token's name, quotes taken off.
@@ -821,18 +959,14 @@ func (session *Session) writerOf(schema string) (Writer, error) {
 }
 
 // writeAlone commits one statement by itself.
-func (session *Session) writeAlone(ctx context.Context, schema, text string, arguments []any) (int64, error) {
+func (session *Session) writeAlone(ctx context.Context, schema, text string, arguments []any, checks *rowChecks) (int64, error) {
 	writer, err := session.writerOf(schema)
 	if err != nil {
 		return 0, err
 	}
 	var affected int64
 	_, err = writer.Write(ctx, session.by(), func(transaction *kitdbsqlite.Transaction) error {
-		result, err := transaction.Exec(text, arguments...)
-		if err != nil {
-			return err
-		}
-		affected, err = result.RowsAffected()
+		affected, err = execute(transaction, text, arguments, checks)
 		return err
 	})
 	if err != nil {
@@ -842,7 +976,7 @@ func (session *Session) writeAlone(ctx context.Context, schema, text string, arg
 }
 
 // writeInBlock runs a statement in the transaction block's request, taking the writer at the block's first write.
-func (session *Session) writeInBlock(ctx context.Context, schema, text string, arguments []any) (int64, error) {
+func (session *Session) writeInBlock(ctx context.Context, schema, text string, arguments []any, checks *rowChecks) (int64, error) {
 	if session.block == nil {
 		if err := session.startBlock(schema); err != nil {
 			return 0, err
@@ -858,7 +992,7 @@ func (session *Session) writeInBlock(ctx context.Context, schema, text string, a
 	}
 	reply := make(chan blockReply, 1)
 	select {
-	case block.statements <- blockStatement{text: text, arguments: arguments, reply: reply}:
+	case block.statements <- blockStatement{text: text, arguments: arguments, checks: checks, reply: reply}:
 	case err := <-block.outcome:
 		block.ended = blockEnd(err, session.writeIdle(), session.writeLimit())
 		return 0, block.ended
@@ -930,11 +1064,7 @@ func (session *Session) startBlock(schema string) error {
 						next.reply <- blockReply{}
 						return errBlockRolledBack
 					}
-					result, err := transaction.Exec(next.text, next.arguments...)
-					var affected int64
-					if err == nil {
-						affected, err = result.RowsAffected()
-					}
+					affected, err := execute(transaction, next.text, next.arguments, next.checks)
 					next.reply <- blockReply{affected: affected, err: err}
 				case <-wait.C:
 					return errWriteIdle
