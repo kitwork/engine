@@ -451,14 +451,14 @@ func TestMigrateWritesPostgreSQL(t *testing.T) {
 }
 
 // What PostgreSQL's words cannot say through the port is written as the engine's SQLite statement, shown so: a CHECK on
-// a decimal (it compares the stored integer), which the port's translator refuses. The rest of the same plan stays
-// PostgreSQL's.
+// a decimal the port's translator refuses (since 07/11/2026 it writes one of comparisons with numbers as the stored
+// integer, so this one bounds the column by more places than it keeps). The rest of the same plan stays PostgreSQL's.
 //
 // CONTROL (05/11/2026): with the translator's refusal not taken, "statements: "CREATE TABLE ledger (… amount
 // numeric(12, 2) NOT NULL CHECK (amount >= '0')…".
 func TestMigrateWritesSQLiteWherePostgreSQLCannot(t *testing.T) {
 	checked := &ColumnSpec{kind: "decimal", precision: 12, scale: 2, notNull: true, seq: 2,
-		checks: []colCheckRef{{operator: ">=", value: value.New(0)}}}
+		checks: []colCheckRef{{operator: ">=", value: value.New(0.001)}}}
 	tables := map[string]map[string]*ColumnSpec{
 		"ledger": {"id": {kind: "kitid", primary: true, seq: 1}, "amount": checked},
 		"notes":  {"id": {kind: "kitid", primary: true, seq: 3}, "body": {kind: "text", notNull: true, seq: 4}},

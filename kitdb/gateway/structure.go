@@ -401,11 +401,26 @@ func renderTable(text string, kinds map[string]columnKind) (string, string) {
 		rest := part[position:]
 		kind, found := kinds[strings.ToLower(name)]
 		primary := false
-		for index, current := range rest {
-			switch current.word() {
+		for index := 0; index < len(rest); index++ {
+			switch rest[index].word() {
 			case "GENERATED", "AS":
 				return "", "a generated column"
 			case "CHECK":
+				if found && kind.kind == "decimal" && kind.scale > 0 {
+					// the column's comparisons with numbers, written as its values (the file compares the stored integer)
+					back := func(literal string) (string, error) {
+						stored, err := strconv.ParseInt(strings.TrimSpace(literal), 10, 64)
+						if err != nil {
+							return "", err
+						}
+						return strings.TrimSuffix(strings.TrimRight(formatScaled(stored, kind.scale), "0"), "."), nil
+					}
+					if written, end, ok, err := decimalCheck(rest, index, name, back); ok && err == nil {
+						rest = append(append(append([]token(nil), rest[:index]...), written...), rest[end+1:]...)
+						index += len(written) - 1
+						continue
+					}
+				}
 				if kind.kind == "decimal" && kind.scale > 0 || readsDecimal(rest[index:]) {
 					return "", "a CHECK reads a decimal column, whose stored integer is not its value"
 				}

@@ -116,7 +116,9 @@ func TestStructureFileMakesTheSameFile(t *testing.T) {
 		`CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users (id) ON DELETE CASCADE, price INTEGER NOT NULL DEFAULT 150, note TEXT COLLATE NOCASE, picture BLOB, rate REAL, UNIQUE (user_id, note)) STRICT`,
 		`CREATE INDEX orders_user ON orders (user_id, price DESC)`,
 		`CREATE INDEX orders_cheap ON orders (id) WHERE price < 1000`,
-		`CREATE TABLE ledger (id INTEGER PRIMARY KEY, amount INTEGER NOT NULL CHECK (amount > 0)) STRICT`,
+		`CREATE TABLE ledger (id INTEGER PRIMARY KEY, amount INTEGER NOT NULL CHECK (amount * 2 > 0)) STRICT`,
+		// a decimal's CHECK of comparisons with numbers is written as its values; an operator of two characters stays one
+		`CREATE TABLE prices (id INTEGER PRIMARY KEY, low INTEGER NOT NULL CONSTRAINT prices_low_check CHECK (low >= -150 AND low <= 100000000), qty INTEGER CHECK (qty >= 1 AND qty <> 7)) STRICT`,
 		`CREATE TABLE loose (id INTEGER PRIMARY KEY, anything)`,
 		`CREATE VIEW rich AS SELECT id FROM orders WHERE price > 100000`,
 		`CREATE TABLE events (id TEXT PRIMARY KEY NOT NULL, day TEXT NOT NULL, at TEXT) STRICT`,
@@ -126,7 +128,7 @@ func TestStructureFileMakesTheSameFile(t *testing.T) {
 	}
 	if _, err := database.Write(ctx, "test", func(transaction *kitdbsqlite.Transaction) error {
 		for _, row := range [][]any{{"accounts", "balance", "decimal", 14, 4, 0}, {"users", "active", "bool", 0, 0, 0}, {"users", "profile", "json", 0, 0, 0},
-			{"orders", "price", "decimal", 10, 2, 0}, {"ledger", "amount", "decimal", 12, 2, 0}, {"users", "name", "text", 0, 0, 2},
+			{"orders", "price", "decimal", 10, 2, 0}, {"ledger", "amount", "decimal", 12, 2, 0}, {"prices", "low", "decimal", 15, 2, 0}, {"users", "name", "text", 0, 0, 2},
 			{"users", "created", "datetime", 0, 0, 0}, {"users", "order", "integer", 0, 0, 0},
 			{"events", "id", "kitid", 0, 0, 0}, {"events", "day", "date", 0, 0, 0}, {"events", "at", "datetime", 0, 0, 0}} {
 			if _, err := transaction.Exec(`INSERT INTO kitwork_columns (table_name, column_name, kind, precision, scale, search_weight) VALUES (?, ?, ?, ?, ?, ?)`, row...); err != nil {
@@ -151,7 +153,8 @@ func TestStructureFileMakesTheSameFile(t *testing.T) {
 		"-- KitDB: the kinds its PostgreSQL types do not say", "('users', 'created', 'datetime', 0, 0)",
 		"CREATE INDEX users_search ON users USING search (name) WITH (name = 2);", "CREATE DOMAIN kitid AS text;",
 		"id kitid PRIMARY KEY NOT NULL", "day date NOT NULL", "at timestamptz",
-		"('events', 'day', 'date', 0, 0, 'trim', 0)", "('orders', 'user_id', 'integer', 0, 0, '', 1)"} {
+		"('events', 'day', 'date', 0, 0, 'trim', 0)", "('orders', 'user_id', 'integer', 0, 0, '', 1)",
+		"low numeric(15, 2) NOT NULL CONSTRAINT prices_low_check CHECK (low >= -1.5 AND low <= 1000000)", "qty bigint CHECK (qty >= 1 AND qty <> 7)"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("the structure:\n%s\nholds no %q", text, want)
 		}
@@ -171,6 +174,21 @@ func TestStructureFileMakesTheSameFile(t *testing.T) {
 	}
 	if again := structureOf(t, made); again != text {
 		t.Fatalf("the new file's structure differs:\n%s\nagainst\n%s", again, text)
+	}
+	// the CHECKs hold in the file made from the structure, a decimal's on its stored integer (07/11/2026)
+	for _, row := range []string{`INSERT INTO prices (low, qty) VALUES (-151, 1)`, `INSERT INTO prices (low, qty) VALUES (100000001, 1)`, `INSERT INTO prices (low, qty) VALUES (0, 7)`} {
+		if _, err := copyOf.Write(ctx, "test", func(transaction *kitdbsqlite.Transaction) error {
+			_, err := transaction.Exec(row)
+			return err
+		}); err == nil || !strings.Contains(err.Error(), "CHECK constraint failed") {
+			t.Errorf("%s: %v, want the CHECK to refuse it", row, err)
+		}
+	}
+	if _, err := copyOf.Write(ctx, "test", func(transaction *kitdbsqlite.Transaction) error {
+		_, err := transaction.Exec(`INSERT INTO prices (low, qty) VALUES (-150, 1)`)
+		return err
+	}); err != nil {
+		t.Errorf("a row the CHECKs take: %v", err)
 	}
 	if empty := filepath.Join(directory, "empty.db"); true {
 		file, err := kitdbsqlite.Open(ctx, empty, kitdbsqlite.Options{})

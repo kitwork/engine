@@ -223,19 +223,75 @@ func splitTop(tokens []token) [][]token {
 }
 
 // renderTokens writes tokens back as SQL: a space between two, none around a dot, before a comma or a closing
-// parenthesis, or after an opening one.
+// parenthesis, or after an opening one, nor between two characters of one operator as written (>=, <=, <>, !=, ||:
+// "a > = 0" is no SQL, 07/11/2026).
 func renderTokens(tokens []token) string {
 	var text strings.Builder
 	for index, current := range tokens {
 		if index > 0 {
-			previous := tokens[index-1].text
-			if previous != "." && previous != "(" && current.text != "." && current.text != "," && current.text != ")" {
+			before := tokens[index-1]
+			previous := before.text
+			operator := before.kind == tokenPunctuation && current.kind == tokenPunctuation && before.end > 0 && before.end == current.start
+			if previous != "." && previous != "(" && current.text != "." && current.text != "," && current.text != ")" && !operator {
 				text.WriteByte(' ')
 			}
 		}
 		text.WriteString(current.text)
 	}
 	return text.String()
+}
+
+// decimalCheck reads the CHECK at tokens[at] of a decimal column, CHECK (price >= 0 AND price <= 1000000): comparisons
+// of the column with numbers, joined by AND (BETWEEN a AND b too), and gives it with each number rewritten by convert
+// (the value to the stored integer, or back), and the index of its closing parenthesis. A CHECK of any other shape
+// reads the stored integer where its author means the value: ok is false.
+func decimalCheck(tokens []token, at int, column string, convert func(string) (string, error)) (out []token, end int, ok bool, err error) {
+	if at+1 >= len(tokens) || tokens[at].word() != "CHECK" || tokens[at+1].text != "(" {
+		return nil, 0, false, nil
+	}
+	depth := 0
+	end = -1
+	for index := at + 1; index < len(tokens); index++ {
+		switch tokens[index].text {
+		case "(":
+			depth++
+		case ")":
+			depth--
+		}
+		if depth == 0 {
+			end = index
+			break
+		}
+	}
+	if end < 0 {
+		return nil, 0, false, nil
+	}
+	out = append(out, tokens[at], tokens[at+1])
+	for index := at + 2; index < end; index++ {
+		current := tokens[index]
+		switch {
+		case current.kind == tokenWord && (current.word() == "AND" || current.word() == "BETWEEN"),
+			(current.kind == tokenWord || current.kind == tokenQuoted) && strings.EqualFold(identifierText(current), column):
+			out = append(out, current)
+		case current.kind == tokenPunctuation && current.text != "" && strings.Contains("<>=!", current.text):
+			out = append(out, current)
+		case current.kind == tokenNumber, (current.text == "-" || current.text == "+") && index+1 < end && tokens[index+1].kind == tokenNumber:
+			last := index
+			if current.kind != tokenNumber {
+				last = index + 1
+			}
+			literal, _ := literalText(tokens[index : last+1])
+			written, err := convert(literal)
+			if err != nil {
+				return nil, 0, false, err
+			}
+			out = append(out, token{kind: tokenNumber, text: written})
+			index = last
+		default:
+			return nil, 0, false, nil
+		}
+	}
+	return append(out, tokens[end]), end, true, nil
 }
 
 // typeOf reads a PostgreSQL type at the cursor.
@@ -393,8 +449,26 @@ func translateConstraints(tokens []token, schema, column string, kind columnKind
 			}
 		case "CHECK":
 			if kind.kind == "decimal" {
-				return "", false, pgwire.NewError("0A000", fmt.Sprintf("column %s is decimal: a CHECK on it would compare the "+
-					"stored integer, not the value", column))
+				// the column's comparisons with numbers, each number the stored integer the file compares (07/11/2026)
+				target := conversion{column: column, decimal: true, precision: kind.precision, scale: kind.scale}
+				exact := func(literal string) (string, error) {
+					// a bound is never rounded: rounding would change what the CHECK takes
+					if _, fraction, pointed := strings.Cut(literal, "."); pointed && len(strings.TrimRight(fraction, "0")) > kind.scale {
+						return "", pgwire.NewError("22P02", fmt.Sprintf("CHECK of column %s: %s has more decimal places than the column's %d", column, literal, kind.scale))
+					}
+					return target.convert(literal)
+				}
+				scaled, end, ok, err := decimalCheck(tokens, index, column, exact)
+				if err != nil {
+					return "", false, err
+				}
+				if !ok {
+					return "", false, pgwire.NewError("0A000", fmt.Sprintf("column %s is decimal: a CHECK on it compares the column "+
+						"with numbers, joined by AND (CHECK (%s >= 0 AND %s <= 100)); any other would compare the stored integer, not the value", column, column, column))
+				}
+				out = append(out, scaled...)
+				index = end
+				continue
 			}
 		}
 		if current.text == "::" || (current.kind == tokenVariable) {

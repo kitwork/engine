@@ -98,7 +98,7 @@ func TestSchemaStatementsThroughThePort(t *testing.T) {
 		{`DROP TABLE notes CASCADE`, "CASCADE"},
 		{`CREATE TABLE refs (id serial PRIMARY KEY, invoice integer REFERENCES billing.invoices (id))`, "stays in its schema's file"},
 		{`CREATE TABLE odd (id integer PRIMARY KEY, n serial)`, "serial is the table's PRIMARY KEY only"},
-		{`CREATE TABLE checked (id serial PRIMARY KEY, amount numeric(8, 2) CHECK (amount > 0))`, "CHECK"},
+		{`CREATE TABLE checked (id serial PRIMARY KEY, amount numeric(8, 2) CHECK (amount * 2 > 0))`, "CHECK"},
 		{`CREATE INDEX hashed ON notes USING hash (name)`, "index method hash"},
 	} {
 		refused(t, session, statement.text, "0A000", statement.want)
@@ -233,6 +233,35 @@ func TestSchemaStatementsMakeTheSearchIndex(t *testing.T) {
 // another type is a rebuild of the table SQLite needs (0A000).
 //
 // CONTROL (06/11/2026): with the rewrites not run, "after numeric(10, 4): 0.1250|-0.0050" (the kind changed alone).
+// A CHECK of a decimal column compares the stored integer, so its numbers are written as the file holds them: the
+// column's comparisons with numbers joined by AND are taken, any other shape refused. An operator of two characters
+// stays one ("a > = 0" is no SQL).
+//
+// CONTROL (07/11/2026): with renderTokens spacing every token, the CHECK read "qty > = 1", which SQLite refuses.
+func TestSchemaStatementsWriteADecimalsCheck(t *testing.T) {
+	statements, err := TranslateSchema(`CREATE TABLE prices (id bigserial PRIMARY KEY, low numeric(15, 2) NOT NULL CONSTRAINT prices_low_check CHECK (low >= -1.5 AND low <= 1000000), qty bigint CHECK (qty >= 1 AND qty <> 7), size text CHECK (size IN ('s', 'm')), name text CHECK (length(name) >= 1))`)
+	if err != nil || len(statements) != 1 {
+		t.Fatalf("%v %v", statements, err)
+	}
+	for _, want := range []string{"CONSTRAINT prices_low_check CHECK (low >= -150 AND low <= 100000000)", "CHECK (qty >= 1 AND qty <> 7)", "CHECK (size IN ('s', 'm'))"} {
+		if !strings.Contains(statements[0], want) {
+			t.Errorf("%s holds no %q", statements[0], want)
+		}
+	}
+	if statements, err := TranslateSchema(`ALTER TABLE prices ADD COLUMN high numeric(15, 2) CONSTRAINT prices_high_check CHECK (high BETWEEN 0 AND 99.99)`); err != nil || !strings.Contains(statements[0], "CHECK (high BETWEEN 0 AND 9999)") {
+		t.Errorf("ADD COLUMN with a decimal's CHECK: %v %v", statements, err)
+	}
+	for _, refused := range []string{
+		`CREATE TABLE t (p numeric(15, 2) CHECK (p * 2 > 1))`,
+		`CREATE TABLE t (p numeric(15, 2) CHECK (p > other))`,
+		`CREATE TABLE t (p numeric(15, 2) CHECK (p > 0.001))`,
+	} {
+		if _, err := TranslateSchema(refused); err == nil {
+			t.Errorf("%s was taken", refused)
+		}
+	}
+}
+
 func TestSchemaStatementsRescaleANumber(t *testing.T) {
 	fixture := newWriteFixture(t)
 	access := newAccess()
