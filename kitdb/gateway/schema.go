@@ -104,6 +104,66 @@ type schemaPlan struct {
 	renameTo   string
 	// rewrites are the values a number's new scale rewrites (ALTER COLUMN … TYPE numeric), run with the kinds
 	rewrites []Rescale
+	// history is the history each table is set to by WITH (history = …) or ALTER TABLE … SET (history = …) / RESET
+	// (history): set after the statements and the kinds, each in a commit of its own (kitdb/sqlite's SetHistory)
+	history []historySetting
+}
+
+// historySetting is a table's history, on or off (KITWORK_KITDB.md câu 13.11 (a)).
+type historySetting struct {
+	table string
+	on    bool
+}
+
+// ownTableError refuses the history of a table of the engine's or SQLite's own (kitwork_*, _kitwork_*, sqlite_*),
+// which the history follows as the engine needs: PostgreSQL's answer for a system catalog.
+func ownTableError(table string) error {
+	return pgwire.NewError("42501", fmt.Sprintf("permission denied: %q is a table of KitDB's own, whose history is not set", table))
+}
+
+// historyOption reads the parameters of WITH (…) or SET (…), history = on | off (true, false, quoted or not): the one
+// parameter a table of KitDB has. With reset it reads those of RESET (…), history alone, which is off: a table's
+// history when none is set.
+func historyOption(tokens []token, reset bool) (bool, error) {
+	parts := splitTop(tokens)
+	if len(parts) == 0 || len(parts[0]) == 0 {
+		return false, syntaxError("expected a parameter, history")
+	}
+	on := false
+	for _, part := range parts {
+		p := &schemaCursor{tokens: part}
+		name, err := p.name()
+		if err != nil {
+			return false, err
+		}
+		if !strings.EqualFold(name, "history") {
+			return false, pgwire.NewError("22023", fmt.Sprintf("unrecognized parameter %q: a table of KitDB has one, history", name))
+		}
+		on = false
+		if !reset {
+			if p.peek().text != "=" {
+				return false, syntaxError(fmt.Sprintf("expected = after history at %q", p.peek().text))
+			}
+			p.position++
+			value := p.peek()
+			setting := value.word()
+			if value.kind == tokenString {
+				setting = strings.ToUpper(strings.Trim(value.text, "'"))
+			}
+			switch setting {
+			case "ON", "TRUE":
+				on = true
+			case "OFF", "FALSE":
+			default:
+				return false, pgwire.NewError("22023", fmt.Sprintf("invalid value for boolean option %q: %s", "history", value.text))
+			}
+			p.position++
+		}
+		if !p.done() {
+			return false, syntaxError(fmt.Sprintf("unexpected %q after history", p.peek().text))
+		}
+	}
+	return on, nil
 }
 
 // Rescale is the rewrite of a number column's stored values from one scale to another: a decimal holds its value ×
@@ -568,6 +628,9 @@ func TranslateSchema(text string) ([]string, error) {
 	default:
 		return nil, pgwire.NewError("0A000", fmt.Sprintf("%q is not a schema statement kitwork migrate writes", text))
 	}
+	if err == nil && len(plan.history) > 0 {
+		return nil, pgwire.NewError("0A000", "kitwork migrate sets no table's history: set it through the port, ALTER TABLE … SET (history = on)")
+	}
 	return plan.statements, err
 }
 
@@ -597,10 +660,27 @@ func (c *schemaCursor) createTable() (schemaPlan, error) {
 	if err != nil {
 		return schemaPlan{}, err
 	}
-	if !c.done() {
-		return schemaPlan{}, pgwire.NewError("0A000", fmt.Sprintf("table options after the columns (%s) are not supported", c.peek().text))
-	}
 	plan := schemaPlan{schema: schema}
+	if c.keyword("WITH") {
+		options, err := c.group()
+		if err != nil {
+			return schemaPlan{}, err
+		}
+		on, err := historyOption(options, false)
+		if err != nil {
+			return schemaPlan{}, err
+		}
+		if bookkeepingTable(table) {
+			return schemaPlan{}, ownTableError(table)
+		}
+		// IF NOT EXISTS of a table the file has makes nothing, and sets nothing of it
+		if !ifNotExists || !c.hasTable(schema, table) {
+			plan.history = []historySetting{{table: table, on: on}}
+		}
+	}
+	if !c.done() {
+		return schemaPlan{}, pgwire.NewError("0A000", fmt.Sprintf("table options after the columns (%s) are not supported: WITH (history = on) is", c.peek().text))
+	}
 	var definitions []string
 	for _, part := range splitTop(inside) {
 		if len(part) == 0 {
@@ -721,7 +801,6 @@ func (c *schemaCursor) alterTable() (schemaPlan, error) {
 	if schema, err = c.known(schema); err != nil {
 		return schemaPlan{}, err
 	}
-	_ = ifExists
 	plan := schemaPlan{schema: schema}
 	prefix := "ALTER TABLE " + quoteIdentifier(table) + " "
 	for _, action := range splitTop(c.tokens[c.position:]) {
@@ -782,6 +861,30 @@ func (c *schemaCursor) alterTable() (schemaPlan, error) {
 			}
 			plan.statements = append(plan.statements, prefix+"RENAME COLUMN "+quoteIdentifier(from)+" TO "+quoteIdentifier(to))
 			plan.kinds = append(plan.kinds, kindChange{table: table, column: from, rename: true, to: to})
+		case a.word() == "SET" && len(action) > 1 && action[1].text == "(", a.word() == "RESET":
+			reset := a.word() == "RESET"
+			a.position++
+			options, err := a.group()
+			if err != nil {
+				return schemaPlan{}, err
+			}
+			on, err := historyOption(options, reset)
+			if err != nil {
+				return schemaPlan{}, err
+			}
+			if !a.done() {
+				return schemaPlan{}, syntaxError(fmt.Sprintf("unexpected %q in ALTER TABLE", a.peek().text))
+			}
+			if bookkeepingTable(table) {
+				return schemaPlan{}, ownTableError(table)
+			}
+			if c.session != nil && !c.hasTable(schema, table) {
+				if ifExists {
+					continue
+				}
+				return schemaPlan{}, pgwire.NewError("42P01", fmt.Sprintf("relation %q does not exist", table))
+			}
+			plan.history = append(plan.history, historySetting{table: table, on: on})
 		case a.keyword("ALTER"):
 			a.keyword("COLUMN")
 			name, err := a.name()
@@ -811,6 +914,11 @@ func (c *schemaCursor) alterTable() (schemaPlan, error) {
 		}
 		if !a.done() {
 			return schemaPlan{}, syntaxError(fmt.Sprintf("unexpected %q in ALTER TABLE", a.peek().text))
+		}
+	}
+	for index := range plan.history { // set after the statements, so of the table's new name
+		if plan.renameTo != "" && strings.EqualFold(plan.history[index].table, plan.renameFrom) {
+			plan.history[index].table = plan.renameTo
 		}
 	}
 	return plan, nil
@@ -1022,6 +1130,11 @@ func (c *schemaCursor) rescale(schema, table, column string, kind columnKind) (R
 
 // hasColumn reports whether table of schema has column, as the session's catalog last read it; false without a
 // session (a structure file read, structure.go).
+// hasTable reports a table the session's schema has; none without a session.
+func (c *schemaCursor) hasTable(schema, table string) bool {
+	return c.session != nil && c.session.tables[strings.ToLower(schema)][strings.ToLower(table)] != nil
+}
+
 func (c *schemaCursor) hasColumn(schema, table, column string) bool {
 	if c.session == nil {
 		return false
@@ -1064,7 +1177,7 @@ func (session *Session) changeSchema(ctx context.Context, parsed statement) (pgw
 	if tag == "CREATE UNIQUE" {
 		tag = "CREATE INDEX"
 	}
-	if len(plan.statements) == 0 && len(plan.kinds) == 0 {
+	if len(plan.statements) == 0 && len(plan.kinds) == 0 && len(plan.history) == 0 {
 		return pgwire.Result{CommandTag: tag}, nil // IF [NOT] EXISTS found nothing to do
 	}
 	writer, err := session.writerOf(plan.schema)
@@ -1082,8 +1195,10 @@ func (session *Session) changeSchema(ctx context.Context, parsed statement) (pgw
 		}
 		statements = append(prefix, statements...)
 	}
-	if _, err := writer.Migrate(ctx, session.by(), statements...); err != nil {
-		return pgwire.Result{}, writeError(err)
+	if len(statements) > 0 {
+		if _, err := writer.Migrate(ctx, session.by(), statements...); err != nil {
+			return pgwire.Result{}, writeError(err)
+		}
 	}
 	if len(statements) != len(plan.statements) {
 		if _, err := writer.Write(ctx, session.by(), func(transaction *kitdbsqlite.Transaction) error {
@@ -1097,15 +1212,40 @@ func (session *Session) changeSchema(ctx context.Context, parsed statement) (pgw
 			return pgwire.Result{}, fmt.Errorf("gateway: the schema changed, its column kinds were not written: %w", writeError(err))
 		}
 	}
+	for _, setting := range plan.history {
+		if _, err := writer.SetHistory(ctx, session.by(), setting.table, setting.on); err != nil {
+			if len(statements) > 0 {
+				return pgwire.Result{}, fmt.Errorf("gateway: the schema changed, the history of %s was not set: %w", setting.table, writeError(err))
+			}
+			return pgwire.Result{}, writeError(err)
+		}
+	}
 	session.kindsChanged = true
 	return pgwire.Result{CommandTag: tag}, nil
 }
 
-// writeKinds writes what plan changed of kitwork_columns, and of kitwork_columnar when the file has it.
+// writeKinds writes what plan changed of kitwork_columns, and of kitwork_columnar when the file has it; a table
+// dropped or renamed takes its history setting of kitwork_tables with it.
 func writeKinds(transaction *kitdbsqlite.Transaction, plan schemaPlan) error {
 	copies, err := hasColumnar(transaction)
 	if err != nil {
 		return err
+	}
+	settings, err := holdsTable(transaction, "kitwork_tables")
+	if err != nil {
+		return err
+	}
+	if settings {
+		for _, table := range plan.dropTable {
+			if _, err := transaction.Exec(`DELETE FROM kitwork_tables WHERE table_name = ? COLLATE NOCASE`, table); err != nil {
+				return err
+			}
+		}
+		if plan.renameFrom != "" {
+			if _, err := transaction.Exec(`UPDATE OR REPLACE kitwork_tables SET table_name = ? WHERE table_name = ? COLLATE NOCASE`, plan.renameTo, plan.renameFrom); err != nil {
+				return err
+			}
+		}
 	}
 	exec := func(columns, columnar string, arguments ...any) error {
 		if _, err := transaction.Exec(columns, arguments...); err != nil {
@@ -1225,7 +1365,12 @@ func writeColumnar(transaction *kitdbsqlite.Transaction, change kindChange) erro
 
 // hasColumnar reports a file that has kitwork_columnar: made the first time a columns copy is declared in it.
 func hasColumnar(transaction *kitdbsqlite.Transaction) (bool, error) {
-	rows, err := transaction.Query(`SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = 'kitwork_columnar'`)
+	return holdsTable(transaction, "kitwork_columnar")
+}
+
+// holdsTable reports a file that has the table named.
+func holdsTable(transaction *kitdbsqlite.Transaction, name string) (bool, error) {
+	rows, err := transaction.Query(`SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = ?`, name)
 	if err != nil {
 		return false, err
 	}

@@ -384,7 +384,8 @@ func TestCheckAppDatabasesReadsOnly(t *testing.T) {
 // kitwork migrate writes in PostgreSQL's words (KITWORK_DATABASE.md "Database là gốc", slice 4): its plan shows the
 // statements an admin would send through the port, they run through the port's translator, so the tables it makes are
 // STRICT and the structure file says them as PostgreSQL does (kitid, numeric, date, timestamptz, json), with KitDB's
-// domain before them. The app reads and writes them as before. A column added is an ALTER TABLE, which a statement
+// domain before them, each table's history on as the engine keeps every table's (KITWORK_KITDB.md câu 13.11). The app
+// reads and writes them as before. A column added is an ALTER TABLE, which a statement
 // that meets the file before kitwork migrate names, to run through the port.
 //
 // CONTROL (05/11/2026): with written() never taking the PostgreSQL statement, "kitwork migrate's statements: ["--
@@ -416,7 +417,7 @@ func TestMigrateWritesPostgreSQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"CREATE DOMAIN kitid AS text;", "CREATE TABLE orders (\n  id kitid PRIMARY KEY NOT NULL,", "  day date NOT NULL,",
-		"  \"createdAt\" timestamptz NOT NULL\n);", "CREATE INDEX idx_orders_day ON orders (day);"} {
+		"  \"createdAt\" timestamptz NOT NULL\n) WITH (history = on);", "CREATE INDEX idx_orders_day ON orders (day);"} {
 		if !strings.Contains(string(structure), want) {
 			t.Fatalf("kitwork.db.sql:\n%s\nholds no %q", structure, want)
 		}

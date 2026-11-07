@@ -47,11 +47,12 @@ type Writers interface {
 	Open(path string) (Writer, error)
 }
 
-// Writer is one file's writer while the session holds it: kitdb/sqlite.Database's Write, and Migrate for a schema
-// statement (schema.go).
+// Writer is one file's writer while the session holds it: kitdb/sqlite.Database's Write, and Migrate and SetHistory
+// for a schema statement (schema.go).
 type Writer interface {
 	Write(ctx context.Context, by string, request func(*kitdbsqlite.Transaction) error) (uint64, error)
 	Migrate(ctx context.Context, by string, statements ...string) (uint64, error)
+	SetHistory(ctx context.Context, by, table string, on bool) (uint64, error)
 	Close() error
 }
 
@@ -944,7 +945,7 @@ func writeError(err error) error {
 		return err
 	}
 	switch {
-	case errors.Is(err, kitdbsqlite.ErrStatementRefused):
+	case errors.Is(err, kitdbsqlite.ErrStatementRefused), errors.Is(err, kitdbsqlite.ErrUnsupportedSchema):
 		return pgwire.NewError("0A000", cleanMessage(err.Error()))
 	case errors.Is(err, kitdbsqlite.ErrClosed):
 		return pgwire.NewError("55000", "the database's writer is closed")

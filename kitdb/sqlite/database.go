@@ -256,7 +256,10 @@ func (database *Database) Write(ctx context.Context, by string, request func(*Tr
 // SetHistory turns the history of table on or off (kitwork_tables, KITWORK_KITDB.md câu 13.11 (a)) in a commit of
 // its own: from the next commit the writer records the table's changes, after a Tracked change, or no longer records
 // them unless an index is built from the table. A table the file does not have is refused, and so is turning on the
-// history of one it cannot record (WITHOUT ROWID, generated columns), which a table without history may be.
+// history of one it cannot record (WITHOUT ROWID, generated columns), which a table without history may be. A file
+// without kitwork_tables gets it first; when its history has commits (a file written before, open with
+// Options.HistoryOfEveryTable) every table it has is written with its history on, as recorded all along, so setting
+// one table's history leaves the others' as they were.
 func (database *Database) SetHistory(ctx context.Context, by, table string, on bool) (uint64, error) {
 	if err := database.ensureOpen(); err != nil {
 		return 0, err
@@ -265,34 +268,50 @@ func (database *Database) SetHistory(ctx context.Context, by, table string, on b
 	if err := database.readers.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = 'kitwork_tables'`).Scan(&held); err != nil {
 		return 0, err
 	}
+	adopting := held == 0 && database.Revision() > 0
 	if held == 0 {
-		if _, err := database.Migrate(ctx, by, tablesSchema); err != nil {
+		if _, err := database.Migrate(ctx, by, TablesSchema); err != nil {
 			return 0, err
 		}
+	}
+	return database.Write(ctx, by, func(transaction *Transaction) error {
+		if adopting {
+			for name := range transaction.writer.shapes {
+				if bookkeeping(strings.ToLower(name)) {
+					continue
+				}
+				if _, err := transaction.Exec(`INSERT INTO kitwork_tables (table_name, history, recorded) VALUES (?, 1, 1) ON CONFLICT DO NOTHING`, name); err != nil {
+					return err
+				}
+			}
+		}
+		return transaction.SetHistory(table, on)
+	})
+}
+
+// SetHistory writes in the transaction the history setting of table (kitwork_tables), as Database.SetHistory does
+// in a commit of its own: kitdb/gateway sets a table's history with the statement that makes it, or with the file
+// made from a structure file. The file must have kitwork_tables (TablesSchema).
+func (transaction *Transaction) SetHistory(table string, on bool) error {
+	rows, err := transaction.Query(`SELECT name FROM sqlite_schema WHERE type = 'table' AND name = ? COLLATE NOCASE`, table)
+	if err != nil {
+		return err
+	}
+	var name string
+	found := rows.Next() && rows.Scan(&name) == nil
+	rows.Close()
+	if !found || bookkeeping(strings.ToLower(name)) {
+		return fmt.Errorf("kitdb: the file has no table %q whose history can be set", table)
 	}
 	setting := 0
 	if on {
 		setting = 1
+		if reason := transaction.writer.shapes[name].reason; reason != "" {
+			return fmt.Errorf("%w: table %q: %s", ErrUnsupportedSchema, name, reason)
+		}
 	}
-	return database.Write(ctx, by, func(transaction *Transaction) error {
-		rows, err := transaction.Query(`SELECT name FROM sqlite_schema WHERE type = 'table' AND name = ? COLLATE NOCASE`, table)
-		if err != nil {
-			return err
-		}
-		var name string
-		found := rows.Next() && rows.Scan(&name) == nil
-		rows.Close()
-		if !found || bookkeeping(strings.ToLower(name)) {
-			return fmt.Errorf("kitdb: the file has no table %q whose history can be set", table)
-		}
-		if on {
-			if reason := transaction.writer.shapes[name].reason; reason != "" {
-				return fmt.Errorf("%w: table %q: %s", ErrUnsupportedSchema, name, reason)
-			}
-		}
-		_, err = transaction.Exec(`INSERT INTO kitwork_tables (table_name, history) VALUES (?, ?) ON CONFLICT (table_name) DO UPDATE SET history = excluded.history`, name, setting)
-		return err
-	})
+	_, err = transaction.Exec(`INSERT INTO kitwork_tables (table_name, history) VALUES (?, ?) ON CONFLICT (table_name) DO UPDATE SET history = excluded.history`, name, setting)
+	return err
 }
 
 // Migrate runs schema statements (CREATE, ALTER, DROP, ANALYZE, REINDEX) as one

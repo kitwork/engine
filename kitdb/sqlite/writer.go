@@ -356,11 +356,12 @@ func (w *writer) writeStructure() {
 	}
 }
 
-// touchesColumnKinds reports a change of kitwork_columns or kitwork_columnar among the events: the kinds and the
-// columns copies the structure writes.
+// touchesColumnKinds reports a change of kitwork_columns, kitwork_columnar or kitwork_tables among the events: the
+// kinds, the columns copies and the history settings the structure writes.
 func touchesColumnKinds(events []event) bool {
 	for _, change := range events {
-		if strings.EqualFold(change.table, "kitwork_columns") || strings.EqualFold(change.table, "kitwork_columnar") {
+		if strings.EqualFold(change.table, "kitwork_columns") || strings.EqualFold(change.table, "kitwork_columnar") ||
+			strings.EqualFold(change.table, "kitwork_tables") {
 			return true
 		}
 	}
@@ -876,10 +877,12 @@ func (transaction *Transaction) Query(query string, arguments ...any) (*sql.Rows
 	return transaction.writer.conn.QueryContext(transaction.ctx, query, arguments...)
 }
 
-// tablesSchema is kitwork_tables (KITWORK_KITDB.md câu 13.11): a table's history setting (history: on when 1) and
+// TablesSchema is kitwork_tables (KITWORK_KITDB.md câu 13.11): a table's history setting (history: on when 1) and
 // whether the writer recorded its changes as of the last commit (recorded), which tells a table whose recording starts
-// again. A file whose history follows no table but the engine's own has none.
-const tablesSchema = `CREATE TABLE IF NOT EXISTS kitwork_tables (table_name TEXT PRIMARY KEY, history INTEGER NOT NULL DEFAULT 0, recorded INTEGER NOT NULL DEFAULT 0) STRICT`
+// again. A file without it, whose history has commits, was written before the table and keeps the history of every
+// table it has; one made from a structure file always has it (kitdb/gateway's LoadStructure), so its tables have the
+// history the structure says.
+const TablesSchema = `CREATE TABLE IF NOT EXISTS kitwork_tables (table_name TEXT PRIMARY KEY, history INTEGER NOT NULL DEFAULT 0, recorded INTEGER NOT NULL DEFAULT 0) STRICT`
 
 // records reports a table whose changes the history records: every table with Options.HistoryOfEveryTable; else the
 // engine's own (kitwork_*, _kitwork_*: the kinds of columns, the copies declared, the history settings), SQLite's
@@ -992,7 +995,7 @@ func (w *writer) adopt(ctx context.Context) error {
 	}
 	err = w.exec("BEGIN IMMEDIATE")
 	if err == nil {
-		err = w.exec(tablesSchema)
+		err = w.exec(TablesSchema)
 	}
 	for name := range w.shapes {
 		if err != nil || w.revision == 0 {
@@ -1058,7 +1061,7 @@ func (w *writer) follow(ctx context.Context) error {
 	slices.Sort(started)
 	err = w.exec("BEGIN IMMEDIATE")
 	if err == nil {
-		err = w.exec(tablesSchema)
+		err = w.exec(TablesSchema)
 	}
 	var changes []Change
 	for _, name := range started {

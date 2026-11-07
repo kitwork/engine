@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -74,6 +75,10 @@ func Structure(ctx context.Context, source structureQuerier) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	history, every, err := structureHistory(ctx, source)
+	if err != nil {
+		return "", err
+	}
 	var out strings.Builder
 	tables := 0
 	for _, current := range objects {
@@ -82,6 +87,9 @@ func Structure(ctx context.Context, source structureQuerier) (string, error) {
 		case "table":
 			tables++
 			text, native = renderTable(current.text, kinds[strings.ToLower(current.name)])
+			if native == "" && (every || history[strings.ToLower(current.name)]) {
+				text += " WITH (history = on)"
+			}
 		case "index":
 			text, native = renderIndex(current.text, kinds[strings.ToLower(current.table)])
 		case "view":
@@ -110,6 +118,10 @@ func Structure(ctx context.Context, source structureQuerier) (string, error) {
 				out.WriteString("-- KitDB: the kinds its PostgreSQL types do not say\n" + kindRows(current.name, unsaid) + ";\n")
 			}
 		}
+		if native != "" && (every || history[strings.ToLower(current.name)]) {
+			// a table written as SQLite writes it has no WITH of PostgreSQL's
+			out.WriteString("ALTER TABLE " + writtenName(current.name) + " SET (history = on);\n")
+		}
 		order, err := columnOrder(ctx, source, current.name)
 		if err != nil {
 			return "", err
@@ -129,6 +141,41 @@ func Structure(ctx context.Context, source structureQuerier) (string, error) {
 		body = "\n" + kitidDomain + ";\n" + body
 	}
 	return StructureHeader + body, nil
+}
+
+// structureHistory is the tables whose history is on, by name in lower case: those of kitwork_tables when the file
+// has it; every table (every) when it has none, a file written before it, whose history keeps every table's
+// (kitdb/sqlite's TablesSchema).
+func structureHistory(ctx context.Context, source structureQuerier) (map[string]bool, bool, error) {
+	rows, err := source.QueryContext(ctx, `SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = 'kitwork_tables'`)
+	if err != nil {
+		return nil, false, err
+	}
+	held := 0
+	if rows.Next() {
+		err = rows.Scan(&held)
+	}
+	rows.Close()
+	if err != nil {
+		return nil, false, err
+	}
+	if held == 0 {
+		return nil, true, nil
+	}
+	rows, err = source.QueryContext(ctx, `SELECT table_name FROM kitwork_tables WHERE history = 1`)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+	on := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, false, err
+		}
+		on[strings.ToLower(name)] = true
+	}
+	return on, false, rows.Err()
 }
 
 // kindRows is the INSERT of table's kinds into kitwork_columns, by column name.
@@ -575,24 +622,26 @@ type StructureFileWriter interface {
 	Migrate(ctx context.Context, by string, statements ...string) (uint64, error)
 }
 
-// LoadStructure makes the tables and indexes of a structure file in the file writer writes (a new, empty one), and
-// the kinds of their columns: the statements in one commit, the kinds in the next.
+// LoadStructure makes the tables and indexes of a structure file in the file writer writes (a new, empty one), the
+// kinds of their columns and the history of each: the statements in one commit, the kinds and the history in the next.
+// The file always gets kitwork_tables, so a table the structure says no history of has none, as in the file it was
+// written from.
 func LoadStructure(ctx context.Context, writer StructureFileWriter, by, text string) error {
-	statements, kinds, rows, err := structureStatements(text)
+	statements, kinds, rows, history, err := structureStatements(text)
 	if err != nil {
 		return err
 	}
 	if len(statements) == 0 {
 		return nil
 	}
-	prefix := []string{columnsTable}
+	prefix := []string{columnsTable, kitdbsqlite.TablesSchema}
 	if (schemaPlan{kinds: kinds}).touchesColumnar() {
 		prefix = append(prefix, columnarTable)
 	}
 	if _, err := writer.Migrate(ctx, by, append(prefix, statements...)...); err != nil {
 		return err
 	}
-	if len(kinds) == 0 && len(rows) == 0 {
+	if len(kinds) == 0 && len(rows) == 0 && len(history) == 0 {
 		return nil
 	}
 	_, err = writer.Write(ctx, by, func(transaction *kitdbsqlite.Transaction) error {
@@ -620,6 +669,11 @@ func LoadStructure(ctx context.Context, writer StructureFileWriter, by, text str
 				return err
 			}
 		}
+		for _, setting := range history {
+			if err := transaction.SetHistory(setting.table, setting.on); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 	return err
@@ -636,15 +690,17 @@ func markedBy(gap, marker string) bool {
 }
 
 // structureStatements reads a structure file: each schema statement as the writer runs it (PostgreSQL's translated,
-// one after "-- SQLite:" as it is), the kinds of the columns its tables make, and the rows of kitwork_columns written
-// after "-- KitDB:".
-func structureStatements(text string) ([]string, []kindChange, []string, error) {
+// one after "-- SQLite:" as it is), the kinds of the columns its tables make, the rows of kitwork_columns written
+// after "-- KitDB:", and the history of each table (WITH (history = on); ALTER TABLE … SET (history = on) after a
+// table written as SQLite writes it).
+func structureStatements(text string) ([]string, []kindChange, []string, []historySetting, error) {
 	tokens, err := scan(text)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	var statements, rows []string
 	var kinds []kindChange
+	var history []historySetting
 	previousEnd, start := 0, 0
 	for index := 0; index <= len(tokens); index++ {
 		if index < len(tokens) && tokens[index].kind != tokenSemicolon {
@@ -666,7 +722,7 @@ func structureStatements(text string) ([]string, []kindChange, []string, error) 
 		}
 		if markedBy(gap, "-- KitDB:") {
 			if len(part) < 3 || part[0].word() != "INSERT" || part[1].word() != "INTO" || !strings.EqualFold(identifierText(part[2]), "kitwork_columns") {
-				return nil, nil, nil, fmt.Errorf("gateway: after %q a structure file has the rows of kitwork_columns only", "-- KitDB:")
+				return nil, nil, nil, nil, fmt.Errorf("gateway: after %q a structure file has the rows of kitwork_columns only", "-- KitDB:")
 			}
 			rows = append(rows, text[part[0].start:part[len(part)-1].end])
 			continue
@@ -682,14 +738,20 @@ func structureStatements(text string) ([]string, []kindChange, []string, error) 
 			plan, err = c.createIndex(true)
 		case c.keyword("CREATE", "INDEX"):
 			plan, err = c.createIndex(false)
+		case c.keyword("ALTER", "TABLE"):
+			plan, err = c.alterTable()
+			if err == nil && (len(plan.statements) > 0 || len(plan.kinds) > 0 || len(plan.history) == 0) {
+				err = errors.New("a structure file alters a table only to set its history, ALTER TABLE … SET (history = on)")
+			}
 		default:
-			return nil, nil, nil, fmt.Errorf("gateway: a structure file makes tables and indexes: %q is neither", renderTokens(part[:min(3, len(part))]))
+			return nil, nil, nil, nil, fmt.Errorf("gateway: a structure file makes tables and indexes: %q is neither", renderTokens(part[:min(3, len(part))]))
 		}
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("gateway: the structure file's %s: %w", renderTokens(part[:min(3, len(part))]), err)
+			return nil, nil, nil, nil, fmt.Errorf("gateway: the structure file's %s: %w", renderTokens(part[:min(3, len(part))]), err)
 		}
 		statements = append(statements, plan.statements...)
 		kinds = append(kinds, plan.kinds...)
+		history = append(history, plan.history...)
 	}
-	return statements, kinds, rows, nil
+	return statements, kinds, rows, history, nil
 }
