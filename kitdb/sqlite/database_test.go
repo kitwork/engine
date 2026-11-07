@@ -20,7 +20,7 @@ import (
 
 func openTestDatabase(t *testing.T, path string) *Database {
 	t.Helper()
-	database, err := Open(context.Background(), path, Options{})
+	database, err := Open(context.Background(), path, Options{HistoryOfEveryTable: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -397,7 +397,7 @@ func TestVerifyAndRestoreDetectTamperedHistory(t *testing.T) {
 		`UPDATE kitwork_history SET at = at - 1000000000000 WHERE rev = 4`,
 	} {
 		path := filepath.Join(t.TempDir(), "kitwork.db")
-		database, err := Open(ctx, path, Options{})
+		database, err := Open(ctx, path, Options{HistoryOfEveryTable: true})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -465,7 +465,7 @@ func TestUnsupportedSchemaIsRefused(t *testing.T) {
 		}
 	}
 	raw.Close()
-	if _, err := Open(ctx, path, Options{}); !errors.Is(err, ErrUnsupportedSchema) {
+	if _, err := Open(ctx, path, Options{HistoryOfEveryTable: true}); !errors.Is(err, ErrUnsupportedSchema) {
 		t.Fatalf("a file with a trigger opened: %v", err)
 	}
 }
@@ -473,7 +473,7 @@ func TestUnsupportedSchemaIsRefused(t *testing.T) {
 func TestSecondOpenIsLocked(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kitwork.db")
 	openTestDatabase(t, path)
-	if _, err := Open(context.Background(), path, Options{}); !errors.Is(err, ErrLocked) {
+	if _, err := Open(context.Background(), path, Options{HistoryOfEveryTable: true}); !errors.Is(err, ErrLocked) {
 		t.Fatalf("second open: %v", err)
 	}
 }
@@ -516,7 +516,7 @@ func TestCrashChild(t *testing.T) {
 	if path == "" {
 		t.Skip("runs as the child of TestKilledWriterKeepsHistoryConsistent")
 	}
-	database, err := Open(context.Background(), path, Options{})
+	database, err := Open(context.Background(), path, Options{HistoryOfEveryTable: true})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(3)
@@ -542,7 +542,7 @@ func TestKilledWriterKeepsHistoryConsistent(t *testing.T) {
 	}
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kitwork.db")
-	database, err := Open(ctx, path, Options{})
+	database, err := Open(ctx, path, Options{HistoryOfEveryTable: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -575,7 +575,7 @@ func TestKilledWriterKeepsHistoryConsistent(t *testing.T) {
 		}
 		_ = child.Wait()
 
-		database, err := Open(ctx, path, Options{})
+		database, err := Open(ctx, path, Options{HistoryOfEveryTable: true})
 		if err != nil {
 			t.Fatalf("round %d: reopen after kill: %v", round, err)
 		}

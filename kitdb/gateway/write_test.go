@@ -35,7 +35,7 @@ func newWriteFixture(t *testing.T) *writeFixture {
 		t.Fatal(err)
 	}
 	open := func(path string, statements ...string) *kitdbsqlite.Database {
-		database, err := kitdbsqlite.Open(ctx, path, kitdbsqlite.Options{})
+		database, err := kitdbsqlite.Open(ctx, path, kitdbsqlite.Options{HistoryOfEveryTable: true})
 		if err != nil {
 			t.Fatal(err)
 		}

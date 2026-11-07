@@ -35,7 +35,7 @@ func cmdAt(directory string) {
 	checkpointFile(work)
 	_, _, rowCount := fileGeometry(work)
 	start := time.Now()
-	database, err := kitdb.Open(ctx, work, kitdb.Options{}) // a file without an anchor gets one as it opens
+	database, err := kitdb.Open(ctx, work, kitdb.Options{HistoryOfEveryTable: true}) // a file without an anchor gets one as it opens
 	must(err)
 	defer database.Close()
 	base := database.Revision()

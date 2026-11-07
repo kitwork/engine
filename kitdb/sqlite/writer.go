@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	goruntime "runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -85,6 +86,13 @@ type writer struct {
 	// whole is, by table, the columns an update keeps whole in format 3 when one of them changes: the searchable
 	// columns of Options.Search, whose index is built from the history's values.
 	whole map[string]map[string]bool
+
+	// every is Options.HistoryOfEveryTable. tracked are the tables (lower case) whose changes the history records
+	// besides the engine's own (records); followDue says a commit changed what decides them (the schema, kitwork_tables,
+	// kitwork_columnar, kitwork_columns) and follow has not run since.
+	every     bool
+	tracked   map[string]bool
+	followDue bool
 }
 
 func openWriter(ctx context.Context, name string, options Options, anchor func(context.Context) (uint64, error)) (*writer, error) {
@@ -103,7 +111,7 @@ func openWriter(ctx context.Context, name string, options Options, anchor func(c
 	w := &writer{
 		pool: pool, conn: conn, queue: make(chan writerRequest, options.Queue),
 		finished: make(chan struct{}), maximumBatch: options.MaximumBatch, anchor: anchor,
-		whole: map[string]map[string]bool{}, structure: options.Structure,
+		whole: map[string]map[string]bool{}, structure: options.Structure, every: options.HistoryOfEveryTable,
 	}
 	for _, table := range options.Search {
 		if w.whole[table.Table] == nil {
@@ -138,6 +146,12 @@ func openWriter(ctx context.Context, name string, options Options, anchor func(c
 		return fail(err)
 	}
 	if err := w.resync(ctx); err != nil {
+		return fail(err)
+	}
+	if err := w.adopt(ctx); err != nil {
+		return fail(err)
+	}
+	if err := w.follow(ctx); err != nil {
 		return fail(err)
 	}
 	go w.run()
@@ -220,7 +234,7 @@ func (w *writer) resync(ctx context.Context) error {
 }
 
 func (w *writer) hook(data modernc.SQLitePreUpdateData) {
-	if data.DatabaseName != "main" || data.TableName == historyTable || w.hookErr != nil {
+	if data.DatabaseName != "main" || data.TableName == historyTable || w.hookErr != nil || !w.records(data.TableName) {
 		return
 	}
 	if shape, known := w.shapes[data.TableName]; known && shape.reason != "" {
@@ -359,6 +373,12 @@ func (w *writer) exec(query string, arguments ...any) error {
 }
 
 func (w *writer) commitBatch(batch []writerRequest) {
+	if err := w.followFirst(); err != nil {
+		for _, request := range batch {
+			request.done <- writerOutcome{err: err}
+		}
+		return
+	}
 	outcomes := make([]writerOutcome, len(batch))
 	w.events, w.broken = w.events[:0], nil
 	err := w.exec("BEGIN IMMEDIATE")
@@ -397,8 +417,12 @@ func (w *writer) commitBatch(batch []writerRequest) {
 		changes, err = w.netChanges(context.Background(), nil)
 	}
 	kinds := touchesColumnKinds(w.events)
+	followed := touchesFollowed(w.events)
 	revision, err := w.finish(changes, err)
 	w.structureDue = w.structureDue || err == nil && kinds
+	if err == nil && followed {
+		w.refollow()
+	}
 	w.writeStructure()
 	for position, request := range batch {
 		switch {
@@ -413,6 +437,10 @@ func (w *writer) commitBatch(batch []writerRequest) {
 }
 
 func (w *writer) commitSchema(request writerRequest) {
+	if err := w.followFirst(); err != nil {
+		request.done <- writerOutcome{err: err}
+		return
+	}
 	w.events, w.broken, w.by, w.hookErr = w.events[:0], nil, request.by, nil
 	previous := w.shapes
 	err := request.ctx.Err()
@@ -433,7 +461,7 @@ func (w *writer) commitSchema(request writerRequest) {
 	}
 	if err == nil {
 		for name, shape := range w.shapes {
-			if old, existed := previous[name]; shape.reason != "" && (!existed || old.reason == "") {
+			if old, existed := previous[name]; shape.reason != "" && w.records(name) && (!existed || old.reason == "") {
 				err = fmt.Errorf("%w: table %q: %s", ErrUnsupportedSchema, name, shape.reason)
 				break
 			}
@@ -455,6 +483,8 @@ func (w *writer) commitSchema(request writerRequest) {
 	revision, err := w.finish(changes, err)
 	if err != nil {
 		_ = w.loadShapes(context.Background())
+	} else {
+		w.refollow() // a table made or dropped, kitwork_columnar made
 	}
 	w.structureDue = w.structureDue || err == nil
 	w.writeStructure()
@@ -469,6 +499,11 @@ func (w *writer) commitSchema(request writerRequest) {
 // starts from that anchor and replay never crosses the change. Work that
 // changed nothing else commits nothing.
 func (w *writer) commitMaintain(request writerRequest) {
+	if err := w.followFirst(); err != nil {
+		request.done <- writerOutcome{err: err}
+		return
+	}
+	defer w.refollow() // its work may have changed the schema or the engine's tables
 	ctx := context.Background()
 	before, err := w.schemaVersion(ctx)
 	if err == nil {
@@ -839,4 +874,228 @@ func (transaction *Transaction) Query(query string, arguments ...any) (*sql.Rows
 		return nil, fmt.Errorf("%w: use Exec to change rows", ErrStatementRefused)
 	}
 	return transaction.writer.conn.QueryContext(transaction.ctx, query, arguments...)
+}
+
+// tablesSchema is kitwork_tables (KITWORK_KITDB.md câu 13.11): a table's history setting (history: on when 1) and
+// whether the writer recorded its changes as of the last commit (recorded), which tells a table whose recording starts
+// again. A file whose history follows no table but the engine's own has none.
+const tablesSchema = `CREATE TABLE IF NOT EXISTS kitwork_tables (table_name TEXT PRIMARY KEY, history INTEGER NOT NULL DEFAULT 0, recorded INTEGER NOT NULL DEFAULT 0) STRICT`
+
+// records reports a table whose changes the history records: every table with Options.HistoryOfEveryTable; else the
+// engine's own (kitwork_*, _kitwork_*: the kinds of columns, the copies declared, the history settings), SQLite's
+// own while some table is followed (a sequence or a statistic replay needs), and the tables followed.
+func (w *writer) records(table string) bool {
+	if w.every {
+		return true
+	}
+	name := strings.ToLower(table)
+	switch {
+	case strings.HasPrefix(name, "kitwork_"), strings.HasPrefix(name, "_kitwork_"):
+		return true
+	case strings.HasPrefix(name, "sqlite_"):
+		return len(w.tracked) > 0
+	}
+	return w.tracked[name]
+}
+
+// touchesFollowed reports a change of what decides the tables followed among the events: kitwork_tables,
+// kitwork_columnar, kitwork_columns (a search_weight).
+func touchesFollowed(events []event) bool {
+	for _, change := range events {
+		switch strings.ToLower(change.table) {
+		case "kitwork_tables", "kitwork_columnar", "kitwork_columns":
+			return true
+		}
+	}
+	return false
+}
+
+// hasTable reports a table of the file's main schema, read on the writer's connection.
+func (w *writer) hasTable(ctx context.Context, name string) (bool, error) {
+	var count int
+	err := w.conn.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = ?`, name).Scan(&count)
+	return count > 0, err
+}
+
+// readNames reads one column of names, lower case, into names.
+func (w *writer) readNames(ctx context.Context, names map[string]bool, query string) error {
+	rows, err := w.conn.QueryContext(ctx, query)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return err
+		}
+		names[strings.ToLower(name)] = true
+	}
+	return rows.Err()
+}
+
+// followed reads the tables the file says the history follows: history on in kitwork_tables, a columns copy declared
+// in kitwork_columnar, a search_weight in kitwork_columns, and the tables of Options.Search (whole); lower case, of
+// the tables the file has.
+func (w *writer) followed(ctx context.Context) (map[string]bool, error) {
+	wanted := map[string]bool{}
+	for table := range w.whole {
+		wanted[strings.ToLower(table)] = true
+	}
+	sources := []struct{ table, query string }{
+		{"kitwork_tables", `SELECT table_name FROM kitwork_tables WHERE history = 1`},
+		{"kitwork_columnar", `SELECT table_name FROM kitwork_columnar`},
+		{"kitwork_columns", `SELECT table_name FROM kitwork_columns WHERE search_weight > 0`},
+	}
+	for _, source := range sources {
+		held, err := w.hasTable(ctx, source.table)
+		if err != nil {
+			return nil, err
+		}
+		if !held {
+			continue
+		}
+		if source.table == "kitwork_columns" {
+			var weights int
+			if err := w.conn.QueryRowContext(ctx, `SELECT count(*) FROM pragma_table_info('kitwork_columns') WHERE name = 'search_weight'`).Scan(&weights); err != nil {
+				return nil, err
+			}
+			if weights == 0 {
+				continue
+			}
+		}
+		if err := w.readNames(ctx, wanted, source.query); err != nil {
+			return nil, err
+		}
+	}
+	tables := map[string]bool{}
+	for name := range w.shapes {
+		if lower := strings.ToLower(name); wanted[lower] && !bookkeeping(lower) {
+			tables[lower] = true
+		}
+	}
+	return tables, nil
+}
+
+// adopt gives a file without kitwork_tables one as it opens, unless Options.HistoryOfEveryTable. A file whose history
+// has commits was written before 07/11/2026, when the history followed every table: each of its tables keeps its
+// history, written on and recorded, with no Tracked change since it was recorded all along. A file whose history has
+// none (new, or never written through KitDB) gets an empty one: its tables have no history until one is set, and the
+// table says the file is of the new kind when it opens again with commits.
+func (w *writer) adopt(ctx context.Context) error {
+	if w.every {
+		return nil
+	}
+	held, err := w.hasTable(ctx, "kitwork_tables")
+	if err != nil || held {
+		return err
+	}
+	err = w.exec("BEGIN IMMEDIATE")
+	if err == nil {
+		err = w.exec(tablesSchema)
+	}
+	for name := range w.shapes {
+		if err != nil || w.revision == 0 {
+			break
+		}
+		if !bookkeeping(strings.ToLower(name)) {
+			err = w.exec(`INSERT INTO kitwork_tables (table_name, history, recorded) VALUES (?, 1, 1) ON CONFLICT DO NOTHING`, name)
+		}
+	}
+	if err == nil {
+		err = w.exec("COMMIT")
+	}
+	w.events = w.events[:0] // the file's own settings, not changes to replay
+	if err != nil {
+		_ = w.exec("ROLLBACK")
+		return err
+	}
+	return w.loadShapes(ctx)
+}
+
+// follow brings the tables the history records to what the file says (followed). A table whose recording starts gets
+// a Tracked change, in a commit of its own written before the next, so an index of it built before goes stale; its
+// recorded mark in kitwork_tables is set, or taken off for a table no longer followed. It runs at open and before the
+// first commit after one that changed what decides it (refollow).
+func (w *writer) follow(ctx context.Context) error {
+	if w.every {
+		w.followDue = false
+		return nil
+	}
+	held, err := w.hasTable(ctx, "kitwork_tables")
+	if err != nil {
+		return err
+	}
+	wanted, err := w.followed(ctx)
+	if err != nil {
+		return err
+	}
+	recorded := map[string]bool{}
+	if held {
+		if err := w.readNames(ctx, recorded, `SELECT table_name FROM kitwork_tables WHERE recorded = 1`); err != nil {
+			return err
+		}
+	}
+	written := map[string]string{} // a table's name as the file writes it, by lower case
+	for name := range w.shapes {
+		written[strings.ToLower(name)] = name
+	}
+	var started, stopped []string
+	for name := range wanted {
+		if !recorded[name] {
+			started = append(started, written[name])
+		}
+	}
+	for name := range recorded {
+		if !wanted[name] {
+			stopped = append(stopped, name)
+		}
+	}
+	if len(started) == 0 && len(stopped) == 0 {
+		w.tracked, w.followDue = wanted, false
+		return nil
+	}
+	slices.Sort(started)
+	err = w.exec("BEGIN IMMEDIATE")
+	if err == nil {
+		err = w.exec(tablesSchema)
+	}
+	var changes []Change
+	for _, name := range started {
+		if err != nil {
+			break
+		}
+		err = w.exec(`INSERT INTO kitwork_tables (table_name, recorded) VALUES (?, 1) ON CONFLICT (table_name) DO UPDATE SET recorded = 1`, name)
+		changes = append(changes, Change{Operation: Tracked, Table: name, Statement: "the history records " + name + " from here"})
+	}
+	for _, name := range stopped {
+		if err != nil {
+			break
+		}
+		err = w.exec(`UPDATE kitwork_tables SET recorded = 0 WHERE lower(table_name) = ?`, name)
+	}
+	w.events = w.events[:0] // kitwork_tables' rows are this commit's own, not changes to replay
+	if _, err = w.finish(changes, err); err != nil {
+		return err
+	}
+	w.tracked, w.followDue = wanted, false
+	return nil
+}
+
+// refollow runs follow after a commit that changed what decides it; when it fails, the next commit runs it first.
+func (w *writer) refollow() {
+	if err := w.follow(context.Background()); err != nil {
+		w.followDue = true
+	}
+}
+
+// followFirst runs follow before a commit when the one after the last change of what decides it failed.
+func (w *writer) followFirst() error {
+	if !w.followDue {
+		return nil
+	}
+	if err := w.follow(context.Background()); err != nil {
+		return fmt.Errorf("kitdb: the tables the history follows were not read: %w", err)
+	}
+	return nil
 }

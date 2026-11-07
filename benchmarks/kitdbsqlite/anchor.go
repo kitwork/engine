@@ -40,7 +40,7 @@ func cmdAnchor(directory string) {
 		gigabytes(int64(pageCount)*int64(pageSize)), rowCount)
 
 	start := time.Now()
-	database, err := kitdb.Open(ctx, work, kitdb.Options{}) // a file without an anchor gets one as it opens: a base
+	database, err := kitdb.Open(ctx, work, kitdb.Options{HistoryOfEveryTable: true}) // a file without an anchor gets one as it opens: a base
 	must(err)
 	fmt.Printf("the first anchor, a base (Open): %s, %s; pages.hashes %s\n\n", duration(time.Since(start)),
 		gigabytes(newestSize(history, ".base")), gigabytes(fileSize(filepath.Join(history, "pages.hashes"))))

@@ -688,7 +688,8 @@ func (table *Table) changedRows(ctx context.Context, connection *sql.Conn, revis
 		next++
 		for _, change := range commit.Changes {
 			switch change.Operation {
-			case kitdbsqlite.Barrier, kitdbsqlite.Statement:
+			case kitdbsqlite.Barrier, kitdbsqlite.Statement, kitdbsqlite.Tracked:
+				// the schema moved, or a table's recording starts (its rows changed with no trace before)
 				rebuild = true
 				return errEnough
 			}

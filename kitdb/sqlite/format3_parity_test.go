@@ -33,7 +33,10 @@ import (
 func TestFormatThreeMatchesTheRowsAtEveryRevision(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kitwork.db")
-	database := openSearchDatabase(t, path, 8)
+	database, err := Open(ctx, path, Options{Search: []SearchTable{{Table: "products", Columns: searchColumns}}, SearchFold: 8, HistoryOfEveryTable: true})
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() { _ = database.Close() })
 	if _, err := database.Migrate(ctx, "boot", `CREATE TABLE products (id INTEGER PRIMARY KEY, code TEXT UNIQUE,
 		name TEXT, description TEXT, price INTEGER, note TEXT)`); err != nil {

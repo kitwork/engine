@@ -150,7 +150,9 @@ func (t *Table) advance(ctx context.Context, source Querier, schema string, base
 				return fmt.Errorf("%w: revision %d changed the schema", ErrStale, commit.Revision)
 			case change.Operation == kitdb.Barrier && strings.HasSuffix(change.Statement, " "+table):
 				return fmt.Errorf("%w: revision %d changed rows of %s outside the history", ErrStale, commit.Revision, table)
-			case change.Operation == kitdb.Barrier:
+			case change.Operation == kitdb.Tracked && strings.EqualFold(change.Table, table):
+				return fmt.Errorf("%w: revision %d starts recording %s, whose rows changed with no trace before", ErrStale, commit.Revision, table)
+			case change.Operation == kitdb.Barrier, change.Operation == kitdb.Tracked:
 				// another table's rows, or the schema, which the schema_version says
 			case change.Table == table:
 				touched[change.RowID] = true

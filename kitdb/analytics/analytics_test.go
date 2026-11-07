@@ -26,7 +26,7 @@ func ordersFile(t *testing.T, rows int) (string, *kitdb.Database) {
 	t.Helper()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kitwork.db")
-	database, err := kitdb.Open(ctx, path, kitdb.Options{})
+	database, err := kitdb.Open(ctx, path, kitdb.Options{HistoryOfEveryTable: true})
 	if err != nil {
 		t.Fatal(err)
 	}

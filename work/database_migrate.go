@@ -448,7 +448,7 @@ func readState(path string, tables map[string]map[string]*ColumnSpec, every bool
 	}
 	defer os.RemoveAll(folder)
 	ctx := context.Background()
-	made, err := kitdbsqlite.Open(ctx, filepath.Join(folder, filepath.Base(path)), kitdbsqlite.Options{})
+	made, err := kitdbsqlite.Open(ctx, filepath.Join(folder, filepath.Base(path)), kitdbsqlite.Options{HistoryOfEveryTable: true})
 	if err != nil {
 		return nil, err
 	}

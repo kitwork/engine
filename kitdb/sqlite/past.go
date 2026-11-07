@@ -78,6 +78,12 @@ func PastRelation(ctx context.Context, conn pastConn, table string, revision uin
 			if change.Operation == Statement || change.Operation == Barrier {
 				return fmt.Errorf("%w: revision %d changed the schema", ErrPastUnreachable, commit.Revision)
 			}
+			if change.Operation == Tracked {
+				if strings.EqualFold(change.Table, table) {
+					return fmt.Errorf("%w: the history records %q from revision %d only", ErrPastUnreachable, table, commit.Revision)
+				}
+				continue
+			}
 			if change.Table != table {
 				continue
 			}

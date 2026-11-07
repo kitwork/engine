@@ -46,6 +46,10 @@ const (
 	// Barrier is a commit of Maintain whose work moved the schema: the history did not follow that work, so replay
 	// never crosses it, and a restore after it starts from the anchor written at it. Statement says what moved.
 	Barrier Operation = 5
+	// Tracked marks the commit from which the history records the changes of a table (Table) it did not record just
+	// before (KITWORK_KITDB.md câu 13.11): while it was not followed its rows changed with no trace, so an index of the
+	// table built before is stale and a moment of the table before it is out of reach. Replay has nothing to do.
+	Tracked Operation = 6
 )
 
 // Change is the net effect of one commit on one row: the row as it was before
@@ -160,7 +164,7 @@ func encodeColumns(changes []Change) ([]byte, error) {
 		body = binary.AppendUvarint(body, name(change.Table))
 		body = binary.AppendUvarint(body, name(change.By))
 		switch change.Operation {
-		case Statement, Barrier:
+		case Statement, Barrier, Tracked:
 			body = binary.AppendUvarint(body, uint64(len(change.Statement)))
 			body = append(body, change.Statement...)
 		case Insert:
@@ -397,7 +401,7 @@ func decodeChanges(data []byte) ([]Change, error) {
 				break
 			}
 			change.Statement = string(reader.take(reader.uvarint()))
-		case change.Operation == Statement:
+		case change.Operation == Statement, change.Operation == Tracked:
 			change.Statement = string(reader.take(reader.uvarint()))
 		case format[0] >= columnsFormat && (change.Operation == Insert || change.Operation == Update || change.Operation == Delete):
 			change.RowID = reader.varint()

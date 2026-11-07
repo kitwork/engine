@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/kitwork/engine/search"
@@ -224,6 +225,12 @@ func (s *searchable) searchChanges(changes []Change) ([]search.Change, bool) {
 		if change.Operation == Statement {
 			if shape, err := classifyStatement(change.Statement); err == nil && namesTable(shape.words, s.config.Table) {
 				return nil, false
+			}
+			continue
+		}
+		if change.Operation == Tracked {
+			if strings.EqualFold(change.Table, s.config.Table) {
+				return nil, false // its rows changed with no trace before: rebuilt from the rows
 			}
 			continue
 		}

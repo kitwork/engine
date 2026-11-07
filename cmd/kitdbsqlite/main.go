@@ -97,7 +97,7 @@ func main() {
 	}
 	ctx := context.Background()
 	start := benchclock.Now()
-	database, err := kitdb.Open(ctx, path, kitdb.Options{Search: searchTables})
+	database, err := kitdb.Open(ctx, path, kitdb.Options{Search: searchTables, HistoryOfEveryTable: true})
 	if err != nil {
 		fail(err)
 	}

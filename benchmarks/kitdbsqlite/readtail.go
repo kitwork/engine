@@ -31,7 +31,7 @@ func cmdReadTail(directory string) {
 	path := filepath.Join(directory, "tail.db")
 	_, statErr := os.Stat(path)
 	fresh := statErr != nil
-	database, err := kitdb.Open(ctx, path, kitdb.Options{})
+	database, err := kitdb.Open(ctx, path, kitdb.Options{HistoryOfEveryTable: true})
 	must(err)
 	defer database.Close()
 	const rows = 100_000

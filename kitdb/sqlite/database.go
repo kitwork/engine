@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -57,6 +58,12 @@ var (
 type Options struct {
 	// MaximumBatch caps the requests one SQLite transaction gathers (100).
 	MaximumBatch int
+	// HistoryOfEveryTable records the changes of every table, as KitDB did before 07/11/2026 (the old engine, the
+	// tools). Without it the history records a table whose history is on (kitwork_tables, SetHistory), a table an
+	// index is built from (Options.Search, a columns copy of kitwork_columnar, a search_weight of kitwork_columns) and
+	// the engine's own tables; the rows of any other table change with no trace (KITWORK_KITDB.md câu 13.11). A file
+	// whose history has commits and no kitwork_tables, written before, keeps the history of every table it has.
+	HistoryOfEveryTable bool
 	// Queue bounds the requests waiting for the writer (4096).
 	Queue int
 	// Readers bounds concurrent read connections (8).
@@ -244,6 +251,48 @@ func (database *Database) Write(ctx context.Context, by string, request func(*Tr
 		return 0, fmt.Errorf("kitdb: write needs a context and a request")
 	}
 	return database.writer.submit(ctx, writerRequest{ctx: ctx, by: by, run: request})
+}
+
+// SetHistory turns the history of table on or off (kitwork_tables, KITWORK_KITDB.md câu 13.11 (a)) in a commit of
+// its own: from the next commit the writer records the table's changes, after a Tracked change, or no longer records
+// them unless an index is built from the table. A table the file does not have is refused, and so is turning on the
+// history of one it cannot record (WITHOUT ROWID, generated columns), which a table without history may be.
+func (database *Database) SetHistory(ctx context.Context, by, table string, on bool) (uint64, error) {
+	if err := database.ensureOpen(); err != nil {
+		return 0, err
+	}
+	var held int
+	if err := database.readers.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = 'kitwork_tables'`).Scan(&held); err != nil {
+		return 0, err
+	}
+	if held == 0 {
+		if _, err := database.Migrate(ctx, by, tablesSchema); err != nil {
+			return 0, err
+		}
+	}
+	setting := 0
+	if on {
+		setting = 1
+	}
+	return database.Write(ctx, by, func(transaction *Transaction) error {
+		rows, err := transaction.Query(`SELECT name FROM sqlite_schema WHERE type = 'table' AND name = ? COLLATE NOCASE`, table)
+		if err != nil {
+			return err
+		}
+		var name string
+		found := rows.Next() && rows.Scan(&name) == nil
+		rows.Close()
+		if !found || bookkeeping(strings.ToLower(name)) {
+			return fmt.Errorf("kitdb: the file has no table %q whose history can be set", table)
+		}
+		if on {
+			if reason := transaction.writer.shapes[name].reason; reason != "" {
+				return fmt.Errorf("%w: table %q: %s", ErrUnsupportedSchema, name, reason)
+			}
+		}
+		_, err = transaction.Exec(`INSERT INTO kitwork_tables (table_name, history) VALUES (?, ?) ON CONFLICT (table_name) DO UPDATE SET history = excluded.history`, name, setting)
+		return err
+	})
 }
 
 // Migrate runs schema statements (CREATE, ALTER, DROP, ANALYZE, REINDEX) as one

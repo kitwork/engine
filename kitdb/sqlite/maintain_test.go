@@ -75,7 +75,7 @@ func restoredNotes(t *testing.T, database *Database, moment time.Time) (string, 
 func TestMaintainMarksASchemaChangeAndRestoresAcrossIt(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kitwork.db")
-	database, err := Open(ctx, path, Options{})
+	database, err := Open(ctx, path, Options{HistoryOfEveryTable: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestMaintainMarksASchemaChangeAndRestoresAcrossIt(t *testing.T) {
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if database, err = Open(ctx, path, Options{}); err != nil {
+	if database, err = Open(ctx, path, Options{HistoryOfEveryTable: true}); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := restoredNotes(t, database, time.Now()); err != nil || got != now {

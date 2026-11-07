@@ -119,7 +119,7 @@ func acquireHistory(path string) (*kitdbsqlite.Database, func(), error) {
 			return nil, nil, fmt.Errorf("%s: %w", filepath.Base(absolute), err)
 		}
 		structure, made := readStructureToMake(absolute)
-		database, err := kitdbsqlite.Open(context.Background(), absolute, kitdbsqlite.Options{Structure: structureWriter(absolute)})
+		database, err := kitdbsqlite.Open(context.Background(), absolute, kitdbsqlite.Options{Structure: structureWriter(absolute), HistoryOfEveryTable: true})
 		if err != nil {
 			return nil, nil, historyRefusal(absolute, err)
 		}

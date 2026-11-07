@@ -20,7 +20,7 @@ func trackedFile(t *testing.T) (string, *kitdbsqlite.Database, func(statement st
 	t.Helper()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "kitwork.db")
-	database, err := kitdbsqlite.Open(ctx, path, kitdbsqlite.Options{})
+	database, err := kitdbsqlite.Open(ctx, path, kitdbsqlite.Options{HistoryOfEveryTable: true})
 	if err != nil {
 		t.Fatal(err)
 	}
