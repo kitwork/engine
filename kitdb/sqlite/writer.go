@@ -79,6 +79,10 @@ type writer struct {
 	anchor  func(context.Context) (uint64, error)
 	refused error
 
+	// started is told, on the writer's connection, of every commit that changed what the history follows, once follow
+	// has run after it: the database anchors the file when a table's history starts (Database.anchorWhenStarted).
+	started func(context.Context, *sql.Conn) error
+
 	// structure is Options.Structure; structureDue says the last commit changed the schema or kitwork_columns.
 	structure    func(context.Context, *sql.Conn)
 	structureDue bool
@@ -95,7 +99,8 @@ type writer struct {
 	followDue bool
 }
 
-func openWriter(ctx context.Context, name string, options Options, anchor func(context.Context) (uint64, error)) (*writer, error) {
+func openWriter(ctx context.Context, name string, options Options, anchor func(context.Context) (uint64, error),
+	started func(context.Context, *sql.Conn) error) (*writer, error) {
 	pool, err := sql.Open("sqlite", name)
 	if err != nil {
 		return nil, err
@@ -154,6 +159,8 @@ func openWriter(ctx context.Context, name string, options Options, anchor func(c
 	if err := w.follow(ctx); err != nil {
 		return fail(err)
 	}
+	// from here; a start as the file opens is Open's, once the anchor directory is clean
+	w.started = started
 	go w.run()
 	return w, nil
 }
@@ -1096,7 +1103,9 @@ func (w *writer) follow(ctx context.Context) error {
 func (w *writer) refollow() {
 	if err := w.follow(context.Background()); err != nil {
 		w.followDue = true
+		return
 	}
+	w.tellStarted()
 }
 
 // followFirst runs follow before a commit when the one after the last change of what decides it failed.
@@ -1107,5 +1116,14 @@ func (w *writer) followFirst() error {
 	if err := w.follow(context.Background()); err != nil {
 		return fmt.Errorf("kitdb: the tables the history follows were not read: %w", err)
 	}
+	w.tellStarted()
 	return nil
+}
+
+// tellStarted tells the database that what the history follows may have changed (started). Its failure leaves the
+// file unanchored until Retain or the next Open, as a crash between the commit and the anchor would; the commit stands.
+func (w *writer) tellStarted() {
+	if w.started != nil && !w.every {
+		_ = w.started(context.Background(), w.conn)
+	}
 }

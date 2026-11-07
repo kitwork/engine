@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -136,6 +137,142 @@ func TestAnAnchorIsForAFileThatKeepsHistory(t *testing.T) {
 	t.Cleanup(func() { _ = every.Close() })
 	if names := anchorNames(t, everyPath); len(names) == 0 {
 		t.Fatalf("a new file with Options.HistoryOfEveryTable: no anchor")
+	}
+}
+
+// TestAnAnchorAsATableHistoryStarts: a table's history that starts after the file's newest anchor gets an anchor at the
+// commit it starts in, written in the background (KITWORK_KITDB.md câu 13.11). Its read transaction starts as that
+// commit ends, so what the writer commits while the anchor waits for another (an anchor, a Retain) is not in it, and the
+// writer does not wait for it; a restore of the table to a moment from its start needs no other anchor. The next start
+// gets its own. The file opened again writes no anchor for a start an anchor holds, and writes the one a start lacks.
+//
+// CONTROL (08/11/2026): with the writer not telling the database of the commits that change what the history follows,
+// "no anchor of notes' start: anchors [], want one at revision 3"; with the read transaction started once the anchor
+// is free to be written, "the anchor of notes' start: [revision 5 (base)], want revision 3 (base)"; with Open not
+// looking for a start after the newest anchor, "opened again without the anchor of tags' start: anchors []".
+func TestAnAnchorAsATableHistoryStarts(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "kitwork.db")
+	database, err := Open(ctx, path, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	listAnchors := func() []anchor {
+		t.Helper()
+		anchors, err := database.anchors()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return anchors
+	}
+	describe := func(anchors []anchor) string {
+		var said []string
+		for _, item := range anchors {
+			kind := map[anchorKind]string{anchorWhole: "whole", anchorBase: "base", anchorPages: "pages"}[item.kind]
+			said = append(said, fmt.Sprintf("revision %d (%s)", item.revision, kind))
+		}
+		return "[" + strings.Join(said, ", ") + "]"
+	}
+	from := func(table string) uint64 {
+		t.Helper()
+		_, from, err := TableHistory(ctx, database.readers, table)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return from
+	}
+	bodiesOf := func(target string) string {
+		t.Helper()
+		restored, err := sql.Open("sqlite", "file:"+filepath.ToSlash(target)+"?mode=ro")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer restored.Close()
+		var bodies string
+		if err := restored.QueryRow(`SELECT group_concat(body, ',') FROM (SELECT body FROM notes ORDER BY id)`).Scan(&bodies); err != nil {
+			t.Fatal(err)
+		}
+		return bodies
+	}
+	if _, err := database.Migrate(ctx, "boot", `CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)`,
+		`CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, database, `INSERT INTO notes (body) VALUES ('trước')`) // no trace: notes has no history yet
+
+	var moment time.Time
+	func() {
+		database.anchoring.Lock() // an anchor or a Retain running: the anchor of notes' start waits for it
+		defer database.anchoring.Unlock()
+		if _, err := database.SetHistory(ctx, "t", "notes", true); err != nil {
+			t.Fatal(err)
+		}
+		mustWrite(t, database, `INSERT INTO notes (body) VALUES ('một')`)
+		time.Sleep(2 * time.Millisecond)
+		moment = time.Now()
+		time.Sleep(2 * time.Millisecond)
+		mustWrite(t, database, `INSERT INTO notes (body) VALUES ('hai')`)
+	}()
+	database.background.Wait()
+	notesFrom := from("notes")
+	anchors := listAnchors()
+	if len(anchors) == 0 {
+		t.Fatalf("no anchor of notes' start: anchors %s, want one at revision %d", describe(anchors), notesFrom)
+	}
+	if len(anchors) != 1 || anchors[0].revision != notesFrom || anchors[0].kind != anchorBase {
+		t.Fatalf("the anchor of notes' start: %s, want revision %d (base)", describe(anchors), notesFrom)
+	}
+	target := filepath.Join(t.TempDir(), "restored.db")
+	if _, err := database.RestoreTable(ctx, moment, target, "notes"); err != nil {
+		t.Fatalf("RestoreTable of notes from the anchor of its start: %v", err)
+	}
+	if got := bodiesOf(target); got != "trước,một" {
+		t.Fatalf("notes restored from the anchor of its start: %q, want trước,một", got)
+	}
+
+	if _, err := database.SetHistory(ctx, "t", "tags", true); err != nil {
+		t.Fatal(err)
+	}
+	database.background.Wait()
+	tagsFrom := from("tags")
+	anchors = listAnchors()
+	if len(anchors) != 2 || anchors[1].revision != tagsFrom || anchors[1].kind != anchorPages {
+		t.Fatalf("after tags' start: anchors %s, want revision %d (pages) after notes'", describe(anchors), tagsFrom)
+	}
+	if database.Revision() != tagsFrom {
+		t.Fatalf("revision %d after tags' start at %d: the test writes nothing after it", database.Revision(), tagsFrom)
+	}
+	before := describe(anchors)
+
+	reopen := func() {
+		t.Helper()
+		if err := database.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if database, err = Open(ctx, path, Options{}); err != nil {
+			t.Fatal(err)
+		}
+		database.background.Wait()
+	}
+	reopen()
+	if got := describe(listAnchors()); got != before {
+		t.Fatalf("opened again with an anchor of every start: anchors %s, want %s", got, before)
+	}
+	// the anchors gone, as if the file closed before the anchor of tags' start was written
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(path + ".history"); err != nil {
+		t.Fatal(err)
+	}
+	reopen()
+	anchors = listAnchors()
+	if len(anchors) == 0 {
+		t.Fatalf("opened again without the anchor of tags' start: anchors %s", describe(anchors))
+	}
+	if len(anchors) != 1 || anchors[0].revision != tagsFrom {
+		t.Fatalf("opened again without the anchor of tags' start: anchors %s, want revision %d", describe(anchors), tagsFrom)
 	}
 }
 

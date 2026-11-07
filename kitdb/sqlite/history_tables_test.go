@@ -288,9 +288,9 @@ func TestRestoreKeepsTheHistoryOfTheTablesFollowed(t *testing.T) {
 // change of it is there (KITWORK_KITDB.md câu 13.11): off for a table without history; on from the commit of its
 // Tracked change once its history is set on, after rows changed with no trace; on from 1 in a file without
 // kitwork_tables. RestoreTable, the restore of an app's at(), is refused for a table without history, at a moment
-// before its history began, and while the replay from the anchor would cross that Tracked change, since the rows
-// changed before it are not in the history; Restore of the whole file is not. From an anchor written after it,
-// RestoreTable gives the table whole.
+// before its history began, and while the replay from the anchor would cross that Tracked change (the anchor written
+// at the start held back here), since the rows changed before it are not in the history; Restore of the whole file is
+// not. From an anchor written after it, RestoreTable gives the table whole.
 //
 // CONTROL (07/11/2026): with the writer setting recorded to 1 where a table's recording starts, "notes: TableHistory
 // on true from 1, want on from 3"; with the replay taking no notice of the table RestoreTable restores,
@@ -328,33 +328,39 @@ func TestTableHistorySaysFromWhere(t *testing.T) {
 	time.Sleep(2 * time.Millisecond)
 	beforeHistory := time.Now() // notes had a, b: no anchor after them, the history has nothing of them
 	time.Sleep(2 * time.Millisecond)
-	if _, err := database.SetHistory(ctx, "t", "notes", true); err != nil {
-		t.Fatal(err)
-	}
-	tracked := database.Revision() // the commit of notes' Tracked change, written after SetHistory's
-	if changes := recordedChanges(t, database, tracked-1); len(changes) != 1 || changes[0] != "tracked notes" {
-		t.Fatalf("the last commit: %v, want notes' Tracked change", changes)
-	}
-	if on, from := tableHistory("NOTES"); !on || from != tracked {
-		t.Fatalf("notes: TableHistory on %v from %d, want on from %d", on, from, tracked)
-	}
-	mustWrite(t, database, `INSERT INTO notes (body) VALUES ('c')`)
+	var tracked uint64
+	func() {
+		// the anchor of notes' start, written in the background, waits: the newest anchor is the one before the start
+		database.anchoring.Lock()
+		defer database.anchoring.Unlock()
+		if _, err := database.SetHistory(ctx, "t", "notes", true); err != nil {
+			t.Fatal(err)
+		}
+		tracked = database.Revision() // the commit of notes' Tracked change, written after SetHistory's
+		if changes := recordedChanges(t, database, tracked-1); len(changes) != 1 || changes[0] != "tracked notes" {
+			t.Fatalf("the last commit: %v, want notes' Tracked change", changes)
+		}
+		if on, from := tableHistory("NOTES"); !on || from != tracked {
+			t.Fatalf("notes: TableHistory on %v from %d, want on from %d", on, from, tracked)
+		}
+		mustWrite(t, database, `INSERT INTO notes (body) VALUES ('c')`)
 
-	target := filepath.Join(t.TempDir(), "restored.db")
-	if _, err := database.RestoreTable(ctx, time.Now(), target, "notes"); !errors.Is(err, ErrPastUnreachable) {
-		t.Fatalf("RestoreTable of notes across its Tracked change: %v, want ErrPastUnreachable", err)
-	}
-	if _, err := database.RestoreTable(ctx, beforeHistory, filepath.Join(t.TempDir(), "before.db"), "notes"); !errors.Is(err, ErrPastUnreachable) {
-		t.Fatalf("RestoreTable of notes at a moment before its history: %v, want ErrPastUnreachable", err)
-	}
-	if _, err := database.Restore(ctx, time.Now(), filepath.Join(t.TempDir(), "whole.db")); err != nil {
-		t.Fatalf("Restore of the whole file across notes' Tracked change: %v", err)
-	}
+		target := filepath.Join(t.TempDir(), "restored.db")
+		if _, err := database.RestoreTable(ctx, time.Now(), target, "notes"); !errors.Is(err, ErrPastUnreachable) {
+			t.Fatalf("RestoreTable of notes across its Tracked change: %v, want ErrPastUnreachable", err)
+		}
+		if _, err := database.RestoreTable(ctx, beforeHistory, filepath.Join(t.TempDir(), "before.db"), "notes"); !errors.Is(err, ErrPastUnreachable) {
+			t.Fatalf("RestoreTable of notes at a moment before its history: %v, want ErrPastUnreachable", err)
+		}
+		if _, err := database.Restore(ctx, time.Now(), filepath.Join(t.TempDir(), "whole.db")); err != nil {
+			t.Fatalf("Restore of the whole file across notes' Tracked change: %v", err)
+		}
+	}()
 	if _, err := database.Anchor(ctx); err != nil {
 		t.Fatal(err)
 	}
 	mustWrite(t, database, `INSERT INTO notes (body) VALUES ('d')`)
-	target = filepath.Join(t.TempDir(), "after.db")
+	target := filepath.Join(t.TempDir(), "after.db")
 	if _, err := database.RestoreTable(ctx, time.Now(), target, "notes"); err != nil {
 		t.Fatalf("RestoreTable of notes from an anchor written after its Tracked change: %v", err)
 	}

@@ -125,6 +125,16 @@ type Database struct {
 	// Restore reads anchor files and for writing while a fold or Retain changes or removes them.
 	anchoring   sync.Mutex
 	anchorFiles sync.RWMutex
+
+	// anchored is the revision of the newest anchor, written or being written in the background. background counts
+	// the anchors written in the background (anchorLater), which stopBackground cancels as the file closes;
+	// backgroundErr is the first of them that failed, which Close returns.
+	anchored          atomic.Uint64
+	background        sync.WaitGroup
+	backgroundContext context.Context
+	stopBackground    context.CancelFunc
+	backgroundMutex   sync.Mutex
+	backgroundErr     error
 }
 
 func dataSourceName(path string, parameters ...string) string {
@@ -139,8 +149,10 @@ func dataSourceName(path string, parameters ...string) string {
 // (path + ".lock"). It writes no anchor because the file opens (KITWORK_KITDB.md
 // câu 13.11, 07/11/2026): an old file opens without copying itself, and a file
 // that keeps no table's history has no anchor at all. A file that keeps one is
-// anchored by Retain, at a Barrier, and by Anchor; an anchor a Barrier lacks
-// (Maintain stopped between the two) is written here. With
+// anchored by Retain, at a Barrier, as a table's history starts (in the
+// background, anchorWhenStarted) and by Anchor; an anchor a Barrier lacks
+// (Maintain stopped between the two) is written here, and one a start lacks
+// (the file closed while it was written) is started here. With
 // Options.HistoryOfEveryTable a file is anchored as it opens, as before: a new
 // one at revision 0, an existing one without anchors.
 func Open(ctx context.Context, path string, options Options) (*Database, error) {
@@ -157,6 +169,7 @@ func Open(ctx context.Context, path string, options Options) (*Database, error) 
 		return nil, fmt.Errorf("kitdb: lock %q: %w", path, err)
 	}
 	database := &Database{path: path, lock: lock, searchables: map[string]*searchable{}, open: map[uint64]int{}}
+	database.backgroundContext, database.stopBackground = context.WithCancel(context.Background())
 	opened := false
 	defer func() {
 		if !opened {
@@ -169,7 +182,7 @@ func Open(ctx context.Context, path string, options Options) (*Database, error) 
 	database.writer, err = openWriter(ctx, dataSourceName(path,
 		"_pragma=page_size("+strconv.Itoa(options.PageSize)+")",
 		"_pragma=journal_mode(WAL)", "_pragma=synchronous(FULL)", "_pragma=foreign_keys(1)",
-	), options, database.Anchor)
+	), options, database.Anchor, func(ctx context.Context, conn *sql.Conn) error { return database.anchorWhenStarted(ctx, conn) })
 	if err != nil {
 		return nil, err
 	}
@@ -181,6 +194,11 @@ func Open(ctx context.Context, path string, options Options) (*Database, error) 
 	database.readers.SetMaxIdleConns(options.Readers)
 	if err := database.cleanAnchorDirectory(); err != nil {
 		return nil, err
+	}
+	if anchors, err := database.anchors(); err != nil {
+		return nil, err
+	} else if len(anchors) > 0 {
+		database.anchored.Store(anchors[len(anchors)-1].revision)
 	}
 	none, barrier, err := database.unanchored(ctx)
 	if err != nil {
@@ -196,6 +214,11 @@ func Open(ctx context.Context, path string, options Options) (*Database, error) 
 	}
 	if anchorNeeded {
 		if _, err := database.Anchor(ctx); err != nil {
+			return nil, err
+		}
+	} else if !options.HistoryOfEveryTable {
+		// the anchor of a table's start the file closed before writing
+		if err := database.anchorWhenStarted(ctx, database.readers); err != nil {
 			return nil, err
 		}
 	}
@@ -485,7 +508,8 @@ func (database *Database) oldestSnapshot() (uint64, bool) {
 	return oldest, found
 }
 
-// Close waits for queued writes, then releases the file. It is safe to call twice.
+// Close waits for queued writes, then releases the file. An anchor being written in the background is stopped (the
+// next Open writes it again); one that failed is returned. It is safe to call twice.
 func (database *Database) Close() error {
 	if database == nil || !database.closed.CompareAndSwap(false, true) {
 		return nil
@@ -504,6 +528,12 @@ func (database *Database) release() error {
 	if database.writer != nil {
 		errs = append(errs, database.writer.close())
 	}
+	// after the writer, which starts them
+	database.stopBackground()
+	database.background.Wait()
+	database.backgroundMutex.Lock()
+	errs = append(errs, database.backgroundErr)
+	database.backgroundMutex.Unlock()
 	if database.readers != nil {
 		errs = append(errs, database.readers.Close())
 	}

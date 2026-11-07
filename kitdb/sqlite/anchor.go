@@ -186,38 +186,71 @@ func (database *Database) Anchor(ctx context.Context) (uint64, error) {
 	return database.writeAnchor(ctx)
 }
 
-// writeAnchor writes an anchor as of the file's latest commit. It reads every page through sqlite_dbpage in one read
-// transaction of its own, so the writer goes on, and hashes each. Against the hashes of the newest anchor it keeps
-// the pages that changed (.pages); without them (the first anchor, a file whose anchors were whole copies, hashes
-// whose anchor is gone or of another page size, hashes that do not read) it keeps every page (.base). The hashes of
-// the pages it read replace pages.hashes once the anchor is in place. The caller holds database.anchoring.
+// anchorSnapshot is the file as of a commit, held by a read transaction of its own: the pages an anchor copies.
+type anchorSnapshot struct {
+	source                            *sql.DB
+	tx                                *sql.Tx
+	revision, at, pageSize, pageCount int64
+}
+
+// openSnapshot starts a read transaction on the file and reads in it its latest commit, which fixes what the
+// transaction sees: whatever the writer commits after, the pages read through it are the file as of that commit.
+func (database *Database) openSnapshot(ctx context.Context) (*anchorSnapshot, error) {
+	source, err := sql.Open("sqlite", dataSourceName(database.path, "mode=ro"))
+	if err != nil {
+		return nil, err
+	}
+	source.SetMaxOpenConns(1)
+	snapshot := &anchorSnapshot{source: source}
+	snapshot.tx, err = source.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err == nil {
+		err = snapshot.tx.QueryRowContext(ctx, `SELECT rev, at FROM kitwork_history ORDER BY rev DESC LIMIT 1`).Scan(&snapshot.revision, &snapshot.at)
+		if errors.Is(err, sql.ErrNoRows) {
+			err = nil
+		}
+	}
+	if err == nil {
+		err = snapshot.tx.QueryRowContext(ctx, `PRAGMA page_size`).Scan(&snapshot.pageSize)
+	}
+	if err == nil {
+		err = snapshot.tx.QueryRowContext(ctx, `PRAGMA page_count`).Scan(&snapshot.pageCount)
+	}
+	if err != nil {
+		snapshot.close()
+		return nil, err
+	}
+	return snapshot, nil
+}
+
+func (snapshot *anchorSnapshot) close() {
+	if snapshot.tx != nil {
+		_ = snapshot.tx.Rollback()
+	}
+	_ = snapshot.source.Close()
+}
+
+// writeAnchor writes an anchor as of the file's latest commit (writeAnchorOf). The caller holds database.anchoring.
 func (database *Database) writeAnchor(ctx context.Context) (uint64, error) {
+	snapshot, err := database.openSnapshot(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer snapshot.close()
+	return database.writeAnchorOf(ctx, snapshot)
+}
+
+// writeAnchorOf writes an anchor of the snapshot, unless an anchor at or after its commit is there already. It reads
+// every page through sqlite_dbpage in the snapshot's read transaction, so the writer goes on, and hashes each. Against
+// the hashes of the newest anchor it keeps the pages that changed (.pages); without them (the first anchor, a file
+// whose anchors were whole copies, hashes whose anchor is gone or of another page size, hashes that do not read) it
+// keeps every page (.base). The hashes of the pages it read replace pages.hashes once the anchor is in place. The
+// caller holds database.anchoring.
+func (database *Database) writeAnchorOf(ctx context.Context, snapshot *anchorSnapshot) (uint64, error) {
 	directory := database.anchorDirectory()
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		return 0, err
 	}
-	source, err := sql.Open("sqlite", dataSourceName(database.path, "mode=ro"))
-	if err != nil {
-		return 0, err
-	}
-	defer source.Close()
-	source.SetMaxOpenConns(1)
-	tx, err := source.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
-	var revision, at, pageSize, pageCount int64
-	err = tx.QueryRowContext(ctx, `SELECT rev, at FROM kitwork_history ORDER BY rev DESC LIMIT 1`).Scan(&revision, &at)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return 0, err
-	}
-	if err := tx.QueryRowContext(ctx, `PRAGMA page_size`).Scan(&pageSize); err != nil {
-		return 0, err
-	}
-	if err := tx.QueryRowContext(ctx, `PRAGMA page_count`).Scan(&pageCount); err != nil {
-		return 0, err
-	}
+	tx, revision, at, pageSize, pageCount := snapshot.tx, snapshot.revision, snapshot.at, snapshot.pageSize, snapshot.pageCount
 	anchors, err := database.anchors()
 	if err != nil {
 		return 0, err
@@ -348,8 +381,8 @@ func (database *Database) writeAnchor(ctx context.Context) (uint64, error) {
 		if err := os.Remove(filepath.Join(directory, hashesName)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return 0, err
 		}
-		written = true // nothing of this attempt is left
-		return database.writeAnchor(ctx)
+		written = true                               // nothing of this attempt is left
+		return database.writeAnchorOf(ctx, snapshot) // the same pages, read again in the same transaction
 	}
 	if against != nil {
 		against.close() // pages.hashes is replaced below, which Windows refuses while it is open
@@ -367,11 +400,77 @@ func (database *Database) writeAnchor(ctx context.Context) (uint64, error) {
 	written = true
 	// The anchor is in place before its hashes: hashes of an anchor not written would chain the next .pages to
 	// nothing, while hashes left behind by an anchor written chain it to an older one, which Restore follows.
+	database.noteAnchor(uint64(revision))
 	if err := os.Rename(hashesTemporary, filepath.Join(directory, hashesName)); err != nil {
 		_ = os.Remove(hashesTemporary)
 		return uint64(revision), fmt.Errorf("kitdb: anchor %d is written, its page hashes are not: %w", revision, err)
 	}
 	return uint64(revision), nil
+}
+
+// noteAnchor keeps revision as the newest anchor's when it is newer.
+func (database *Database) noteAnchor(revision uint64) {
+	for {
+		known := database.anchored.Load()
+		if known >= revision || database.anchored.CompareAndSwap(known, revision) {
+			return
+		}
+	}
+}
+
+// anchorWhenStarted anchors the file in the background (anchorLater) when a table's history starts after its newest
+// anchor (KITWORK_KITDB.md câu 13.11): the largest recorded of kitwork_tables among the tables whose history is on (the
+// revision of a table's Tracked change, from which its changes are in the history) is past the newest anchor written
+// or being written. A restore of the table to a moment from there on then starts from an anchor that crosses no start.
+// recorded 1 is a table recorded from the file's first commit, a file's table of before (adopt), which waits for
+// Retain's anchor as the file of before did. The writer calls it after a commit that changed what the history follows,
+// with its own connection; Open, with the readers.
+func (database *Database) anchorWhenStarted(ctx context.Context, querier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}) error {
+	var held int
+	if err := querier.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = 'kitwork_tables'`).Scan(&held); err != nil || held == 0 {
+		return err
+	}
+	var started int64
+	if err := querier.QueryRowContext(ctx, `SELECT coalesce(max(recorded), 0) FROM kitwork_tables WHERE history = 1 AND recorded > 1`).Scan(&started); err != nil {
+		return err
+	}
+	if started == 0 || database.anchored.Load() >= uint64(started) {
+		return nil
+	}
+	return database.anchorLater()
+}
+
+// anchorLater writes an anchor of the file as of its latest commit without holding up the caller: the read transaction
+// the pages are copied in starts now, so the anchor is at this commit whatever the writer commits after, and a
+// goroutine of its own writes them, after the anchor or the Retain running. Close stops it; Open starts again the
+// anchor of a table's start it did not write (anchorWhenStarted).
+func (database *Database) anchorLater() error {
+	ctx := database.backgroundContext
+	snapshot, err := database.openSnapshot(ctx)
+	if err != nil {
+		return err
+	}
+	database.noteAnchor(uint64(snapshot.revision))
+	database.background.Add(1)
+	go func() {
+		defer database.background.Done()
+		defer snapshot.close()
+		database.anchoring.Lock()
+		defer database.anchoring.Unlock()
+		if ctx.Err() != nil {
+			return
+		}
+		if _, err := database.writeAnchorOf(ctx, snapshot); err != nil && ctx.Err() == nil {
+			database.backgroundMutex.Lock()
+			if database.backgroundErr == nil {
+				database.backgroundErr = fmt.Errorf("kitdb: the anchor at revision %d, written in the background: %w", snapshot.revision, err)
+			}
+			database.backgroundMutex.Unlock()
+		}
+	}()
+	return nil
 }
 
 // anchorWriter writes a .base (the pages as they are), a .pages (each page after its number, a zero number ending

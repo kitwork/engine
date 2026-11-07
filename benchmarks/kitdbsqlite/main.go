@@ -12,6 +12,7 @@
 //	kitdbsqlite readtail <directory>                where a read right after a commit waits, with Windows' timer as it is and at 1 ms
 //	kitdbsqlite analytics <kitwork.db> <copies>      KCOL on SQLite: the copy of shopping's analytic columns built, then read back
 //	kitdbsqlite port <kitwork.db> <copies>           the same queries through the read-only port, the copy against SQLite
+//	kitdbsqlite start <kitwork.db>                   a table's history set on: the anchor of its start, written while the writer goes on
 //
 // The commands that read the KitDB file (copy, bench, refresh, execute, measure, definition) went with KROW on
 // 03/11/2026 (docs/KITWORK_KITDB.md câu 13.4); the copy they made of shopping is .database/shopping/kitwork.db.
@@ -29,12 +30,12 @@ func must(err error) {
 }
 
 func main() {
-	arguments := map[string]int{"verify": 1, "query": 2, "decimal": 0, "idlayout": 2, "anchor": 1, "at": 1, "changeset": 1, "readtail": 1, "analytics": 2, "port": 2}
+	arguments := map[string]int{"verify": 1, "query": 2, "decimal": 0, "idlayout": 2, "anchor": 1, "at": 1, "changeset": 1, "readtail": 1, "analytics": 2, "port": 2, "start": 1}
 	if len(os.Args) < 2 {
 		os.Args = append(os.Args, "")
 	}
 	if count, known := arguments[os.Args[1]]; !known || len(os.Args) != count+2 {
-		fmt.Fprintln(os.Stderr, "usage: kitdbsqlite verify|query|decimal|idlayout|anchor|at|changeset|readtail|analytics|port …")
+		fmt.Fprintln(os.Stderr, "usage: kitdbsqlite verify|query|decimal|idlayout|anchor|at|changeset|readtail|analytics|port|start …")
 		os.Exit(2)
 	}
 	switch os.Args[1] {
@@ -58,5 +59,7 @@ func main() {
 		cmdAnalytics(os.Args[2], os.Args[3])
 	case "port":
 		cmdPort(os.Args[2], os.Args[3])
+	case "start":
+		cmdStart(os.Args[2])
 	}
 }
