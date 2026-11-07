@@ -549,7 +549,12 @@ func (w *writer) commitMaintain(request writerRequest) {
 	}
 	err = w.exec("BEGIN IMMEDIATE")
 	revision, err := w.finish([]Change{{Operation: Barrier, Statement: moved, By: request.by}}, err)
-	if err == nil {
+	keeps := w.every
+	if err == nil && !keeps {
+		// a file that keeps no table's history has nothing a restore brings back: no anchor (KITWORK_KITDB.md câu 13.11)
+		keeps, err = keepsHistoryOf(ctx, w.conn)
+	}
+	if err == nil && keeps {
 		_, err = w.anchor(ctx)
 	}
 	w.writeStructure()

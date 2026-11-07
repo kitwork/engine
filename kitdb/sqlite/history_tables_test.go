@@ -251,6 +251,9 @@ func TestRestoreKeepsTheHistoryOfTheTablesFollowed(t *testing.T) {
 		`CREATE TABLE orders (id INTEGER PRIMARY KEY, amount INTEGER)`); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := database.Anchor(ctx); err != nil { // as Retain anchors a file that keeps a table's history
+		t.Fatal(err)
+	}
 	if _, err := database.SetHistory(ctx, "t", "orders", true); err != nil {
 		t.Fatal(err)
 	}
@@ -310,6 +313,9 @@ func TestTableHistorySaysFromWhere(t *testing.T) {
 		return on, from
 	}
 	if _, err := database.Migrate(ctx, "boot", `CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Anchor(ctx); err != nil { // an anchor before the rows, which its replay cannot see
 		t.Fatal(err)
 	}
 	mustWrite(t, database, `INSERT INTO notes (body) VALUES ('a'), ('b')`) // no trace

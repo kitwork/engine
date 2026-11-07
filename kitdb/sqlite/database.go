@@ -136,9 +136,13 @@ func dataSourceName(path string, parameters ...string) string {
 }
 
 // Open opens or creates the database at path and takes its writer lock
-// (path + ".lock"). A new file gets an anchor at revision 0, so every moment
-// of its life can be restored; an existing file without anchors can be
-// restored only from its first Anchor on.
+// (path + ".lock"). It writes no anchor because the file opens (KITWORK_KITDB.md
+// câu 13.11, 07/11/2026): an old file opens without copying itself, and a file
+// that keeps no table's history has no anchor at all. A file that keeps one is
+// anchored by Retain, at a Barrier, and by Anchor; an anchor a Barrier lacks
+// (Maintain stopped between the two) is written here. With
+// Options.HistoryOfEveryTable a file is anchored as it opens, as before: a new
+// one at revision 0, an existing one without anchors.
 func Open(ctx context.Context, path string, options Options) (*Database, error) {
 	options, err := options.normalized()
 	if err != nil {
@@ -178,9 +182,15 @@ func Open(ctx context.Context, path string, options Options) (*Database, error) 
 	if err := database.cleanAnchorDirectory(); err != nil {
 		return nil, err
 	}
-	anchorNeeded := created
-	if !created {
-		if anchorNeeded, err = database.unanchored(ctx); err != nil {
+	none, barrier, err := database.unanchored(ctx)
+	if err != nil {
+		return nil, err
+	}
+	anchorNeeded := barrier
+	if options.HistoryOfEveryTable {
+		anchorNeeded = created || none || barrier
+	} else if barrier {
+		if anchorNeeded, err = database.keepsHistory(ctx, database.readers); err != nil {
 			return nil, err
 		}
 	}
@@ -356,13 +366,13 @@ func (database *Database) Maintain(ctx context.Context, by string, work func(*sq
 	return database.writer.submit(ctx, writerRequest{ctx: ctx, by: by, maintain: work})
 }
 
-// unanchored reports a file that needs an anchor when it opens: it has none (a
-// file the history starts following now), or a Barrier stands after the newest
-// one (the anchor Maintain writes did not get written).
-func (database *Database) unanchored(ctx context.Context) (bool, error) {
+// unanchored reports what Open anchors for: a file with no anchor (none), and a
+// Barrier after the newest anchor (barrier: the anchor Maintain writes did not
+// get written).
+func (database *Database) unanchored(ctx context.Context) (none, barrier bool, err error) {
 	anchors, err := database.anchors()
 	if err != nil || len(anchors) == 0 {
-		return err == nil, err
+		return err == nil, false, err
 	}
 	// a commit holding a Barrier is the one written in barrierFormat or columnsBarrierFormat; one that does not decode
 	// is for VerifyHistory
@@ -370,7 +380,46 @@ func (database *Database) unanchored(ctx context.Context) (bool, error) {
 	var barriers int64
 	err = database.readers.QueryRowContext(ctx, `SELECT count(*) FROM kitwork_history WHERE rev > ? AND substr(changes, 1, 1) IN (?, ?)`,
 		int64(anchors[len(anchors)-1].revision), []byte{barrierFormat}, []byte{columnsBarrierFormat}).Scan(&barriers)
-	return barriers > 0, err
+	return false, barriers > 0, err
+}
+
+// keepsHistory reports a file whose history keeps some table's (kitwork_tables: on and recorded), which a restore can
+// bring back and anchors are written for; with Options.HistoryOfEveryTable, or without kitwork_tables (a file of
+// before), every table's.
+func (database *Database) keepsHistory(ctx context.Context, querier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}) (bool, error) {
+	if database.writer.every {
+		return true, nil
+	}
+	return keepsHistoryOf(ctx, querier)
+}
+
+func keepsHistoryOf(ctx context.Context, querier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}) (bool, error) {
+	rows, err := querier.QueryContext(ctx, `SELECT (SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = 'kitwork_tables')`)
+	if err != nil {
+		return false, err
+	}
+	held := 0
+	if rows.Next() {
+		err = rows.Scan(&held)
+	}
+	rows.Close()
+	if err != nil || held == 0 {
+		return err == nil, err
+	}
+	rows, err = querier.QueryContext(ctx, `SELECT EXISTS (SELECT 1 FROM kitwork_tables WHERE history = 1 AND recorded > 0)`)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	keeps := false
+	if rows.Next() {
+		err = rows.Scan(&keeps)
+	}
+	return keeps, errors.Join(err, rows.Err())
 }
 
 // Snapshot is one read transaction. Revision is the last commit it sees: rows

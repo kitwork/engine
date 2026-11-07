@@ -33,6 +33,11 @@ const pruneBatch = 10000
 // revision. The anchor's own commit stays, so the history starts at the moment
 // the oldest kept anchor holds. It returns that revision: the commits before
 // it are gone, 0 when every commit is still kept.
+//
+// A file that keeps no table's history (KITWORK_KITDB.md câu 13.11: its history
+// holds schema statements and the engine's own tables) gets no anchor: with
+// none, the commits before now - Keep go, the newest always kept, so the
+// revisions go on from it.
 func (database *Database) Retain(ctx context.Context, now time.Time, retention Retention) (uint64, error) {
 	if err := database.ensureOpen(); err != nil {
 		return 0, err
@@ -40,9 +45,18 @@ func (database *Database) Retain(ctx context.Context, now time.Time, retention R
 	if retention.Keep <= 0 || retention.Every <= 0 {
 		return 0, fmt.Errorf("kitdb: retention must be positive")
 	}
-	start, errs, err := database.retainAnchors(ctx, now, retention)
+	keeps, err := database.keepsHistory(ctx, database.readers)
 	if err != nil {
 		return 0, err
+	}
+	start, errs, err := database.retainAnchors(ctx, now, retention, keeps)
+	if err != nil {
+		return 0, err
+	}
+	if start == 0 && !keeps {
+		if start, err = database.unanchoredStart(ctx, now.Add(-retention.Keep)); err != nil {
+			return 0, err
+		}
 	}
 	if start == 0 {
 		return 0, nil
@@ -66,9 +80,23 @@ func (database *Database) Retain(ctx context.Context, now time.Time, retention R
 	return start, errors.Join(errs...)
 }
 
-// retainAnchors anchors when it is due and lets go of the anchors no moment from now - Keep on needs. It returns the
-// revision of the oldest anchor kept, 0 when every anchor is still needed, and the anchor files it could not remove.
-func (database *Database) retainAnchors(ctx context.Context, now time.Time, retention Retention) (uint64, []error, error) {
+// unanchoredStart is where the history of a file with no anchor starts once what is older than from goes: its first
+// commit after from, or its newest when none is; 0 for a file with an anchor, or no commit.
+func (database *Database) unanchoredStart(ctx context.Context, from time.Time) (uint64, error) {
+	anchors, err := database.anchors()
+	if err != nil || len(anchors) > 0 {
+		return 0, err
+	}
+	var start int64
+	err = database.readers.QueryRowContext(ctx, `SELECT coalesce((SELECT min(rev) FROM kitwork_history WHERE at > ?), (SELECT max(rev) FROM kitwork_history), 0)`,
+		from.UTC().UnixNano()).Scan(&start)
+	return uint64(start), err
+}
+
+// retainAnchors anchors when it is due (a file that keeps a table's history) and lets go of the anchors no moment from
+// now - Keep on needs. It returns the revision of the oldest anchor kept, 0 when every anchor is still needed, and the
+// anchor files it could not remove.
+func (database *Database) retainAnchors(ctx context.Context, now time.Time, retention Retention, keeps bool) (uint64, []error, error) {
 	database.anchoring.Lock()
 	defer database.anchoring.Unlock()
 	anchors, err := database.anchors()
@@ -84,7 +112,7 @@ func (database *Database) retainAnchors(ctx context.Context, now time.Time, rete
 		int64(newest)).Scan(&oldest); err != nil {
 		return 0, nil, err
 	}
-	if oldest != 0 && now.Sub(time.Unix(0, oldest)) >= retention.Every {
+	if keeps && oldest != 0 && now.Sub(time.Unix(0, oldest)) >= retention.Every {
 		if _, err := database.writeAnchor(ctx); err != nil {
 			return 0, nil, err
 		}
