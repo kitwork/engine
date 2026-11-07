@@ -13,8 +13,34 @@ import (
 	kitdb "github.com/kitwork/engine/kitdb/sqlite"
 )
 
-// salesFile is a KitDB file of sales written through the writer (so it has a history), and a writer to add rows; an
-// index on category when indexed.
+// salesColumns are the columns of sales the fixture's columns copy holds: every one but the key.
+var salesColumns = []string{"merchant", "category", "price", "rating", "note"}
+
+// declareColumnar writes table's columns copy as CREATE INDEX … USING columnar does (kitwork_columnar), through the
+// writer.
+func declareColumnar(t *testing.T, database *kitdb.Database, table string, columns ...string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := database.Migrate(ctx, "boot", columnarTable); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Write(ctx, "boot", func(tx *kitdb.Transaction) error {
+		if err := writeColumnar(tx, kindChange{table: table, uncolumnar: true}); err != nil {
+			return err
+		}
+		for _, column := range columns {
+			if err := writeColumnar(tx, kindChange{table: table, column: column, columnar: true}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// salesFile is a KitDB file of sales written through the writer (so it has a history), its columns copy declared
+// (salesColumns), and a writer to add rows; an index on category when indexed.
 func salesFile(t *testing.T, rows int, indexed bool) (string, *kitdb.Database) {
 	t.Helper()
 	ctx := context.Background()
@@ -34,6 +60,7 @@ func salesFile(t *testing.T, rows int, indexed bool) (string, *kitdb.Database) {
 	if _, err := database.Migrate(ctx, "boot", schema...); err != nil {
 		t.Fatal(err)
 	}
+	declareColumnar(t, database, "sales", salesColumns...)
 	random := rand.New(rand.NewPCG(1, 2))
 	if _, err := database.Write(ctx, "t", func(tx *kitdb.Transaction) error {
 		for id := 1; id <= rows; id++ {

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/kitwork/engine/kitdb/columnar"
 	"github.com/kitwork/engine/kitdb/pgwire"
 	kitdbsqlite "github.com/kitwork/engine/kitdb/sqlite"
 )
@@ -24,6 +25,9 @@ import (
 //     DEFAULT is not changed (SQLite rebuilds a table for that): 0A000.
 //   - CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON [schema.]t [USING btree] (columns) [WHERE …]; DROP INDEX
 //     [IF EXISTS] [schema.]name; DROP TABLE [IF EXISTS] [schema.]t, …
+//   - CREATE INDEX t_search ON t USING search (columns) [WITH (column = weight, …)], the table's full-text index, and
+//     CREATE INDEX t_columnar ON t USING columnar (columns), the table's columns copy (KITWORK_KITDB.md câu 13.11 (c)):
+//     neither is a SQLite index; DROP INDEX t_search, t_columnar takes it out.
 //
 // Types: smallint, integer, bigint (int2, int4, int8, int) and their serials are INTEGER; real, double precision
 // (float4, float8, float) REAL; numeric(p, s) and decimal(p, s) INTEGER holding the value × 10^s, kind decimal, as
@@ -63,6 +67,26 @@ type kindChange struct {
 	// in with weight
 	search, unsearch bool
 	weight           int
+	// the table's columns copy (columnarIndex): uncolumnar takes every column of the table out of it, columnar puts
+	// column in (kitwork_columnar)
+	columnar, uncolumnar bool
+}
+
+// columnarTable holds the columns of each table's columns copy, the copy the port's scans and aggregates read
+// (kitdb/analytics): a table no row names has none, and the engine builds no copy it was not asked for.
+const columnarTable = `CREATE TABLE IF NOT EXISTS kitwork_columnar (table_name TEXT NOT NULL, column_name TEXT NOT NULL, PRIMARY KEY (table_name, column_name)) STRICT`
+
+// columnarIndexName is the name of a table's columns copy: one per table, the columns it holds.
+func columnarIndexName(table string) string { return table + "_columnar" }
+
+// touchesColumnar reports a plan that declares or takes out a columns copy.
+func (plan schemaPlan) touchesColumnar() bool {
+	for _, change := range plan.kinds {
+		if change.columnar || change.uncolumnar {
+			return true
+		}
+	}
+	return false
 }
 
 // searchIndexName is the name of a table's search index: one per table, the columns its full-text index reads, each
@@ -633,16 +657,23 @@ func (c *schemaCursor) createIndex(unique bool) (schemaPlan, error) {
 	if c.keyword("USING") {
 		method := c.word()
 		c.position++
-		if method == "SEARCH" {
+		switch method {
+		case "SEARCH":
 			return c.searchIndex(unique, name, schema, table)
-		}
-		if method != "BTREE" {
+		case "COLUMNAR":
+			return c.columnarIndex(unique, name, schema, table)
+		case "BTREE":
+		default:
 			return schemaPlan{}, pgwire.NewError("0A000", fmt.Sprintf("index method %s is not supported: SQLite's indexes are b-trees; "+
-				"a table's full-text index is USING search", strings.ToLower(method)))
+				"a table's full-text index is USING search, its columns copy USING columnar", strings.ToLower(method)))
 		}
 	}
 	if strings.EqualFold(name, searchIndexName(table)) {
 		return schemaPlan{}, pgwire.NewError("0A000", fmt.Sprintf("%s is the name of table %s's search index: CREATE INDEX %s ON %s USING search (…)",
+			name, table, name, table))
+	}
+	if strings.EqualFold(name, columnarIndexName(table)) {
+		return schemaPlan{}, pgwire.NewError("0A000", fmt.Sprintf("%s is the name of table %s's columns copy: CREATE INDEX %s ON %s USING columnar (…)",
 			name, table, name, table))
 	}
 	columns, err := c.group()
@@ -881,6 +912,54 @@ func (c *schemaCursor) searchIndex(unique bool, name, schema, table string) (sch
 	return plan, nil
 }
 
+// columnarIndex reads the rest of CREATE INDEX <table>_columnar ON <table> USING columnar (column, …): the table's
+// columns copy, set as written (the columns it had before are taken out). The copy holds those columns of every row,
+// and the port answers a scan or an aggregate of the table from it when the statement reads no other column. It
+// changes kitwork_columnar only; the engine builds the copy in the background.
+func (c *schemaCursor) columnarIndex(unique bool, name, schema, table string) (schemaPlan, error) {
+	want := columnarIndexName(table)
+	switch {
+	case unique:
+		return schemaPlan{}, pgwire.NewError("0A000", "a columns copy is not UNIQUE")
+	case name != "" && !strings.EqualFold(name, want):
+		return schemaPlan{}, pgwire.NewError("0A000", fmt.Sprintf("a table has one columns copy, named %s: CREATE INDEX %s ON %s USING columnar (…)",
+			want, want, table))
+	}
+	inside, err := c.group()
+	if err != nil {
+		return schemaPlan{}, err
+	}
+	seen := map[string]bool{}
+	var columns []string
+	for _, part := range splitTop(inside) {
+		if len(part) != 1 || (part[0].kind != tokenWord && part[0].kind != tokenQuoted) {
+			return schemaPlan{}, syntaxError("a columns copy lists its columns by name")
+		}
+		column := identifierText(part[0])
+		if seen[strings.ToLower(column)] {
+			return schemaPlan{}, syntaxError(fmt.Sprintf("column %s is in the columns copy twice", column))
+		}
+		if c.session != nil && !c.hasColumn(schema, table, column) {
+			return schemaPlan{}, pgwire.NewError("42703", fmt.Sprintf("column %q of relation %q does not exist", column, table))
+		}
+		seen[strings.ToLower(column)] = true
+		columns = append(columns, column)
+	}
+	switch {
+	case len(columns) == 0:
+		return schemaPlan{}, syntaxError("a columns copy holds at least one column")
+	case len(columns) >= columnar.MaximumColumns:
+		return schemaPlan{}, pgwire.NewError("54011", fmt.Sprintf("a columns copy holds at most %d columns", columnar.MaximumColumns-1))
+	case !c.done():
+		return schemaPlan{}, syntaxError(fmt.Sprintf("unexpected %q after the columns copy", c.peek().text))
+	}
+	plan := schemaPlan{schema: schema, kinds: []kindChange{{table: table, uncolumnar: true}}}
+	for _, column := range columns {
+		plan.kinds = append(plan.kinds, kindChange{table: table, column: column, columnar: true})
+	}
+	return plan, nil
+}
+
 func (c *schemaCursor) dropIndex() (schemaPlan, error) {
 	if c.keyword("CONCURRENTLY") {
 		return schemaPlan{}, pgwire.NewError("0A000", "DROP INDEX CONCURRENTLY is not supported")
@@ -905,6 +984,11 @@ func (c *schemaCursor) dropIndex() (schemaPlan, error) {
 		// a table's search index: its columns leave it; a SQLite index of that name, from before, goes too
 		return schemaPlan{schema: schema, statements: []string{"DROP INDEX IF EXISTS " + quoteIdentifier(name)},
 			kinds: []kindChange{{table: table, unsearch: true}}}, nil
+	}
+	if table, copied := strings.CutSuffix(name, "_columnar"); copied && table != "" {
+		// a table's columns copy: its columns leave it, and the port reads the table again
+		return schemaPlan{schema: schema, statements: []string{"DROP INDEX IF EXISTS " + quoteIdentifier(name)},
+			kinds: []kindChange{{table: table, uncolumnar: true}}}, nil
 	}
 	return schemaPlan{schema: schema, statements: []string{text + quoteIdentifier(name)}}, nil
 }
@@ -993,6 +1077,9 @@ func (session *Session) changeSchema(ctx context.Context, parsed statement) (pgw
 		if lacksSearchWeight(session.files[plan.schema]) {
 			prefix = append(prefix, columnsSearchWeight) // a kitwork_columns written before 31/10/2026
 		}
+		if plan.touchesColumnar() {
+			prefix = append(prefix, columnarTable) // made the first time a table's columns copy is declared
+		}
 		statements = append(prefix, statements...)
 	}
 	if _, err := writer.Migrate(ctx, session.by(), statements...); err != nil {
@@ -1014,15 +1101,30 @@ func (session *Session) changeSchema(ctx context.Context, parsed statement) (pgw
 	return pgwire.Result{CommandTag: tag}, nil
 }
 
-// writeKinds writes what plan changed of kitwork_columns.
+// writeKinds writes what plan changed of kitwork_columns, and of kitwork_columnar when the file has it.
 func writeKinds(transaction *kitdbsqlite.Transaction, plan schemaPlan) error {
+	copies, err := hasColumnar(transaction)
+	if err != nil {
+		return err
+	}
+	exec := func(columns, columnar string, arguments ...any) error {
+		if _, err := transaction.Exec(columns, arguments...); err != nil {
+			return err
+		}
+		if copies {
+			_, err := transaction.Exec(columnar, arguments...)
+			return err
+		}
+		return nil
+	}
 	for _, table := range plan.dropTable {
-		if _, err := transaction.Exec(`DELETE FROM kitwork_columns WHERE table_name = ?`, table); err != nil {
+		if err := exec(`DELETE FROM kitwork_columns WHERE table_name = ?`, `DELETE FROM kitwork_columnar WHERE table_name = ?`, table); err != nil {
 			return err
 		}
 	}
 	if plan.renameFrom != "" {
-		if _, err := transaction.Exec(`UPDATE kitwork_columns SET table_name = ? WHERE table_name = ?`, plan.renameTo, plan.renameFrom); err != nil {
+		if err := exec(`UPDATE kitwork_columns SET table_name = ? WHERE table_name = ?`,
+			`UPDATE kitwork_columnar SET table_name = ? WHERE table_name = ?`, plan.renameTo, plan.renameFrom); err != nil {
 			return err
 		}
 	}
@@ -1030,11 +1132,15 @@ func writeKinds(transaction *kitdbsqlite.Transaction, plan schemaPlan) error {
 		var err error
 		switch {
 		case change.drop:
-			_, err = transaction.Exec(`DELETE FROM kitwork_columns WHERE table_name = ? AND column_name = ?`, change.table, change.column)
+			err = exec(`DELETE FROM kitwork_columns WHERE table_name = ? AND column_name = ?`,
+				`DELETE FROM kitwork_columnar WHERE table_name = ? AND column_name = ?`, change.table, change.column)
 		case change.rename:
-			_, err = transaction.Exec(`UPDATE kitwork_columns SET column_name = ? WHERE table_name = ? AND column_name = ?`, change.to, change.table, change.column)
+			err = exec(`UPDATE kitwork_columns SET column_name = ? WHERE table_name = ? AND column_name = ?`,
+				`UPDATE kitwork_columnar SET column_name = ? WHERE table_name = ? AND column_name = ?`, change.to, change.table, change.column)
 		case change.search || change.unsearch:
 			err = writeSearch(transaction, change)
+		case change.columnar || change.uncolumnar:
+			err = writeColumnar(transaction, change)
 		default:
 			_, err = transaction.Exec(`INSERT INTO kitwork_columns (table_name, column_name, kind, precision, scale) VALUES (?, ?, ?, ?, ?)
 				ON CONFLICT (table_name, column_name) DO UPDATE SET kind = excluded.kind, precision = excluded.precision, scale = excluded.scale`,
@@ -1104,6 +1210,33 @@ func writeSearch(transaction *kitdbsqlite.Transaction, change kindChange) error 
 	_, err := transaction.Exec(`INSERT INTO kitwork_columns (table_name, column_name, kind, precision, scale, search_weight) VALUES (?, ?, 'text', 0, 0, ?)
 		ON CONFLICT (table_name, column_name) DO UPDATE SET search_weight = excluded.search_weight`, change.table, change.column, change.weight)
 	return err
+}
+
+// writeColumnar writes a change of a table's columns copy in kitwork_columnar: every column of the table out of it, or
+// one column in.
+func writeColumnar(transaction *kitdbsqlite.Transaction, change kindChange) error {
+	if change.uncolumnar {
+		_, err := transaction.Exec(`DELETE FROM kitwork_columnar WHERE table_name = ?`, change.table)
+		return err
+	}
+	_, err := transaction.Exec(`INSERT INTO kitwork_columnar (table_name, column_name) VALUES (?, ?) ON CONFLICT DO NOTHING`, change.table, change.column)
+	return err
+}
+
+// hasColumnar reports a file that has kitwork_columnar: made the first time a columns copy is declared in it.
+func hasColumnar(transaction *kitdbsqlite.Transaction) (bool, error) {
+	rows, err := transaction.Query(`SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = 'kitwork_columnar'`)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	var tables int
+	if rows.Next() {
+		if err := rows.Scan(&tables); err != nil {
+			return false, err
+		}
+	}
+	return tables > 0, rows.Err()
 }
 
 // fileColumns are the kinds the files' kitwork_columns hold, read again after the session changed the schema, over

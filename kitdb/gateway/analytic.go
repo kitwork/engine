@@ -571,24 +571,21 @@ func (session *Session) analyticRead(ctx context.Context, parsed statement, argu
 	if !ok || len(columns) != len(shape.items) {
 		return pgwire.Result{}, false
 	}
-	schema, path, declared, ok := session.analyticTable(ctx, shape)
-	if !ok {
-		return pgwire.Result{}, false
+	schema, path, declared, copied, ok := session.analyticTable(ctx, shape)
+	if !ok || len(copied) == 0 {
+		return pgwire.Result{}, false // no columns copy declared (CREATE INDEX … USING columnar): SQLite reads the table
 	}
 	// the copy's names are the table's own: SQLite's names are not case sensitive
 	canonical := func(name string) (string, bool) {
 		found, ok := declared[name]
 		return found, ok
 	}
-	var needed []string
 	for name := range shape.columns {
 		found, ok := canonical(name)
-		if !ok {
-			return pgwire.Result{}, false
+		if !ok || !slices.Contains(copied, found) {
+			return pgwire.Result{}, false // a column the copy does not hold
 		}
-		needed = append(needed, found)
 	}
-	slices.Sort(needed)
 	query := shape.query
 	query.Group = make([]string, len(shape.query.Group))
 	for position, name := range shape.query.Group {
@@ -620,7 +617,7 @@ func (session *Session) analyticRead(ctx context.Context, parsed statement, argu
 			return pgwire.Result{}, false // SQLite's own error: the statement runs again on it and says it
 		}
 	}
-	table, release := registry.Acquire(path, shape.table, needed)
+	table, release := registry.Acquire(path, shape.table, copied)
 	defer release()
 	if table == nil {
 		return pgwire.Result{}, false // built in the background; SQLite answers meanwhile
@@ -749,7 +746,7 @@ func compareIntegers(a, b int64) int {
 
 // analyticTable finds the schema the statement's table is in (the first attached schema holding it when the statement
 // names none, as SQLite looks), its file, and its columns by their names in lower case.
-func (session *Session) analyticTable(ctx context.Context, shape *analyticShape) (string, string, map[string]string, bool) {
+func (session *Session) analyticTable(ctx context.Context, shape *analyticShape) (string, string, map[string]string, []string, bool) {
 	candidates := session.order
 	if shape.schema != "" {
 		candidates = nil
@@ -762,7 +759,7 @@ func (session *Session) analyticTable(ctx context.Context, shape *analyticShape)
 	for _, schema := range candidates {
 		rows, err := session.connection.QueryContext(ctx, `SELECT name FROM pragma_table_xinfo(?, ?)`, shape.table, schema)
 		if err != nil {
-			return "", "", nil, false
+			return "", "", nil, nil, false
 		}
 		declared := map[string]string{}
 		for rows.Next() {
@@ -777,11 +774,43 @@ func (session *Session) analyticTable(ctx context.Context, shape *analyticShape)
 		}
 		path, err := filepath.Abs(session.target.Schemas[schema])
 		if err != nil {
-			return "", "", nil, false
+			return "", "", nil, nil, false
 		}
-		return schema, path, declared, true
+		copied, err := session.copiedColumns(ctx, schema, shape.table, declared)
+		if err != nil {
+			return "", "", nil, nil, false
+		}
+		return schema, path, declared, copied, true
 	}
-	return "", "", nil, false
+	return "", "", nil, nil, false
+}
+
+// copiedColumns are the columns of table's columns copy (kitwork_columnar of schema, CREATE INDEX … USING columnar),
+// by the table's own names (declared, by lower case), sorted; none when the table has no copy.
+func (session *Session) copiedColumns(ctx context.Context, schema, table string, declared map[string]string) ([]string, error) {
+	var held int
+	if err := session.connection.QueryRowContext(ctx, `SELECT count(*) FROM `+quoteIdentifier(schema)+
+		`.sqlite_schema WHERE type = 'table' AND name = 'kitwork_columnar'`).Scan(&held); err != nil || held == 0 {
+		return nil, err
+	}
+	rows, err := session.connection.QueryContext(ctx, `SELECT column_name FROM `+quoteIdentifier(schema)+
+		`.kitwork_columnar WHERE table_name = ? COLLATE NOCASE`, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var copied []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		if found, ok := declared[strings.ToLower(name)]; ok {
+			copied = append(copied, found)
+		}
+	}
+	slices.Sort(copied)
+	return copied, rows.Err()
 }
 
 // analyticPlan reads SQLite's plan for the statement: planScan when it reads its table whole (SCAN, in rowid order or

@@ -70,6 +70,10 @@ func Structure(ctx context.Context, source structureQuerier) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	copies, err := structureColumnar(ctx, source)
+	if err != nil {
+		return "", err
+	}
 	var out strings.Builder
 	tables := 0
 	for _, current := range objects {
@@ -112,6 +116,9 @@ func Structure(ctx context.Context, source structureQuerier) (string, error) {
 		}
 		if search := searchStatement(current.name, tableKinds, order); search != "" {
 			out.WriteString(search + ";\n")
+		}
+		if copy := columnarStatement(current.name, copies[strings.ToLower(current.name)], order); copy != "" {
+			out.WriteString(copy + ";\n")
 		}
 	}
 	if tables == 0 {
@@ -162,6 +169,55 @@ func searchStatement(table string, kinds map[string]columnKind, order []string) 
 		text += " WITH (" + strings.Join(weights, ", ") + ")"
 	}
 	return text
+}
+
+// columnarStatement is a table's columns copy as the port takes it, its columns in the table's order (order, lower
+// case); "" for a table without one. copied holds the copy's columns as kitwork_columnar names them, by lower case.
+func columnarStatement(table string, copied map[string]string, order []string) string {
+	var columns []string
+	for _, name := range order {
+		if column, found := copied[name]; found {
+			columns = append(columns, writtenName(column))
+		}
+	}
+	if len(columns) == 0 {
+		return ""
+	}
+	return "CREATE INDEX " + writtenName(columnarIndexName(table)) + " ON " + writtenName(table) + " USING columnar (" + strings.Join(columns, ", ") + ")"
+}
+
+// structureColumnar is kitwork_columnar of the file: each table's (lower case) copied columns, by lower case, as
+// written; nil when the file has none.
+func structureColumnar(ctx context.Context, source structureQuerier) (map[string]map[string]string, error) {
+	rows, err := source.QueryContext(ctx, `SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = 'kitwork_columnar'`)
+	if err != nil {
+		return nil, err
+	}
+	held := 0
+	if rows.Next() {
+		err = rows.Scan(&held)
+	}
+	rows.Close()
+	if err != nil || held == 0 {
+		return nil, err
+	}
+	rows, err = source.QueryContext(ctx, `SELECT table_name, column_name FROM kitwork_columnar`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	copies := map[string]map[string]string{}
+	for rows.Next() {
+		var table, column string
+		if err := rows.Scan(&table, &column); err != nil {
+			return nil, err
+		}
+		if copies[strings.ToLower(table)] == nil {
+			copies[strings.ToLower(table)] = map[string]string{}
+		}
+		copies[strings.ToLower(table)][strings.ToLower(column)] = column
+	}
+	return copies, rows.Err()
 }
 
 // columnOrder is a table's columns in their order, lower case.
@@ -529,7 +585,11 @@ func LoadStructure(ctx context.Context, writer StructureFileWriter, by, text str
 	if len(statements) == 0 {
 		return nil
 	}
-	if _, err := writer.Migrate(ctx, by, append([]string{columnsTable}, statements...)...); err != nil {
+	prefix := []string{columnsTable}
+	if (schemaPlan{kinds: kinds}).touchesColumnar() {
+		prefix = append(prefix, columnarTable)
+	}
+	if _, err := writer.Migrate(ctx, by, append(prefix, statements...)...); err != nil {
 		return err
 	}
 	if len(kinds) == 0 && len(rows) == 0 {
@@ -545,6 +605,12 @@ func LoadStructure(ctx context.Context, writer StructureFileWriter, by, text str
 		for _, change := range kinds {
 			if change.search || change.unsearch {
 				if err := writeSearch(transaction, change); err != nil {
+					return err
+				}
+				continue
+			}
+			if change.columnar || change.uncolumnar {
+				if err := writeColumnar(transaction, change); err != nil {
 					return err
 				}
 				continue

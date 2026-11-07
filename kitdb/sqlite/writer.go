@@ -342,10 +342,11 @@ func (w *writer) writeStructure() {
 	}
 }
 
-// touchesColumnKinds reports a change of kitwork_columns among the events: the kinds the structure writes.
+// touchesColumnKinds reports a change of kitwork_columns or kitwork_columnar among the events: the kinds and the
+// columns copies the structure writes.
 func touchesColumnKinds(events []event) bool {
 	for _, change := range events {
-		if strings.EqualFold(change.table, "kitwork_columns") {
+		if strings.EqualFold(change.table, "kitwork_columns") || strings.EqualFold(change.table, "kitwork_columnar") {
 			return true
 		}
 	}

@@ -12,10 +12,11 @@ import (
 	"time"
 )
 
-// Registry keeps the copies a process reads, the File of each database file and one copy per table in it, and decides
-// them (KITWORK_KITDB.md mục 6 and 7: the engine decides, nobody declares one). A query that would scan a table asks
-// for the columns it reads; a table without a copy holding them gets one built in the background, of every column
-// asked for so far, when it holds at least MinimumRows rows; the query reads the rows meanwhile. A copy whose changed
+// Registry keeps the copies a process reads, the File of each database file and one copy per table in it. Which table
+// has a copy, of which columns, the database declares (CREATE INDEX … USING columnar, kitwork_columnar; KITWORK_KITDB.md
+// câu 13.11 (c), 07/11/2026, which replaced the engine deciding): a query asks for the table's declared columns, and a
+// table without a copy of exactly those gets one built in the background when it holds at least MinimumRows rows; the
+// query reads the rows meanwhile. A copy whose changed
 // rows reach FoldRows is folded in the background, unless they are spread over many blocks while fewer than a 256th of
 // the table's rows: then the fold waits for that many (Fold). One that went stale is built again. After either, a
 // File holding more bytes no generation reads than ones it does is compacted.
@@ -99,9 +100,9 @@ func (r *Registry) fileOf(path string) *registryFile {
 	return entry
 }
 
-// Acquire gives the copy of table of the file at path when it holds every column of columns; release gives it back.
-// Without one it returns nil, and a build of the table with those columns (and every one asked for before) starts in
-// the background unless one runs or the table was found too small.
+// Acquire gives the copy of table of the file at path when it holds exactly columns, the columns the database declares
+// for it; release gives it back. Without one it returns nil, and a build of the table with those columns starts in
+// the background unless one runs or the table was found too small: a declaration that changed builds the copy again.
 func (r *Registry) Acquire(path, table string, columns []string) (*Table, func()) {
 	path = filepath.Clean(path)
 	r.mutex.Lock()
@@ -116,25 +117,36 @@ func (r *Registry) Acquire(path, table string, columns []string) (*Table, func()
 		file.tables[table] = entry
 		if opened, err := file.file.Table(table); err == nil && opened != nil {
 			entry.table = opened
-			for _, column := range opened.Manifest().Columns {
-				entry.wanted[column.Name] = true
-			}
 		}
 	}
-	missing := false
+	declared := make(map[string]bool, len(columns))
 	for _, column := range columns {
-		if !entry.wanted[column] {
-			entry.wanted[column] = true
-			missing = true
-		}
+		declared[column] = true
 	}
-	if entry.table != nil && !missing && holdsAll(entry.table.Manifest(), columns) {
+	if !maps.Equal(entry.wanted, declared) {
+		entry.wanted = declared
+		entry.failed = time.Time{} // another declaration: its build is tried at once
+	}
+	if entry.table != nil && holdsExactly(entry.table.Manifest(), entry.wanted) {
 		table := entry.table
 		entry.users[table]++
 		return table, func() { r.release(path, table) }
 	}
 	r.startBuild(path, table, file, entry)
 	return nil, func() {}
+}
+
+// holdsExactly reports a copy whose columns are those of wanted, no more, no less.
+func holdsExactly(manifest *Manifest, wanted map[string]bool) bool {
+	if len(manifest.Columns) != len(wanted) {
+		return false
+	}
+	for _, column := range manifest.Columns {
+		if !wanted[column.Name] {
+			return false
+		}
+	}
+	return true
 }
 
 // Stale says table's copy no longer reaches the snapshots: it is built again.
@@ -257,8 +269,8 @@ func (r *Registry) startBuild(path, table string, file *registryFile, entry *reg
 	case entry.building, r.ctx.Err() != nil:
 		return
 	case len(entry.wanted) == 0:
-		// a query of no column (count(*)) has nothing a copy would hold: a build of none fails, and the failure
-		// would hold back for ten minutes the build the next query's columns ask for
+		// no column declared: a copy of none holds nothing, its build fails, and the failure would hold back for ten
+		// minutes the build a declaration asks for next
 		return
 	case !entry.small.IsZero() && time.Since(entry.small) < time.Hour:
 		return
@@ -281,8 +293,8 @@ func (r *Registry) startBuild(path, table string, file *registryFile, entry *reg
 			}
 		case small:
 			entry.small = time.Now()
-		case entry.table == nil || !holdsAll(entry.table.Manifest(), slices.Collect(maps.Keys(entry.wanted))):
-			r.startBuild(path, table, file, entry) // columns asked for while it was built
+		case entry.table == nil || !holdsExactly(entry.table.Manifest(), entry.wanted):
+			r.startBuild(path, table, file, entry) // the declaration changed while it was built
 		}
 		r.mutex.Unlock()
 		if err == nil && !small {

@@ -2,42 +2,50 @@ package analytics
 
 import "testing"
 
-// TestRegistryCountOfNoColumnHoldsNoBuildBack: a query reading no column (count(*)) starts no build, so the next
-// query's columns are built at once, and a count(*) after that reads the copy. On 07/11/2026, shopping's count(*)
-// through the port asked for a copy of no column; its build failed ("a copy holds 1..127 columns"), the failure held
-// every build of the table back for ten minutes, and GROUP BY brand right after ran on SQLite until it timed out.
+// TestRegistryBuildsWhatIsDeclared: a table's copy holds exactly the columns the database declares for it
+// (kitwork_columnar, KITWORK_KITDB.md câu 13.11 (c)). Asked with none, the registry builds nothing and leaves no failed
+// build behind (on 07/11/2026 a count(*) through engine2's port asked for a copy of no column, its build failed, and the
+// failure held every build of shopping back for ten minutes); asked with columns, it builds a copy of those; a
+// declaration that grows or narrows builds the copy again, and the copy before is not given meanwhile.
 //
-// CONTROL (07/11/2026): without the guard in startBuild, "a count(*) left a failed build: 2026-11-07 …" and, with the
-// failure's mark left out of the check, "no copy of amount after its build: a count(*) before it held the build back".
-func TestRegistryCountOfNoColumnHoldsNoBuildBack(t *testing.T) {
+// CONTROL (07/11/2026): without the guard of no column in startBuild, "asked with no column: a failed build: …"; with
+// a copy given when it holds the declared columns among others, "narrowed to amount: a copy given before its build".
+func TestRegistryBuildsWhatIsDeclared(t *testing.T) {
 	path, _ := ordersFile(t, 3000)
 	registry := NewRegistry()
 	registry.MinimumRows = 1
 	defer registry.Close()
 	if table, release := registry.Acquire(path, "orders", nil); table != nil {
 		release()
-		t.Fatal("a copy of no column before any build")
+		t.Fatal("a copy of no column")
 	}
 	registry.Wait()
 	registry.mutex.Lock()
 	failed := registry.files[path].tables["orders"].failed
 	registry.mutex.Unlock()
 	if !failed.IsZero() {
-		t.Fatalf("a count(*) left a failed build: %v", failed)
+		t.Fatalf("asked with no column: a failed build: %v", failed)
 	}
-	if table, release := registry.Acquire(path, "orders", []string{"amount"}); table != nil {
-		release()
-		t.Fatal("a copy holding amount before its build")
+	declared := func(label string, columns ...string) {
+		t.Helper()
+		if table, release := registry.Acquire(path, "orders", columns); table != nil {
+			release()
+			t.Fatalf("%s: a copy given before its build", label)
+		}
+		registry.Wait()
+		table, release := registry.Acquire(path, "orders", columns)
+		if table == nil {
+			t.Fatalf("%s: no copy after its build", label)
+		}
+		defer release()
+		if got := len(table.Manifest().Columns); got != len(columns) {
+			t.Fatalf("%s: the copy holds %d columns", label, got)
+		}
+		if !holdsAll(table.Manifest(), columns) {
+			t.Fatalf("%s: the copy holds %v", label, table.Manifest().Columns)
+		}
 	}
-	registry.Wait()
-	table, release := registry.Acquire(path, "orders", []string{"amount"})
-	defer release()
-	if table == nil {
-		t.Fatal("no copy of amount after its build: a count(*) before it held the build back")
-	}
-	counted, releaseCount := registry.Acquire(path, "orders", nil)
-	defer releaseCount()
-	if counted == nil {
-		t.Fatal("a count(*) does not read the copy built for amount")
-	}
+	declared("amount", "amount")
+	declared("grown to amount, price", "amount", "price")
+	declared("narrowed to amount", "amount")
 }

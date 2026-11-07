@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -25,9 +26,14 @@ func (portAccess) Current(context.Context) (bool, error)                 { retur
 // cmdPort runs the analytic queries of RESULTS_2026-10-27.md through two sessions of the read-only port on the file
 // (kitdb/gateway), as a PostgreSQL client sends them: one whose registry finds the copy in the copies' file at copies
 // (built by `kitdbsqlite analytics`), one without copies, SQLite answering. The results must be the same field for
-// field. Evidence for KITWORK_KITDB.md mục 6 and 7 (05/11/2026).
+// field. Evidence for KITWORK_KITDB.md mục 6 and 7 (05/11/2026). Since 07/11/2026 the copy is read only for a table
+// whose columns copy the file declares (CREATE INDEX shopping_columnar ON shopping USING columnar (…), câu 13.11 (c)):
+// without one, both sessions are SQLite's, and the command says so first.
 func cmdPort(path, copies string) {
 	ctx := context.Background()
+	if declared := declaredCopy(path, "shopping"); declared == 0 {
+		fmt.Println("the file declares no columns copy of shopping (CREATE INDEX shopping_columnar ON shopping USING columnar (…)): every statement below is SQLite's")
+	}
 	registry := analytics.NewRegistry()
 	registry.Place = func(string) string { return copies }
 	defer registry.Close()
@@ -78,4 +84,18 @@ func cmdPort(path, copies string) {
 		}
 		fmt.Printf("%-36s %12s %12s  %d rows, %s\n", item.name, duration(times[position]), duration(took), len(want.Rows), verdict)
 	}
+}
+
+// declaredCopy is how many columns of table's columns copy the file at path declares (kitwork_columnar); 0 without one.
+func declaredCopy(path, table string) int {
+	db, err := sql.Open("sqlite", "file:"+toSlash(path)+"?mode=ro")
+	if err != nil {
+		return 0
+	}
+	defer db.Close()
+	var columns int
+	if db.QueryRow(`SELECT count(*) FROM kitwork_columnar WHERE table_name = ?`, table).Scan(&columns) != nil {
+		return 0
+	}
+	return columns
 }
