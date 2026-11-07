@@ -256,6 +256,10 @@ func (r *Registry) startBuild(path, table string, file *registryFile, entry *reg
 	switch {
 	case entry.building, r.ctx.Err() != nil:
 		return
+	case len(entry.wanted) == 0:
+		// a query of no column (count(*)) has nothing a copy would hold: a build of none fails, and the failure
+		// would hold back for ten minutes the build the next query's columns ask for
+		return
 	case !entry.small.IsZero() && time.Since(entry.small) < time.Hour:
 		return
 	case !entry.failed.IsZero() && time.Since(entry.failed) < 10*time.Minute:
