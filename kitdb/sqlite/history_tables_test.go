@@ -280,3 +280,145 @@ func TestRestoreKeepsTheHistoryOfTheTablesFollowed(t *testing.T) {
 		t.Fatalf("restored: orders %q, %d notes; want orders 1,2 as at the moment, and notes as the anchor holds them (0)", amounts, notes)
 	}
 }
+
+// TestTableHistorySaysFromWhere: TableHistory says whether the history keeps a table and from which revision every
+// change of it is there (KITWORK_KITDB.md câu 13.11): off for a table without history; on from the commit of its
+// Tracked change once its history is set on, after rows changed with no trace; on from 1 in a file without
+// kitwork_tables. RestoreTable, the restore of an app's at(), is refused for a table without history, at a moment
+// before its history began, and while the replay from the anchor would cross that Tracked change, since the rows
+// changed before it are not in the history; Restore of the whole file is not. From an anchor written after it,
+// RestoreTable gives the table whole.
+//
+// CONTROL (07/11/2026): with the writer setting recorded to 1 where a table's recording starts, "notes: TableHistory
+// on true from 1, want on from 3"; with the replay taking no notice of the table RestoreTable restores,
+// "RestoreTable of notes across its Tracked change: <nil>, want ErrPastUnreachable"; with RestoreTable not comparing
+// the moment with the table's from, "RestoreTable of notes at a moment before its history: <nil>" (the anchor before
+// it and no Tracked change in the replay: the table as the anchor held it, without a and b).
+func TestTableHistorySaysFromWhere(t *testing.T) {
+	ctx := context.Background()
+	database, err := Open(ctx, filepath.Join(t.TempDir(), "kitwork.db"), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	tableHistory := func(table string) (bool, uint64) {
+		t.Helper()
+		on, from, err := TableHistory(ctx, database.readers, table)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return on, from
+	}
+	if _, err := database.Migrate(ctx, "boot", `CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, database, `INSERT INTO notes (body) VALUES ('a'), ('b')`) // no trace
+	if on, from := tableHistory("notes"); on || from != 0 {
+		t.Fatalf("notes without history: TableHistory on %v from %d", on, from)
+	}
+	if _, err := database.RestoreTable(ctx, time.Now(), filepath.Join(t.TempDir(), "off.db"), "notes"); !errors.Is(err, ErrPastUnreachable) {
+		t.Fatalf("RestoreTable of notes without history: %v, want ErrPastUnreachable", err)
+	}
+	time.Sleep(2 * time.Millisecond)
+	beforeHistory := time.Now() // notes had a, b: no anchor after them, the history has nothing of them
+	time.Sleep(2 * time.Millisecond)
+	if _, err := database.SetHistory(ctx, "t", "notes", true); err != nil {
+		t.Fatal(err)
+	}
+	tracked := database.Revision() // the commit of notes' Tracked change, written after SetHistory's
+	if changes := recordedChanges(t, database, tracked-1); len(changes) != 1 || changes[0] != "tracked notes" {
+		t.Fatalf("the last commit: %v, want notes' Tracked change", changes)
+	}
+	if on, from := tableHistory("NOTES"); !on || from != tracked {
+		t.Fatalf("notes: TableHistory on %v from %d, want on from %d", on, from, tracked)
+	}
+	mustWrite(t, database, `INSERT INTO notes (body) VALUES ('c')`)
+
+	target := filepath.Join(t.TempDir(), "restored.db")
+	if _, err := database.RestoreTable(ctx, time.Now(), target, "notes"); !errors.Is(err, ErrPastUnreachable) {
+		t.Fatalf("RestoreTable of notes across its Tracked change: %v, want ErrPastUnreachable", err)
+	}
+	if _, err := database.RestoreTable(ctx, beforeHistory, filepath.Join(t.TempDir(), "before.db"), "notes"); !errors.Is(err, ErrPastUnreachable) {
+		t.Fatalf("RestoreTable of notes at a moment before its history: %v, want ErrPastUnreachable", err)
+	}
+	if _, err := database.Restore(ctx, time.Now(), filepath.Join(t.TempDir(), "whole.db")); err != nil {
+		t.Fatalf("Restore of the whole file across notes' Tracked change: %v", err)
+	}
+	if _, err := database.Anchor(ctx); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, database, `INSERT INTO notes (body) VALUES ('d')`)
+	target = filepath.Join(t.TempDir(), "after.db")
+	if _, err := database.RestoreTable(ctx, time.Now(), target, "notes"); err != nil {
+		t.Fatalf("RestoreTable of notes from an anchor written after its Tracked change: %v", err)
+	}
+	restored, err := sql.Open("sqlite", "file:"+filepath.ToSlash(target)+"?mode=ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+	var bodies string
+	if err := restored.QueryRow(`SELECT group_concat(body, ',') FROM (SELECT body FROM notes ORDER BY id)`).Scan(&bodies); err != nil {
+		t.Fatal(err)
+	}
+	if bodies != "a,b,c,d" {
+		t.Fatalf("notes restored from the anchor after its Tracked change: %q, want a,b,c,d", bodies)
+	}
+
+	if _, err := database.SetHistory(ctx, "t", "notes", false); err != nil {
+		t.Fatal(err)
+	}
+	if on, from := tableHistory("notes"); on || from != 0 {
+		t.Fatalf("notes, its history off again: TableHistory on %v from %d", on, from)
+	}
+
+	// a file without kitwork_tables: every table's history, from its first commit
+	every, err := Open(ctx, filepath.Join(t.TempDir(), "every.db"), Options{HistoryOfEveryTable: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = every.Close() })
+	if _, err := every.Migrate(ctx, "boot", `CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if on, from, err := TableHistory(ctx, every.readers, "notes"); err != nil || !on || from != 1 {
+		t.Fatalf("a file without kitwork_tables: TableHistory on %v from %d (%v), want on from 1", on, from, err)
+	}
+}
+
+// TestATableOfBeforeKeepsItsHistory: the tables a file has when a writer first opens it without kitwork_tables keep
+// their history, though no commit was ever recorded (a file made outside KitDB, or by the old engine, whose writer
+// would have followed every table): only a table made since starts without (KITWORK_KITDB.md câu 13.11 (d)).
+//
+// CONTROL (07/11/2026): with adopt writing no table of a file whose history has no commit, "an insert into notes, a
+// table the file had: revision 0 → 0".
+func TestATableOfBeforeKeepsItsHistory(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "kitwork.db")
+	plain, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := plain.Exec(`CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT); INSERT INTO notes (body) VALUES ('a')`); err != nil {
+		t.Fatal(err)
+	}
+	plain.Close()
+	database, err := Open(ctx, path, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	before := database.Revision()
+	mustWrite(t, database, `INSERT INTO notes (body) VALUES ('b')`)
+	if after := database.Revision(); after == before {
+		t.Fatalf("an insert into notes, a table the file had: revision %d → %d", before, after)
+	}
+	if _, err := database.Migrate(ctx, "t", `CREATE TABLE later (id INTEGER PRIMARY KEY)`); err != nil {
+		t.Fatal(err)
+	}
+	before = database.Revision()
+	mustWrite(t, database, `INSERT INTO later DEFAULT VALUES`)
+	if after := database.Revision(); after != before {
+		t.Fatalf("an insert into later, a table made since: revision %d → %d", before, after)
+	}
+}

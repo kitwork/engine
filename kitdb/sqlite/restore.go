@@ -18,6 +18,36 @@ import (
 // restored revision. target must not exist. A moment before the history Retain
 // kept is ErrPruned.
 func (database *Database) Restore(ctx context.Context, moment time.Time, target string) (uint64, error) {
+	return database.restore(ctx, moment, target, "")
+}
+
+// RestoreTable is Restore for a reader of one table (an app's at()): it is refused, ErrPastUnreachable, unless the
+// history holds every change of table from the anchor it starts from to the moment. A table the history does not
+// record, a moment before where its recording last started (TableHistory's from) and an anchor before that start (a
+// Tracked change of the table in the replay) are each refused: rows changed then with no trace, and the table restored
+// would not be as it was.
+func (database *Database) RestoreTable(ctx context.Context, moment time.Time, target, table string) (uint64, error) {
+	if err := database.ensureOpen(); err != nil {
+		return 0, err
+	}
+	on, from, err := TableHistory(ctx, database.readers, table)
+	if err != nil {
+		return 0, err
+	}
+	if !on {
+		return 0, fmt.Errorf("%w: the history does not record %q", ErrPastUnreachable, table)
+	}
+	revision, err := database.RevisionAt(ctx, moment)
+	if err != nil {
+		return 0, err
+	}
+	if from > 1 && revision < from {
+		return 0, fmt.Errorf("%w: the history records %q from revision %d only", ErrPastUnreachable, table, from)
+	}
+	return database.restore(ctx, moment, target, table)
+}
+
+func (database *Database) restore(ctx context.Context, moment time.Time, target, table string) (uint64, error) {
 	if err := database.ensureOpen(); err != nil {
 		return 0, err
 	}
@@ -65,7 +95,7 @@ func (database *Database) Restore(ctx context.Context, moment time.Time, target 
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return 0, err
 	}
-	replay := &replayer{target: restored, columns: map[string][]string{}}
+	replay := &replayer{target: restored, columns: map[string][]string{}, whole: table}
 	tx, err := restored.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -107,6 +137,8 @@ type replayer struct {
 	target  *sql.DB
 	tx      *sql.Tx
 	columns map[string][]string
+	// whole is the table RestoreTable restores, whose Tracked change the replay may not cross
+	whole string
 }
 
 func (replay *replayer) tableColumns(ctx context.Context, table string) ([]string, error) {
@@ -228,7 +260,10 @@ func (replay *replayer) apply(ctx context.Context, changes []Change) error {
 			// the anchor Maintain writes at a Barrier starts every restore after it
 			return fmt.Errorf("%w: the file changed here outside the history (%s) and no anchor was written at it", ErrNoAnchor, change.Statement)
 		case Tracked:
-			// the history records a table from here: nothing to replay
+			// the history records a table from here: nothing to replay, unless it is the table RestoreTable restores
+			if replay.whole != "" && strings.EqualFold(change.Table, replay.whole) {
+				return fmt.Errorf("%w: the history records %q from here only, after the anchor the restore starts from", ErrPastUnreachable, change.Table)
+			}
 		case Delete:
 			if _, err := replay.tx.ExecContext(ctx, `DELETE FROM `+quoteIdentifier(change.Table)+` WHERE _rowid_ = ?`, change.RowID); err != nil {
 				return err

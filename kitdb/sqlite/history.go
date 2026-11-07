@@ -557,6 +557,49 @@ func ReadChanges(ctx context.Context, querier interface {
 	})
 }
 
+// TableHistory reads, on the file querier reads, what its history keeps of table (kitwork_tables, KITWORK_KITDB.md
+// câu 13.11): on when the table's history is set on and the writer records it, and from, the revision from which
+// every change of the table is in the history (1: from the file's first commit). The table as it was at a revision
+// before from is not in the history: the writer did not record it then, and rows may have changed with no trace. A
+// file without kitwork_tables, written before it, keeps every table's history from its first commit.
+func TableHistory(ctx context.Context, querier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}, table string) (on bool, from uint64, err error) {
+	rows, err := querier.QueryContext(ctx, `SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = 'kitwork_tables'`)
+	if err != nil {
+		return false, 0, err
+	}
+	held := 0
+	if rows.Next() {
+		err = rows.Scan(&held)
+	}
+	rows.Close()
+	if err != nil {
+		return false, 0, err
+	}
+	if held == 0 {
+		return true, 1, nil
+	}
+	rows, err = querier.QueryContext(ctx, `SELECT history, recorded FROM kitwork_tables WHERE table_name = ? COLLATE NOCASE`, table)
+	if err != nil {
+		return false, 0, err
+	}
+	defer rows.Close()
+	var history, recorded int64
+	if rows.Next() {
+		if err := rows.Scan(&history, &recorded); err != nil {
+			return false, 0, err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, 0, err
+	}
+	if history != 1 || recorded <= 0 {
+		return false, 0, nil
+	}
+	return true, uint64(recorded), nil
+}
+
 // ReadChangesIn is ReadChanges of the file a connection attaches as schema.
 func ReadChangesIn(ctx context.Context, querier interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)

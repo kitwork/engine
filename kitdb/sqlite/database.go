@@ -257,9 +257,8 @@ func (database *Database) Write(ctx context.Context, by string, request func(*Tr
 // its own: from the next commit the writer records the table's changes, after a Tracked change, or no longer records
 // them unless an index is built from the table. A table the file does not have is refused, and so is turning on the
 // history of one it cannot record (WITHOUT ROWID, generated columns), which a table without history may be. A file
-// without kitwork_tables gets it first; when its history has commits (a file written before, open with
-// Options.HistoryOfEveryTable) every table it has is written with its history on, as recorded all along, so setting
-// one table's history leaves the others' as they were.
+// without kitwork_tables (open with Options.HistoryOfEveryTable) gets it first, every table it has written with its
+// history on, as recorded all along, so setting one table's history leaves the others' as they were.
 func (database *Database) SetHistory(ctx context.Context, by, table string, on bool) (uint64, error) {
 	if err := database.ensureOpen(); err != nil {
 		return 0, err
@@ -268,7 +267,7 @@ func (database *Database) SetHistory(ctx context.Context, by, table string, on b
 	if err := database.readers.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = 'kitwork_tables'`).Scan(&held); err != nil {
 		return 0, err
 	}
-	adopting := held == 0 && database.Revision() > 0
+	adopting := held == 0
 	if held == 0 {
 		if _, err := database.Migrate(ctx, by, TablesSchema); err != nil {
 			return 0, err

@@ -878,8 +878,9 @@ func (transaction *Transaction) Query(query string, arguments ...any) (*sql.Rows
 }
 
 // TablesSchema is kitwork_tables (KITWORK_KITDB.md câu 13.11): a table's history setting (history: on when 1) and
-// whether the writer recorded its changes as of the last commit (recorded), which tells a table whose recording starts
-// again. A file without it, whose history has commits, was written before the table and keeps the history of every
+// whether the writer records its changes (recorded): 0 when it does not, else the revision from which every change of
+// the table is in the history, the commit of its Tracked change (1 for a table recorded from the file's first
+// commit), which tells a table whose recording starts again and how far back its history reaches (TableHistory). A file without it, whose history has commits, was written before the table and keeps the history of every
 // table it has; one made from a structure file always has it (kitdb/gateway's LoadStructure), so its tables have the
 // history the structure says.
 const TablesSchema = `CREATE TABLE IF NOT EXISTS kitwork_tables (table_name TEXT PRIMARY KEY, history INTEGER NOT NULL DEFAULT 0, recorded INTEGER NOT NULL DEFAULT 0) STRICT`
@@ -980,11 +981,11 @@ func (w *writer) followed(ctx context.Context) (map[string]bool, error) {
 	return tables, nil
 }
 
-// adopt gives a file without kitwork_tables one as it opens, unless Options.HistoryOfEveryTable. A file whose history
-// has commits was written before 07/11/2026, when the history followed every table: each of its tables keeps its
-// history, written on and recorded, with no Tracked change since it was recorded all along. A file whose history has
-// none (new, or never written through KitDB) gets an empty one: its tables have no history until one is set, and the
-// table says the file is of the new kind when it opens again with commits.
+// adopt gives a file without kitwork_tables one as it opens, unless Options.HistoryOfEveryTable. The tables a file
+// already has were made before 07/11/2026, when the history followed every table, or outside KitDB, where a writer
+// would have followed them: each keeps its history, written on and recorded, with no Tracked change since nothing of
+// it went unrecorded while a writer held the file. A new file has no table yet, and its kitwork_tables starts empty:
+// a table made in it has no history until one is set.
 func (w *writer) adopt(ctx context.Context) error {
 	if w.every {
 		return nil
@@ -998,7 +999,7 @@ func (w *writer) adopt(ctx context.Context) error {
 		err = w.exec(TablesSchema)
 	}
 	for name := range w.shapes {
-		if err != nil || w.revision == 0 {
+		if err != nil {
 			break
 		}
 		if !bookkeeping(strings.ToLower(name)) {
@@ -1035,7 +1036,7 @@ func (w *writer) follow(ctx context.Context) error {
 	}
 	recorded := map[string]bool{}
 	if held {
-		if err := w.readNames(ctx, recorded, `SELECT table_name FROM kitwork_tables WHERE recorded = 1`); err != nil {
+		if err := w.readNames(ctx, recorded, `SELECT table_name FROM kitwork_tables WHERE recorded > 0`); err != nil {
 			return err
 		}
 	}
@@ -1064,11 +1065,12 @@ func (w *writer) follow(ctx context.Context) error {
 		err = w.exec(TablesSchema)
 	}
 	var changes []Change
+	from := w.revision + 1 // the revision this commit takes: it has a change for each table started
 	for _, name := range started {
 		if err != nil {
 			break
 		}
-		err = w.exec(`INSERT INTO kitwork_tables (table_name, recorded) VALUES (?, 1) ON CONFLICT (table_name) DO UPDATE SET recorded = 1`, name)
+		err = w.exec(`INSERT INTO kitwork_tables (table_name, recorded) VALUES (?, ?) ON CONFLICT (table_name) DO UPDATE SET recorded = excluded.recorded`, name, int64(from))
 		changes = append(changes, Change{Operation: Tracked, Table: name, Statement: "the history records " + name + " from here"})
 	}
 	for _, name := range stopped {
