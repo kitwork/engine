@@ -124,40 +124,18 @@ func Structure(ctx context.Context, source structureQuerier) (string, error) {
 	return StructureHeader + body, nil
 }
 
-// kindRows is the INSERT of table's kinds into kitwork_columns, by column name; with the rules of its columns when one
-// has a transform or is set once (written so only then: a structure of before stays the same text).
+// kindRows is the INSERT of table's kinds into kitwork_columns, by column name.
 func kindRows(table string, kinds map[string]columnKind) string {
 	names := make([]string, 0, len(kinds))
-	rules, checks := false, false
-	for name, kind := range kinds {
+	for name := range kinds {
 		names = append(names, name)
-		rules = rules || kind.transform != "" || kind.readonly
-		checks = checks || kind.minimum != "" || kind.maximum != "" || kind.choices != ""
 	}
-	rules = rules || checks
 	sort.Strings(names)
 	values := make([]string, len(names))
 	for index, name := range names {
 		kind := kinds[name]
-		values[index] = fmt.Sprintf("(%s, %s, %s, %d, %d", quoteLiteral(table), quoteLiteral(kind.column), quoteLiteral(kind.kind),
+		values[index] = fmt.Sprintf("(%s, %s, %s, %d, %d)", quoteLiteral(table), quoteLiteral(kind.column), quoteLiteral(kind.kind),
 			kind.precision, kind.scale)
-		if rules {
-			readonly := 0
-			if kind.readonly {
-				readonly = 1
-			}
-			values[index] += fmt.Sprintf(", %s, %d", quoteLiteral(kind.transform), readonly)
-		}
-		if checks {
-			values[index] += fmt.Sprintf(", %s, %s, %s", quoteLiteral(kind.minimum), quoteLiteral(kind.maximum), quoteLiteral(kind.choices))
-		}
-		values[index] += ")"
-	}
-	switch {
-	case checks:
-		return "INSERT INTO kitwork_columns (table_name, column_name, kind, precision, scale, transform, readonly, minimum, maximum, choices) VALUES\n  " + strings.Join(values, ",\n  ")
-	case rules:
-		return "INSERT INTO kitwork_columns (table_name, column_name, kind, precision, scale, transform, readonly) VALUES\n  " + strings.Join(values, ",\n  ")
 	}
 	return "INSERT INTO kitwork_columns (table_name, column_name, kind, precision, scale) VALUES\n  " + strings.Join(values, ",\n  ")
 }
@@ -233,8 +211,7 @@ func unsaidKinds(ctx context.Context, source structureQuerier, table string, kin
 	for column, kind := range kinds {
 		said := kind.kind == "decimal" || kind.kind == "bool" || kind.kind == "json" || implied[storage[column]] == kind.kind ||
 			storage[column] == "TEXT" && (kind.kind == "kitid" || kind.kind == "date" || kind.kind == "datetime" || kind.kind == "uuid")
-		// no PostgreSQL type says a transform, a column set once, nor a value's bounds or words
-		if said && kind.transform == "" && !kind.readonly && kind.minimum == "" && kind.maximum == "" && kind.choices == "" {
+		if said {
 			continue // numeric(p, s), boolean, json, kitid, date, timestamptz, or the kind its storage gives
 		}
 		unsaid[column] = kind
@@ -274,41 +251,7 @@ func structureKinds(ctx context.Context, source structureQuerier) (map[string]ma
 	if held > 0 {
 		weight = "search_weight"
 	}
-	// the rules came on 06/11/2026 (engine2's kitwork migrate); a file of before has none
-	rules := "'', 0"
-	rows, err = source.QueryContext(ctx, `SELECT count(*) FROM pragma_table_info('kitwork_columns') WHERE name = 'transform'`)
-	if err != nil {
-		return nil, err
-	}
-	held = 0
-	if rows.Next() {
-		err = rows.Scan(&held)
-	}
-	rows.Close()
-	if err != nil {
-		return nil, err
-	}
-	if held > 0 {
-		rules = "transform, readonly"
-	}
-	// a value's bounds and words came on 07/11/2026
-	checks := "'', '', ''"
-	rows, err = source.QueryContext(ctx, `SELECT count(*) FROM pragma_table_info('kitwork_columns') WHERE name = 'minimum'`)
-	if err != nil {
-		return nil, err
-	}
-	held = 0
-	if rows.Next() {
-		err = rows.Scan(&held)
-	}
-	rows.Close()
-	if err != nil {
-		return nil, err
-	}
-	if held > 0 {
-		checks = "minimum, maximum, choices"
-	}
-	rows, err = source.QueryContext(ctx, `SELECT table_name, column_name, kind, precision, scale, `+weight+`, `+rules+`, `+checks+` FROM kitwork_columns`)
+	rows, err = source.QueryContext(ctx, `SELECT table_name, column_name, kind, precision, scale, `+weight+` FROM kitwork_columns`)
 	if err != nil {
 		return nil, err
 	}
@@ -316,8 +259,7 @@ func structureKinds(ctx context.Context, source structureQuerier) (map[string]ma
 	for rows.Next() {
 		var table, column string
 		var kind columnKind
-		if err := rows.Scan(&table, &column, &kind.kind, &kind.precision, &kind.scale, &kind.weight, &kind.transform, &kind.readonly,
-			&kind.minimum, &kind.maximum, &kind.choices); err != nil {
+		if err := rows.Scan(&table, &column, &kind.kind, &kind.precision, &kind.scale, &kind.weight); err != nil {
 			return nil, err
 		}
 		if kinds[strings.ToLower(table)] == nil {

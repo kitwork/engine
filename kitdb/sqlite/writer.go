@@ -824,66 +824,6 @@ func (transaction *Transaction) Exec(query string, arguments ...any) (sql.Result
 	return result, err
 }
 
-// ExecReturning runs one data statement that ends with RETURNING inside the
-// request, in a savepoint of its own as Exec does, and hands each row it
-// returns to check before the savepoint is let go: a check that fails rolls
-// the statement back, and its error is the statement's. It gives how many rows
-// the statement returned, the rows it wrote. A database's rules a client's
-// write is held to (the port's, kitdb/gateway) read the rows as written, so a
-// value computed by the statement (qty = qty - 5) is held as one written out.
-func (transaction *Transaction) ExecReturning(query string, check func(*sql.Rows) error, arguments ...any) (int64, error) {
-	if transaction.done {
-		return 0, fmt.Errorf("kitdb: transaction used after its request returned")
-	}
-	for position, argument := range arguments {
-		if text, ok := argument.(string); ok && strings.IndexByte(text, 0) >= 0 {
-			return 0, fmt.Errorf("%w: argument %d is a text holding the NUL character", ErrStatementRefused, position+1)
-		}
-	}
-	shape, err := classifyStatement(query)
-	if err != nil {
-		return 0, err
-	}
-	if shape.kind != statementData {
-		return 0, fmt.Errorf("%w: ExecReturning runs a data statement", ErrStatementRefused)
-	}
-	w := transaction.writer
-	mark := len(w.events)
-	if err := w.exec("SAVEPOINT kitwork_statement"); err != nil {
-		w.broken = err
-		return 0, err
-	}
-	var returned int64
-	rows, err := w.conn.QueryContext(transaction.ctx, query, arguments...)
-	if err == nil {
-		for err == nil && rows.Next() {
-			returned++
-			err = check(rows)
-		}
-		if err == nil {
-			err = rows.Err()
-		}
-		if closeErr := rows.Close(); err == nil {
-			err = closeErr
-		}
-	}
-	if err != nil {
-		if rollbackErr := w.exec("ROLLBACK TO kitwork_statement"); rollbackErr != nil {
-			w.broken = errors.Join(err, rollbackErr)
-			return 0, w.broken
-		}
-		w.events = w.events[:mark]
-	}
-	if releaseErr := w.exec("RELEASE kitwork_statement"); releaseErr != nil {
-		w.broken = errors.Join(err, releaseErr)
-		return 0, w.broken
-	}
-	if err != nil {
-		return 0, err
-	}
-	return returned, nil
-}
-
 // Query runs one read statement inside the write transaction, seeing the
 // request's own changes.
 func (transaction *Transaction) Query(query string, arguments ...any) (*sql.Rows, error) {

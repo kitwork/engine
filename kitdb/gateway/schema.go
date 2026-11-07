@@ -40,7 +40,7 @@ import (
 // wrote is refused.
 
 // columnsTable is kitwork_columns as the engine makes it (work/db.sqlite_columns.go).
-const columnsTable = `CREATE TABLE IF NOT EXISTS kitwork_columns (table_name TEXT NOT NULL, column_name TEXT NOT NULL, kind TEXT NOT NULL, precision INTEGER NOT NULL, scale INTEGER NOT NULL, search_weight INTEGER NOT NULL DEFAULT 0, transform TEXT NOT NULL DEFAULT '', readonly INTEGER NOT NULL DEFAULT 0, minimum TEXT NOT NULL DEFAULT '', maximum TEXT NOT NULL DEFAULT '', choices TEXT NOT NULL DEFAULT '', PRIMARY KEY (table_name, column_name))`
+const columnsTable = `CREATE TABLE IF NOT EXISTS kitwork_columns (table_name TEXT NOT NULL, column_name TEXT NOT NULL, kind TEXT NOT NULL, precision INTEGER NOT NULL, scale INTEGER NOT NULL, search_weight INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (table_name, column_name))`
 
 // columnKind is what a column's PostgreSQL type becomes: its SQLite storage and the engine's kind.
 type columnKind struct {
@@ -51,12 +51,6 @@ type columnKind struct {
 	serial    bool
 	column    string // the column's name as kitwork_columns writes it (structure.go)
 	weight    int    // its .searchable() weight, search_weight of kitwork_columns (structure.go)
-	// its rules (structure.go, write.go's ColumnRules): a transform's steps, "trim,toLowerCase"; set once, at an insert
-	transform string
-	readonly  bool
-	// what its value is held to (write.go's ColumnChecks): a number's bounds or a text's length in characters, a
-	// choice's words as a JSON array; "" for none
-	minimum, maximum, choices string
 }
 
 // kindChange is what a schema statement does to kitwork_columns.
@@ -441,7 +435,7 @@ func translateConstraints(tokens []token, schema, column string, kind columnKind
 					end++
 				}
 				if literal, ok := literalText(tokens[index+1 : end]); ok {
-					stored, err := conversion{column: column, decimal: kind.kind == "decimal", boolean: kind.kind == "bool", precision: kind.precision, scale: kind.scale}.convert(literal)
+					stored, err := conversion{column: column, decimal: kind.kind == "decimal", precision: kind.precision, scale: kind.scale}.convert(literal)
 					if err != nil {
 						return "", false, err
 					}

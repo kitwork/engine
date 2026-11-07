@@ -57,30 +57,6 @@ type Columns interface {
 	Column(schema, table, column string) (kind string, precision, scale int, found bool)
 }
 
-// ColumnRules is what a Columns may also say of a column (KITWORK_SCHEMA.md mục 5): the transform the database takes
-// every value written into it through, its steps in order (trim, toLowerCase, toUpperCase, as JavaScript's), and
-// whether it is set once, at an insert (.readonly()). A write through the port keeps both, as the engine's own
-// statements do, so every client is held to them.
-type ColumnRules interface {
-	Rules(schema, table, column string) (transform []string, readonly bool)
-}
-
-// ColumnChecks is what a column's value is held to, as kitwork migrate wrote it in kitwork_columns (minimum, maximum,
-// choices; KITWORK_SCHEMA.md mục 3, 07/11/2026): a number's bounds (a decimal's as its value), a text's length in
-// characters, a choice's words. A write through the port keeps them, its rows read as written (RETURNING, so a value
-// the statement computes is held too); a row that breaks one is 23514, as PostgreSQL's CHECK answers, the statement
-// rolled back. It holds a table whose CHECK SQLite would add only by making the table again.
-type ColumnChecks interface {
-	Check(schema, table, column string) (Check, bool)
-}
-
-// Check is one column's: Minimum and Maximum written as numbers ("" for none), Choices the words it takes (none for
-// any).
-type Check struct {
-	Minimum, Maximum string
-	Choices          []string
-}
-
 // Options bounds what one statement may return, names the session's user and receives what fails.
 type Options struct {
 	MaxRows  int   // 10000 when zero or less
