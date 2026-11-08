@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"crypto/tls"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/kitwork/engine/domain"
 	"github.com/kitwork/engine/kitdb/analytics"
 	"github.com/kitwork/engine/kitdb/catalog"
 	"github.com/kitwork/engine/kitdb/gateway"
@@ -42,10 +44,65 @@ type appDatabaseRuntime struct {
 	closeErr  error
 }
 
-// appDatabaseApps is where the host's apps are, to find the app of a domain.
+// appDatabaseApps is where the host's apps are, to find the app of a domain, and where the website keeps their
+// certificates ("" when the manifest declares no website).
 type appDatabaseApps struct {
-	root   string
-	layout work.RootLayout
+	root         string
+	layout       work.RootLayout
+	certificates string
+}
+
+// websiteCertificates is the website's AutoSSL store when the manifest declares a website, else "".
+func websiteCertificates(website bool) string {
+	if !website {
+		return ""
+	}
+	folder, err := filepath.Abs(domain.CertificatesFolder)
+	if err != nil {
+		return domain.CertificatesFolder
+	}
+	return folder
+}
+
+// appDatabaseTLS is the port's TLS (KITWORK_KITDB.md câu 13.11, 08/11/2026): the files of tls: { certificate, key },
+// else, when the port listens beyond the loopback, the website's certificates out of its AutoSSL store by the name the
+// client connects with (a site of the host); nil on the loopback with no files, the port as before. It says which.
+func appDatabaseTLS(config AppDatabaseConfig, apps appDatabaseApps, port *appDatabaseGateway) (*tls.Config, string, error) {
+	if config.TLS != nil {
+		certificate, err := pgwire.CertificateFiles(config.TLS.Certificate, config.TLS.Key)
+		if err != nil {
+			return nil, "", fmt.Errorf("app.database %q: tls: %w", config.Path, err)
+		}
+		return pgwire.TLSConfig(certificate), config.TLS.Certificate, nil
+	}
+	if loopbackHost(config.Host) {
+		return nil, "", nil
+	}
+	if apps.certificates == "" {
+		return nil, "", fmt.Errorf("app.database %q listens on %s: a client of another machine comes in by TLS, and the "+
+			"manifest declares no website whose certificates the port could use; write tls: { certificate, key }", config.Path, config.Host)
+	}
+	store := pgwire.CachedCertificates(apps.certificates, func(name string) bool {
+		_, err := port.appOf(name)
+		return err == nil
+	})
+	certificate := func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+		found, err := store(hello)
+		if err != nil {
+			slog.Warn("Database port: no certificate for a client", "error", err)
+		}
+		return found, err
+	}
+	return pgwire.TLSConfig(certificate), "the website's certificates in " + apps.certificates, nil
+}
+
+// loopbackHost reports a host the port listens on that only this machine reaches.
+func loopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	return ip != nil && ip.IsLoopback()
 }
 
 func startAppDatabaseRuntimes(parent context.Context, configs []AppDatabaseConfig, apps appDatabaseApps) ([]*appDatabaseRuntime, <-chan error, error) {
@@ -113,17 +170,24 @@ func startAppDatabaseRuntime(parent context.Context, config AppDatabaseConfig, a
 		_ = runtime.Close()
 		return nil, err
 	}
+	secure, certificates, err := appDatabaseTLS(config, apps, port)
+	if err != nil {
+		_ = runtime.Close()
+		return nil, err
+	}
 	address := net.JoinHostPort(config.Host, strconv.Itoa(config.Port))
 	runtime.listener, err = net.Listen("tcp", address)
 	if err != nil {
 		_ = runtime.Close()
 		return nil, fmt.Errorf("app.database %q: listen on %s: %w", config.Path, address, err)
 	}
-	if err := pgwire.ValidateCleartextListener(runtime.listener); err != nil {
-		_ = runtime.Close()
-		return nil, fmt.Errorf("app.database %q: %w (the port has no TLS yet: host must be 127.0.0.1 or ::1)", config.Path, err)
+	if secure == nil {
+		if err := pgwire.ValidateCleartextListener(runtime.listener); err != nil {
+			_ = runtime.Close()
+			return nil, fmt.Errorf("app.database %q: %w (without TLS the host is 127.0.0.1 or ::1)", config.Path, err)
+		}
 	}
-	server := pgwire.Server{Authenticator: port}
+	server := pgwire.Server{Authenticator: port, TLS: secure}
 	if config.Concurrency > 0 {
 		server.MaxConcurrentQueries = config.Concurrency
 		server.MaxConcurrentQueriesPerKey = config.Concurrency
@@ -141,7 +205,12 @@ func startAppDatabaseRuntime(parent context.Context, config AppDatabaseConfig, a
 			}
 		}
 	}()
-	slog.Info("Database port started (PostgreSQL wire, SQLite)", "path", host, "address", runtime.listener.Addr())
+	if secure == nil {
+		slog.Info("Database port started (PostgreSQL wire, SQLite)", "path", host, "address", runtime.listener.Addr())
+	} else {
+		slog.Info("Database port started (PostgreSQL wire, SQLite, TLS)", "path", host, "address", runtime.listener.Addr(),
+			"certificates", certificates)
+	}
 	return runtime, nil
 }
 

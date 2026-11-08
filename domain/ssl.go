@@ -68,9 +68,13 @@ func HostPolicy(ctx context.Context, host string) error {
 	return fmt.Errorf("domain %s is not registered on this platform", host)
 }
 
+// CertificatesFolder is where AutoSSL keeps the sites' certificates, from the folder the host runs in; the database
+// port reads the website's certificates there (app.database without tls files, KITWORK_KITDB.md câu 13.11).
+const CertificatesFolder = "certs"
+
 // AutoSSL initializes the Let's Encrypt autocert manager and returns TLS config
 func AutoSSL(Allows []string) *tls.Config {
-	certDir := filepath.Join(".", "certs")
+	certDir := filepath.Join(".", CertificatesFolder)
 	_ = os.MkdirAll(certDir, 0700)
 
 	m := &autocert.Manager{

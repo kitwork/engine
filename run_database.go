@@ -46,7 +46,7 @@ func runDatabase(ctx context.Context, listening chan<- string, configFile ...str
 	portContext, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	runtimes, stopped, err := startAppDatabaseRuntimes(portContext, cfg.AppDatabases,
-		appDatabaseApps{root: cfg.Root, layout: cfg.RootLayout})
+		appDatabaseApps{root: cfg.Root, layout: cfg.RootLayout, certificates: websiteCertificates(cfg.Web)})
 	if err != nil {
 		return err
 	}

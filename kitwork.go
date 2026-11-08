@@ -178,7 +178,7 @@ func Run(configFile ...string) (err error) {
 
 	appDatabaseContext, cancelAppDatabases := context.WithCancel(context.Background())
 	appDatabaseRuntimes, appDatabaseErrors, err := startAppDatabaseRuntimes(appDatabaseContext, cfg.AppDatabases,
-		appDatabaseApps{root: cfg.Root, layout: cfg.RootLayout})
+		appDatabaseApps{root: cfg.Root, layout: cfg.RootLayout, certificates: websiteCertificates(builder.hasWeb)})
 	if err != nil {
 		cancelAppDatabases()
 		return err
@@ -567,16 +567,23 @@ func commandConfig(configFile ...string) (*Config, error) {
 	return cfg, err
 }
 
-// resolveAppDatabasePaths makes the host's .database/ of each app.database absolute: it is declared relative to the
-// manifest, whatever folder the command runs in.
+// resolveAppDatabasePaths makes the host's .database/ of each app.database and its tls files absolute: they are
+// declared relative to the manifest, whatever folder the command runs in.
 func resolveAppDatabasePaths(cfg *Config, file string) error {
 	manifestDirectory, err := filepath.Abs(filepath.Dir(file))
 	if err != nil {
 		return fmt.Errorf("resolve manifest directory: %w", err)
 	}
+	absolute := func(path string) string {
+		if filepath.IsAbs(path) {
+			return path
+		}
+		return filepath.Join(manifestDirectory, path)
+	}
 	for index := range cfg.AppDatabases {
-		if !filepath.IsAbs(cfg.AppDatabases[index].Path) {
-			cfg.AppDatabases[index].Path = filepath.Join(manifestDirectory, cfg.AppDatabases[index].Path)
+		cfg.AppDatabases[index].Path = absolute(cfg.AppDatabases[index].Path)
+		if files := cfg.AppDatabases[index].TLS; files != nil {
+			cfg.AppDatabases[index].TLS = &AppDatabaseTLS{Certificate: absolute(files.Certificate), Key: absolute(files.Key)}
 		}
 	}
 	return nil

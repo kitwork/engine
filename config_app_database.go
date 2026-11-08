@@ -8,9 +8,9 @@ import (
 )
 
 // AppDatabaseConfig is app.database(path, { … }) of application.work: the host's database port (KITWORK_KITDB.md
-// câu 13.5), the PostgreSQL wire, read-only, on the SQLite files of the host's .database/ (Path) and of every app's
-// .database/. A positive Port opens the listener on Host; User and Password are the admin of every cluster;
-// Concurrency bounds the statements running at once.
+// câu 13.5), the PostgreSQL wire, reads and writes by GRANT, on the SQLite files of the host's .database/ (Path) and
+// of every app's .database/. A positive Port opens the listener on Host; User and Password are the admin of every
+// cluster; Concurrency bounds the statements running at once; TLS names the port's certificate files (câu 13.11).
 type AppDatabaseConfig struct {
 	Path        string
 	Host        string
@@ -18,8 +18,17 @@ type AppDatabaseConfig struct {
 	User        string
 	Password    string
 	Concurrency int
+	TLS         *AppDatabaseTLS
 	// Search is the full-text index of each table SEARCH reads on the port (app_database_search.go).
 	Search []AppDatabaseSearch
+}
+
+// AppDatabaseTLS is tls: { certificate, key } of app.database: a PEM certificate file (its chain after it) and its
+// key, as PostgreSQL's ssl_cert_file and ssl_key_file, relative to the manifest. Without it, a port listening beyond
+// the loopback answers with the website's certificates (app_database_runtime.go appDatabaseTLS).
+type AppDatabaseTLS struct {
+	Certificate string
+	Key         string
 }
 
 // AppDatabaseSearch is one table's full-text index of app.database's search: a table of a database of the host's
@@ -76,17 +85,47 @@ func parseAppDatabaseConfigs(source interface{}) ([]AppDatabaseConfig, error) {
 	return result, nil
 }
 
+// parseAppDatabaseTLS reads tls: { certificate, key }, both paths.
+func parseAppDatabaseTLS(value interface{}) (*AppDatabaseTLS, error) {
+	source, ok := value.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("tls must be { certificate, key }: the port's certificate file and its key")
+	}
+	files := &AppDatabaseTLS{}
+	for key, item := range source {
+		text, isText := item.(string)
+		switch key {
+		case "certificate", "key":
+			if !isText || strings.TrimSpace(text) == "" {
+				return nil, fmt.Errorf("tls.%s must be the path of a file", key)
+			}
+			if key == "certificate" {
+				files.Certificate = strings.TrimSpace(text)
+			} else {
+				files.Key = strings.TrimSpace(text)
+			}
+		default:
+			return nil, fmt.Errorf("unknown option tls.%s: tls takes certificate and key", key)
+		}
+	}
+	if files.Certificate == "" || files.Key == "" {
+		return nil, fmt.Errorf("tls needs certificate and key: the port's certificate file and its key")
+	}
+	return files, nil
+}
+
 func parseAppDatabaseConfig(source map[string]interface{}) (AppDatabaseConfig, error) {
 	config := AppDatabaseConfig{Host: "127.0.0.1", User: "kitdb"}
 	known := map[string]bool{
 		"path": true, "host": true, "port": true, "user": true, "password": true, "concurrency": true, "search": true,
+		"tls": true,
 	}
 	for key := range source {
 		if why, removed := appDatabaseRemovedOptions[key]; removed {
 			return config, fmt.Errorf("option %q is gone (30/10/2026, the port runs on SQLite, KITWORK_KITDB.md 13.5): %s", key, why)
 		}
 		if !known[key] {
-			return config, fmt.Errorf("unknown option %q: app.database takes path, host, port, user, password, concurrency, search", key)
+			return config, fmt.Errorf("unknown option %q: app.database takes path, host, port, user, password, concurrency, search, tls", key)
 		}
 	}
 	path, ok := source["path"].(string)
@@ -127,6 +166,13 @@ func parseAppDatabaseConfig(source map[string]interface{}) (AppDatabaseConfig, e
 	}
 	if config.Password == "" {
 		return config, fmt.Errorf("password is required: user and password are the admin of every cluster on the port")
+	}
+	if value, found := source["tls"]; found {
+		files, err := parseAppDatabaseTLS(value)
+		if err != nil {
+			return config, err
+		}
+		config.TLS = files
 	}
 	if value, found := source["search"]; found {
 		search, err := parseAppDatabaseSearch(value)

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -46,11 +47,15 @@ var errTerminateConnection = errors.New("pgwire: terminate connection")
 
 // Server is KitDB's bounded PostgreSQL wire server. It authenticates with
 // SCRAM-SHA-256 when its Authenticator is also a SCRAMAuthenticator, and with
-// a cleartext password otherwise. It has no TLS yet, so it listens on loopback
-// only: SCRAM keeps the password off the wire, but statements and rows still
-// travel in clear.
+// a cleartext password otherwise. Without TLS it listens on loopback only:
+// SCRAM keeps the password off the wire, but statements and rows would travel
+// in clear. With TLS it listens anywhere, and a client of another machine
+// must ask for TLS (sslmode=require or verify-full) before its startup.
 type Server struct {
 	Authenticator Authenticator
+	// TLS is what an SSLRequest is answered with (TLSConfig); nil answers N,
+	// and the listener must then be loopback.
+	TLS *tls.Config
 	// SCRAMMockIterations is the PBKDF2 iteration count a SCRAM exchange
 	// announces for an unknown or disabled user, so that it looks like a real
 	// account's; 600000 (what accounts are made with) when zero.
@@ -283,7 +288,9 @@ func (server Server) withDefaults() Server {
 
 // Serve accepts PostgreSQL protocol 3.0 connections until ctx is canceled.
 // Without TLS it rejects non-loopback listeners by construction, whether it
-// authenticates with SCRAM-SHA-256 or with a cleartext password.
+// authenticates with SCRAM-SHA-256 or with a cleartext password; with TLS a
+// connection from another machine that did not start TLS is refused at its
+// startup.
 func (server Server) Serve(ctx context.Context, listener net.Listener) error {
 	server = server.withDefaults()
 	if ctx == nil {
@@ -292,8 +299,12 @@ func (server Server) Serve(ctx context.Context, listener net.Listener) error {
 	if server.Authenticator == nil {
 		return fmt.Errorf("pgwire: authenticator is nil")
 	}
-	if err := ValidateCleartextListener(listener); err != nil {
-		return err
+	if server.TLS == nil {
+		if err := ValidateCleartextListener(listener); err != nil {
+			return err
+		}
+	} else if listener == nil {
+		return fmt.Errorf("pgwire: listener is nil")
 	}
 
 	runtime := &serverRuntime{server: server}
@@ -380,9 +391,9 @@ func (server Server) Serve(ctx context.Context, listener net.Listener) error {
 
 // ValidateCleartextListener checks the network boundary without accepting a
 // connection. Adapters use it before touching their local persistence so an
-// invalid public listener fails before any startup side effect. Until the
-// server speaks TLS every listener must be loopback, with SCRAM-SHA-256 too:
-// the password stays off the wire, but statements and rows do not.
+// invalid public listener fails before any startup side effect. A server
+// without TLS listens on loopback only, with SCRAM-SHA-256 too: the password
+// stays off the wire, but statements and rows do not.
 func ValidateCleartextListener(listener net.Listener) error {
 	if listener == nil {
 		return fmt.Errorf("pgwire: listener is nil")
@@ -419,6 +430,8 @@ type wireConnection struct {
 	prepared        map[string]*preparedStatement
 	portals         map[string]*portal
 	failed          bool
+	// encrypted once the connection went through TLS (startTLS)
+	encrypted bool
 }
 
 type preparedStatement struct {
@@ -463,7 +476,21 @@ func (wire *wireConnection) start(ctx context.Context) error {
 			return err
 		}
 		switch code {
-		case sslRequestCode, gssRequestCode:
+		case sslRequestCode:
+			if err := decoder.done(); err != nil {
+				return err
+			}
+			if wire.runtime.server.TLS != nil && !wire.encrypted {
+				if err := wire.startTLS(ctx); err != nil {
+					return err
+				}
+				continue
+			}
+			if err := wire.writeRaw([]byte{'N'}); err != nil {
+				return err
+			}
+			continue
+		case gssRequestCode:
 			if err := decoder.done(); err != nil {
 				return err
 			}
@@ -494,6 +521,12 @@ func (wire *wireConnection) start(ctx context.Context) error {
 				return err
 			}
 			wire.startup = startup
+			if !wire.encrypted && !loopbackListener(wire.conn.RemoteAddr()) {
+				// SCRAM keeps the password off the wire, never the statements and rows: another machine comes in by TLS
+				err := NewError("28000", "a connection from another machine must use TLS (sslmode=require or verify-full)")
+				_ = wire.sendError(err)
+				return err
+			}
 			return wire.authenticate(ctx)
 		default:
 			err := NewError("0A000", fmt.Sprintf("unsupported PostgreSQL protocol version %d", code))
@@ -501,6 +534,36 @@ func (wire *wireConnection) start(ctx context.Context) error {
 			return err
 		}
 	}
+}
+
+// startTLS answers an SSLRequest with S and runs the TLS handshake on the connection, within the idle timeout; what
+// follows, the startup message among it, is read and written through TLS. Bytes the client sent after its SSLRequest
+// and before the handshake are refused: they would be read as if they had come through TLS (PostgreSQL's
+// CVE-2021-23214).
+func (wire *wireConnection) startTLS(ctx context.Context) error {
+	if wire.reader.Buffered() > 0 {
+		err := NewError("08P01", "data after the SSLRequest, before the TLS handshake")
+		_ = wire.sendError(err)
+		return err
+	}
+	if err := wire.writeRaw([]byte{'S'}); err != nil {
+		return err
+	}
+	connection := tls.Server(wire.conn, wire.runtime.server.TLS)
+	if err := connection.SetDeadline(time.Now().Add(wire.runtime.server.IdleTimeout)); err != nil {
+		return err
+	}
+	if err := connection.HandshakeContext(ctx); err != nil {
+		return fmt.Errorf("pgwire: TLS handshake: %w", err)
+	}
+	if err := connection.SetDeadline(time.Time{}); err != nil {
+		return err
+	}
+	wire.conn = connection
+	wire.reader = bufio.NewReaderSize(connection, 32<<10)
+	wire.writer = bufio.NewWriterSize(connection, 32<<10)
+	wire.encrypted = true
+	return nil
 }
 
 func decodeStartup(decoder *decoder) (Startup, error) {
