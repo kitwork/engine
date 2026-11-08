@@ -52,6 +52,8 @@ const (
 	authenticationSASLContinue = 11
 	authenticationSASLFinal    = 12
 	scramMechanism             = "SCRAM-SHA-256"
+	scramPlusMechanism         = "SCRAM-SHA-256-PLUS"
+	scramChannelBindingType    = "tls-server-end-point"
 	scramServerNonceBytes      = 18
 	scramMockSaltBytes         = 16
 )
@@ -62,13 +64,20 @@ func (verifier SCRAMVerifier) usable() bool {
 	return verifier.Iterations > 0 && len(verifier.Salt) > 0
 }
 
-// authenticateSCRAM runs SCRAM-SHA-256 as PostgreSQL does, without channel binding (there is no TLS yet):
+// authenticateSCRAM runs SCRAM-SHA-256 as PostgreSQL does, and SCRAM-SHA-256-PLUS over TLS:
 //
-//	server: AuthenticationSASL (10), the one mechanism SCRAM-SHA-256
-//	client: SASLInitialResponse, the mechanism and client-first-message "n,,n=<ignored>,r=<client nonce>"
+//	server: AuthenticationSASL (10), the mechanisms: SCRAM-SHA-256-PLUS first over TLS, then SCRAM-SHA-256
+//	client: SASLInitialResponse, the mechanism and client-first-message "<gs2 header>n=<ignored>,r=<client nonce>"
 //	server: AuthenticationSASLContinue (11), server-first-message "r=<client nonce><server nonce>,s=<salt>,i=<n>"
-//	client: SASLResponse, client-final-message "c=biws,r=<both nonces>,p=<proof>"
+//	client: SASLResponse, client-final-message "c=<channel binding>,r=<both nonces>,p=<proof>"
 //	server: AuthenticationSASLFinal (12), server-final-message "v=<server signature>"
+//
+// The gs2 header is "n,," from a client without channel binding, "y,," from one that has it but was not offered it,
+// and "p=tls-server-end-point,," with SCRAM-SHA-256-PLUS; c= is base64 of the header, followed for PLUS by the hash of
+// the server's certificate as the client saw it (serverEndPoint). The proof covers c=, so a relay that ends the
+// client's TLS with its own certificate and opens another TLS to this server cannot carry a PLUS exchange through:
+// the hash the client sends is of the relay's certificate, not of this server's. A client that has channel binding
+// and says "y" while this server offered PLUS was told otherwise by someone between them, and is refused.
 //
 // The user is the startup's; the name inside the client's first message is ignored. An unknown user runs the same
 // exchange on a mock verifier and fails at the proof with a wrong password's error. The session is opened only once
@@ -90,10 +99,13 @@ func (wire *wireConnection) authenticateSCRAM(ctx context.Context, authenticator
 		_ = wire.sendError(NewError("XX000", "could not generate a SCRAM nonce"))
 		return nil, err
 	}
-	exchange := scramExchange{verifier: verifier, found: found, serverNonce: serverNonce}
+	exchange := scramExchange{verifier: verifier, found: found, serverNonce: serverNonce, offered: wire.channelBinding != nil}
 
 	var request encoder
 	request.int32(authenticationSASL)
+	if exchange.offered {
+		request.cstring(scramPlusMechanism)
+	}
 	request.cstring(scramMechanism)
 	request.byte(0)
 	if err := wire.send('R', request); err != nil {
@@ -116,7 +128,11 @@ func (wire *wireConnection) authenticateSCRAM(ctx context.Context, authenticator
 	if err != nil {
 		return nil, wire.refuseAuthentication(NewError("08P01", "invalid SASLInitialResponse message"))
 	}
-	if mechanism != scramMechanism {
+	switch {
+	case mechanism == scramPlusMechanism && exchange.offered:
+		exchange.binding = wire.channelBinding
+	case mechanism == scramMechanism:
+	default:
 		return nil, wire.refuseAuthentication(NewError("08P01", "client selected an invalid SASL authentication mechanism"))
 	}
 	if length < 0 {
@@ -217,6 +233,10 @@ type scramExchange struct {
 	// found is false when verifier is a mock one: the exchange then fails at the proof.
 	found       bool
 	serverNonce string
+	// offered is true when the server offered SCRAM-SHA-256-PLUS (over TLS); binding is the certificate's hash the
+	// client must send back when it chose PLUS, nil for SCRAM-SHA-256
+	offered bool
+	binding []byte
 
 	gs2Header       string
 	nonce           string // the client's nonce followed by the server's
@@ -237,9 +257,24 @@ func (exchange *scramExchange) receiveClientFirst(message []byte) ([]byte, error
 		return nil, malformedSCRAM("the gs2 header is incomplete")
 	}
 	switch {
-	case flag == "n", flag == "y":
+	case (flag == "n" || flag == "y") && exchange.binding != nil:
+		return nil, malformedSCRAM("the client selected SCRAM-SHA-256-PLUS, but the SCRAM message does not include channel binding data")
+	case flag == "n":
+	case flag == "y":
+		if exchange.offered {
+			return nil, NewError("08P01", "SCRAM channel binding negotiation error: the client supports SCRAM channel binding "+
+				"but thinks the server does not; this server does support channel binding")
+		}
 	case strings.HasPrefix(flag, "p="):
-		return nil, malformedSCRAM("the client requires channel binding, which the server does not support without TLS")
+		if exchange.binding == nil {
+			return nil, malformedSCRAM("the client selected SCRAM-SHA-256 without channel binding, but the SCRAM message includes channel binding data")
+		}
+		if kind := flag[len("p="):]; kind != scramChannelBindingType {
+			if !scramPrintable(kind) {
+				kind = "?"
+			}
+			return nil, NewError("08P01", "unsupported SCRAM channel-binding type \""+kind+"\"")
+		}
 	default:
 		return nil, malformedSCRAM("unexpected channel-binding flag")
 	}
@@ -294,7 +329,10 @@ func (exchange *scramExchange) receiveClientFinal(message []byte) (serverFinal [
 			return nil, false, malformedSCRAM("invalid attribute in the client-final-message")
 		}
 	}
-	if attributes[0][len("c="):] != base64.StdEncoding.EncodeToString([]byte(exchange.gs2Header)) {
+	if attributes[0][len("c="):] != base64.StdEncoding.EncodeToString(append([]byte(exchange.gs2Header), exchange.binding...)) {
+		if exchange.binding != nil {
+			return nil, false, NewError("28000", "SCRAM channel binding check failed")
+		}
 		return nil, false, NewError("08P01", "unexpected SCRAM channel-binding attribute in client-final-message")
 	}
 	if subtle.ConstantTimeCompare([]byte(attributes[1][len("r="):]), []byte(exchange.nonce)) != 1 {

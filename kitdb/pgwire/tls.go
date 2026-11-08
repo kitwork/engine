@@ -1,11 +1,15 @@
 package pgwire
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"crypto/sha512"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"hash"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -26,6 +30,87 @@ func TLSConfig(certificate func(*tls.ClientHelloInfo) (*tls.Certificate, error))
 		NextProtos:     []string{"postgresql"},
 		GetCertificate: certificate,
 	}
+}
+
+// servedCertificate is config for one connection, and the certificate its handshake served once it ran: Go's
+// ConnectionState names the client's certificates, never the server's own, and SCRAM-SHA-256-PLUS binds to that one
+// (serverEndPoint). The copy issues no session tickets, so every handshake is a full one that chooses a certificate,
+// as PostgreSQL turns tickets off too. A config that picks another config per client (GetConfigForClient) serves
+// without telling, and its connections are offered no channel binding.
+func servedCertificate(config *tls.Config) (own *tls.Config, served func() *tls.Certificate) {
+	own = config.Clone()
+	own.SessionTicketsDisabled = true
+	var chosen *tls.Certificate
+	get, certificates := config.GetCertificate, config.Certificates
+	// crypto/tls asks GetCertificate only when Certificates is empty or the client named a host, so the copy holds
+	// none and chooseCertificate chooses among them
+	own.Certificates = nil
+	own.GetCertificate = func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+		certificate, err := chooseCertificate(get, certificates, hello)
+		if err != nil {
+			return nil, err
+		}
+		chosen = certificate
+		return certificate, nil
+	}
+	return own, func() *tls.Certificate { return chosen }
+}
+
+// chooseCertificate chooses as crypto/tls does: what get gives (asked when there are no certificates or the client
+// named a host), else the one certificate, else the first the client supports, else the first (NameToCertificate,
+// deprecated since Go 1.14, is not read).
+func chooseCertificate(get func(*tls.ClientHelloInfo) (*tls.Certificate, error), certificates []tls.Certificate,
+	hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	if get != nil && (len(certificates) == 0 || hello.ServerName != "") {
+		if certificate, err := get(hello); certificate != nil || err != nil {
+			return certificate, err
+		}
+	}
+	switch len(certificates) {
+	case 0:
+		return nil, errors.New("tls: no certificates configured")
+	case 1:
+		return &certificates[0], nil
+	}
+	for index := range certificates {
+		if hello.SupportsCertificate(&certificates[index]) == nil {
+			return &certificates[index], nil
+		}
+	}
+	return &certificates[0], nil
+}
+
+// serverEndPoint is the channel binding data of tls-server-end-point (RFC 5929 section 4.1), the one type PostgreSQL
+// binds SCRAM-SHA-256-PLUS to: the hash of the server's certificate, by the hash its signature is made with, SHA-256
+// for MD5 and SHA-1. Nil for a certificate whose signature names no hash (Ed25519): its connections are offered no
+// channel binding, where PostgreSQL fails the exchange.
+func serverEndPoint(certificate *tls.Certificate) []byte {
+	if certificate == nil || len(certificate.Certificate) == 0 {
+		return nil
+	}
+	raw := certificate.Certificate[0]
+	leaf := certificate.Leaf
+	if leaf == nil || !bytes.Equal(leaf.Raw, raw) {
+		parsed, err := x509.ParseCertificate(raw)
+		if err != nil {
+			return nil
+		}
+		leaf = parsed
+	}
+	var sum hash.Hash
+	switch leaf.SignatureAlgorithm {
+	case x509.MD5WithRSA, x509.SHA1WithRSA, x509.DSAWithSHA1, x509.ECDSAWithSHA1,
+		x509.SHA256WithRSA, x509.SHA256WithRSAPSS, x509.DSAWithSHA256, x509.ECDSAWithSHA256:
+		sum = sha256.New()
+	case x509.SHA384WithRSA, x509.SHA384WithRSAPSS, x509.ECDSAWithSHA384:
+		sum = sha512.New384()
+	case x509.SHA512WithRSA, x509.SHA512WithRSAPSS, x509.ECDSAWithSHA512:
+		sum = sha512.New()
+	default:
+		return nil
+	}
+	sum.Write(raw)
+	return sum.Sum(nil)
 }
 
 // CertificateFiles is the certificate of a PEM file and the key of another, every name the client connects with

@@ -347,6 +347,16 @@ func startSCRAM(t *testing.T, address, user string) *scramClient {
 	t.Cleanup(func() { _ = conn.Close() })
 	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
 	client := &scramClient{wireClient: &wireClient{conn: conn, reader: bufio.NewReader(conn)}}
+	if mechanisms := client.startup(t, user); mechanisms != "SCRAM-SHA-256\x00\x00" {
+		t.Fatalf("mechanisms = %q, want SCRAM-SHA-256 alone", mechanisms)
+	}
+	return client
+}
+
+// startup sends the startup for user and returns the mechanisms AuthenticationSASL offers, each ended by a zero byte,
+// the list by one more.
+func (client *scramClient) startup(t *testing.T, user string) string {
+	t.Helper()
 	var startup []byte
 	startup = binary.BigEndian.AppendUint32(startup, ProtocolVersion30)
 	for _, pair := range [][2]string{{"user", user}, {"database", "shop"}} {
@@ -361,10 +371,7 @@ func startSCRAM(t *testing.T, address, user string) *scramClient {
 	if kind != 'R' || len(body) < 4 || binary.BigEndian.Uint32(body) != authenticationSASL {
 		t.Fatalf("reply to startup = %q %q, want AuthenticationSASL", kind, body)
 	}
-	if mechanisms := string(body[4:]); mechanisms != "SCRAM-SHA-256\x00\x00" {
-		t.Fatalf("mechanisms = %q, want SCRAM-SHA-256 alone", mechanisms)
-	}
-	return client
+	return string(body[4:])
 }
 
 // sendClientFirst sends the SASLInitialResponse and returns the server's reply.
@@ -382,8 +389,14 @@ func (client *scramClient) sendClientFirst(t *testing.T, mechanism, message stri
 // begin sends a client-first-message with gs2Header and requires the server-first-message.
 func (client *scramClient) begin(t *testing.T, gs2Header string) {
 	t.Helper()
+	client.beginWith(t, "SCRAM-SHA-256", gs2Header)
+}
+
+// beginWith is begin choosing mechanism.
+func (client *scramClient) beginWith(t *testing.T, mechanism, gs2Header string) {
+	t.Helper()
 	client.clientFirstBare = "n=,r=fyko+d2lbbFgONRv9qkxdawL"
-	kind, body := client.sendClientFirst(t, "SCRAM-SHA-256", gs2Header+client.clientFirstBare)
+	kind, body := client.sendClientFirst(t, mechanism, gs2Header+client.clientFirstBare)
 	if kind != 'R' || len(body) < 4 || binary.BigEndian.Uint32(body) != authenticationSASLContinue {
 		t.Fatalf("reply to client-first = %q %q, want AuthenticationSASLContinue", kind, body)
 	}

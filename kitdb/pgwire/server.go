@@ -46,8 +46,9 @@ const (
 var errTerminateConnection = errors.New("pgwire: terminate connection")
 
 // Server is KitDB's bounded PostgreSQL wire server. It authenticates with
-// SCRAM-SHA-256 when its Authenticator is also a SCRAMAuthenticator, and with
-// a cleartext password otherwise. Without TLS it listens on loopback only:
+// SCRAM-SHA-256 when its Authenticator is also a SCRAMAuthenticator (over TLS
+// SCRAM-SHA-256-PLUS too, bound to the certificate), and with a cleartext
+// password otherwise. Without TLS it listens on loopback only:
 // SCRAM keeps the password off the wire, but statements and rows would travel
 // in clear. With TLS it listens anywhere, and a client of another machine
 // must ask for TLS (sslmode=require or verify-full) before its startup.
@@ -432,6 +433,9 @@ type wireConnection struct {
 	failed          bool
 	// encrypted once the connection went through TLS (startTLS)
 	encrypted bool
+	// channelBinding is the tls-server-end-point data of the certificate the handshake served (serverEndPoint), nil
+	// without TLS or for a certificate it cannot be had of: SCRAM-SHA-256-PLUS is offered only when it is set
+	channelBinding []byte
 }
 
 type preparedStatement struct {
@@ -549,7 +553,8 @@ func (wire *wireConnection) startTLS(ctx context.Context) error {
 	if err := wire.writeRaw([]byte{'S'}); err != nil {
 		return err
 	}
-	connection := tls.Server(wire.conn, wire.runtime.server.TLS)
+	config, served := servedCertificate(wire.runtime.server.TLS)
+	connection := tls.Server(wire.conn, config)
 	if err := connection.SetDeadline(time.Now().Add(wire.runtime.server.IdleTimeout)); err != nil {
 		return err
 	}
@@ -563,6 +568,7 @@ func (wire *wireConnection) startTLS(ctx context.Context) error {
 	wire.reader = bufio.NewReaderSize(connection, 32<<10)
 	wire.writer = bufio.NewWriterSize(connection, 32<<10)
 	wire.encrypted = true
+	wire.channelBinding = serverEndPoint(served()) // nil when the handshake served no certificate it was told of
 	return nil
 }
 
