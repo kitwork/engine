@@ -560,6 +560,37 @@ func translateConstraints(tokens []token, schema, column string, kind columnKind
 	return renderTokens(out), primary, nil
 }
 
+// checkReadsDecimal refuses a CHECK of part, a column of CREATE TABLE or ADD COLUMN (own its name) or a table's
+// constraint (own ""), that reads a decimal column other than own, by lower-case name: the file compares the stored
+// integer, so CHECK (price <= 100) would hold price to 1.00. A decimal column's own CHECK is the one shape that reads
+// it (translateConstraints turns its numbers into stored integers); the structure file refuses the rest too
+// (renderTable). Before 08/11/2026 the port took a table's CHECK and another column's as written.
+func checkReadsDecimal(part []token, own string, decimals map[string]bool) error {
+	for index := 0; index+1 < len(part); index++ {
+		if part[index].word() != "CHECK" || part[index+1].text != "(" {
+			continue
+		}
+		end := matchingClose(part, index+1)
+		if end < 0 {
+			return nil
+		}
+		for at := index + 2; at < end; at++ {
+			current := part[at]
+			if !isIdentifier(current) || (at+1 < end && part[at+1].text == "(") {
+				continue
+			}
+			name := identifierText(current)
+			if decimals[strings.ToLower(name)] && !strings.EqualFold(name, own) {
+				return pgwire.NewError("0A000", fmt.Sprintf("a CHECK reads decimal column %s, whose stored integer is not its value: "+
+					"write it on %s itself, comparing it with numbers joined by AND (%s numeric(…) CHECK (%s >= 0 AND %s <= 100))",
+					name, name, name, name, name))
+			}
+		}
+		index = end
+	}
+	return nil
+}
+
 // schemaStatement plans a CREATE, ALTER or DROP the port runs; handled is false for one it does not.
 func (session *Session) schemaStatement(parsed statement) (plan schemaPlan, err error) {
 	c := &schemaCursor{tokens: parsed.tokens, session: session}
@@ -682,7 +713,8 @@ func (c *schemaCursor) createTable() (schemaPlan, error) {
 		return schemaPlan{}, pgwire.NewError("0A000", fmt.Sprintf("table options after the columns (%s) are not supported: WITH (history = on) is", c.peek().text))
 	}
 	var definitions []string
-	for _, part := range splitTop(inside) {
+	parts, owners := splitTop(inside), map[int]string{}
+	for position, part := range parts {
 		if len(part) == 0 {
 			return schemaPlan{}, syntaxError("an empty column")
 		}
@@ -702,6 +734,18 @@ func (c *schemaCursor) createTable() (schemaPlan, error) {
 		}
 		definitions = append(definitions, definition)
 		plan.kinds = append(plan.kinds, kindChange{table: table, column: name, kind: kind})
+		owners[position] = name
+	}
+	decimals := map[string]bool{}
+	for _, change := range plan.kinds {
+		if change.kind.kind == "decimal" && change.kind.scale > 0 {
+			decimals[strings.ToLower(change.column)] = true
+		}
+	}
+	for position, part := range parts {
+		if err := checkReadsDecimal(part, owners[position], decimals); err != nil {
+			return schemaPlan{}, err
+		}
 	}
 	create := "CREATE TABLE "
 	if ifNotExists {
@@ -815,6 +859,17 @@ func (c *schemaCursor) alterTable() (schemaPlan, error) {
 			name, definition, kind, err := a.columnDefinition(schema, true)
 			if err != nil {
 				return schemaPlan{}, err
+			}
+			if c.session != nil {
+				if found := c.session.tables[strings.ToLower(schema)][strings.ToLower(table)]; found != nil {
+					decimals := map[string]bool{}
+					for column := range found.scales {
+						decimals[column] = true
+					}
+					if err := checkReadsDecimal(action, name, decimals); err != nil {
+						return schemaPlan{}, err
+					}
+				}
 			}
 			if skip && c.hasColumn(schema, table, name) {
 				continue

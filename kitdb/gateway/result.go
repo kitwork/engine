@@ -605,10 +605,12 @@ const (
 
 var resultCodeSuffix = regexp.MustCompile(`\s*\(\d+\)(\s*\(SQLITE_[A-Z]+\))?$`)
 
-// cleanMessage is SQLite's message without modernc's result code suffix and generic prefix.
+// cleanMessage is SQLite's message without modernc's result code suffix and generic prefix: the "constraint failed: "
+// of a constraint's message too, which says it twice ("constraint failed: UNIQUE constraint failed: users.email").
 func cleanMessage(message string) string {
 	message = resultCodeSuffix.ReplaceAllString(message, "")
-	return strings.TrimPrefix(message, "SQL logic error: ")
+	message = strings.TrimPrefix(message, "SQL logic error: ")
+	return strings.TrimPrefix(message, "constraint failed: ")
 }
 
 // protocolError keeps an error that already carries a SQLSTATE; any other becomes XX000 with what was being done.

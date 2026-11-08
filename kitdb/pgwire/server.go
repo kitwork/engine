@@ -1816,6 +1816,18 @@ func writeError(writer *bufio.Writer, err error) error {
 	payload.cstring(errorState(err))
 	payload.byte('M')
 	payload.cstring(err.Error())
+	var protocol *Error
+	if errors.As(err, &protocol) {
+		for _, field := range []struct {
+			kind  byte
+			value string
+		}{{'s', protocol.Schema}, {'t', protocol.Table}, {'n', protocol.Constraint}} {
+			if field.value != "" {
+				payload.byte(field.kind)
+				payload.cstring(field.value)
+			}
+		}
+	}
 	payload.byte(0)
 	return writeMessage(writer, 'E', payload)
 }

@@ -213,6 +213,9 @@ type TransactionStatusSession interface {
 type Error struct {
 	Code    string
 	Message string
+	// Schema, Table and Constraint are the error's fields s, t and n, which PostgreSQL sends with a broken constraint
+	// and a client reads (lib/pq's Error.Constraint, pgx's PgError.ConstraintName); none is sent when empty.
+	Schema, Table, Constraint string
 }
 
 func (err *Error) Error() string {

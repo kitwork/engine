@@ -453,11 +453,12 @@ func renderTable(text string, kinds map[string]columnKind) (string, string) {
 			return "", "an empty column"
 		}
 		switch part[0].word() {
-		case "PRIMARY", "UNIQUE", "FOREIGN", "CONSTRAINT":
+		case "PRIMARY", "UNIQUE", "FOREIGN":
 			definitions = append(definitions, renderTokens(part))
 			continue
-		case "CHECK":
-			if readsDecimal(part) {
+		case "CONSTRAINT", "CHECK":
+			// a CHECK, named or not, that reads a decimal (CONSTRAINT … CHECK went unread before 08/11/2026)
+			if (part[0].word() == "CHECK" || (len(part) > 2 && part[2].word() == "CHECK")) && readsDecimal(part) {
 				return "", "a CHECK reads a decimal column, whose stored integer is not its value"
 			}
 			definitions = append(definitions, renderTokens(part))

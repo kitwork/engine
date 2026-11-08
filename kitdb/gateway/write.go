@@ -168,12 +168,11 @@ func (session *Session) write(ctx context.Context, parsed statement, parameters 
 	// The statement is read (its program, the schema's tables) in a read transaction of the session's, the block's
 	// when one is open; outside a block that transaction ends before the writer writes, so a file not yet in WAL mode
 	// is not held by it.
-	var schema, text string
+	var schema, table, text string
 	prepare := func() error {
 		if err := session.refreshSchemas(ctx); err != nil {
 			return err
 		}
-		var table string
 		var err error
 		if schema, table, err = session.authorizeWrite(ctx, parsed, shape, arguments); err != nil {
 			return err
@@ -203,7 +202,7 @@ func (session *Session) write(ctx context.Context, parsed statement, parameters 
 		affected, err = session.writeAlone(ctx, schema, text, arguments)
 	}
 	if err != nil {
-		return pgwire.Result{}, err
+		return pgwire.Result{}, session.checkViolation(ctx, schema, table, err)
 	}
 	tag := fmt.Sprintf("%s %d", shape.verb, affected)
 	if shape.verb == "INSERT" {
