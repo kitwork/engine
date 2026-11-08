@@ -6,6 +6,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kitwork/engine/kitdb/analytics"
@@ -257,5 +258,53 @@ func TestAnalyticTakesASearchSQLiteIsSlowAt(t *testing.T) {
 	t.Cleanup(func() { analyticBudget = previous })
 	if got, want := mustRun(t, with, query), mustRun(t, without, query); !sameResult(got, want) || analyticAnswers.Load() != before+1 {
 		t.Fatalf("past the budget: %q (the copy answered %d), SQLite %q", cells(got), analyticAnswers.Load()-before, cells(want))
+	}
+}
+
+// salesDecimals are the fixture's kinds with sales.price a decimal(12,2): its stored integers are cents.
+type salesDecimals struct{ fakeColumns }
+
+func (columns salesDecimals) Column(schema, table, column string) (string, int, int, bool) {
+	if schema+"."+table+"."+column == "public.sales.price" {
+		return "decimal", 12, 2, true
+	}
+	return columns.fakeColumns.Column(schema, table, column)
+}
+
+// sum, min and max of a decimal column are the copy's to answer since they stay stored integers (decimal.go,
+// 08/11/2026), and it answers them as SQLite does: numeric of the column's scale, the same digits; a literal compared
+// with the column is the stored integer for it too.
+//
+// CONTROL (08/11/2026): with the aggregates wrapped as before, "from the copy: SELECT merchant, sum(price), … (answered
+// 0)" (float8 from SQLite, the copy never asked); with the stored integers not typed, "{sum(price) 20 8 0}
+// \"lazada,508132001,754,996863|…\", want numeric with its cents".
+func TestAnalyticSumsADecimal(t *testing.T) {
+	path, _ := salesFile(t, 3000, false)
+	registry := analytics.NewRegistry()
+	registry.MinimumRows = 1
+	t.Cleanup(func() { _ = registry.Close() })
+	open := func(registry *analytics.Registry) *Session {
+		session, err := Open(context.Background(), Target{Name: "shop.example/application", Schemas: map[string]string{"public": path}},
+			newAccess("public.sales"), salesDecimals{}, Options{Analytics: registry})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = session.Close() })
+		return session
+	}
+	with, without := open(registry), open(nil)
+	grouped := `SELECT merchant, sum(price), min(price) AS least, max(price) FROM sales GROUP BY merchant`
+	mustRun(t, with, grouped)
+	registry.Wait()
+	for _, query := range []string{grouped, `SELECT count(*), sum(price) FROM sales WHERE price > 5000 AND merchant = 'tiki'`} {
+		before := analyticAnswers.Load()
+		got, want := mustRun(t, with, query), mustRun(t, without, query)
+		if !sameResult(got, want) || analyticAnswers.Load() != before+1 {
+			t.Fatalf("from the copy: %s: the copy %v %q (answered %d)\n  SQLite %v %q", query, got.Columns, cells(got),
+				analyticAnswers.Load()-before, want.Columns, cells(want))
+		}
+		if column := got.Columns[1]; column.DataTypeOID != pgwire.OIDNumeric || !strings.Contains(cells(got), ".") {
+			t.Fatalf("%s: %v %q, want numeric with its cents", query, column, cells(got))
+		}
 	}
 }

@@ -19,8 +19,14 @@ import (
 //
 //   - compared with a literal or a parameter (amount > 1000, amount BETWEEN $1 AND $2, amount IN (1, 2.5)), the literal
 //     becomes the stored integer (amount > 100000): exact, and an index on the column still serves;
-//   - anywhere else (sum(amount), amount * 2, amount > other, an item of a subquery's select list), the column becomes
-//     kitwork_decimal(amount, 2), the decimal as a REAL; a subquery's SELECT * over a decimal column is written out;
+//   - sum, min or max of the column, an item of the statement's own select list by itself (sum(amount), max(amount)
+//     AS most), stays as it is: the stored integers summed, or the least or greatest of them, exact however large;
+//     the result writes it as a numeric of the column's scale, as PostgreSQL's sum(numeric) is (08/11/2026: it was
+//     a REAL, 1.99999e+06 for a sum of prices). A * before it leaves its position in the result unknown: it is
+//     read as below;
+//   - anywhere else (avg(amount), amount * 2, amount > other, an aggregate in HAVING, an item of a subquery's select
+//     list), the column becomes kitwork_decimal(amount, 2), the decimal as a REAL (an aggregate of it is computed in
+//     stored integers, then read so); a subquery's SELECT * over a decimal column is written out;
 //   - an item of the statement's own select list that is the column alone, a term of ORDER BY, GROUP BY or PARTITION
 //     BY that is the column alone, and amount IS NULL stay as they are: the result writes the first as its decimal,
 //     and the others do not depend on the unit. In a UNION, INTERSECT or EXCEPT every SELECT reads its decimals as
@@ -91,12 +97,18 @@ func (session *Session) decimalStatement(parsed statement) (statement, error) {
 	if session.decimalColumns == 0 || (parsed.kind != statementRead && parsed.kind != statementExplain) {
 		return parsed, nil
 	}
-	rewrite := &decimalRewrite{session: session, text: parsed.text, tokens: parsed.tokens}
+	rewrite := &decimalRewrite{session: session, text: parsed.text, tokens: parsed.tokens, typed: parsed.kind == statementRead}
 	text, changed, err := rewrite.run()
-	if err != nil || !changed {
+	if err != nil || (!changed && len(rewrite.numeric) == 0) {
 		return parsed, err
 	}
-	return parseStatement(text)
+	if changed {
+		if parsed, err = parseStatement(text); err != nil {
+			return parsed, err
+		}
+	}
+	parsed.decimals = rewrite.numeric
+	return parsed, nil
 }
 
 // decimalCore is one SELECT of the statement: its select list, its FROM items, the SELECT around it.
@@ -149,6 +161,12 @@ type decimalRewrite struct {
 	valuesAt  map[int]bool         // a "(" whose first word is VALUES
 	ctes      map[string]*decimalCTE
 	consumed  []bool // names that are not columns: tables, schemas, aliases, a CTE's header, USING's columns
+
+	// typed is a statement whose rows are its result (a read, not an EXPLAIN): its select list's items are its
+	// columns, so one may stay a stored integer the result types.
+	typed bool
+	// numeric is each result column kept as stored integers (sum, min or max of a decimal column): its scale.
+	numeric map[int]int
 
 	splices []decimalSplice
 }
@@ -692,8 +710,19 @@ func (rewrite *decimalRewrite) column(index int) error {
 		return nil
 	}
 	if from, to, name, ok := rewrite.aggregate(start, next); ok {
-		if name != "COUNT" {
+		switch {
+		case name == "COUNT":
+		case name == "SUM" || name == "MIN" || name == "MAX":
+			if position, ok := rewrite.resultColumn(core, from, to); ok {
+				if rewrite.numeric == nil {
+					rewrite.numeric = map[int]int{}
+				}
+				rewrite.numeric[position] = found.scale // the result writes the stored integer as its numeric
+				break
+			}
 			rewrite.wrap(from, to, found.scale) // summed, or its least or greatest, in stored integers: exact
+		default:
+			rewrite.wrap(from, to, found.scale)
 		}
 		return nil
 	}
@@ -744,6 +773,37 @@ func (rewrite *decimalRewrite) aggregate(from, to int) (int, int, string, bool) 
 		}
 	}
 	return open - 1, end, name, true
+}
+
+// resultColumn is the position in the result of tokens [from, to), an aggregate call, when it is an item of the
+// statement's own select list by itself, with or without an alias; false when it is not, or when a * before it leaves
+// the position unknown.
+func (rewrite *decimalRewrite) resultColumn(core *decimalCore, from, to int) (int, bool) {
+	if !rewrite.typed || core == nil || !core.outer || rewrite.clause[from] != "SELECT" {
+		return 0, false
+	}
+	tokens := rewrite.tokens
+	position, found, known := 0, -1, true
+	rewrite.eachItem(core, func(itemFrom, itemTo int) {
+		if found >= 0 || !known {
+			return
+		}
+		if itemFrom == from {
+			rest := itemTo - to
+			if rest == 0 || (rest == 1 && isIdentifier(tokens[to])) || (rest == 2 && tokens[to].word() == "AS" && isIdentifier(tokens[to+1])) {
+				found = position
+			} else {
+				known = false // the call is part of a longer item
+			}
+			return
+		}
+		if isPunctuation(tokens[itemTo-1], "*") {
+			known = false // its columns are not counted here
+			return
+		}
+		position++
+	})
+	return found, found >= 0 && known
 }
 
 // nameItems gives each select-list item the rewrite changed the name SQLite gave it before: the column's name for a

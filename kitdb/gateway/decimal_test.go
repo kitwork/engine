@@ -14,7 +14,7 @@ import (
 //
 // CONTROL: with decimalStatement returning the statement as it came, "amount > 100 = 1|3, want 3"; with every
 // comparison wrapped instead of its literal scaled, "amount = '4.50' = , want 1"; with sum taking the REALs,
-// "sum(total), avg(total) = 0.30000000000000004,0.15000000000000002, want 0.3,0.15"; with a subquery's item kept as
+// "sum(total), avg(total) = 0.30000000000000004,0.15000000000000002, want 0.3,0.15" (0.30,0.15 since sum is numeric); with a subquery's item kept as
 // stored, "(SELECT amount FROM orders) WHERE amount > 100 = 2, want 1"; with the first SELECT of a UNION keeping its
 // column as stored, "… UNION ALL SELECT amount * 2 … = 4.50|0.09, want 4.5|9".
 func TestDecimalComparesAsItsValue(t *testing.T) {
@@ -57,7 +57,7 @@ func TestDecimalComparesAsItsValue(t *testing.T) {
 		{"WITH big AS (SELECT id, amount FROM orders) SELECT id FROM big WHERE amount > 100", "3"},
 		{"SELECT name FROM users u WHERE EXISTS (SELECT 1 FROM orders WHERE user_id = u.id AND amount > 100)", "Binh"},
 		{"SELECT id FROM orders WHERE amount > (SELECT total FROM billing.invoices WHERE id = 11) ORDER BY id", "3"},
-		{"SELECT sum(total), avg(total) FROM billing.invoices WHERE user_id = 3", "0.3,0.15"},
+		{"SELECT sum(total), avg(total) FROM billing.invoices WHERE user_id = 3", "0.30,0.15"},
 		{"SELECT amount FROM orders WHERE id = 1 UNION ALL SELECT amount * 2 FROM orders WHERE id = 1", "4.5|9"},
 		{"SELECT * FROM orders WHERE id = 3 UNION ALL SELECT * FROM orders WHERE id = 2", "3,2,1234.56|2,1,-0.05"},
 	} {
@@ -105,6 +105,87 @@ func TestDecimalComparesAsItsValue(t *testing.T) {
 	}
 
 	expectCode(t, session, "SELECT count(*) FROM (SELECT * FROM orders NATURAL JOIN users)", "0A000", "list the columns")
+}
+
+// sum, min and max of a decimal column, an item of the statement's own select list by themselves, are numeric of the
+// column's scale, as PostgreSQL's are: the stored integers summed, exact however large, ordered as numbers; the
+// trial of 07/11/2026 read sum(price) back as a float8 (1.99999e+06). avg stays a float8, written as PostgreSQL
+// writes one (no exponent below 10^15). Elsewhere (HAVING, an expression, a UNION, after a *) the column is read as
+// its decimal, as before.
+//
+// CONTROL (08/11/2026): with the aggregate wrapped as before, "SELECT sum(amount) …: column 0 is OID 701"; with the
+// integer kept but the column not typed, "… column 0 is OID 20" (the stored integer, a hundred times the sum); with the
+// position counted past a *, "SELECT *, sum(amount) …: 1,0.01,4.50,450" (user_id typed numeric, the sum raw); with
+// an exponent from 10^6 as Go's %g, "avg of a decimal = 1.234567890123456e+13".
+func TestDecimalAggregatesAreNumeric(t *testing.T) {
+	fixture := newFixture(t)
+	if _, err := fixture.billingDB.Exec("INSERT INTO invoices VALUES (12, 3, 10), (13, 3, 20)"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.writer.Exec("INSERT INTO orders VALUES (4, 3, 1234567890123456)"); err != nil {
+		t.Fatal(err)
+	}
+	session := openSession(t, fixture, defaultAccess(), Options{})
+	numeric := func(query string, columns ...int) pgwire.Result {
+		t.Helper()
+		result := mustRun(t, session, query)
+		for _, column := range columns {
+			if got := result.Columns[column]; got.DataTypeOID != pgwire.OIDNumeric || got.TypeModifier != -1 || got.DataTypeSize != -1 {
+				t.Fatalf("%s: column %d is OID %d (modifier %d), want numeric of no declared precision", query, column,
+					got.DataTypeOID, got.TypeModifier)
+			}
+		}
+		return result
+	}
+	for _, check := range []struct {
+		query   string
+		columns []int
+		want    string
+	}{
+		{"SELECT sum(amount) FROM orders WHERE id < 4", []int{0}, "1239.01"},
+		{"SELECT max(amount) AS most, min(amount) least FROM orders WHERE id < 4", []int{0, 1}, "1234.56,-0.05"},
+		{"SELECT user_id, sum(amount) FROM orders GROUP BY user_id ORDER BY 2 DESC", []int{1}, "3,12345678901234.56|2,1234.56|1,4.45"},
+		{"SELECT sum(amount) FROM orders WHERE amount > 10000000000000", []int{0}, "12345678901234.56"},
+		{"SELECT sum(amount) FROM orders WHERE amount > 100000000000000", []int{0}, "NULL"},
+		{"SELECT sum(amount) OVER () FROM orders WHERE id = 1", []int{0}, "4.50"},
+		{"SELECT sum(DISTINCT amount) FILTER (WHERE id > 1) FROM orders WHERE id < 4", []int{0}, "1234.51"},
+		{"SELECT sum(total) FROM billing.invoices WHERE user_id = 3", []int{0}, "0.30"},
+		{"SELECT user_id, sum(amount) FROM orders GROUP BY user_id HAVING sum(amount) > 1000 AND user_id < 3", []int{1}, "2,1234.56"},
+	} {
+		if got := cells(numeric(check.query, check.columns...)); got != check.want {
+			t.Fatalf("%s = %s, want %s", check.query, got, check.want)
+		}
+	}
+	if got := cells(mustRun(t, session, "SELECT sum(amount) FROM orders WHERE id < 4 UNION ALL SELECT 1")); got != "1239.01|1" {
+		t.Fatalf("sum in a UNION = %s, want 1239.01|1", got)
+	}
+	if got := mustRun(t, session, "SELECT *, sum(amount) FROM orders WHERE id = 1"); got.Rows[0][3].Null || string(got.Rows[0][3].Data) != "4.5" {
+		t.Fatalf("SELECT *, sum(amount) …: %s, want the sum read as its decimal", cells(got))
+	}
+	average := mustRun(t, session, "SELECT avg(amount) FROM orders WHERE user_id = 3")
+	if got := cells(average); got != "12345678901234.56" || average.Columns[0].DataTypeOID != pgwire.OIDFloat8 {
+		t.Fatalf("avg of a decimal = %s (OID %d), want 12345678901234.56, a float8", got, average.Columns[0].DataTypeOID)
+	}
+	described, err := session.Describe(context.Background(), "SELECT sum(amount) AS spent FROM orders WHERE user_id = $1",
+		[]pgwire.Parameter{{Null: true}})
+	if err != nil || len(described) != 1 || described[0].DataTypeOID != pgwire.OIDNumeric || described[0].TypeModifier != -1 {
+		t.Fatalf("Describe of sum(amount) = %v %v, want numeric", described, err)
+	}
+	if plan := mustRun(t, session, "EXPLAIN QUERY PLAN SELECT sum(amount) FROM orders"); plan.Columns[0].DataTypeOID == pgwire.OIDNumeric {
+		t.Fatalf("EXPLAIN's first column is numeric: the plan's columns are not the statement's")
+	}
+}
+
+// A float8 is written as PostgreSQL writes one: its shortest digits, an exponent only below 10^-4 or from 10^15.
+func TestFloatText(t *testing.T) {
+	for value, want := range map[float64]string{
+		0: "0", 1.5: "1.5", -2: "-2", 0.0001: "0.0001", 0.00001: "1e-05", 1999990: "1999990",
+		123456789012345: "123456789012345", 1e15: "1e+15", 1.5e20: "1.5e+20", 2.5e-300: "2.5e-300",
+	} {
+		if got := plainText(value); got != want {
+			t.Errorf("plainText(%v) = %s, want %s", value, got, want)
+		}
+	}
 }
 
 // A literal becomes the stored integer exactly, whatever its form; what is not a decimal number is not one.

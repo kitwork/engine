@@ -257,6 +257,8 @@ type statement struct {
 	// verb is the first keyword in upper case (for a WITH, the keyword of its main statement).
 	verb   string
 	tokens []token
+	// decimals are the result columns the decimal rewrite kept as stored integers (decimal.go): each column's scale.
+	decimals map[int]int
 }
 
 // readOnlyError is PostgreSQL's refusal of a write in a read-only transaction.

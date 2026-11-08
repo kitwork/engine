@@ -162,7 +162,18 @@ func (session *Session) describeColumns(parsed statement) ([]resultColumn, error
 	for index, column := range information {
 		columns[index] = session.newResultColumn(column.Name, column.DeclType, column.DatabaseName, column.TableName, column.OriginName)
 	}
+	typeDecimals(columns, parsed.decimals)
 	return columns, nil
+}
+
+// typeDecimals types the result columns the decimal rewrite kept as stored integers (sum, min or max of a decimal
+// column, decimal.go): numeric of the column's scale and no declared precision, as PostgreSQL's sum(numeric) is.
+func typeDecimals(columns []resultColumn, decimals map[int]int) {
+	for position, scale := range decimals {
+		if position < len(columns) {
+			columns[position].fixed, columns[position].scale, columns[position].modifier = pgwire.OIDNumeric, scale, -1
+		}
+	}
 }
 
 // read authorizes a read statement inside a read transaction (the statement's own when no block is open), then
@@ -237,6 +248,7 @@ func (session *Session) run(ctx context.Context, parsed statement, arguments []a
 			}
 			columns[index] = session.newResultColumn(name, declared, "", "", "")
 		}
+		typeDecimals(columns, parsed.decimals) // a stored integer is never written as one
 	}
 	seen := make([][classBlob + 1]bool, len(columns))
 	values := make([]any, len(columns))
@@ -377,7 +389,13 @@ func plainText(value any) string {
 		case math.IsNaN(typed):
 			return "NaN"
 		}
-		return strconv.FormatFloat(typed, 'g', -1, 64)
+		// PostgreSQL's float8 output (src/common/d2s.c): the shortest digits, an exponent only below 10^-4 or from
+		// 10^15; Go's %g turns to one from 10^6 (1.99999e+06 where PostgreSQL writes 1999990).
+		scientific := strconv.FormatFloat(typed, 'e', -1, 64)
+		if exponent, err := strconv.Atoi(scientific[strings.LastIndexByte(scientific, 'e')+1:]); err == nil && exponent >= -4 && exponent < 15 {
+			return strconv.FormatFloat(typed, 'f', -1, 64)
+		}
+		return scientific
 	case []byte:
 		return `\x` + hex.EncodeToString(typed)
 	case string:
