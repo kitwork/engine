@@ -10,15 +10,17 @@ import (
 // AppDatabaseConfig is app.database(path, { … }) of application.work: the host's database port (KITWORK_KITDB.md
 // câu 13.5), the PostgreSQL wire, reads and writes by GRANT, on the SQLite files of the host's .database/ (Path) and
 // of every app's .database/. A positive Port opens the listener on Host; User and Password are the admin of every
-// cluster; Concurrency bounds the statements running at once; TLS names the port's certificate files (câu 13.11).
+// cluster; Concurrency bounds the statements running at once; TLS names the port's certificate files (câu 13.11);
+// RequireChannelBinding is channelBinding: "require", a client of another machine taken with SCRAM-SHA-256-PLUS only.
 type AppDatabaseConfig struct {
-	Path        string
-	Host        string
-	Port        int
-	User        string
-	Password    string
-	Concurrency int
-	TLS         *AppDatabaseTLS
+	Path                  string
+	Host                  string
+	Port                  int
+	User                  string
+	Password              string
+	Concurrency           int
+	TLS                   *AppDatabaseTLS
+	RequireChannelBinding bool
 	// Search is the full-text index of each table SEARCH reads on the port (app_database_search.go).
 	Search []AppDatabaseSearch
 }
@@ -118,14 +120,14 @@ func parseAppDatabaseConfig(source map[string]interface{}) (AppDatabaseConfig, e
 	config := AppDatabaseConfig{Host: "127.0.0.1", User: "kitdb"}
 	known := map[string]bool{
 		"path": true, "host": true, "port": true, "user": true, "password": true, "concurrency": true, "search": true,
-		"tls": true,
+		"tls": true, "channelBinding": true,
 	}
 	for key := range source {
 		if why, removed := appDatabaseRemovedOptions[key]; removed {
 			return config, fmt.Errorf("option %q is gone (30/10/2026, the port runs on SQLite, KITWORK_KITDB.md 13.5): %s", key, why)
 		}
 		if !known[key] {
-			return config, fmt.Errorf("unknown option %q: app.database takes path, host, port, user, password, concurrency, search, tls", key)
+			return config, fmt.Errorf("unknown option %q: app.database takes path, host, port, user, password, concurrency, search, tls, channelBinding", key)
 		}
 	}
 	path, ok := source["path"].(string)
@@ -173,6 +175,16 @@ func parseAppDatabaseConfig(source map[string]interface{}) (AppDatabaseConfig, e
 			return config, err
 		}
 		config.TLS = files
+	}
+	if value, found := source["channelBinding"]; found {
+		switch value {
+		case "prefer":
+		case "require":
+			config.RequireChannelBinding = true
+		default:
+			return config, fmt.Errorf("channelBinding must be \"prefer\" (the default: SCRAM-SHA-256-PLUS offered over TLS) or " +
+				"\"require\" (a client of another machine authenticates with it only)")
+		}
 	}
 	if value, found := source["search"]; found {
 		search, err := parseAppDatabaseSearch(value)

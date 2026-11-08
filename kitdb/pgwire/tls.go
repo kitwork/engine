@@ -80,6 +80,13 @@ func chooseCertificate(get func(*tls.ClientHelloInfo) (*tls.Certificate, error),
 	return &certificates[0], nil
 }
 
+// BindsChannel reports whether SCRAM-SHA-256-PLUS can bind to certificate: whether its signature is made with a hash,
+// which an Ed25519 certificate's is not (serverEndPoint). A host requiring channel binding checks its certificate with
+// it before it listens.
+func BindsChannel(certificate *tls.Certificate) bool {
+	return serverEndPoint(certificate) != nil
+}
+
 // serverEndPoint is the channel binding data of tls-server-end-point (RFC 5929 section 4.1), the one type PostgreSQL
 // binds SCRAM-SHA-256-PLUS to: the hash of the server's certificate, by the hash its signature is made with, SHA-256
 // for MD5 and SHA-1. Nil for a certificate whose signature names no hash (Ed25519): its connections are offered no

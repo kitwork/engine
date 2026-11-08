@@ -3,6 +3,7 @@ package pgwire
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
@@ -467,5 +468,98 @@ func TestServerEndPoint(t *testing.T) {
 	}
 	if serverEndPoint(nil) != nil || serverEndPoint(&tls.Certificate{}) != nil {
 		t.Fatal("a hash of no certificate")
+	}
+}
+
+// RequireChannelBinding: a client of another machine is offered SCRAM-SHA-256-PLUS alone and comes in with it; one that
+// picks SCRAM-SHA-256 anyway, as lib/pq does, is refused with 28000 before its proof; a client of this machine is not
+// asked, over TLS or not. A certificate that gives no binding (Ed25519) leaves a client of another machine no way in,
+// and it is told so; a cleartext Authenticator cannot require binding at all.
+//
+// CONTROL (08/11/2026): with the requirement not read in authenticateSCRAM, "PLUS from another machine" fails
+// "mechanisms = …SCRAM-SHA-256-PLUS…SCRAM-SHA-256…, want …SCRAM-SHA-256-PLUS… alone" and the lib/pq subtest "got in";
+// with SCRAM-SHA-256 still taken when required, "SCRAM-SHA-256 from another machine" fails "reply = 'R' …r=…, want
+// ErrorResponse 28000"; with the requirement on clients of this machine too, "this machine" fails "mechanisms = …";
+// with no check of a certificate without binding, "a certificate without a hash" fails "…pq: SCRAM-SHA-256-PLUS is
+// required of a client of another machine…, want refused for the certificate" (no mechanism offered at all, and no
+// reason why); with Serve not refusing a cleartext Authenticator, "Serve with a cleartext Authenticator: <nil>" once
+// its 2 s are over.
+func TestSCRAMPlusRequired(t *testing.T) {
+	authority := newTestAuthority(t)
+	certificate, key := authority.issue(t, "db.example", time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+	pair, err := tls.X509KeyPair(certificate, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authenticator := newSCRAMTestAuthenticator(t)
+	server := Server{Authenticator: authenticator, SCRAMMockIterations: scramTestIterations, RequireChannelBinding: true,
+		TLS: TLSConfig(func(*tls.ClientHelloInfo) (*tls.Certificate, error) { return &pair, nil })}
+	remote, _ := serveRemote(t, server)
+	local := serveForTest(t, server)
+
+	t.Run("PLUS from another machine", func(t *testing.T) {
+		client, mechanisms, served := startSCRAMOverTLS(t, remote, "alice", nil)
+		if want := offered(scramPlusMechanism); mechanisms != want {
+			t.Fatalf("mechanisms = %q, want %q alone", mechanisms, want)
+		}
+		hash := sha256.Sum256(served.Raw)
+		kind, body, withoutProof := client.plus(t, hash[:], "pencil")
+		client.requireAuthenticated(t, kind, body, withoutProof, "pencil")
+	})
+	t.Run("SCRAM-SHA-256 from another machine", func(t *testing.T) {
+		client, _, _ := startSCRAMOverTLS(t, remote, "alice", nil)
+		kind, body := client.sendClientFirst(t, scramMechanism, "n,,n=,r=fyko+d2lbbFgONRv9qkxdawL")
+		client.requireRefused(t, kind, body, "28000", "SCRAM-SHA-256-PLUS is required of a client of another machine: "+
+			"channel binding, the password's proof bound to the server's certificate (libpq 11 or later)")
+	})
+	t.Run("lib/pq from another machine", func(t *testing.T) {
+		answer, err := answerOverTLS(t, remote, "db.example", "require", "")
+		if err == nil || !strings.Contains(err.Error(), "SCRAM-SHA-256-PLUS is required") {
+			t.Fatalf("lib/pq, which has no channel binding: %q, %v, want refused for it", answer, err)
+		}
+	})
+	t.Run("this machine", func(t *testing.T) {
+		client, mechanisms, _ := startSCRAMOverTLS(t, local, "alice", nil)
+		if want := offered(scramPlusMechanism, scramMechanism); mechanisms != want {
+			t.Fatalf("mechanisms = %q, want %q", mechanisms, want)
+		}
+		client.begin(t, "n,,")
+		kind, body := client.finish(t, "biws", client.nonce, "pencil")
+		client.requireAuthenticated(t, kind, body, "c=biws,r="+client.nonce, "pencil")
+		plain := startSCRAM(t, local, "alice") // without TLS: SCRAM-SHA-256 alone
+		plain.begin(t, "n,,")
+		kind, body = plain.finish(t, "biws", plain.nonce, "pencil")
+		plain.requireAuthenticated(t, kind, body, "c=biws,r="+plain.nonce, "pencil")
+	})
+	t.Run("a certificate without a hash", func(t *testing.T) {
+		_, edKey, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ed := Server{Authenticator: newSCRAMTestAuthenticator(t), SCRAMMockIterations: scramTestIterations, RequireChannelBinding: true,
+			TLS: &tls.Config{Certificates: []tls.Certificate{selfSigned(t, "db.example", edKey, 0)}}}
+		address, _ := serveRemote(t, ed)
+		_, err = answerOverTLS(t, address, "db.example", "require", "")
+		if err == nil || !strings.Contains(err.Error(), "channel binding is required of a client of another machine, and the certificate") {
+			t.Fatalf("an Ed25519 certificate with binding required: %v, want refused for the certificate", err)
+		}
+	})
+	t.Run("cleartext Authenticator", func(t *testing.T) {
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer listener.Close()
+		cleartext := Server{Authenticator: cleartextTestAuthenticator{password: "pencil"}, RequireChannelBinding: true, TLS: server.TLS}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second) // a Serve that takes it runs until then
+		defer cancel()
+		err = cleartext.Serve(ctx, listener)
+		if err == nil || !strings.Contains(err.Error(), "needs a SCRAMAuthenticator") {
+			t.Fatalf("Serve with a cleartext Authenticator: %v", err)
+		}
+	})
+
+	if _, opened := authenticator.record(); strings.Join(opened, " ") != "alice alice alice" {
+		t.Fatalf("sessions opened for %q, want PLUS from another machine and the two of this machine", opened)
 	}
 }

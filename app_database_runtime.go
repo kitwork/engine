@@ -73,6 +73,12 @@ func appDatabaseTLS(config AppDatabaseConfig, apps appDatabaseApps, port *appDat
 		if err != nil {
 			return nil, "", fmt.Errorf("app.database %q: tls: %w", config.Path, err)
 		}
+		if config.RequireChannelBinding {
+			if pair, err := certificate(&tls.ClientHelloInfo{}); err != nil || !pgwire.BindsChannel(pair) {
+				return nil, "", fmt.Errorf("app.database %q: channelBinding: \"require\", and the certificate %s is signed without a "+
+					"hash (Ed25519): no client could bind to it; use an RSA or ECDSA certificate", config.Path, config.TLS.Certificate)
+			}
+		}
 		return pgwire.TLSConfig(certificate), config.TLS.Certificate, nil
 	}
 	if loopbackHost(config.Host) {
@@ -187,12 +193,7 @@ func startAppDatabaseRuntime(parent context.Context, config AppDatabaseConfig, a
 			return nil, fmt.Errorf("app.database %q: %w (without TLS the host is 127.0.0.1 or ::1)", config.Path, err)
 		}
 	}
-	server := pgwire.Server{Authenticator: port, TLS: secure}
-	if config.Concurrency > 0 {
-		server.MaxConcurrentQueries = config.Concurrency
-		server.MaxConcurrentQueriesPerKey = config.Concurrency
-		server.MaxConnections = max(16, config.Concurrency*4)
-	}
+	server := appDatabaseServer(config, port, secure)
 	listener := runtime.listener
 	runtime.serveDone = make(chan struct{})
 	go func() {
@@ -205,13 +206,29 @@ func startAppDatabaseRuntime(parent context.Context, config AppDatabaseConfig, a
 			}
 		}
 	}()
-	if secure == nil {
+	switch {
+	case secure == nil:
 		slog.Info("Database port started (PostgreSQL wire, SQLite)", "path", host, "address", runtime.listener.Addr())
-	} else {
+	case server.RequireChannelBinding:
+		slog.Info("Database port started (PostgreSQL wire, SQLite, TLS)", "path", host, "address", runtime.listener.Addr(),
+			"certificates", certificates, "channelBinding", "required of a client of another machine")
+	default:
 		slog.Info("Database port started (PostgreSQL wire, SQLite, TLS)", "path", host, "address", runtime.listener.Addr(),
 			"certificates", certificates)
 	}
 	return runtime, nil
+}
+
+// appDatabaseServer is the port's pgwire server: the gateway authenticating, the TLS, SCRAM-SHA-256-PLUS required of a
+// client of another machine when the manifest says channelBinding: "require", and the bounds of concurrency.
+func appDatabaseServer(config AppDatabaseConfig, port *appDatabaseGateway, secure *tls.Config) pgwire.Server {
+	server := pgwire.Server{Authenticator: port, TLS: secure, RequireChannelBinding: config.RequireChannelBinding}
+	if config.Concurrency > 0 {
+		server.MaxConcurrentQueries = config.Concurrency
+		server.MaxConcurrentQueriesPerKey = config.Concurrency
+		server.MaxConnections = max(16, config.Concurrency*4)
+	}
+	return server
 }
 
 func (runtime *appDatabaseRuntime) Close() error {

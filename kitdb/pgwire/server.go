@@ -57,6 +57,11 @@ type Server struct {
 	// TLS is what an SSLRequest is answered with (TLSConfig); nil answers N,
 	// and the listener must then be loopback.
 	TLS *tls.Config
+	// RequireChannelBinding takes a client of another machine with
+	// SCRAM-SHA-256-PLUS only, its password's proof bound to the certificate
+	// the server served (scram.go); a client of this machine is not asked.
+	// The Authenticator must then be a SCRAMAuthenticator.
+	RequireChannelBinding bool
 	// SCRAMMockIterations is the PBKDF2 iteration count a SCRAM exchange
 	// announces for an unknown or disabled user, so that it looks like a real
 	// account's; 600000 (what accounts are made with) when zero.
@@ -299,6 +304,9 @@ func (server Server) Serve(ctx context.Context, listener net.Listener) error {
 	}
 	if server.Authenticator == nil {
 		return fmt.Errorf("pgwire: authenticator is nil")
+	}
+	if _, scram := server.Authenticator.(SCRAMAuthenticator); server.RequireChannelBinding && !scram {
+		return fmt.Errorf("pgwire: RequireChannelBinding needs a SCRAMAuthenticator: a cleartext password binds to no channel")
 	}
 	if server.TLS == nil {
 		if err := ValidateCleartextListener(listener); err != nil {

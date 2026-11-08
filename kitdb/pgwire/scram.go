@@ -77,12 +77,21 @@ func (verifier SCRAMVerifier) usable() bool {
 // the server's certificate as the client saw it (serverEndPoint). The proof covers c=, so a relay that ends the
 // client's TLS with its own certificate and opens another TLS to this server cannot carry a PLUS exchange through:
 // the hash the client sends is of the relay's certificate, not of this server's. A client that has channel binding
-// and says "y" while this server offered PLUS was told otherwise by someone between them, and is refused.
+// and says "y" while this server offered PLUS was told otherwise by someone between them, and is refused. With
+// Server.RequireChannelBinding a client of another machine is offered SCRAM-SHA-256-PLUS alone and refused
+// SCRAM-SHA-256, so a client that checks no certificate is safe from a relay whether it asks for binding or not.
 //
 // The user is the startup's; the name inside the client's first message is ignored. An unknown user runs the same
 // exchange on a mock verifier and fails at the proof with a wrong password's error. The session is opened only once
 // the proof verifies. A failure has been sent to the client when it returns an error.
 func (wire *wireConnection) authenticateSCRAM(ctx context.Context, authenticator SCRAMAuthenticator) (Session, error) {
+	// required: SCRAM-SHA-256-PLUS alone is offered and taken (Server.RequireChannelBinding), from a client of another
+	// machine, which has come through TLS by then (start refuses it otherwise)
+	required := wire.runtime.server.RequireChannelBinding && !loopbackListener(wire.conn.RemoteAddr())
+	if required && wire.channelBinding == nil {
+		return nil, wire.refuseAuthentication(NewError("28000", "channel binding is required of a client of another machine, "+
+			"and the certificate this server served gives none (its signature names no hash, as Ed25519's)"))
+	}
 	user := wire.startup.User()
 	verifier, found, err := authenticator.SCRAMVerifier(ctx, wire.startup)
 	if err != nil {
@@ -106,7 +115,9 @@ func (wire *wireConnection) authenticateSCRAM(ctx context.Context, authenticator
 	if exchange.offered {
 		request.cstring(scramPlusMechanism)
 	}
-	request.cstring(scramMechanism)
+	if !required {
+		request.cstring(scramMechanism)
+	}
 	request.byte(0)
 	if err := wire.send('R', request); err != nil {
 		return nil, err
@@ -131,6 +142,9 @@ func (wire *wireConnection) authenticateSCRAM(ctx context.Context, authenticator
 	switch {
 	case mechanism == scramPlusMechanism && exchange.offered:
 		exchange.binding = wire.channelBinding
+	case mechanism == scramMechanism && required:
+		return nil, wire.refuseAuthentication(NewError("28000", "SCRAM-SHA-256-PLUS is required of a client of another machine: "+
+			"channel binding, the password's proof bound to the server's certificate (libpq 11 or later)"))
 	case mechanism == scramMechanism:
 	default:
 		return nil, wire.refuseAuthentication(NewError("08P01", "client selected an invalid SASL authentication mechanism"))
