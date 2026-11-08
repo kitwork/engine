@@ -131,15 +131,8 @@ func Run(configFile ...string) (err error) {
 	if err := validatePrewarmSurface(builder.hasWeb, cfg.Prewarm); err != nil {
 		return err
 	}
-	// The host's .database/ of app.database is declared relative to the manifest.
-	manifestDirectory, err := filepath.Abs(filepath.Dir(file))
-	if err != nil {
-		return fmt.Errorf("resolve manifest directory: %w", err)
-	}
-	for index := range cfg.AppDatabases {
-		if !filepath.IsAbs(cfg.AppDatabases[index].Path) {
-			cfg.AppDatabases[index].Path = filepath.Join(manifestDirectory, cfg.AppDatabases[index].Path)
-		}
+	if err := resolveAppDatabasePaths(cfg, file); err != nil {
+		return err
 	}
 
 	// Initialize structured logger
@@ -570,18 +563,39 @@ func isManifestFile(file string) bool {
 }
 
 func commandConfig(configFile ...string) (*Config, error) {
+	cfg, _, err := commandManifest(configFile...)
+	return cfg, err
+}
+
+// resolveAppDatabasePaths makes the host's .database/ of each app.database absolute: it is declared relative to the
+// manifest, whatever folder the command runs in.
+func resolveAppDatabasePaths(cfg *Config, file string) error {
+	manifestDirectory, err := filepath.Abs(filepath.Dir(file))
+	if err != nil {
+		return fmt.Errorf("resolve manifest directory: %w", err)
+	}
+	for index := range cfg.AppDatabases {
+		if !filepath.IsAbs(cfg.AppDatabases[index].Path) {
+			cfg.AppDatabases[index].Path = filepath.Join(manifestDirectory, cfg.AppDatabases[index].Path)
+		}
+	}
+	return nil
+}
+
+// commandManifest is commandConfig with the manifest file it read.
+func commandManifest(configFile ...string) (*Config, string, error) {
 	file := ""
 	if len(configFile) > 0 && configFile[0] != "" {
 		file = configFile[0]
 	} else {
 		found, err := FindManifest(".")
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		file = found
 	}
 	if !isManifestFile(file) {
-		return nil, fmt.Errorf(
+		return nil, "", fmt.Errorf(
 			"engine command chỉ nhận manifest application.work (hay .kitwork.js cũ), nhận %q",
 			file,
 		)
@@ -589,18 +603,18 @@ func commandConfig(configFile ...string) (*Config, error) {
 
 	builder, err := evalServerBuilder(file)
 	if err != nil {
-		return nil, fmt.Errorf("failed to evaluate config %s: %w", file, err)
+		return nil, "", fmt.Errorf("failed to evaluate config %s: %w", file, err)
 	}
 	printBootNotices(file, builder)
 	if builder.err != "" {
-		return nil, fmt.Errorf(
+		return nil, "", fmt.Errorf(
 			"failed to evaluate config %s: config validation error: %s",
 			file,
 			builder.err,
 		)
 	}
 	if !builder.hasWeb && !builder.hasDatabase && !builder.hasGateway && !builder.hasProxy {
-		return nil, fmt.Errorf(
+		return nil, "", fmt.Errorf(
 			"failed to evaluate config %s: %w",
 			file,
 			noWebSurfaceErr(builder, file),
@@ -608,31 +622,31 @@ func commandConfig(configFile ...string) (*Config, error) {
 	}
 	raw, err := builderToMap(builder, file)
 	if err != nil {
-		return nil, fmt.Errorf("failed to evaluate config %s: %w", file, err)
+		return nil, "", fmt.Errorf("failed to evaluate config %s: %w", file, err)
 	}
 	cfg, err := ParseConfig(raw)
 	if err != nil {
-		return nil, fmt.Errorf("failed to process configuration: %w", err)
+		return nil, "", fmt.Errorf("failed to process configuration: %w", err)
 	}
 	cfg.Web = builder.hasWeb
 	cfg.SharedEnvironment = builder.sharedEnvironment
 	if err := validateGatewaySurface(builder.hasWeb, cfg.Gateway); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if err := validatePrewarmSurface(builder.hasWeb, cfg.Prewarm); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if builder.hasWeb || builder.hasDatabase {
 		if err := resolveRootConfig(cfg); err != nil {
-			return nil, fmt.Errorf("resolve app root: %w", err)
+			return nil, "", fmt.Errorf("resolve app root: %w", err)
 		}
 		if err := validateSharedApps(cfg.SharedEnvironment, cfg.Root, cfg.RootLayout); err != nil {
-			return nil, err
+			return nil, "", err
 		}
 	} else {
 		cfg.Root = "."
 	}
-	return cfg, nil
+	return cfg, file, nil
 }
 
 // printBanner renders the Kitwork startup banner: a brand-red "KITWORK" wordmark
@@ -681,7 +695,7 @@ func printBanner(cfg *Config, isLocalhost, hasWeb bool) {
 		}
 	}
 	for _, db := range cfg.AppDatabases {
-		fmt.Printf("%sdatabase · %s %s(postgresql %s:%d, SQLite, read-only)%s\n", label("db"), db.Path, dim, db.Host, db.Port, reset)
+		fmt.Printf("%sdatabase · %s %s(postgresql %s:%d, SQLite)%s\n", label("db"), db.Path, dim, db.Host, db.Port, reset)
 	}
 	for _, proxy := range cfg.Proxies {
 		hostname := proxy.Host

@@ -141,7 +141,7 @@ func startAppDatabaseRuntime(parent context.Context, config AppDatabaseConfig, a
 			}
 		}
 	}()
-	slog.Info("Database port started (PostgreSQL wire, SQLite, read-only)", "path", host, "address", runtime.listener.Addr())
+	slog.Info("Database port started (PostgreSQL wire, SQLite)", "path", host, "address", runtime.listener.Addr())
 	return runtime, nil
 }
 
