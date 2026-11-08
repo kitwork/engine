@@ -11,7 +11,9 @@ import (
 // câu 13.5), the PostgreSQL wire, reads and writes by GRANT, on the SQLite files of the host's .database/ (Path) and
 // of every app's .database/. A positive Port opens the listener on Host; User and Password are the admin of every
 // cluster; Concurrency bounds the statements running at once; TLS names the port's certificate files (câu 13.11);
-// RequireChannelBinding is channelBinding: "require", a client of another machine taken with SCRAM-SHA-256-PLUS only.
+// RequireChannelBinding is channelBinding: "require", a client of another machine taken with SCRAM-SHA-256-PLUS only;
+// ClientAuthority is clientAuthority, the PEM file of the authorities whose certificate a client of another machine
+// presents, its common name its user, as well as its password.
 type AppDatabaseConfig struct {
 	Path                  string
 	Host                  string
@@ -21,6 +23,7 @@ type AppDatabaseConfig struct {
 	Concurrency           int
 	TLS                   *AppDatabaseTLS
 	RequireChannelBinding bool
+	ClientAuthority       string
 	// Search is the full-text index of each table SEARCH reads on the port (app_database_search.go).
 	Search []AppDatabaseSearch
 }
@@ -120,14 +123,14 @@ func parseAppDatabaseConfig(source map[string]interface{}) (AppDatabaseConfig, e
 	config := AppDatabaseConfig{Host: "127.0.0.1", User: "kitdb"}
 	known := map[string]bool{
 		"path": true, "host": true, "port": true, "user": true, "password": true, "concurrency": true, "search": true,
-		"tls": true, "channelBinding": true,
+		"tls": true, "channelBinding": true, "clientAuthority": true,
 	}
 	for key := range source {
 		if why, removed := appDatabaseRemovedOptions[key]; removed {
 			return config, fmt.Errorf("option %q is gone (30/10/2026, the port runs on SQLite, KITWORK_KITDB.md 13.5): %s", key, why)
 		}
 		if !known[key] {
-			return config, fmt.Errorf("unknown option %q: app.database takes path, host, port, user, password, concurrency, search, tls, channelBinding", key)
+			return config, fmt.Errorf("unknown option %q: app.database takes path, host, port, user, password, concurrency, search, tls, channelBinding, clientAuthority", key)
 		}
 	}
 	path, ok := source["path"].(string)
@@ -175,6 +178,13 @@ func parseAppDatabaseConfig(source map[string]interface{}) (AppDatabaseConfig, e
 			return config, err
 		}
 		config.TLS = files
+	}
+	if value, found := source["clientAuthority"]; found {
+		authority, ok := value.(string)
+		if !ok || strings.TrimSpace(authority) == "" {
+			return config, fmt.Errorf("clientAuthority must be the path of the PEM file of the authorities that sign the clients' certificates")
+		}
+		config.ClientAuthority = strings.TrimSpace(authority)
 	}
 	if value, found := source["channelBinding"]; found {
 		switch value {

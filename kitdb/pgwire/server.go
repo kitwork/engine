@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -62,6 +63,12 @@ type Server struct {
 	// the server served (scram.go); a client of this machine is not asked.
 	// The Authenticator must then be a SCRAMAuthenticator.
 	RequireChannelBinding bool
+	// ClientAuthorities, when set, ask a client of another machine in the
+	// TLS handshake for a certificate one of them signed, and take it only
+	// for the user its common name names (PostgreSQL's clientcert=verify-full);
+	// the password is still asked. A client of this machine is not asked.
+	// ClientAuthorityFile reads them.
+	ClientAuthorities *x509.CertPool
 	// SCRAMMockIterations is the PBKDF2 iteration count a SCRAM exchange
 	// announces for an unknown or disabled user, so that it looks like a real
 	// account's; 600000 (what accounts are made with) when zero.
@@ -444,6 +451,9 @@ type wireConnection struct {
 	// channelBinding is the tls-server-end-point data of the certificate the handshake served (serverEndPoint), nil
 	// without TLS or for a certificate it cannot be had of: SCRAM-SHA-256-PLUS is offered only when it is set
 	channelBinding []byte
+	// clientCertificate is the certificate the TLS handshake verified against Server.ClientAuthorities, nil when none
+	// was asked for
+	clientCertificate *x509.Certificate
 }
 
 type preparedStatement struct {
@@ -539,6 +549,9 @@ func (wire *wireConnection) start(ctx context.Context) error {
 				_ = wire.sendError(err)
 				return err
 			}
+			if err := wire.checkClientCertificate(); err != nil {
+				return err
+			}
 			return wire.authenticate(ctx)
 		default:
 			err := NewError("0A000", fmt.Sprintf("unsupported PostgreSQL protocol version %d", code))
@@ -562,6 +575,10 @@ func (wire *wireConnection) startTLS(ctx context.Context) error {
 		return err
 	}
 	config, served := servedCertificate(wire.runtime.server.TLS)
+	if authorities := wire.runtime.server.ClientAuthorities; authorities != nil && !loopbackListener(wire.conn.RemoteAddr()) {
+		// a client of another machine with no certificate of these authorities ends here, before its startup
+		config.ClientAuth, config.ClientCAs = tls.RequireAndVerifyClientCert, authorities
+	}
 	connection := tls.Server(wire.conn, config)
 	if err := connection.SetDeadline(time.Now().Add(wire.runtime.server.IdleTimeout)); err != nil {
 		return err
@@ -577,6 +594,28 @@ func (wire *wireConnection) startTLS(ctx context.Context) error {
 	wire.writer = bufio.NewWriterSize(connection, 32<<10)
 	wire.encrypted = true
 	wire.channelBinding = serverEndPoint(served()) // nil when the handshake served no certificate it was told of
+	if chains := connection.ConnectionState().VerifiedChains; len(chains) > 0 && len(chains[0]) > 0 {
+		wire.clientCertificate = chains[0][0]
+	}
+	return nil
+}
+
+// checkClientCertificate takes a client of another machine, when the server has ClientAuthorities, only for the user
+// its certificate names: the common name of the certificate its handshake verified is the startup's user. It has
+// sent the refusal when it returns an error.
+func (wire *wireConnection) checkClientCertificate() error {
+	if wire.runtime.server.ClientAuthorities == nil || loopbackListener(wire.conn.RemoteAddr()) {
+		return nil
+	}
+	user, name := wire.startup.User(), ""
+	if wire.clientCertificate != nil {
+		name = wire.clientCertificate.Subject.CommonName
+	}
+	if wire.clientCertificate == nil || name != user {
+		err := NewError("28000", fmt.Sprintf("certificate authentication failed for user %q: the client's certificate is of %q", user, name))
+		_ = wire.sendError(err)
+		return err
+	}
 	return nil
 }
 

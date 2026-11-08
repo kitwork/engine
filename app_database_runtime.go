@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -181,6 +182,13 @@ func startAppDatabaseRuntime(parent context.Context, config AppDatabaseConfig, a
 		_ = runtime.Close()
 		return nil, err
 	}
+	var clients *x509.CertPool
+	if config.ClientAuthority != "" {
+		if clients, err = pgwire.ClientAuthorityFile(config.ClientAuthority); err != nil {
+			_ = runtime.Close()
+			return nil, fmt.Errorf("app.database %q: clientAuthority: %w", config.Path, err)
+		}
+	}
 	address := net.JoinHostPort(config.Host, strconv.Itoa(config.Port))
 	runtime.listener, err = net.Listen("tcp", address)
 	if err != nil {
@@ -193,7 +201,7 @@ func startAppDatabaseRuntime(parent context.Context, config AppDatabaseConfig, a
 			return nil, fmt.Errorf("app.database %q: %w (without TLS the host is 127.0.0.1 or ::1)", config.Path, err)
 		}
 	}
-	server := appDatabaseServer(config, port, secure)
+	server := appDatabaseServer(config, port, secure, clients)
 	listener := runtime.listener
 	runtime.serveDone = make(chan struct{})
 	go func() {
@@ -209,20 +217,25 @@ func startAppDatabaseRuntime(parent context.Context, config AppDatabaseConfig, a
 	switch {
 	case secure == nil:
 		slog.Info("Database port started (PostgreSQL wire, SQLite)", "path", host, "address", runtime.listener.Addr())
-	case server.RequireChannelBinding:
-		slog.Info("Database port started (PostgreSQL wire, SQLite, TLS)", "path", host, "address", runtime.listener.Addr(),
-			"certificates", certificates, "channelBinding", "required of a client of another machine")
 	default:
-		slog.Info("Database port started (PostgreSQL wire, SQLite, TLS)", "path", host, "address", runtime.listener.Addr(),
-			"certificates", certificates)
+		attributes := []any{"path", host, "address", runtime.listener.Addr(), "certificates", certificates}
+		if server.RequireChannelBinding {
+			attributes = append(attributes, "channelBinding", "required of a client of another machine")
+		}
+		if server.ClientAuthorities != nil {
+			attributes = append(attributes, "clientAuthority", config.ClientAuthority)
+		}
+		slog.Info("Database port started (PostgreSQL wire, SQLite, TLS)", attributes...)
 	}
 	return runtime, nil
 }
 
 // appDatabaseServer is the port's pgwire server: the gateway authenticating, the TLS, SCRAM-SHA-256-PLUS required of a
-// client of another machine when the manifest says channelBinding: "require", and the bounds of concurrency.
-func appDatabaseServer(config AppDatabaseConfig, port *appDatabaseGateway, secure *tls.Config) pgwire.Server {
-	server := pgwire.Server{Authenticator: port, TLS: secure, RequireChannelBinding: config.RequireChannelBinding}
+// client of another machine when the manifest says channelBinding: "require", the authorities of clientAuthority whose
+// certificate such a client presents (clients, nil for none), and the bounds of concurrency.
+func appDatabaseServer(config AppDatabaseConfig, port *appDatabaseGateway, secure *tls.Config, clients *x509.CertPool) pgwire.Server {
+	server := pgwire.Server{Authenticator: port, TLS: secure, RequireChannelBinding: config.RequireChannelBinding,
+		ClientAuthorities: clients}
 	if config.Concurrency > 0 {
 		server.MaxConcurrentQueries = config.Concurrency
 		server.MaxConcurrentQueriesPerKey = config.Concurrency

@@ -585,6 +585,9 @@ func resolveAppDatabasePaths(cfg *Config, file string) error {
 		if files := cfg.AppDatabases[index].TLS; files != nil {
 			cfg.AppDatabases[index].TLS = &AppDatabaseTLS{Certificate: absolute(files.Certificate), Key: absolute(files.Key)}
 		}
+		if authority := cfg.AppDatabases[index].ClientAuthority; authority != "" {
+			cfg.AppDatabases[index].ClientAuthority = absolute(authority)
+		}
 	}
 	return nil
 }

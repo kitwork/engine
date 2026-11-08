@@ -80,6 +80,21 @@ func chooseCertificate(get func(*tls.ClientHelloInfo) (*tls.Certificate, error),
 	return &certificates[0], nil
 }
 
+// ClientAuthorityFile reads the authorities whose certificates a client of another machine presents
+// (Server.ClientAuthorities): a PEM file of one certificate or several, as PostgreSQL's ssl_ca_file. It is read once;
+// a changed file takes a restart, as PostgreSQL's takes a reload.
+func ClientAuthorityFile(path string) (*x509.CertPool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("pgwire: client authority: %w", err)
+	}
+	authorities := x509.NewCertPool()
+	if !authorities.AppendCertsFromPEM(data) {
+		return nil, fmt.Errorf("pgwire: client authority %s: no PEM certificate in it", path)
+	}
+	return authorities, nil
+}
+
 // BindsChannel reports whether SCRAM-SHA-256-PLUS can bind to certificate: whether its signature is made with a hash,
 // which an Ed25519 certificate's is not (serverEndPoint). A host requiring channel binding checks its certificate with
 // it before it listens.

@@ -41,7 +41,7 @@ func TestAppDatabaseChannelBindingOption(t *testing.T) {
 			t.Errorf("channelBinding %q: required %v, %v, want %v", value, config.RequireChannelBinding, err, want)
 			continue
 		}
-		if server := appDatabaseServer(config, &appDatabaseGateway{}, nil); server.RequireChannelBinding != want {
+		if server := appDatabaseServer(config, &appDatabaseGateway{}, nil, nil); server.RequireChannelBinding != want {
 			t.Errorf("%s: the server requires binding %v", value, server.RequireChannelBinding)
 		}
 	}
