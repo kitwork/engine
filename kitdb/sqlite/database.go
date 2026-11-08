@@ -154,6 +154,13 @@ func dataSourceName(path string, parameters ...string) string {
 // (Maintain stopped between the two) is written here, and one a start lacks
 // (the file closed while it was written) is started here. With
 // Options.HistoryOfEveryTable a file is anchored as it opens, as before: a new
+// walSizeLimit is the most bytes the WAL keeps once it restarts (the writer's PRAGMA journal_size_limit). A long read,
+// an anchor's pages or a Backup, holds the checkpoint back, so the WAL grows by every commit meanwhile (2.46 GB during
+// shopping's anchor, 08/11/2026), and SQLite reuses the file at that size, never shrinking it. With the limit the
+// file is cut back as the WAL restarts, the commit after the checkpoint that follows the read. 64 MiB is above what
+// the WAL holds between two automatic checkpoints (1,000 pages of 16 KiB), so an ordinary WAL is never cut.
+var walSizeLimit int64 = 64 << 20
+
 // one at revision 0, an existing one without anchors.
 func Open(ctx context.Context, path string, options Options) (*Database, error) {
 	options, err := options.normalized()
@@ -182,6 +189,7 @@ func Open(ctx context.Context, path string, options Options) (*Database, error) 
 	database.writer, err = openWriter(ctx, dataSourceName(path,
 		"_pragma=page_size("+strconv.Itoa(options.PageSize)+")",
 		"_pragma=journal_mode(WAL)", "_pragma=synchronous(FULL)", "_pragma=foreign_keys(1)",
+		"_pragma=journal_size_limit("+strconv.FormatInt(walSizeLimit, 10)+")",
 	), options, database.Anchor, func(ctx context.Context, conn *sql.Conn) error { return database.anchorWhenStarted(ctx, conn) })
 	if err != nil {
 		return nil, err
@@ -526,7 +534,7 @@ func (database *Database) release() error {
 		errs = append(errs, database.container.Close())
 	}
 	if database.writer != nil {
-		errs = append(errs, database.writer.close())
+		database.writer.stop()
 	}
 	// after the writer, which starts them
 	database.stopBackground()
@@ -536,6 +544,12 @@ func (database *Database) release() error {
 	database.backgroundMutex.Unlock()
 	if database.readers != nil {
 		errs = append(errs, database.readers.Close())
+	}
+	// The writer's connection last: closing the last connection of the file, SQLite checkpoints the whole WAL into it
+	// and removes the WAL, so a file closed is whole by itself (08/11/2026). A read-only connection closed last does
+	// neither: the WAL stayed beside the file, 2.64 GB on shopping's copy, and a copy of kitwork.db alone lacked it.
+	if database.writer != nil {
+		errs = append(errs, database.writer.closeConnection())
 	}
 	if database.lock != nil {
 		errs = append(errs, database.lock.close())

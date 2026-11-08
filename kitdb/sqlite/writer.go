@@ -293,7 +293,9 @@ func (w *writer) submit(ctx context.Context, request writerRequest) (uint64, err
 	return outcome.revision, outcome.err
 }
 
-func (w *writer) close() error {
+// stop ends the writer: the writes queued are committed or refused, no new one is taken. Its connection stays open
+// until closeConnection, so the Database closes it last (release).
+func (w *writer) stop() {
 	w.sending.Lock()
 	if !w.stopped {
 		w.stopped = true
@@ -301,6 +303,9 @@ func (w *writer) close() error {
 	}
 	w.sending.Unlock()
 	<-w.finished
+}
+
+func (w *writer) closeConnection() error {
 	return errors.Join(w.conn.Close(), w.pool.Close())
 }
 

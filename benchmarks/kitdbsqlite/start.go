@@ -21,7 +21,8 @@ import (
 //
 // path is a copy, written to: a table start_<n> is made in it, with its history on, and an anchor is written beside
 // it, a .pages when the copy has an anchor already, a .base of every page when it has none. The anchor's read
-// transaction holds the WAL back from a checkpoint while it lasts, so the largest the -wal file grows is printed too.
+// transaction holds the WAL back from a checkpoint while it lasts, so the largest the -wal file grows is printed too,
+// and its size once the writer has cut it back after the anchor.
 func cmdStart(path string) {
 	ctx := context.Background()
 	history := path + ".history"
@@ -76,6 +77,13 @@ func cmdStart(path string) {
 	fmt.Printf("one-row commits before:          %s\n", commitTimes(before))
 	fmt.Printf("one-row commits while it is written: %s\n", commitTimes(during))
 	fmt.Printf("the -wal file: %s at most while it is written, %s once it is\n", gigabytes(wal), gigabytes(fileSize(path+"-wal")))
+	// the anchor's snapshot closes after its file is named; a commit then checkpoints the WAL, the next restarts it,
+	// cut to the writer's journal_size_limit (64 MiB, 08/11/2026)
+	after := 0
+	for ; after < 1000 && fileSize(path+"-wal") > 64<<20; after++ {
+		commit()
+	}
+	fmt.Printf("the -wal file %d commits after: %s\n", after, gigabytes(fileSize(path+"-wal")))
 	fmt.Printf("anchors after: %v\n", anchorNamesIn(history))
 }
 
