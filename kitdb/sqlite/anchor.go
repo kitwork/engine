@@ -186,6 +186,20 @@ func (database *Database) Anchor(ctx context.Context) (uint64, error) {
 	return database.writeAnchor(ctx)
 }
 
+// OldestAnchor is the moment of the oldest anchor a restore can start from, the earliest moment RestoreTable reaches;
+// found is false while there is none, as when a table's first anchor is still written in the background. It says
+// where ErrNoAnchor ends (09/11/2026).
+func (database *Database) OldestAnchor() (at time.Time, found bool, err error) {
+	if err := database.ensureOpen(); err != nil {
+		return time.Time{}, false, err
+	}
+	anchors, err := database.anchors()
+	if err != nil || len(anchors) == 0 {
+		return time.Time{}, false, err
+	}
+	return time.Unix(0, anchors[0].at).UTC(), true, nil
+}
+
 // anchorSnapshot is the file as of a commit, held by a read transaction of its own: the pages an anchor copies.
 type anchorSnapshot struct {
 	source                            *sql.DB

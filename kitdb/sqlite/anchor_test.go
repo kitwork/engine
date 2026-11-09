@@ -552,3 +552,42 @@ func TestPageAnchorsUnderAConcurrentWorkload(t *testing.T) {
 		t.Fatalf("the last revision %d restored to different rows (%v)", last, err)
 	}
 }
+
+// OldestAnchor is the moment of the oldest anchor, none while a file has none: a table's first anchor, held here as an
+// anchor running holds it, is there only once written.
+//
+// CONTROL (09/11/2026): with the newest anchor given in place of the oldest, "the oldest anchor at …, want the first's".
+func TestOldestAnchor(t *testing.T) {
+	ctx := context.Background()
+	database, err := Open(ctx, filepath.Join(t.TempDir(), "kitwork.db"), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if _, err := database.Migrate(ctx, "boot", `CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	func() {
+		database.anchoring.Lock()
+		defer database.anchoring.Unlock()
+		if _, err := database.SetHistory(ctx, "t", "notes", true); err != nil {
+			t.Fatal(err)
+		}
+		if _, found, err := database.OldestAnchor(); err != nil || found {
+			t.Fatalf("OldestAnchor while the first is written: found %v (%v), want none", found, err)
+		}
+	}()
+	database.background.Wait()
+	first, found, err := database.OldestAnchor()
+	if err != nil || !found {
+		t.Fatalf("OldestAnchor once the first is written: found %v (%v)", found, err)
+	}
+	time.Sleep(5 * time.Millisecond)
+	mustWrite(t, database, `INSERT INTO notes (body) VALUES ('a')`)
+	if _, err := database.Anchor(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if oldest, _, _ := database.OldestAnchor(); !oldest.Equal(first) {
+		t.Fatalf("the oldest anchor at %v, want the first's, %v", oldest, first)
+	}
+}
