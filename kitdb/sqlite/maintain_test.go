@@ -180,6 +180,7 @@ func TestMaintainMarksASchemaChangeAndRestoresAcrossIt(t *testing.T) {
 	if database, err = Open(ctx, path, Options{HistoryOfEveryTable: true}); err != nil {
 		t.Fatal(err)
 	}
+	database.background.Wait() // Open writes that anchor in the background (09/11/2026)
 	if got, err := restoredNotes(t, database, time.Now()); err != nil || got != now {
 		t.Fatalf("restored after reopening = %q (%v), want %q", got, err, now)
 	}

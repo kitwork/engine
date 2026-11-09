@@ -220,11 +220,20 @@ func Open(ctx context.Context, path string, options Options) (*Database, error) 
 			return nil, err
 		}
 	}
-	if anchorNeeded {
+	switch {
+	case anchorNeeded && created:
+		// a file made now: its anchor is its few pages, written before Open returns
 		if _, err := database.Anchor(ctx); err != nil {
 			return nil, err
 		}
-	} else if !options.HistoryOfEveryTable {
+	case anchorNeeded:
+		// a file with its rows: its anchor (the first time a .base of every page, 27.6 GB for shopping) is written in
+		// the background from a snapshot of now, while the writer takes writes (09/11/2026: Open wrote it before it
+		// returned, and the first write through the port waited 65 s, or was canceled at 84 s)
+		if err := database.anchorLater(); err != nil {
+			return nil, err
+		}
+	case !options.HistoryOfEveryTable:
 		// the anchor of a table's start the file closed before writing
 		if err := database.anchorWhenStarted(ctx, database.readers); err != nil {
 			return nil, err

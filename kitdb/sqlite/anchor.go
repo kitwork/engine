@@ -456,6 +456,10 @@ func (database *Database) anchorWhenStarted(ctx context.Context, querier interfa
 	return database.anchorLater()
 }
 
+// anchorStarting, nil but in tests, is called as a background anchor starts, before it writes a page: a test holds it
+// there to see what goes on meanwhile.
+var anchorStarting func()
+
 // anchorLater writes an anchor of the file as of its latest commit without holding up the caller: the read transaction
 // the pages are copied in starts now, so the anchor is at this commit whatever the writer commits after, and a
 // goroutine of its own writes them, after the anchor or the Retain running. Close stops it; Open starts again the
@@ -471,6 +475,9 @@ func (database *Database) anchorLater() error {
 	go func() {
 		defer database.background.Done()
 		defer snapshot.close()
+		if anchorStarting != nil {
+			anchorStarting()
+		}
 		database.anchoring.Lock()
 		defer database.anchoring.Unlock()
 		if ctx.Err() != nil {

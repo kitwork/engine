@@ -591,3 +591,66 @@ func TestOldestAnchor(t *testing.T) {
 		t.Fatalf("the oldest anchor at %v, want the first's, %v", oldest, first)
 	}
 }
+
+// A file that has rows and no anchor, opened with the history of every table (as the old engine opens a file of
+// before), gets its first anchor in the background, from a snapshot taken as Open returns: Open does not wait for its
+// pages (27.6 GB for shopping), a write goes through while they are written, and the anchor is of the revision the file
+// had at Open, not of the write after it. A file made now still gets its anchor before Open returns.
+//
+// CONTROL (09/11/2026): with Open writing the anchor before it returns, as before, "an anchor while the background one
+// is held: [00000000000000000003-….base pages.hashes], want none yet".
+func TestOpenAnchorsAFileInTheBackground(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "kitwork.db")
+	first, err := Open(ctx, path, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.Migrate(ctx, "boot", `CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, first, `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 200) INSERT INTO notes (body) SELECT 'note ' || i FROM n`)
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	release := make(chan struct{})
+	started := make(chan struct{}, 1)
+	anchorStarting = func() {
+		started <- struct{}{}
+		<-release
+	}
+	t.Cleanup(func() { anchorStarting = nil })
+	database, err := Open(ctx, path, Options{HistoryOfEveryTable: true})
+	if err != nil {
+		close(release)
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	opened := database.Revision()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		close(release)
+		t.Fatal("no anchor started in the background")
+	}
+	anchorFiles := func() []string {
+		entries, _ := filepath.Glob(filepath.Join(path+".history", "*"))
+		var names []string
+		for _, entry := range entries {
+			names = append(names, filepath.Base(entry))
+		}
+		return names
+	}
+	if names := anchorFiles(); len(names) != 0 {
+		close(release)
+		t.Fatalf("an anchor while the background one is held: %v, want none yet", names)
+	}
+	mustWrite(t, database, `INSERT INTO notes (body) VALUES ('while the anchor is written')`)
+	close(release)
+	database.background.Wait()
+	anchors, err := database.anchors()
+	if err != nil || len(anchors) != 1 || anchors[0].revision != opened || anchors[0].kind != anchorBase {
+		t.Fatalf("anchors after the background one: %+v (%v), want one .base of revision %d", anchors, err, opened)
+	}
+}
