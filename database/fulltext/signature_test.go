@@ -2,7 +2,6 @@ package fulltext
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -33,9 +32,8 @@ func openDeclared(t *testing.T, path string) (*Table, func()) {
 // CONTROL (09/11/2026): with any later revision taken as a change, as before, "after a row of another table: posts'
 // index was built again"; with a commit of any table counted as one of posts, the same; with the file's schema
 // version in place of the table's definition, "after a table made: posts' index was built again"; with updates of
-// posts counted whatever column they change, "after posts' stock: …"; with reuse not storing the state it moved to,
-// "the index's stored state {\"revision\":4,…} after the restart, want the file's revision 7"; with updates of posts
-// not counted, "after posts' title: com tam = \"\", want 3".
+// posts counted whatever column they change, "after posts' stock: …"; with updates of posts not counted, "after
+// posts' title: com tam = \"\", want 3".
 func TestDeclaredTableKeepsItsIndexWhileOtherTablesChange(t *testing.T) {
 	previous := Watch
 	Watch = 20 * time.Millisecond
@@ -74,7 +72,7 @@ func TestDeclaredTableKeepsItsIndexWhileOtherTablesChange(t *testing.T) {
 	}
 	release()
 
-	// Restarted: the index is used as it is, its state moved past the commits read, so it is not read from them again.
+	// Restarted: the index is used as it is, its signature in memory moved past the commits read.
 	write(`INSERT INTO logs (line) VALUES ('khi đóng')`)
 	table, release = openDeclared(t, path)
 	defer release()
@@ -96,18 +94,11 @@ func TestDeclaredTableKeepsItsIndexWhileOtherTablesChange(t *testing.T) {
 		}
 		return last
 	}
-	container, err := table.file.open(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	index, encoded, err := container.Index(table.name, table.definition)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = index.Close()
-	var stored state
-	if err := json.Unmarshal(encoded, &stored); err != nil || stored.Signature == nil || stored.Signature.Revision != revision() {
-		t.Fatalf("the index's stored state %s after the restart, want the file's revision %d", encoded, revision())
+	table.mutex.RLock()
+	held := table.signature
+	table.mutex.RUnlock()
+	if held.Revision != revision() {
+		t.Fatalf("the index's signature after the restart is of revision %d, want the file's %d (the commits read kept)", held.Revision, revision())
 	}
 
 	// posts' own searchable column changed: built again, the new title found.
@@ -141,4 +132,36 @@ func TestDeclaredTableKeepsItsIndexWhileOtherTablesChange(t *testing.T) {
 	if check(old) {
 		t.Fatal("a signature without a definition, the schema version moved: the same")
 	}
+}
+
+// The watch leaves a table alone while Open looks whether the index the container holds is still the table's: it has
+// no index and no signature yet, which the watch would read as a table to build again. On shopping's copy of 31/10/2026
+// that look took 3 minutes (a Fold that merged segments, since dropped), and the watch built 13.7 million rows again
+// meanwhile.
+//
+// CONTROL (09/11/2026): with the watch not asking opening, "while it opens: posts' index was built again".
+func TestWatchLeavesATableBeingOpened(t *testing.T) {
+	previous := Watch
+	Watch = 20 * time.Millisecond
+	t.Cleanup(func() { Watch = previous })
+	path, _, write := trackedFile(t)
+	table, release := openDeclared(t, path)
+	defer release()
+	found(t, table, "ca phe")
+	builds := table.builds.Load()
+	// as Open leaves it while it looks: no signature read yet
+	table.opening.Store(true)
+	table.mutex.Lock()
+	kept := table.signature
+	table.signature = Signature{}
+	table.mutex.Unlock()
+	write(`INSERT INTO posts (id, title) VALUES (20, 'Chè ba màu')`)
+	time.Sleep(10 * Watch)
+	if table.builds.Load() != builds {
+		t.Fatal("while it opens: posts' index was built again")
+	}
+	table.mutex.Lock()
+	table.signature = kept
+	table.mutex.Unlock()
+	table.opening.Store(false)
 }

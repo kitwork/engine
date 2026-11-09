@@ -143,6 +143,9 @@ type Table struct {
 
 	retired atomic.Bool
 	queued  atomic.Bool
+	// opening is set while Open looks whether the index the container holds is still the table's (reuse): the watch
+	// leaves the table alone meanwhile, rather than build it again because it has no index yet
+	opening atomic.Bool
 	built   atomic.Int64
 	total   atomic.Int64
 	builds  atomic.Int64 // how many times the index was built from the rows
@@ -265,6 +268,8 @@ func (manager *Manager) replace(entry *file, current *Table, table, label string
 		current.retired.Store(true)
 		current.swap(nil, nil)
 	}
+	created.opening.Store(true)
+	defer created.opening.Store(false)
 	if err := manager.reuse(created); err != nil {
 		manager.enqueue(created)
 	}
@@ -399,18 +404,9 @@ func (manager *Manager) reuse(table *Table) error {
 		_ = index.Close()
 		return fmt.Errorf("the table changed since its index was built")
 	}
-	if signature != *held.Signature {
-		// commits of other tables since, or a signature written before 09/11/2026: the index's state says where it is
-		// now, so the next start reads the history from here
-		_ = index.Close()
-		held.Revision, held.Signature = uint64(max(signature.Revision, 0)), &signature
-		if err := container.Fold(ctx, table.name, table.definition, held, search.BuildOptions{SkipLongTerms: true}, nil); err != nil {
-			return err
-		}
-		if index, _, err = container.Index(table.name, table.definition); err != nil {
-			return err
-		}
-	}
+	// The signature read now is kept in memory, not in the index's state: writing the state is a Fold, which first
+	// merges the segments of an index past containerMaximumSegments (shopping's of 31/10/2026: 3 minutes, while the
+	// watch, seeing no index, built it again). The next start reads the commits since the build again, which is cheap.
 	table.mutex.Lock()
 	table.signature = signature
 	table.mutex.Unlock()
@@ -836,7 +832,7 @@ func (manager *Manager) watch() {
 				changed = err == nil && found
 				changes[table.file] = changed
 			}
-			if !changed || table.retired.Load() {
+			if !changed || table.retired.Load() || table.opening.Load() {
 				continue
 			}
 			table.mutex.RLock()
