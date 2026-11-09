@@ -549,8 +549,34 @@ func (session *Session) readSchema(ctx context.Context, index int, schema string
 		if err := session.readForeignKeys(ctx, relation, byName); err != nil {
 			return nil, err
 		}
+		session.readChecks(relation)
 	}
 	return relations, nil
+}
+
+// readChecks gives the table's CHECKs as constraints of kind "c" (09/11/2026), named as a broken one is told
+// (check.go): its own name, else PostgreSQL's. Its definition is CHECK ( … ) as the file holds it; a decimal column's
+// own CHECK is written with the values its stored integers stand for, as the structure file writes it.
+func (session *Session) readChecks(relation *catalogRelation) {
+	for _, check := range checkConstraints(relation.sql) {
+		key := &catalogKey{name: check.name, kind: "c", names: check.columns,
+			definition: "CHECK (" + check.expression + ")"}
+		for _, name := range check.columns {
+			if attribute, found := relation.attribute(name); found {
+				key.columns = append(key.columns, attribute.number)
+			}
+		}
+		if len(check.columns) == 1 {
+			if attribute, found := relation.attribute(check.columns[0]); found && attribute.kind.oid == pgwire.OIDNumeric &&
+				attribute.kind.scale.Valid && attribute.kind.scale.Int64 > 0 {
+				if written, _, ok, err := decimalCheck(check.tokens, 0, check.columns[0], storedAsValue(int(attribute.kind.scale.Int64))); ok && err == nil {
+					key.definition = renderTokens(written)
+				}
+			}
+		}
+		key.oid = session.objectOID("constraint", relation.schema, relation.name+"\x00"+key.name)
+		relation.keys = append(relation.keys, key)
+	}
 }
 
 // readStatistics reads the row count ANALYZE left in sqlite_stat1 for each table (reltuples); none without it. Each
@@ -1224,7 +1250,12 @@ func (session *Session) addRelationRows(relation *catalogRelation, database, use
 			"convalidated": true, "conrelid": relation.oid, "conindid": key.index, "confupdtype": " ",
 			"confdeltype": " ", "confmatchtype": " ", "conislocal": true, "connoinherit": true,
 			"conkey": pgArray(intStrings(key.columns))}
-		constraintType := map[string]string{"p": "PRIMARY KEY", "u": "UNIQUE", "f": "FOREIGN KEY"}[key.kind]
+		constraintType := map[string]string{"p": "PRIMARY KEY", "u": "UNIQUE", "f": "FOREIGN KEY", "c": "CHECK"}[key.kind]
+		if key.kind == "c" {
+			row["connoinherit"] = false
+			add("information_schema_check_constraints", catalogRow{"constraint_catalog": database, "constraint_schema": schema,
+				"constraint_name": key.name, "check_clause": strings.TrimPrefix(key.definition, "CHECK ")})
+		}
 		if key.kind == "f" {
 			row["confrelid"] = key.references.oid
 			row["confupdtype"], row["confdeltype"], row["confmatchtype"] = key.onUpdate, key.onDelete, "s"
@@ -1251,6 +1282,9 @@ func (session *Session) addRelationRows(relation *catalogRelation, database, use
 			"table_name":         map[bool]string{true: key.referencedTable(), false: relation.name}[key.kind == "f"],
 			"constraint_catalog": database, "constraint_schema": schema, "constraint_name": key.name})
 		for position, name := range key.names {
+			if key.kind == "c" {
+				break // a CHECK reads its columns, it is no key of them (PostgreSQL lists it in constraint_column_usage only)
+			}
 			row := catalogRow{"constraint_catalog": database, "constraint_schema": schema, "constraint_name": key.name,
 				"table_catalog": database, "table_schema": schema, "table_name": relation.name, "column_name": name,
 				"ordinal_position": position + 1}

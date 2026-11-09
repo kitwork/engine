@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"errors"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -28,10 +29,14 @@ const checkFailed = "CHECK constraint failed: "
 // maximumNameBytes is PostgreSQL's NAMEDATALEN - 1: the bytes of a name it makes.
 const maximumNameBytes = 63
 
-// checkConstraint is one CHECK of a table: the name PostgreSQL knows it by, and what SQLite says of it when it fails.
+// checkConstraint is one CHECK of a table: the name PostgreSQL knows it by, what SQLite says of it when it fails, its
+// expression as the file holds it, the tokens CHECK ( … ) for the catalog, and the table's columns it reads.
 type checkConstraint struct {
-	name     string
-	reported string
+	name       string
+	reported   string
+	expression string
+	tokens     []token
+	columns    []string
 }
 
 // checkConstraints are the CHECKs of a CREATE TABLE as SQLite keeps it, in the order written; nil when it does not read.
@@ -73,15 +78,21 @@ func checkConstraints(create string) []checkConstraint {
 				return checks
 			}
 			expression := part[index+2 : end]
+			check := checkConstraint{expression: strings.TrimSpace(source(create, expression, 0, len(expression))),
+				tokens: part[index : end+1], columns: readColumns(expression, columns)}
 			if index >= 2 && part[index-2].word() == "CONSTRAINT" && isIdentifier(part[index-1]) {
-				name := identifierText(part[index-1])
-				taken[name] = true
-				checks = append(checks, checkConstraint{name: name, reported: name})
+				check.name = identifierText(part[index-1])
+				check.reported = check.name
 			} else {
-				name := chooseCheckName(table, readColumn(expression, columns), taken)
-				taken[name] = true
-				checks = append(checks, checkConstraint{name: name, reported: strings.TrimSpace(source(create, expression, 0, len(expression)))})
+				column := ""
+				if len(check.columns) == 1 {
+					column = check.columns[0]
+				}
+				check.name = chooseCheckName(table, column, taken)
+				check.reported = check.expression
 			}
+			taken[check.name] = true
+			checks = append(checks, check)
 			index = end
 		}
 	}
@@ -91,9 +102,9 @@ func checkConstraints(create string) []checkConstraint {
 // tableConstraintWords begin a table's constraint, not a column, in a CREATE TABLE.
 var tableConstraintWords = map[string]bool{"CONSTRAINT": true, "PRIMARY": true, "UNIQUE": true, "CHECK": true, "FOREIGN": true}
 
-// readColumn is the one column of the table an expression reads, "" when it reads more or none.
-func readColumn(expression []token, columns map[string]string) string {
-	found := ""
+// readColumns are the columns of the table an expression reads, each once, in the order it first reads them.
+func readColumns(expression []token, columns map[string]string) []string {
+	var found []string
 	for index, current := range expression {
 		if !isIdentifier(current) {
 			continue
@@ -101,13 +112,8 @@ func readColumn(expression []token, columns map[string]string) string {
 		if next := index + 1; next < len(expression) && (expression[next].text == "(" || expression[next].text == ".") {
 			continue // a function, or the table before a column
 		}
-		name, known := columns[strings.ToLower(identifierText(current))]
-		switch {
-		case !known:
-		case found == "":
-			found = name
-		case found != name:
-			return ""
+		if name, known := columns[strings.ToLower(identifierText(current))]; known && !slices.Contains(found, name) {
+			found = append(found, name)
 		}
 	}
 	return found

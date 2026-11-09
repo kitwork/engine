@@ -402,6 +402,18 @@ func writtenName(name string) string {
 var columnConstraintWords = map[string]bool{"CONSTRAINT": true, "PRIMARY": true, "NOT": true, "NULL": true, "UNIQUE": true,
 	"CHECK": true, "DEFAULT": true, "COLLATE": true, "REFERENCES": true, "GENERATED": true, "AS": true}
 
+// storedAsValue turns a number of a decimal column's CHECK, the stored integer, into the value it stands for:
+// 150 at scale 2 is 1.5.
+func storedAsValue(scale int) func(string) (string, error) {
+	return func(literal string) (string, error) {
+		stored, err := strconv.ParseInt(strings.TrimSpace(literal), 10, 64)
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSuffix(strings.TrimRight(formatScaled(stored, scale), "0"), "."), nil
+	}
+}
+
 // renderTable writes a CREATE TABLE of SQLite as PostgreSQL's; native says why it cannot be ("" when it can).
 func renderTable(text string, kinds map[string]columnKind) (string, string) {
 	tokens, err := scan(text)
@@ -481,14 +493,7 @@ func renderTable(text string, kinds map[string]columnKind) (string, string) {
 			case "CHECK":
 				if found && kind.kind == "decimal" && kind.scale > 0 {
 					// the column's comparisons with numbers, written as its values (the file compares the stored integer)
-					back := func(literal string) (string, error) {
-						stored, err := strconv.ParseInt(strings.TrimSpace(literal), 10, 64)
-						if err != nil {
-							return "", err
-						}
-						return strings.TrimSuffix(strings.TrimRight(formatScaled(stored, kind.scale), "0"), "."), nil
-					}
-					if written, end, ok, err := decimalCheck(rest, index, name, back); ok && err == nil {
+					if written, end, ok, err := decimalCheck(rest, index, name, storedAsValue(kind.scale)); ok && err == nil {
 						rest = append(append(append([]token(nil), rest[:index]...), written...), rest[end+1:]...)
 						index += len(written) - 1
 						continue

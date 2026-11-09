@@ -13,31 +13,33 @@ import (
 // expression of one column, wherever it is written, <table>_check for one of more or none, a number after check for a
 // name the table has, in the order written; what SQLite reports of each, its name or its expression's text.
 //
-// CONTROL (08/11/2026): with every unnamed CHECK <table>_check, "#0 = {orders_check qty >= 1}, want
-// {orders_qty_check qty >= 1}"; with no number after a name taken, "#3 = {orders_High_check high < 1000}, want
-// {orders_High_check1 high < 1000}".
+// CONTROL (08/11/2026, again 09/11 with the columns read): with every unnamed CHECK <table>_check, "#0 =
+// {orders_check qty >= 1 qty}, want {orders_qty_check qty >= 1 qty}"; with no number after a name taken, "#3 =
+// {orders_High_check high < 1000 High}, want {orders_High_check1 high < 1000 High}".
 func TestCheckConstraintNames(t *testing.T) {
 	create := `CREATE TABLE "orders" ("qty" INTEGER CHECK (qty >= 1), low INTEGER CHECK ( low < "High" ), "High" INTEGER ` +
 		`CHECK (High > 0) CHECK (high < 1000), CONSTRAINT "Positive" CHECK (qty > 0), name TEXT, CHECK (length (name) >= 1), ` +
 		`CHECK (low < high), CHECK (1 = 1), CHECK (orders.qty < 99)) STRICT`
-	want := []checkConstraint{
-		{"orders_qty_check", "qty >= 1"},
-		{"orders_check", `low < "High"`},
-		{"orders_High_check", "High > 0"},
-		{"orders_High_check1", "high < 1000"},
-		{"Positive", "Positive"},
-		{"orders_name_check", "length (name) >= 1"},
-		{"orders_check1", "low < high"},
-		{"orders_check2", "1 = 1"},
-		{"orders_qty_check1", "orders.qty < 99"},
+	type named struct{ name, reported, columns string }
+	want := []named{
+		{"orders_qty_check", "qty >= 1", "qty"},
+		{"orders_check", `low < "High"`, "low,High"},
+		{"orders_High_check", "High > 0", "High"},
+		{"orders_High_check1", "high < 1000", "High"},
+		{"Positive", "Positive", "qty"},
+		{"orders_name_check", "length (name) >= 1", "name"},
+		{"orders_check1", "low < high", "low,High"},
+		{"orders_check2", "1 = 1", ""},
+		{"orders_qty_check1", "orders.qty < 99", "qty"},
 	}
-	got := checkConstraints(create)
-	if len(got) != len(want) {
-		t.Fatalf("%d CHECKs: %v, want %d", len(got), got, len(want))
+	checks := checkConstraints(create)
+	if len(checks) != len(want) {
+		t.Fatalf("%d CHECKs: %v, want %d", len(checks), checks, len(want))
 	}
 	for index := range want {
-		if got[index] != want[index] {
-			t.Errorf("#%d = %v, want %v", index, got[index], want[index])
+		check := checks[index]
+		if got := (named{check.name, check.reported, strings.Join(check.columns, ",")}); got != want[index] {
+			t.Errorf("#%d = %v, want %v", index, got, want[index])
 		}
 	}
 	if checks := checkConstraints("CREATE TABLE broken ("); checks != nil {
@@ -127,5 +129,41 @@ func TestBrokenCheckThroughThePort(t *testing.T) {
 	if table, why := renderTable(`CREATE TABLE "t" ("p" INTEGER, CONSTRAINT "small" CHECK (p <= 10000)) STRICT`,
 		map[string]columnKind{"p": {kind: "decimal", precision: 15, scale: 2}}); why == "" {
 		t.Errorf("the structure file wrote a named CHECK of a decimal as it is: %s", table)
+	}
+}
+
+// The catalog lists a table's CHECKs as PostgreSQL does (pg_constraint contype 'c', information_schema's
+// check_constraints and table_constraints), by the names a broken one is told with, so a tool such as TablePlus shows
+// them; a decimal column's own CHECK is written with the values its stored integers stand for.
+//
+// CONTROL (09/11/2026): with readChecks not called, "pg_constraint's CHECKs of notes = \"\""; with the decimal's
+// numbers left as stored, "notes_price_check,c,CHECK (price >= 0 AND price <= 100000)|…"; with a CHECK listed among
+// the keys' columns, "key_column_usage of notes = \"3\", want none".
+func TestCatalogListsTheChecks(t *testing.T) {
+	fixture := newWriteFixture(t)
+	access := newAccess()
+	access.admin = true
+	session := fixture.session(t, access, Options{})
+	run(t, session, `CREATE TABLE notes (n bigint, text text CHECK (length(text) >= 1), `+
+		`price numeric(12, 2) CHECK (price >= 0 AND price <= 1000), CONSTRAINT sensible CHECK (n < 1000))`)
+	query := func(statement string) string {
+		t.Helper()
+		return cells(mustRun(t, session, statement))
+	}
+	if got := query(`SELECT conname, contype, pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'notes'::regclass AND contype = 'c' ORDER BY conname`); got !=
+		"notes_price_check,c,CHECK (price >= 0 AND price <= 1000)|notes_text_check,c,CHECK (length (text) >= 1)|sensible,c,CHECK (n < 1000)" {
+		t.Fatalf("pg_constraint's CHECKs of notes = %q", got)
+	}
+	if got := query(`SELECT conkey FROM pg_constraint WHERE conname = 'sensible'`); got != "{1}" {
+		t.Errorf("conkey of sensible = %q, want {1}", got)
+	}
+	if got := query(`SELECT check_clause FROM information_schema.check_constraints WHERE constraint_name = 'notes_price_check'`); got != "(price >= 0 AND price <= 1000)" {
+		t.Errorf("information_schema.check_constraints = %q", got)
+	}
+	if got := query(`SELECT count(*) FROM information_schema.table_constraints WHERE table_name = 'notes' AND constraint_type = 'CHECK'`); got != "3" {
+		t.Errorf("CHECKs in information_schema.table_constraints = %q, want 3", got)
+	}
+	if got := query(`SELECT count(*) FROM information_schema.key_column_usage WHERE table_name = 'notes'`); got != "0" {
+		t.Errorf("key_column_usage of notes = %q, want none: a CHECK is no key", got)
 	}
 }
