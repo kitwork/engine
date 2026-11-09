@@ -29,6 +29,16 @@ const (
 	// columnsBarrierFormat is format 3 with Barrier among the operations, as format 2 is format 1's: Open finds a
 	// commit holding one by its first byte alone (Database.unanchored).
 	columnsBarrierFormat = 4
+	// lightFormat is format 3 with light changes among its changes (KITWORK_KITDB.md câu 13.11, lát 2b, 09/11/2026): a
+	// change of a table the history follows for its search or its columns copy alone, not for its history, is its
+	// operation with lightBit, its table, who, its rowid, and no image; a reader that needs the row reads it again. A
+	// commit without one is written in format 3 or 4 as before, so a reader of before reads it; one with one is refused
+	// by that reader as a format it does not know, never misread.
+	lightFormat = 5
+	// lightBarrierFormat is lightFormat with Barrier among the operations, as format 4 is format 3's.
+	lightBarrierFormat = 6
+	// lightBit marks a light change's operation in formats 5 and 6.
+	lightBit = 0x80
 
 	// the kinds of an update's column entry in format 3
 	columnChanged = 1 // the old value, then the new
@@ -65,6 +75,11 @@ const (
 // ones kept whole when one of those changed (Old equal to New), with Before
 // and After nil; read from format 1, every column, with Before and After
 // whole. A reader of an update reads Updates alone, whatever the format.
+//
+// Light is a change of a table the history follows for its search or its
+// columns copy alone (lightFormat): its operation, table and rowid, with
+// Columns, Before, After and Updates nil. It says which row changed, not how:
+// an index reads the row again; replay, at() and history() cannot use it.
 type Change struct {
 	Operation Operation
 	Table     string
@@ -75,6 +90,7 @@ type Change struct {
 	Updates   []ColumnUpdate
 	Statement string
 	By        string
+	Light     bool
 }
 
 // ColumnUpdate is one column of an update: its position in Columns, the value
@@ -118,9 +134,14 @@ func encodeColumns(changes []Change) ([]byte, error) {
 	}
 	var tables []string
 	columns := map[string][]string{}
+	light := false
 	for _, change := range changes {
 		if change.Operation != Insert && change.Operation != Update && change.Operation != Delete {
 			continue
+		}
+		if change.Light {
+			light = true
+			continue // its table's columns are not written: it holds no value
 		}
 		known, seen := columns[change.Table]
 		if !seen {
@@ -160,6 +181,16 @@ func encodeColumns(changes []Change) ([]byte, error) {
 	body = binary.AppendUvarint(body, uint64(len(changes)))
 	var err error
 	for _, change := range changes {
+		if change.Light {
+			if change.Operation != Insert && change.Operation != Update && change.Operation != Delete {
+				return nil, fmt.Errorf("kitdb: a light change of operation %d", change.Operation)
+			}
+			body = append(body, byte(change.Operation)|lightBit)
+			body = binary.AppendUvarint(body, name(change.Table))
+			body = binary.AppendUvarint(body, name(change.By))
+			body = binary.AppendVarint(body, change.RowID)
+			continue
+		}
 		body = append(body, byte(change.Operation))
 		body = binary.AppendUvarint(body, name(change.Table))
 		body = binary.AppendUvarint(body, name(change.By))
@@ -199,9 +230,15 @@ func encodeColumns(changes []Change) ([]byte, error) {
 		}
 	}
 	format := byte(columnsFormat)
+	if light {
+		format = lightFormat
+	}
 	for _, change := range changes {
 		if change.Operation == Barrier {
 			format = columnsBarrierFormat
+			if light {
+				format = lightBarrierFormat
+			}
 		}
 	}
 	encoded := []byte{format}
@@ -348,7 +385,7 @@ func (reader *changesReader) value() any {
 func decodeChanges(data []byte) ([]Change, error) {
 	reader := &changesReader{data: data}
 	format := reader.take(1)
-	if reader.failed || format[0] < changesFormat || format[0] > columnsBarrierFormat {
+	if reader.failed || format[0] < changesFormat || format[0] > lightBarrierFormat {
 		return nil, fmt.Errorf("%w: unknown changes format", ErrCorruptHistory)
 	}
 	nameCount := reader.uvarint()
@@ -394,9 +431,19 @@ func decodeChanges(data []byte) ([]Change, error) {
 			break
 		}
 		change := Change{Operation: Operation(operation[0]), Table: lookup(reader.uvarint()), By: lookup(reader.uvarint())}
+		if operation[0]&lightBit != 0 {
+			change.Operation, change.Light = Operation(operation[0]&^lightBit), true
+			if format[0] < lightFormat || (change.Operation != Insert && change.Operation != Update && change.Operation != Delete) {
+				reader.failed = true
+				break
+			}
+			change.RowID = reader.varint()
+			changes = append(changes, change)
+			continue
+		}
 		switch {
 		case change.Operation == Barrier:
-			if format[0] != barrierFormat && format[0] != columnsBarrierFormat {
+			if format[0] != barrierFormat && format[0] != columnsBarrierFormat && format[0] != lightBarrierFormat {
 				reader.failed = true
 				break
 			}

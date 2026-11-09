@@ -87,6 +87,10 @@ func PastRelation(ctx context.Context, conn pastConn, table string, revision uin
 			if change.Table != table {
 				continue
 			}
+			if change.Light {
+				// the table was followed for its search or its columns copy alone then: which row changed, not how
+				return fmt.Errorf("%w: the history records which rows of %q changed at revision %d, not their values", ErrPastUnreachable, table, commit.Revision)
+			}
 			state := states[change.RowID]
 			if state == nil {
 				if len(states) >= limit {

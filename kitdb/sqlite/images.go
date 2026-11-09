@@ -20,6 +20,9 @@ func WholeImages(changes []Change, table string, live LiveRows) error {
 		if change.Operation != Insert && change.Operation != Update && change.Operation != Delete {
 			continue
 		}
+		if change.Light {
+			return fmt.Errorf("%w: the history records which row %d of %q changed, not its values", ErrPastUnreachable, change.RowID, table)
+		}
 		if _, seen := order[change.RowID]; !seen {
 			rowIDs = append(rowIDs, change.RowID)
 		}

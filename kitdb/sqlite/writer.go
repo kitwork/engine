@@ -97,6 +97,9 @@ type writer struct {
 	every     bool
 	tracked   map[string]bool
 	followDue bool
+	// light are the tables tracked for their search or their columns copy alone, not their history (lower case): a
+	// change of one is recorded light, which row and how, no image (lightFormat, 09/11/2026).
+	light map[string]bool
 }
 
 func openWriter(ctx context.Context, name string, options Options, anchor func(context.Context) (uint64, error),
@@ -260,7 +263,7 @@ func (w *writer) hook(data modernc.SQLitePreUpdateData) {
 		w.hookErr = fmt.Errorf("kitdb: unknown row operation %d", data.Op)
 		return
 	}
-	if change.operation != Insert {
+	if change.operation != Insert && !w.light[strings.ToLower(data.TableName)] {
 		change.before = make([]any, data.Count())
 		if err := data.Old(change.before...); err != nil {
 			w.hookErr = err
@@ -687,7 +690,28 @@ func (w *writer) netChanges(ctx context.Context, leading []Change) ([]Change, er
 		entries[key] = &rowEntry{existed: existed, before: before, by: by}
 		order = append(order, key)
 	}
+	// a row of a light table: whether it was there before the commit (its first event) and after (its last), from the
+	// events alone, its table not read
+	alive := map[rowKey]bool{}
+	mark := func(key rowKey, existed, after bool, by string) {
+		touch(key, existed, nil, by)
+		alive[key] = after
+	}
 	for _, change := range w.events {
+		if w.light[strings.ToLower(change.table)] {
+			switch change.operation {
+			case Insert:
+				mark(rowKey{change.table, change.newRowID}, false, true, change.by)
+			case Delete:
+				mark(rowKey{change.table, change.oldRowID}, true, false, change.by)
+			case Update:
+				mark(rowKey{change.table, change.oldRowID}, true, change.newRowID == change.oldRowID, change.by)
+				if change.newRowID != change.oldRowID {
+					mark(rowKey{change.table, change.newRowID}, false, true, change.by)
+				}
+			}
+			continue
+		}
 		switch change.operation {
 		case Insert:
 			touch(rowKey{change.table, change.newRowID}, false, nil, change.by)
@@ -703,6 +727,9 @@ func (w *writer) netChanges(ctx context.Context, leading []Change) ([]Change, er
 	rowIDs := map[string][]int64{}
 	var tables []string
 	for _, key := range order {
+		if _, light := alive[key]; light {
+			continue
+		}
 		if _, seen := rowIDs[key.table]; !seen {
 			tables = append(tables, key.table)
 		}
@@ -723,6 +750,21 @@ func (w *writer) netChanges(ctx context.Context, leading []Change) ([]Change, er
 	changes := append([]Change(nil), leading...)
 	for _, key := range order {
 		entry := entries[key]
+		if there, light := alive[key]; light {
+			change := Change{Table: key.table, RowID: key.rowID, By: entry.by, Light: true}
+			switch {
+			case entry.existed && there:
+				change.Operation = Update
+			case entry.existed:
+				change.Operation = Delete
+			case there:
+				change.Operation = Insert
+			default:
+				continue // inserted and deleted in the commit
+			}
+			changes = append(changes, change)
+			continue
+		}
 		values, exists := after[key]
 		change := Change{Table: key.table, RowID: key.rowID, Before: entry.before, After: values, By: entry.by}
 		switch {
@@ -957,21 +999,26 @@ func (w *writer) readNames(ctx context.Context, names map[string]bool, query str
 
 // followed reads the tables the file says the history follows: history on in kitwork_tables, a columns copy declared
 // in kitwork_columnar, a search_weight in kitwork_columns, and the tables of Options.Search (whole); lower case, of
-// the tables the file has.
-func (w *writer) followed(ctx context.Context) (map[string]bool, error) {
-	wanted := map[string]bool{}
+// the tables the file has. light are those followed for a columns copy or a search_weight alone: their indexes read
+// the rows again, so the history records which row changed and how, without the row (lightFormat).
+func (w *writer) followed(ctx context.Context) (tables, light map[string]bool, err error) {
+	whole := map[string]bool{} // the tables whose changes keep their images
 	for table := range w.whole {
-		wanted[strings.ToLower(table)] = true
+		whole[strings.ToLower(table)] = true
 	}
-	sources := []struct{ table, query string }{
-		{"kitwork_tables", `SELECT table_name FROM kitwork_tables WHERE history = 1`},
-		{"kitwork_columnar", `SELECT table_name FROM kitwork_columnar`},
-		{"kitwork_columns", `SELECT table_name FROM kitwork_columns WHERE search_weight > 0`},
+	indexed := map[string]bool{}
+	sources := []struct {
+		table, query string
+		into         map[string]bool
+	}{
+		{"kitwork_tables", `SELECT table_name FROM kitwork_tables WHERE history = 1`, whole},
+		{"kitwork_columnar", `SELECT table_name FROM kitwork_columnar`, indexed},
+		{"kitwork_columns", `SELECT table_name FROM kitwork_columns WHERE search_weight > 0`, indexed},
 	}
 	for _, source := range sources {
 		held, err := w.hasTable(ctx, source.table)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if !held {
 			continue
@@ -979,23 +1026,28 @@ func (w *writer) followed(ctx context.Context) (map[string]bool, error) {
 		if source.table == "kitwork_columns" {
 			var weights int
 			if err := w.conn.QueryRowContext(ctx, `SELECT count(*) FROM pragma_table_info('kitwork_columns') WHERE name = 'search_weight'`).Scan(&weights); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			if weights == 0 {
 				continue
 			}
 		}
-		if err := w.readNames(ctx, wanted, source.query); err != nil {
-			return nil, err
+		if err := w.readNames(ctx, source.into, source.query); err != nil {
+			return nil, nil, err
 		}
 	}
-	tables := map[string]bool{}
+	tables, light = map[string]bool{}, map[string]bool{}
 	for name := range w.shapes {
-		if lower := strings.ToLower(name); wanted[lower] && !bookkeeping(lower) {
-			tables[lower] = true
+		lower := strings.ToLower(name)
+		if bookkeeping(lower) || !whole[lower] && !indexed[lower] {
+			continue
+		}
+		tables[lower] = true
+		if !whole[lower] {
+			light[lower] = true
 		}
 	}
-	return tables, nil
+	return tables, light, nil
 }
 
 // adopt gives a file without kitwork_tables one as it opens, unless Options.HistoryOfEveryTable. The tables a file
@@ -1047,7 +1099,7 @@ func (w *writer) follow(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	wanted, err := w.followed(ctx)
+	wanted, light, err := w.followed(ctx)
 	if err != nil {
 		return err
 	}
@@ -1063,7 +1115,9 @@ func (w *writer) follow(ctx context.Context) error {
 	}
 	var started, stopped []string
 	for name := range wanted {
-		if !recorded[name] {
+		// a table recorded light until now keeps its images from here: what it was before is not in the history, so
+		// its history starts here, as a table's that was not followed (09/11/2026)
+		if !recorded[name] || w.light[name] && !light[name] {
 			started = append(started, written[name])
 		}
 	}
@@ -1073,7 +1127,7 @@ func (w *writer) follow(ctx context.Context) error {
 		}
 	}
 	if len(started) == 0 && len(stopped) == 0 {
-		w.tracked, w.followDue = wanted, false
+		w.tracked, w.light, w.followDue = wanted, light, false
 		return nil
 	}
 	slices.Sort(started)
@@ -1100,7 +1154,7 @@ func (w *writer) follow(ctx context.Context) error {
 	if _, err = w.finish(changes, err); err != nil {
 		return err
 	}
-	w.tracked, w.followDue = wanted, false
+	w.tracked, w.light, w.followDue = wanted, light, false
 	return nil
 }
 

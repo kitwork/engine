@@ -176,8 +176,8 @@ func (replay *replayer) afterImages(ctx context.Context, changes []Change) (map[
 	wanted := map[string][]int64{}
 	var tables []string
 	for _, change := range changes {
-		if change.Operation != Update || change.After != nil {
-			continue // format 1 keeps the whole row after
+		if change.Operation != Update || change.After != nil || change.Light {
+			continue // format 1 keeps the whole row after; a light change is not replayed
 		}
 		if _, seen := wanted[change.Table]; !seen {
 			tables = append(tables, change.Table)
@@ -247,6 +247,14 @@ func (replay *replayer) apply(ctx context.Context, changes []Change) error {
 		return err
 	}
 	for _, change := range changes {
+		if change.Light {
+			// a table followed for its search or its columns copy alone: which row changed, not how; it stays as the
+			// anchor holds it, as a table the history does not follow (09/11/2026)
+			if replay.whole != "" && strings.EqualFold(change.Table, replay.whole) {
+				return fmt.Errorf("%w: the history records which rows of %q changed here, not their values", ErrPastUnreachable, change.Table)
+			}
+			continue
+		}
 		if change.Operation == Update && change.After == nil {
 			change.After = images[rowKey{change.Table, change.RowID}]
 		}

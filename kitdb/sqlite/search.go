@@ -237,6 +237,9 @@ func (s *searchable) searchChanges(changes []Change) ([]search.Change, bool) {
 		if change.Table != s.config.Table {
 			continue
 		}
+		if change.Light {
+			return nil, false // no value to index: rebuilt from the rows (the writer keeps Options.Search's tables whole)
+		}
 		identifier := strconv.FormatInt(change.RowID, 10)
 		if change.Operation == Delete {
 			result = append(result, search.Change{ID: identifier, Delete: true})
