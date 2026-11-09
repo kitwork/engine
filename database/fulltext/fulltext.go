@@ -11,8 +11,11 @@
 // (an update that leaves the searchable columns as they were is not one), so a row the app just wrote is found; a
 // commit that changed the schema builds the index again. Before 03/11/2026 triggers counted the changes; an index
 // folded from them is built again. A table nobody tracks (a host database application.work declares, a file without
-// history) is built again when its signature moves (schema version, rows, last rowid, revision of kitwork_history),
-// looked at every Watch.
+// history) is built again when the table itself changed, looked at every Watch: its definition, its rows or its last
+// rowid moved, or a commit of kitwork_history after the index's revision changed it (a row inserted or deleted, a
+// searchable column updated, a statement naming it). A write to another table of the file, or another table's schema,
+// leaves it as it is (09/11/2026; before, the file's schema version and last revision were the signature, so a commit
+// to any table built shopping's 13.7 million rows again).
 //
 // The first build of a table runs in the background, one table at a time; a read waits for it up to Wait, then is
 // told how far it is (BuildingError). An index whose table has not moved since it was built is used as it is.
@@ -20,7 +23,9 @@ package fulltext
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -72,12 +77,15 @@ type state struct {
 	History bool `json:"history,omitempty"`
 }
 
-// Signature tells whether an untracked table is still what its index was built from.
+// Signature tells whether an untracked table is still what its index was built from (unchanged). Definition is the
+// SHA-256 of the table's CREATE TABLE; a signature written before 09/11/2026 has none, and is read by the file's
+// SchemaVersion instead, so an index built then is used as it is while the file's schema has not moved.
 type Signature struct {
-	SchemaVersion int64 `json:"schemaVersion"`
-	Rows          int64 `json:"rows"`
-	LastRowID     int64 `json:"lastRowid"`
-	Revision      int64 `json:"revision"`
+	SchemaVersion int64  `json:"schemaVersion"`
+	Definition    string `json:"definition,omitempty"`
+	Rows          int64  `json:"rows"`
+	LastRowID     int64  `json:"lastRowid"`
+	Revision      int64  `json:"revision"`
 }
 
 // BuildingError is a read of an index whose first build has not ended.
@@ -137,6 +145,7 @@ type Table struct {
 	queued  atomic.Bool
 	built   atomic.Int64
 	total   atomic.Int64
+	builds  atomic.Int64 // how many times the index was built from the rows
 
 	folding sync.Mutex // one fold at a time
 
@@ -385,10 +394,22 @@ func (manager *Manager) reuse(table *Table) error {
 		_ = index.Close()
 		return fmt.Errorf("the index has no signature")
 	}
-	signature, err := readSignature(ctx, table.file.path, table.name)
-	if err != nil || signature != *held.Signature {
+	signature, same, err := table.checkSignature(ctx, *held.Signature)
+	if err != nil || !same {
 		_ = index.Close()
 		return fmt.Errorf("the table changed since its index was built")
+	}
+	if signature != *held.Signature {
+		// commits of other tables since, or a signature written before 09/11/2026: the index's state says where it is
+		// now, so the next start reads the history from here
+		_ = index.Close()
+		held.Revision, held.Signature = uint64(max(signature.Revision, 0)), &signature
+		if err := container.Fold(ctx, table.name, table.definition, held, search.BuildOptions{SkipLongTerms: true}, nil); err != nil {
+			return err
+		}
+		if index, _, err = container.Index(table.name, table.definition); err != nil {
+			return err
+		}
 	}
 	table.mutex.Lock()
 	table.signature = signature
@@ -460,6 +481,7 @@ func (table *Table) build(ctx context.Context) (int64, error) {
 	if !exists(table.file.path) {
 		return 0, fmt.Errorf("the database has no file %s", filepath.Base(table.file.path))
 	}
+	table.builds.Add(1)
 	container, err := table.file.open(ctx)
 	if err != nil {
 		return 0, err
@@ -817,10 +839,16 @@ func (manager *Manager) watch() {
 			if !changed || table.retired.Load() {
 				continue
 			}
-			signature, err := readSignature(context.Background(), table.file.path, table.name)
 			table.mutex.RLock()
-			stale := table.index == nil && !table.building || err == nil && signature != table.signature
+			held := table.signature
 			table.mutex.RUnlock()
+			signature, same, err := table.checkSignature(context.Background(), held)
+			table.mutex.Lock()
+			stale := table.index == nil && !table.building || err == nil && !same
+			if err == nil && same && table.signature == held {
+				table.signature = signature // the commits read are not read again
+			}
+			table.mutex.Unlock()
 			if stale {
 				manager.enqueue(table)
 			}
@@ -937,18 +965,81 @@ func openFile(ctx context.Context, path string) (*sql.DB, *sql.Conn, error) {
 	return database, connection, nil
 }
 
-func readSignature(ctx context.Context, path, table string) (Signature, error) {
-	database, connection, err := openFile(ctx, path)
+// checkSignature reads, in one read transaction of the file, the table's signature now and whether the table is still
+// what held was taken from (unchanged).
+func (table *Table) checkSignature(ctx context.Context, held Signature) (Signature, bool, error) {
+	database, connection, err := openFile(ctx, table.file.path)
 	if err != nil {
-		return Signature{}, err
+		return Signature{}, false, err
 	}
 	defer database.Close()
 	defer connection.Close()
 	if _, err := connection.ExecContext(ctx, "BEGIN"); err != nil {
-		return Signature{}, err
+		return Signature{}, false, err
 	}
 	defer func() { _, _ = connection.ExecContext(context.WithoutCancel(ctx), "ROLLBACK") }()
-	return signatureOf(ctx, connection, table)
+	return table.unchanged(ctx, connection, held)
+}
+
+// unchanged reads, inside the connection's transaction, whether the table is still what held was taken from: its
+// definition (by the file's schema version for a signature written without one), its rows and its last rowid, and no
+// commit after held's revision that changed it (touchedSince). It gives the signature now, which a caller keeps when
+// the table is unchanged, so the commits read are not read again.
+func (table *Table) unchanged(ctx context.Context, connection *sql.Conn, held Signature) (Signature, bool, error) {
+	now, err := signatureOf(ctx, connection, table.name)
+	if err != nil {
+		return now, false, err
+	}
+	sameSchema := held.Definition == now.Definition
+	if held.Definition == "" {
+		sameSchema = held.SchemaVersion == now.SchemaVersion
+	}
+	if !sameSchema || held.Rows != now.Rows || held.LastRowID != now.LastRowID || now.Revision < held.Revision {
+		return now, false, nil
+	}
+	if now.Revision == held.Revision {
+		return now, true, nil
+	}
+	touched, err := table.touchedSince(ctx, connection, uint64(max(held.Revision, 0)))
+	return now, err == nil && !touched, err
+}
+
+// touchedSince reads, inside the connection's transaction, the commits after revision and reports one that changed
+// the table: a row of it inserted or deleted, an update of a searchable column, the start of its recording (rows
+// changed before with no trace), a statement naming it, or a revision missing (the history's retention took it out:
+// what it changed is not known). A Barrier, another table's rows or a statement of another table leave it as it was:
+// its definition says whether its own schema moved.
+func (table *Table) touchedSince(ctx context.Context, connection *sql.Conn, revision uint64) (bool, error) {
+	touched := false
+	next := revision + 1
+	name := strings.ToLower(table.name)
+	err := kitdbsqlite.ReadChanges(ctx, connection, revision, func(commit kitdbsqlite.Commit) error {
+		if commit.Revision != next {
+			touched = true
+			return errEnough
+		}
+		next++
+		for _, change := range commit.Changes {
+			mine := strings.EqualFold(change.Table, table.name)
+			switch change.Operation {
+			case kitdbsqlite.Barrier:
+				continue
+			case kitdbsqlite.Statement:
+				mine = mine || strings.Contains(strings.ToLower(change.Statement), name)
+			case kitdbsqlite.Update:
+				mine = mine && table.textChanged(change)
+			}
+			if mine {
+				touched = true
+				return errEnough
+			}
+		}
+		return nil
+	})
+	if errors.Is(err, errEnough) {
+		err = nil
+	}
+	return touched, err
 }
 
 // signatureOf reads the signature of an untracked table inside the connection's transaction.
@@ -964,6 +1055,13 @@ func signatureOf(ctx context.Context, connection *sql.Conn, table string) (Signa
 	if exists == 0 {
 		return signature, fmt.Errorf("the database has no table %s", table)
 	}
+	var definition string
+	if err := connection.QueryRowContext(ctx, "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ? COLLATE NOCASE", table).
+		Scan(&definition); err != nil {
+		return signature, err
+	}
+	sum := sha256.Sum256([]byte(definition))
+	signature.Definition = hex.EncodeToString(sum[:])
 	if err := connection.QueryRowContext(ctx, "SELECT count(*), coalesce(max(_rowid_), 0) FROM "+quote(table)).
 		Scan(&signature.Rows, &signature.LastRowID); err != nil {
 		if strings.Contains(err.Error(), "_rowid_") {
