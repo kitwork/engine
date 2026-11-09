@@ -525,3 +525,35 @@ func TestFileUploadFailuresAreTold(t *testing.T) {
 		t.Errorf("a broken temp folder = %d %s", rec.Code, rec.Body.String())
 	}
 }
+
+// A file of the data zone (what the app wrote, an upload under the name its sender chose) served as a type a browser
+// runs as a page (HTML, XHTML, SVG, XML) comes with Content-Security-Policy: sandbox: shown, its scripts not run, its
+// origin not the site's, so an upload "a.html" or "a.svg" cannot read the viewer's cookies or act as them (security
+// review of 04/11/2026, B). An image and a file of the code zone (the author's own) are served as they were.
+//
+// CONTROL (09/11/2026): with no sandbox, "context.file(\"uploads/a.html\") as text/html; charset=utf-8:
+// Content-Security-Policy \"\", want sandbox".
+func TestFileServedFromTheDataZoneRunsNoScript(t *testing.T) {
+	tn, _ := fileSite(t, map[string]string{
+		"get":   `router.get((context) => context.file(file.open(context.query("p"))));`,
+		"typed": `router.get((context) => context.type("text/html").file("uploads/a.txt"));`,
+	}, map[string]string{
+		".database/files/uploads/a.html": `<script>document.cookie</script>`,
+		".database/files/uploads/a.svg":  `<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`,
+		".database/files/uploads/a.png":  "\x89PNG",
+		".database/files/uploads/a.txt":  "chữ",
+		"localhost/page.html":            `<p>của tác giả</p>`,
+	})
+	for target, sandboxed := range map[string]bool{
+		"/get?p=uploads/a.html": true, "/get?p=uploads/a.svg": true, "/typed": true,
+		"/get?p=uploads/a.png": false, "/get?p=uploads/a.txt": false, "/get?p=app/localhost/page.html": false,
+	} {
+		rec := serveGet(tn, target, nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: %d %.200q", target, rec.Code, rec.Body.String())
+		}
+		if got, want := rec.Header().Get("Content-Security-Policy"), map[bool]string{true: "sandbox"}[sandboxed]; got != want {
+			t.Errorf("%s as %s: Content-Security-Policy %q, want %q", target, rec.Header().Get("Content-Type"), got, want)
+		}
+	}
+}

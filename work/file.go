@@ -642,6 +642,23 @@ func serveFile(w http.ResponseWriter, request *http.Request, handle *fileHandle,
 	}
 	w.Header().Set("Content-Type", mediaType)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if !handle.path.Code && fileRunsAsPage(mediaType) {
+		// what the app wrote, an upload under the name its sender chose: shown, its scripts not run, its origin not
+		// the site's (09/11/2026; an upload "a.html" or "a.svg" ran as a page of the site)
+		w.Header().Set("Content-Security-Policy", "sandbox")
+	}
 	w.Header().Set("ETag", fmt.Sprintf(`"%x-%x"`, stat.ModTime().UnixNano(), stat.Size()))
 	http.ServeContent(w, request, stat.Name(), stat.ModTime(), file)
+}
+
+// fileRunsAsPage reports a media type a browser opens as a document that may run scripts: HTML, XHTML, SVG, XML and
+// its +xml kinds, XSLT.
+func fileRunsAsPage(mediaType string) bool {
+	base, _, _ := strings.Cut(mediaType, ";")
+	base = strings.ToLower(strings.TrimSpace(base))
+	switch base {
+	case "text/html", "application/xhtml+xml", "image/svg+xml", "text/xml", "application/xml", "text/xsl":
+		return true
+	}
+	return strings.HasSuffix(base, "+xml")
 }
